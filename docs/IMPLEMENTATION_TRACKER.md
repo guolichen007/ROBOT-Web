@@ -4,7 +4,7 @@
 
 | 工作流 | 状态 | 证据 / 备注 |
 | --- | --- | --- |
-| Git / 分支流程 | IN_PROGRESS | `develop` 已提交并推送；全部本地门禁和远端 CI 已通过，正在进入 `develop → main` 发布门禁。 |
+| Git / 分支流程 | PASS | 全部实现先进入 `develop`；远端 CI 全绿后非快进合并 `main`，main 核心 smoke 与远端 CI 通过，双分支已推送。 |
 | P0 Infrastructure / Profiles | PASS | DEV/TEST/SERVER 三个 Compose 配置通过；DEV 和隔离 TEST 全栈均实际启动。 |
 | P0 Identity / RBAC / Audit | PASS | Argon2id、refresh family rotation/revoke、CSRF、登录限流、一次性 WS ticket、六角色/细权限和审计有自动测试。 |
 | P0 Protocol / Realtime | PASS | Schema 1.1、boot_id/seq、source/server time、duplicate/out-of-order、latest/downsample、heartbeat 状态已实现。 |
@@ -30,12 +30,11 @@
 | Core fault tests | PASS | Redis/MQTT/PostgreSQL 503→200；API/dispatcher restart；outbox queued→ACK_ACCEPTED；Mock boot_id 变化；协议异常/TTL/map mismatch。 |
 | Secret / vulnerability scan | PASS | Gitleaks 0 leaks；Trivy repo CRITICAL=0；API image CRITICAL=0；Web image CRITICAL=0。 |
 | CI definition | PASS | 六 jobs：backend、frontend、protocol、containers+image scan、e2e、security；Actions 固定 SHA。 |
-| Remote GitHub Actions | PASS | develop run `31397474188`：backend/frontend/protocol/containers/security/e2e 全部 success。 |
-| develop → main / push | TODO | 仅在最终本地门禁和远端 CI 通过后执行。 |
+| Remote GitHub Actions | PASS | develop run `31397920735`、main run `31399449747`：六个 jobs 全部 success。 |
+| develop → main / push | PASS | 非快进合并完成；main 登录/R001/stop ACK/火情任务/备份可读性 smoke 通过，main/develop 均推送。 |
 
 ## 当前门禁
 
-- 本地功能、Docker、浏览器、故障、恢复与安全门禁：`PASS`。
-- 待完成：提交本跟踪记录、确认新的 develop SHA CI、合并 main、main smoke、双分支 push、clean main。
+- 本地功能、Docker、协议、浏览器、故障、恢复、安全、develop CI、main smoke 与 main CI 全部完成；最终工作区停留在 clean `main`。
 - `SERVER_DEPLOYMENT_READY=YES`
 - `SERVER_DEPLOYED=NO`
