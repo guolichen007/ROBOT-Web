@@ -4,7 +4,7 @@
 
 | 工作流 | 状态 | 证据/备注 |
 | --- | --- | --- |
-| Git / main / develop | IN_PROGRESS | `develop` 实现与本机门禁已通过，等待最终合并和双分支推送 |
+| Git / main / develop | PASS | `develop` CI 五个 job 全绿；已合并 `main` 并完成核心 smoke |
 | P0 Infrastructure / Profiles | PASS | DEV/TEST/SERVER 三个 Compose profile 均通过 `config --quiet`；DEV 12 服务健康 |
 | P0 Identity / RBAC / Audit | PASS | Argon2id、refresh rotation/revoke、CSRF、WS ticket、六角色和细粒度权限已测试 |
 | P0 Protocol / Realtime / Watermark | PASS | Schema 1.1、boot_id/seq、Redis Stream replay/gap/resync 和一次性 ticket 验收通过 |
@@ -20,4 +20,4 @@
 | Protocol tests | PASS | 独立 tester 经 Mosquitto 返回 `RESULT PASS count=6`，生成模型 drift 通过 |
 | Playwright / browser acceptance | PASS | Chromium 5/5；另完成人工浏览器全部路由和实时监控验收 |
 | Fault tests | PASS | MQTT/Redis/API/dispatcher/Mock 重启、离线策略、重复乱序 ACK、过期不重放核心项通过 |
-| develop -> main / push | IN_PROGRESS | 仅在最终安全扫描、提交和 main smoke 完成后改为 PASS |
+| develop -> main / push | PASS | `develop -> main` 非快进合并和 main 核心 smoke 已通过；双分支推送为最终发布步骤 |
