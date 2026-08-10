@@ -1,0 +1,14 @@
+title = "Firebot Gitleaks policy"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Exact non-production secrets used only by isolated CI and test profiles"
+regexTarget = "secret"
+regexes = [
+  '''ci-jwt-secret-at-least-32-characters-long''',
+  '''ci-csrf-secret-at-least-32-characters-long''',
+  '''test-jwt-secret-at-least-32-bytes-long''',
+  '''test-csrf-secret-at-least-32-bytes-long''',
+]

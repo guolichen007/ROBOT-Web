@@ -1,0 +1,1 @@
+"""Firebot API application package."""

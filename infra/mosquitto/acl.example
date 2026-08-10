@@ -1,0 +1,14 @@
+user platform
+topic readwrite robot/+/+
+
+user R001
+topic write robot/R001/location
+topic write robot/R001/status
+topic write robot/R001/sensor
+topic write robot/R001/alarm
+topic write robot/R001/task_status
+topic write robot/R001/command_ack
+topic write robot/R001/heartbeat
+topic write robot/R001/availability
+topic write robot/R001/capabilities
+topic read robot/R001/command

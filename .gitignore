@@ -17,9 +17,9 @@ test-results/
 Thumbs.db
 backups/
 data/
+secrets/
 *.pem
 *.key
 *.crt
 *.p12
 *.log
-

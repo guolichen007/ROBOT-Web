@@ -1,0 +1,106 @@
+name: Firebot V2 CI
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18.4-alpine
+        env:
+          POSTGRES_DB: firebot_ci
+          POSTGRES_USER: firebot_ci
+          POSTGRES_PASSWORD: firebot_ci
+        options: >-
+          --health-cmd "pg_isready -U firebot_ci -d firebot_ci"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+      redis:
+        image: redis:8.4.5-alpine
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 3s --health-retries 20
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+psycopg://firebot_ci:firebot_ci@localhost:5432/firebot_ci
+      REDIS_URL: redis://localhost:6379/15
+      JWT_SECRET: ci-jwt-secret-at-least-32-characters-long
+      REFRESH_SECRET: ci-refresh-secret-at-least-32-characters
+      CSRF_SECRET: ci-csrf-secret-at-least-32-characters-long
+      BOOTSTRAP_ADMIN_PASSWORD: Firebot-CI-Only-2026!
+      SEED_DEMO: "true"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check apps/api services scripts
+      - run: ruff format --check apps/api services scripts
+      - run: mypy apps/api/app services/protocol.py
+      - run: |
+          for file in services/*/main.py; do
+            mypy --follow-imports=skip "$file"
+          done
+      - working-directory: apps/api
+        run: alembic upgrade head && python -m app.db.seed
+      - run: pytest apps/api/tests services/protocol-tester/tests
+
+  frontend:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@1e60f620b9541dca151540d0c3cbe3b98c7c8b4
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci --ignore-scripts
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm run test
+      - run: npm run build
+
+  protocol:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install jsonschema==4.25.1 pytest==8.4.1
+      - run: python scripts/check_protocol_drift.py
+      - run: pytest services/protocol-tester/tests
+
+  containers:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - run: cp .env.example .env
+      - run: docker compose -f compose.dev.yml config --quiet
+      - run: docker compose -f compose.test.yml config --quiet
+      - run: SERVER_ENV_FILE=.env.server.example docker compose --env-file .env.server.example -f docker-compose.server.yml config --quiet
+      - run: docker build -f infra/docker/python.Dockerfile -t firebot-api:ci .
+      - run: docker build -f apps/web/Dockerfile -t firebot-web:ci .
+
+  security:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.24.2 git --source=/repo --config=/repo/.gitleaks.toml --no-banner
+      - run: docker run --rm -v "$PWD:/repo" ghcr.io/aquasecurity/trivy:0.59.1 fs --db-repository ghcr.io/aquasecurity/trivy-db:2 --exit-code 1 --severity CRITICAL --ignore-unfixed /repo

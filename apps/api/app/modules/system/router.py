@@ -1,0 +1,163 @@
+from __future__ import annotations
+
+import json
+import socket
+import time
+
+from fastapi import APIRouter, Depends
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from sqlalchemy import func, select, text
+from starlette.responses import Response
+
+from app.core.dependencies import AuthContext, CurrentAuth, DbSession, require_permission
+from app.core.events import current_watermark, get_redis
+from app.core.metrics import (
+    mqtt_duplicate_total,
+    mqtt_ingress_rate,
+    mqtt_invalid_total,
+    mqtt_out_of_order_total,
+    robot_online_total,
+)
+from app.core.serialization import serialize_model
+from app.db.models import (
+    ExtinguishPoint,
+    FireEvent,
+    InspectionPoint,
+    Map,
+    MapVersion,
+    ParkingSlot,
+    Robot,
+    Site,
+    StreamRegistry,
+    Task,
+    Trajectory,
+)
+
+router = APIRouter(tags=["system"])
+
+
+@router.get("/health/live")
+def live() -> dict:
+    return {"status": "live", "service": "api"}
+
+
+@router.get("/health/ready")
+def ready(db: DbSession) -> dict:
+    checks: dict[str, dict] = {}
+    try:
+        db.execute(text("SELECT 1"))
+        checks["postgresql"] = {"ok": True}
+    except Exception as exc:
+        checks["postgresql"] = {"ok": False, "error": type(exc).__name__}
+    started = time.perf_counter()
+    try:
+        get_redis().ping()
+        checks["redis"] = {
+            "ok": True,
+            "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+        }
+    except Exception as exc:
+        checks["redis"] = {"ok": False, "error": type(exc).__name__}
+    mqtt_heartbeat = (
+        get_redis().get("service:mqtt-ingress:heartbeat")
+        if checks.get("redis", {}).get("ok")
+        else None
+    )
+    checks["mqtt_ingress"] = {"ok": bool(mqtt_heartbeat), "last_heartbeat": mqtt_heartbeat}
+    ok = all(item["ok"] for item in checks.values())
+    return {"status": "ready" if ok else "degraded", "ok": ok, "checks": checks}
+
+
+@router.get("/metrics")
+def metrics(db: DbSession) -> Response:
+    try:
+        mqtt_values = get_redis().hgetall("metrics:mqtt")
+    except Exception:
+        mqtt_values = {}
+    for field, raw_value in mqtt_values.items():
+        value = float(raw_value)
+        if field.startswith("ingress:"):
+            mqtt_ingress_rate.labels(type=field.split(":", 1)[1]).set(value)
+        elif field.startswith("invalid:"):
+            mqtt_invalid_total.labels(reason=field.split(":", 1)[1]).set(value)
+        elif field == "duplicate":
+            mqtt_duplicate_total.set(value)
+        elif field == "out_of_order":
+            mqtt_out_of_order_total.set(value)
+    online_count = db.scalar(
+        select(func.count()).select_from(Robot).where(Robot.online_state == "ONLINE")
+    )
+    robot_online_total.set(online_count or 0)
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+@router.get("/api/v1/system/status")
+def system_status(db: DbSession, auth: CurrentAuth) -> dict:
+    status = ready(db)
+    media: dict[str, object]
+    try:
+        with socket.create_connection(("mediamtx", 9997), timeout=1.5):
+            media = {"ok": True, "endpoint": "mediamtx:9997"}
+    except Exception as exc:
+        media = {"ok": False, "error": type(exc).__name__}
+    status["checks"]["mediamtx"] = media
+    status["server_deployed"] = False
+    status["server_deployment_ready"] = True
+    return status
+
+
+@router.get("/api/v1/monitor/snapshot")
+def monitor_snapshot(
+    db: DbSession, _: AuthContext = Depends(require_permission("robot.read"))
+) -> dict:
+    site = db.scalar(select(Site).where(Site.active.is_(True)).order_by(Site.code))
+    map_row = (
+        db.scalar(select(Map).where(Map.site_id == site.id).order_by(Map.code)) if site else None
+    )
+    version = (
+        db.get(MapVersion, map_row.active_version_id)
+        if map_row and map_row.active_version_id
+        else None
+    )
+    version_id = version.id if version else None
+    robots = db.scalars(select(Robot).order_by(Robot.vehicle_id)).all()
+    latest = []
+    for robot in robots:
+        raw = get_redis().get(f"robot:{robot.vehicle_id}:latest")
+        latest.append(json.loads(raw) if raw else serialize_model(robot))
+    alarms = db.scalars(
+        select(FireEvent)
+        .where(FireEvent.state.not_in({"RESOLVED", "CLOSED", "DISMISSED"}))
+        .order_by(FireEvent.last_seen_at.desc())
+    ).all()
+    tasks = db.scalars(
+        select(Task)
+        .where(Task.status.not_in({"SUCCEEDED", "FAILED", "CANCELLED"}))
+        .order_by(Task.created_at.desc())
+    ).all()
+
+    def version_rows(model):
+        if not version_id:
+            return []
+        return [
+            serialize_model(x)
+            for x in db.scalars(select(model).where(model.map_version_id == version_id)).all()
+        ]
+
+    return {
+        "snapshot_watermark": current_watermark(),
+        "site": serialize_model(site) if site else None,
+        "map": serialize_model(map_row) if map_row else None,
+        "map_version": serialize_model(version) if version else None,
+        "parking_slots": version_rows(ParkingSlot),
+        "inspection_points": version_rows(InspectionPoint),
+        "extinguish_points": version_rows(ExtinguishPoint),
+        "trajectories": version_rows(Trajectory),
+        "robots": latest,
+        "alarms": [serialize_model(x) for x in alarms],
+        "tasks": [serialize_model(x) for x in tasks],
+        "streams": [
+            serialize_model(x)
+            for x in db.scalars(select(StreamRegistry).order_by(StreamRegistry.camera_type)).all()
+        ],
+    }
