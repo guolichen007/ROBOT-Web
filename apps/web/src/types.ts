@@ -27,6 +27,9 @@ export interface RobotState {
   bottom_ir?: number
   top_ir?: number
   server_received_at?: string
+  supported_commands?: string[]
+  sensors?: string[]
+  media?: string[]
 }
 
 export interface ParkingSlot {

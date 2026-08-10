@@ -40,9 +40,16 @@ for ($attempt = 1; $attempt -le 60; $attempt++) {
 }
 if (-not $postgresReady) { throw 'PostgreSQL did not become ready within 60 seconds.' }
 
+$postgresUser = (docker compose -f compose.dev.yml exec -T postgres printenv POSTGRES_USER).Trim()
+Assert-NativeCommand 'Reading the PostgreSQL user from the container'
+$postgresDatabase = (docker compose -f compose.dev.yml exec -T postgres printenv POSTGRES_DB).Trim()
+Assert-NativeCommand 'Reading the PostgreSQL database from the container'
+docker compose -f compose.dev.yml exec -T postgres sh -c 'dropdb --if-exists --force -U "$POSTGRES_USER" "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
+Assert-NativeCommand 'Recreating an empty PostgreSQL database'
+
 docker compose -f compose.dev.yml cp $dump postgres:/tmp/firebot-restore.dump
 Assert-NativeCommand 'Copying PostgreSQL backup into the container'
-docker compose -f compose.dev.yml exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner /tmp/firebot-restore.dump'
+docker compose -f compose.dev.yml exec -T postgres sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error /tmp/firebot-restore.dump'
 Assert-NativeCommand 'Restoring PostgreSQL backup'
 
 $assets = Join-Path $resolved 'assets'
@@ -55,10 +62,6 @@ if (Test-Path -LiteralPath $assets) {
 docker compose -f compose.dev.yml exec -T api alembic upgrade head
 Assert-NativeCommand 'Validating database migration head'
 
-$postgresUser = (docker compose -f compose.dev.yml exec -T postgres printenv POSTGRES_USER).Trim()
-Assert-NativeCommand 'Reading the PostgreSQL user from the container'
-$postgresDatabase = (docker compose -f compose.dev.yml exec -T postgres printenv POSTGRES_DB).Trim()
-Assert-NativeCommand 'Reading the PostgreSQL database from the container'
 $countSql = 'SELECT (SELECT count(*) FROM users),(SELECT count(*) FROM maps),(SELECT count(*) FROM telemetry_samples),(SELECT count(*) FROM fire_events),(SELECT count(*) FROM tasks),(SELECT count(*) FROM audit_logs),(SELECT count(*) FROM commands);'
 $counts = docker compose -f compose.dev.yml exec -T postgres psql -v ON_ERROR_STOP=1 -U $postgresUser -d $postgresDatabase -Atc $countSql
 Assert-NativeCommand 'Verifying restored business records'

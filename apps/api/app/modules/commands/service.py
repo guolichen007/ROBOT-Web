@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.events import get_redis
-from app.db.models import Command, OutboxEvent, Robot, Task
+from app.db.models import Command, OutboxEvent, Robot, RobotCapability, Task
 
 ACTIVE_TASK_STATES = {"CREATED", "QUEUED", "ACCEPTED", "EXECUTING"}
 
@@ -32,6 +32,13 @@ def assert_robot_can_execute(
         raise HTTPException(409, f"机器人状态为 {robot.online_state}，拒绝执行 {action}")
     if robot.estop_active and action not in {"emergency_stop", "reset_estop"}:
         raise HTTPException(409, "软件急停已锁存")
+    if action in {"patrol", "extinguish", "return_dock"} and get_redis().exists(
+        f"manual:lease:{robot.id}"
+    ):
+        raise HTTPException(409, "机器人已有有效手动控制租约，请先显式释放")
+    capability = db.get(RobotCapability, robot.id)
+    if capability and action not in capability.supported_commands_json:
+        raise HTTPException(409, f"机器人能力声明不支持 {action}")
     active_query = select(Task).where(
         Task.robot_id == robot.id, Task.status.in_(ACTIVE_TASK_STATES)
     )

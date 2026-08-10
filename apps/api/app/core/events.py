@@ -14,7 +14,13 @@ EVENT_STREAM = "firebot:events"
 
 @lru_cache
 def get_redis() -> Any:
-    return Redis.from_url(get_settings().redis_url, decode_responses=True)
+    return Redis.from_url(
+        get_settings().redis_url,
+        decode_responses=True,
+        socket_connect_timeout=1.0,
+        socket_timeout=2.0,
+        retry_on_timeout=False,
+    )
 
 
 def append_event(event_type: str, payload: dict[str, Any]) -> str:

@@ -21,6 +21,17 @@ settings = get_settings()
 configure_logging("mock-robot")
 logger = logging.getLogger("mock-robot")
 
+SUPPORTED_COMMANDS = {
+    "manual_control",
+    "stop_motion",
+    "emergency_stop",
+    "reset_estop",
+    "return_dock",
+    "patrol",
+    "extinguish",
+    "cancel_task",
+}
+
 
 class MockRobot:
     def __init__(self) -> None:
@@ -46,6 +57,24 @@ class MockRobot:
         self.delay_ms = int(os.getenv("MOCK_PACKET_DELAY_MS", "0"))
         self.fire_after = int(os.getenv("MOCK_FIRE_AFTER_SECONDS", "25"))
         self.fire_sent = False
+        self.timestamp_skew_seconds = float(os.getenv("MOCK_TIMESTAMP_SKEW_SECONDS", "0"))
+        self.duplicate_every = int(os.getenv("MOCK_DUPLICATE_EVERY", "0"))
+        self.out_of_order_every = int(os.getenv("MOCK_OUT_OF_ORDER_EVERY", "0"))
+        self.invalid_schema_every = int(os.getenv("MOCK_INVALID_SCHEMA_EVERY", "0"))
+        self.bad_json_every = int(os.getenv("MOCK_BAD_JSON_EVERY", "0"))
+        self.reboot_after = int(os.getenv("MOCK_REBOOT_AFTER_SECONDS", "0"))
+        self.offline_after = int(os.getenv("MOCK_OFFLINE_AFTER_SECONDS", "0"))
+        self.duplicate_ack = os.getenv("MOCK_DUPLICATE_ACK", "false").lower() == "true"
+        self.wrong_ack = os.getenv("MOCK_WRONG_COMMAND_ID_ACK", "false").lower() == "true"
+        unsupported = {
+            item.strip()
+            for item in os.getenv("MOCK_UNSUPPORTED_COMMANDS", "").split(",")
+            if item.strip()
+        }
+        self.supported_commands = SUPPORTED_COMMANDS - unsupported
+        self.publish_count = 0
+        self.rebooted = False
+        self.offline_sent = False
         self.client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
             client_id=f"mock-{self.vehicle_id}-{self.boot_id[:8]}",
@@ -71,7 +100,9 @@ class MockRobot:
             "type": message_type,
             "vehicle_id": self.vehicle_id,
             "boot_id": self.boot_id,
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": datetime.fromtimestamp(
+                datetime.now(UTC).timestamp() + self.timestamp_skew_seconds, UTC
+            ).isoformat(),
             "seq": self.next_seq(),
             **payload,
         }
@@ -86,9 +117,21 @@ class MockRobot:
             return
         if self.delay_ms:
             time.sleep(self.delay_ms / 1000)
-        self.client.publish(
-            self.topic(name), json.dumps(payload, ensure_ascii=False), qos=qos, retain=retain
-        )
+        topic = self.topic(name)
+        encoded = json.dumps(payload, ensure_ascii=False)
+        self.client.publish(topic, encoded, qos=qos, retain=retain)
+        if name not in {"availability", "capabilities"}:
+            self.publish_count += 1
+            if self.duplicate_every and self.publish_count % self.duplicate_every == 0:
+                self.client.publish(topic, encoded, qos=qos, retain=False)
+            if self.out_of_order_every and self.publish_count % self.out_of_order_every == 0:
+                old = {**payload, "message_id": str(uuid4()), "seq": max(0, payload["seq"] - 2)}
+                self.client.publish(topic, json.dumps(old), qos=qos, retain=False)
+            if self.invalid_schema_every and self.publish_count % self.invalid_schema_every == 0:
+                invalid = {**payload, "message_id": str(uuid4()), "schema_version": "9.9"}
+                self.client.publish(topic, json.dumps(invalid), qos=qos, retain=False)
+            if self.bad_json_every and self.publish_count % self.bad_json_every == 0:
+                self.client.publish(topic, "{bad-json", qos=qos, retain=False)
 
     def on_connect(self, client, userdata, flags, reason_code, properties) -> None:
         if reason_code != 0:
@@ -106,16 +149,7 @@ class MockRobot:
             self.message(
                 "capabilities",
                 protocol_version="1.1",
-                supported_commands=[
-                    "manual_control",
-                    "stop_motion",
-                    "emergency_stop",
-                    "reset_estop",
-                    "return_dock",
-                    "patrol",
-                    "extinguish",
-                    "cancel_task",
-                ],
+                supported_commands=sorted(self.supported_commands),
                 sensors=["smoke", "bottom_ir", "top_ir"],
                 media=["roof_rgb", "roof_thermal", "bottom_ir"],
             ),
@@ -132,6 +166,12 @@ class MockRobot:
         if late_ms:
             time.sleep(late_ms / 1000)
         self.publish("command_ack", payload, 1)
+        if self.wrong_ack:
+            wrong = {**payload, "message_id": str(uuid4()), "command_id": str(uuid4())}
+            self.publish("command_ack", wrong, 1)
+        if self.duplicate_ack:
+            duplicate = {**payload, "message_id": str(uuid4()), "seq": self.next_seq()}
+            self.publish("command_ack", duplicate, 1)
         return payload
 
     def task_status(self, task_id: str, status: str, phase: str, progress: float) -> dict:
@@ -194,7 +234,9 @@ class MockRobot:
             self.processed[command["command_id"]] = (ack, [])
             return
         cmd = command["cmd"]
-        if cmd not in command.get("cmd", ""):
+        if cmd not in self.supported_commands:
+            ack = self.ack(command, "unsupported", "UNKNOWN_COMMAND")
+            self.processed[command["command_id"]] = (ack, [])
             return
         if cmd == "manual_control":
             with self.lock:
@@ -300,6 +342,32 @@ class MockRobot:
         status_tick = sensor_tick = heartbeat_tick = 0.0
         while not self.stop_event.is_set():
             now = time.monotonic()
+            uptime = now - self.started
+            if self.reboot_after > 0 and not self.rebooted and uptime >= self.reboot_after:
+                self.rebooted = True
+                with self.lock:
+                    self.boot_id = str(uuid4())
+                    self.seq = 0
+                    self.active_task_id = None
+                    self.linear = self.angular = 0
+                    self.mode = "IDLE"
+                self.publish(
+                    "availability",
+                    self.message("availability", state="online", reason="MOCK_REBOOT"),
+                    1,
+                    True,
+                )
+            if self.offline_after > 0 and not self.offline_sent and uptime >= self.offline_after:
+                self.offline_sent = True
+                self.publish(
+                    "availability",
+                    self.message("availability", state="offline", reason="FAULT_INJECTION"),
+                    1,
+                    True,
+                )
+            if self.offline_sent:
+                time.sleep(0.05)
+                continue
             if now >= status_tick:
                 with self.lock:
                     payload = self.message(

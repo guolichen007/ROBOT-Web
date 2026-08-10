@@ -48,17 +48,19 @@ if ($LASTEXITCODE -ne 0) { throw 'Docker Compose startup failed.' }
 $ready = $false
 for ($i = 0; $i -lt 90; $i++) {
     try {
-        $health = Invoke-RestMethod 'http://localhost:8080/health/ready' -TimeoutSec 3
+        $healthJson = & curl.exe --noproxy '*' --fail --silent --show-error --max-time 3 'http://127.0.0.1:8080/health/ready'
+        if ($LASTEXITCODE -ne 0) { throw 'health request failed' }
+        $health = $healthJson | ConvertFrom-Json
         if ($health.ok) { $ready = $true; break }
     } catch { }
     Start-Sleep -Seconds 2
 }
 if (-not $ready) { docker compose -f compose.dev.yml ps; throw 'The stack did not become ready in time.' }
 
-Write-Host 'Web:       http://localhost:8080'
-Write-Host 'API docs:  http://localhost:8080/api/docs'
-Write-Host 'Health:    http://localhost:8080/health/ready'
-Write-Host 'Metrics:   http://localhost:8080/metrics'
+Write-Host 'Web:       http://127.0.0.1:8080'
+Write-Host 'API docs:  http://127.0.0.1:8080/api/docs'
+Write-Host 'Health:    http://127.0.0.1:8080/health/ready'
+Write-Host 'Metrics:   http://127.0.0.1:8080/metrics'
 Write-Host 'Media API: http://localhost:9997/v3/paths/list'
 if ($created) {
     Write-Host 'DEV bootstrap (shown once):' -ForegroundColor Yellow

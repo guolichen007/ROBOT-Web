@@ -1,23 +1,41 @@
 # Implementation Tracker
 
-状态：`TODO` / `IN_PROGRESS` / `PASS` / `BLOCKED`
+状态：`TODO` / `IN_PROGRESS` / `PASS` / `BLOCKED`。本文件只记录已经有可复核证据的状态；本地通过不等同于远端 GitHub Actions 通过。
 
-| 工作流 | 状态 | 证据/备注 |
+| 工作流 | 状态 | 证据 / 备注 |
 | --- | --- | --- |
-| Git / main / develop | PASS | `develop` CI 五个 job 全绿；已合并 `main` 并完成核心 smoke |
-| P0 Infrastructure / Profiles | PASS | DEV/TEST/SERVER 三个 Compose profile 均通过 `config --quiet`；DEV 12 服务健康 |
-| P0 Identity / RBAC / Audit | PASS | Argon2id、refresh rotation/revoke、CSRF、WS ticket、六角色和细粒度权限已测试 |
-| P0 Protocol / Realtime / Watermark | PASS | Schema 1.1、boot_id/seq、Redis Stream replay/gap/resync 和一次性 ticket 验收通过 |
-| P0 Manual Lease / Control Safety | PASS | Redis 原子 lease、manual pulse、stop、e-stop、ACK 与 offline policy 已实现和测试 |
-| P0 Map Version / Coordinate Contract | PASS | Site/Map/MapVersion、发布不可变、任务快照和 map mismatch 门禁通过 |
-| P0 Mock Robot | PASS | R001 仅通过真实 MQTT 运行；位置、传感器、ACK、任务和故障注入通过 |
-| P1 Alarm / Manual Fire / Dedup | PASS | 自动/人工事件、A-12 地图创建、生命周期和重复合并通过 |
-| P1 Task / Execution Policy | PASS | patrol/extinguish/return_dock/cancel、outbox、冲突矩阵与状态时间线通过 |
-| P1 History / Map Configuration | PASS | 历史查询、地图语义配置、安全资产上传和权限 UI 已实现 |
-| P2 Media / Observability | PASS | MediaMTX 实际启动；无源显示 OFFLINE；health/ready/metrics/结构化日志通过 |
-| P2 Backup / Restore / Server Package | PASS | 空环境 restore 计数和登录/地图/历史/报警/任务/审计通过；SERVER package 校验通过 |
-| Automated tests | PASS | Ruff、format、mypy、22 Pytest、typecheck、ESLint、Prettier、6 Vitest、build 通过 |
-| Protocol tests | PASS | 独立 tester 经 Mosquitto 返回 `RESULT PASS count=6`，生成模型 drift 通过 |
-| Playwright / browser acceptance | PASS | Chromium 5/5；另完成人工浏览器全部路由和实时监控验收 |
-| Fault tests | PASS | MQTT/Redis/API/dispatcher/Mock 重启、离线策略、重复乱序 ACK、过期不重放核心项通过 |
-| develop -> main / push | PASS | `develop -> main` 非快进合并和 main 核心 smoke 已通过；双分支推送为最终发布步骤 |
+| Git / 分支流程 | IN_PROGRESS | 当前分支 `develop`；实现和复核尚未提交。只有全部门禁完成后才合并 `main`。 |
+| P0 Infrastructure / Profiles | PASS | DEV/TEST/SERVER 三个 Compose 配置通过；DEV 和隔离 TEST 全栈均实际启动。 |
+| P0 Identity / RBAC / Audit | PASS | Argon2id、refresh family rotation/revoke、CSRF、登录限流、一次性 WS ticket、六角色/细权限和审计有自动测试。 |
+| P0 Protocol / Realtime | PASS | Schema 1.1、boot_id/seq、source/server time、duplicate/out-of-order、latest/downsample、heartbeat 状态已实现。 |
+| P0 Snapshot / Delta | PASS | Redis Stream watermark、ticket+after replay、gap/resync 有集成测试。 |
+| P0 Manual Lease / Session | PASS | Redis 原子 TTL、一车一租约、seq、续租、logout/权限/WS/hidden 释放与 QoS1 stop 有测试。 |
+| P0 Command / ACK / Outbox | PASS | manual/stop/e-stop/durable 分类、ACK 状态、同 command_id 重试、transactional outbox 已验证。 |
+| P0 Execution Policy / Offline | PASS | manual/auto/e-stop 冲突、capability、STALE/OFFLINE 和 map mismatch 门禁有测试。 |
+| P0 Map Version / Coordinate | PASS | Site/Map/MapVersion、PUBLISHED 不可变、语义对象、任务快照和坐标合同已实现。 |
+| P0 Mock Robot | PASS | R001 仅通过真实 MQTT；10 Hz location、status/sensor/heartbeat、任务/控制、e-stop latch、fault injection。 |
+| P1 Alarm / Manual Fire / Dedup | PASS | 自动/人工事件、NEW→CONFIRMED→DISPATCHED→IN_PROGRESS→RESOLVED、A-12 与去重测试通过。 |
+| P1 Tasks | PASS | patrol/extinguish/return_dock/cancel、时间线、ACK/task_status、执行冲突与 history。 |
+| P1 Map Config / Asset Upload | PASS | draft/publish/archive、车位/点位/轨迹与 size/MIME/ext/SHA/random-name/path traversal 检查。 |
+| P1 History / RBAC / Audit UI | PASS | 页面与 API 可查询 telemetry/sensor/task/command/alarm/audit。 |
+| P2 Media | PASS | MediaMTX `1.18.2` 实际运行；VideoProvider/stream 五态；无源严格显示 OFFLINE。1.20.0 registry tag 不可取得，未伪造该版本。 |
+| P2 Observability | PASS | live、ready、metrics、结构化日志；PostgreSQL/Redis/MQTT 故障时 ready 503，恢复后 200。 |
+| P2 Backup / Restore | PASS | `20260810T123811Z` 备份后重建空 DEV 数据库恢复；计数 `1|1|24226|13|3|113|19`，全栈重新健康。 |
+| P2 Server Package | PASS | server compose、env example、TLS/ACL/coturn/反代/持久化/日志轮转/部署和恢复文档；未实际部署第二台服务器。 |
+| Alembic | PASS | 初始 revision `20260810_0001`；隔离 TEST 实测 `head → base → head`，35 个 public tables，seed 幂等。 |
+| Backend / Protocol automated | PASS | Ruff、Ruff format、mypy、Pytest `30 passed`；protocol drift；真实 broker tester `RESULT PASS count=11`。 |
+| Frontend automated | PASS | ESLint、Prettier、vue-tsc、Vitest `6 passed`、Vite production build。 |
+| Playwright E2E | PASS | Chromium `6 passed`：登录、monitor、双租约、manual/hidden safety、自动/人工火情、灭火任务状态链。 |
+| 真实浏览器验收 | PASS | 实际浏览器确认 R001 ONLINE、V1 PUBLISHED、12 车位、实时位置/传感器、history/settings、三路视频 OFFLINE，console 0 error。 |
+| Core fault tests | PASS | Redis/MQTT/PostgreSQL 503→200；API/dispatcher restart；outbox queued→ACK_ACCEPTED；Mock boot_id 变化；协议异常/TTL/map mismatch。 |
+| Secret / vulnerability scan | PASS | Gitleaks 0 leaks；Trivy repo CRITICAL=0；API image CRITICAL=0；Web image CRITICAL=0。 |
+| CI definition | PASS | 六 jobs：backend、frontend、protocol、containers+image scan、e2e、security；Actions 固定 SHA。 |
+| Remote GitHub Actions | TODO | develop 推送后查看真实 run；未运行前不写 PASS。 |
+| develop → main / push | TODO | 仅在最终本地门禁和远端 CI 通过后执行。 |
+
+## 当前门禁
+
+- 本地功能、Docker、浏览器、故障、恢复与安全门禁：`PASS`。
+- 待完成：最终全量复跑、提交/push develop、确认 GitHub Actions、合并 main、main smoke、双分支 push、clean main。
+- `SERVER_DEPLOYMENT_READY=YES`
+- `SERVER_DEPLOYED=NO`

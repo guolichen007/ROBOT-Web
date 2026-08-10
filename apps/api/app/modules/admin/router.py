@@ -1,14 +1,25 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, insert, select
+from sqlalchemy import delete, insert, select, update
 
 from app.core.audit import write_audit
 from app.core.dependencies import AuthContext, DbSession, request_meta, require_permission
 from app.core.security import hash_password
 from app.core.serialization import serialize_model
-from app.db.models import AppSetting, AuditLog, Permission, Role, User, user_roles
+from app.core.websocket import release_user_leases
+from app.db.models import (
+    AppSetting,
+    AuditLog,
+    Permission,
+    RefreshSession,
+    Role,
+    User,
+    user_roles,
+)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -92,7 +103,13 @@ def set_roles(
         after={"roles": role_codes},
         **request_meta(request),
     )
+    db.execute(
+        update(RefreshSession)
+        .where(RefreshSession.user_id == user.id, RefreshSession.revoked_at.is_(None))
+        .values(revoked_at=datetime.now(UTC))
+    )
     db.commit()
+    release_user_leases(user.id, "PERMISSION_CHANGED")
     return {"user_id": user.id, "roles": role_codes}
 
 

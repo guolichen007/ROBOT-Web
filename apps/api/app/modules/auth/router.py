@@ -24,6 +24,7 @@ from app.core.security import (
     random_token,
     verify_password,
 )
+from app.core.websocket import release_user_leases
 from app.db.models import RefreshSession, Role, User, user_roles
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
@@ -214,11 +215,13 @@ def logout(
     csrf_token: str | None = Cookie(default=None),
     x_csrf_token: str | None = Header(default=None),
 ) -> Response:
+    user_id: str | None = None
     if refresh_token:
         session = db.scalar(
             select(RefreshSession).where(RefreshSession.token_hash == hash_token(refresh_token))
         )
         if session:
+            user_id = session.user_id
             validate_csrf(session, x_csrf_token, csrf_token)
             db.execute(
                 update(RefreshSession)
@@ -226,6 +229,8 @@ def logout(
                 .values(revoked_at=datetime.now(UTC))
             )
             db.commit()
+    if user_id:
+        release_user_leases(user_id, "USER_LOGOUT")
     response.delete_cookie("refresh_token", path="/api/v1/auth")
     response.delete_cookie("csrf_token", path="/")
     response.status_code = 204
@@ -259,6 +264,7 @@ def change_password(
         **request_meta(request),
     )
     db.commit()
+    release_user_leases(auth.user.id, "PASSWORD_CHANGED")
     return {"changed": True, "reauthenticate": True}
 
 

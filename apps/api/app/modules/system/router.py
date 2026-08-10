@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import socket
+import threading
 import time
 
 from fastapi import APIRouter, Depends
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import func, select, text
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from app.core.dependencies import AuthContext, CurrentAuth, DbSession, require_permission
 from app.core.events import current_watermark, get_redis
@@ -27,6 +28,7 @@ from app.db.models import (
     MapVersion,
     ParkingSlot,
     Robot,
+    RobotCapability,
     Site,
     StreamRegistry,
     Task,
@@ -36,36 +38,67 @@ from app.db.models import (
 router = APIRouter(tags=["system"])
 
 
+def bounded_tcp_probe(host: str, port: int, timeout: float = 1.5) -> tuple[bool, str | None]:
+    result: dict[str, object] = {}
+
+    def probe() -> None:
+        try:
+            with socket.create_connection((host, port), timeout=timeout):
+                result["ok"] = True
+        except Exception as exc:
+            result["error"] = type(exc).__name__
+
+    thread = threading.Thread(target=probe, daemon=True)
+    thread.start()
+    thread.join(timeout)
+    if thread.is_alive():
+        return False, "TimeoutError"
+    return bool(result.get("ok")), str(result.get("error")) if result.get("error") else None
+
+
 @router.get("/health/live")
 def live() -> dict:
     return {"status": "live", "service": "api"}
 
 
-@router.get("/health/ready")
-def ready(db: DbSession) -> dict:
+def readiness_payload(db: DbSession) -> dict:
     checks: dict[str, dict] = {}
-    try:
-        db.execute(text("SELECT 1"))
-        checks["postgresql"] = {"ok": True}
-    except Exception as exc:
-        checks["postgresql"] = {"ok": False, "error": type(exc).__name__}
+    postgres_ok, postgres_error = bounded_tcp_probe("postgres", 5432)
+    if postgres_ok:
+        try:
+            db.execute(text("SELECT 1"))
+            checks["postgresql"] = {"ok": True}
+        except Exception as exc:
+            checks["postgresql"] = {"ok": False, "error": type(exc).__name__}
+    else:
+        checks["postgresql"] = {"ok": False, "error": postgres_error}
     started = time.perf_counter()
-    try:
-        get_redis().ping()
-        checks["redis"] = {
-            "ok": True,
-            "latency_ms": round((time.perf_counter() - started) * 1000, 2),
-        }
-    except Exception as exc:
-        checks["redis"] = {"ok": False, "error": type(exc).__name__}
+    redis_ok, redis_error = bounded_tcp_probe("redis", 6379)
+    checks["redis"] = (
+        {"ok": True, "latency_ms": round((time.perf_counter() - started) * 1000, 2)}
+        if redis_ok
+        else {"ok": False, "error": redis_error}
+    )
     mqtt_heartbeat = (
         get_redis().get("service:mqtt-ingress:heartbeat")
         if checks.get("redis", {}).get("ok")
         else None
     )
     checks["mqtt_ingress"] = {"ok": bool(mqtt_heartbeat), "last_heartbeat": mqtt_heartbeat}
+    mqtt_ok, mqtt_error = bounded_tcp_probe("mosquitto", 1883)
+    checks["mqtt_broker"] = (
+        {"ok": True, "endpoint": "mosquitto:1883"}
+        if mqtt_ok
+        else {"ok": False, "error": mqtt_error}
+    )
     ok = all(item["ok"] for item in checks.values())
     return {"status": "ready" if ok else "degraded", "ok": ok, "checks": checks}
+
+
+@router.get("/health/ready")
+def ready(db: DbSession) -> Response:
+    payload = readiness_payload(db)
+    return JSONResponse(payload, status_code=200 if payload["ok"] else 503)
 
 
 @router.get("/metrics")
@@ -93,7 +126,7 @@ def metrics(db: DbSession) -> Response:
 
 @router.get("/api/v1/system/status")
 def system_status(db: DbSession, auth: CurrentAuth) -> dict:
-    status = ready(db)
+    status = readiness_payload(db)
     media: dict[str, object]
     try:
         with socket.create_connection(("mediamtx", 9997), timeout=1.5):
@@ -124,7 +157,12 @@ def monitor_snapshot(
     latest = []
     for robot in robots:
         raw = get_redis().get(f"robot:{robot.vehicle_id}:latest")
-        latest.append(json.loads(raw) if raw else serialize_model(robot))
+        state = json.loads(raw) if raw else serialize_model(robot)
+        capability = db.get(RobotCapability, robot.id)
+        state["supported_commands"] = capability.supported_commands_json if capability else []
+        state["sensors"] = capability.sensors_json if capability else []
+        state["media"] = capability.media_json if capability else []
+        latest.append(state)
     alarms = db.scalars(
         select(FireEvent)
         .where(FireEvent.state.not_in({"RESOLVED", "CLOSED", "DISMISSED"}))
