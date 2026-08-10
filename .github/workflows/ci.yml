@@ -22,11 +22,15 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U firebot_ci -d firebot_ci"
           --health-interval 5s --health-timeout 3s --health-retries 20
+        ports:
+          - 5432:5432
       redis:
         image: redis:8.4.5-alpine
         options: >-
           --health-cmd "redis-cli ping" --health-interval 5s
           --health-timeout 3s --health-retries 20
+        ports:
+          - 6379:6379
     env:
       APP_ENV: test
       DATABASE_URL: postgresql+psycopg://firebot_ci:firebot_ci@localhost:5432/firebot_ci
@@ -61,7 +65,7 @@ jobs:
         working-directory: apps/web
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - uses: actions/setup-node@1e60f620b9541dca151540d0c3cbe3b98c7c8b4
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: '24.19.0'
           cache: npm
@@ -81,7 +85,7 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-      - run: pip install jsonschema==4.25.1 pytest==8.4.1
+      - run: pip install -r requirements.lock pytest==8.4.1
       - run: python scripts/check_protocol_drift.py
       - run: pytest services/protocol-tester/tests
 
@@ -102,5 +106,5 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           fetch-depth: 0
-      - run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.24.2 git --source=/repo --config=/repo/.gitleaks.toml --no-banner
+      - run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.24.2 git --config=/repo/.gitleaks.toml --no-banner /repo
       - run: docker run --rm -v "$PWD:/repo" ghcr.io/aquasecurity/trivy:0.59.1 fs --db-repository ghcr.io/aquasecurity/trivy-db:2 --exit-code 1 --severity CRITICAL --ignore-unfixed /repo
