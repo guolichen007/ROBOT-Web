@@ -1,0 +1,11 @@
+logLevel: info
+api: yes
+apiAddress: :9997
+metrics: yes
+metricsAddress: :9998
+rtsp: yes
+rtspAddress: :8554
+webrtc: yes
+webrtcAddress: :8889
+webrtcAllowOrigins: ['https://REPLACE_SERVER_HOST']
+paths: {}

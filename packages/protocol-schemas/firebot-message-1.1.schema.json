@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://firebot.local/schemas/firebot-message-1.1.schema.json",
+  "title": "Firebot MQTT Message 1.1",
+  "oneOf": [
+    { "$ref": "#/$defs/location" },
+    { "$ref": "#/$defs/status" },
+    { "$ref": "#/$defs/sensor" },
+    { "$ref": "#/$defs/alarm" },
+    { "$ref": "#/$defs/taskStatus" },
+    { "$ref": "#/$defs/heartbeat" },
+    { "$ref": "#/$defs/availability" },
+    { "$ref": "#/$defs/capabilities" },
+    { "$ref": "#/$defs/command" },
+    { "$ref": "#/$defs/commandAck" }
+  ],
+  "$defs": {
+    "base": {
+      "type": "object",
+      "required": ["schema_version", "message_id", "type", "vehicle_id", "boot_id", "timestamp", "seq"],
+      "properties": {
+        "schema_version": { "const": "1.1" },
+        "message_id": { "type": "string", "format": "uuid" },
+        "type": { "type": "string" },
+        "vehicle_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "boot_id": { "type": "string", "format": "uuid" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "seq": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "pose": {
+      "type": "object",
+      "required": ["x", "y", "theta"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "theta": { "type": "number" }
+      },
+      "additionalProperties": false
+    },
+    "location": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["position", "site_code", "map_code", "map_version", "frame_id"],
+          "properties": {
+            "type": { "const": "location" },
+            "position": { "$ref": "#/$defs/pose" },
+            "linear_speed": { "type": "number" },
+            "angular_speed": { "type": "number" },
+            "battery": { "type": "number", "minimum": 0, "maximum": 100 },
+            "site_code": { "type": "string" },
+            "map_code": { "type": "string" },
+            "map_version": { "type": "string" },
+            "frame_id": { "const": "map" },
+            "parking_slot_code": { "type": ["string", "null"] },
+            "localization_status": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "status": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["mode", "battery", "estop_active"],
+          "properties": {
+            "type": { "const": "status" },
+            "mode": { "enum": ["IDLE", "MANUAL", "PATROL", "EXTINGUISH", "RETURN_DOCK", "ESTOP"] },
+            "battery": { "type": "number", "minimum": 0, "maximum": 100 },
+            "estop_active": { "type": "boolean" },
+            "active_task_id": { "type": ["string", "null"] },
+            "network_rssi": { "type": ["number", "null"] }
+          }
+        }
+      ]
+    },
+    "sensor": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["smoke", "bottom_ir", "top_ir_max"],
+          "properties": {
+            "type": { "const": "sensor" },
+            "smoke": { "type": "number" },
+            "bottom_ir": { "type": "number" },
+            "top_ir_max": { "type": "number" },
+            "payload": { "type": "object" }
+          }
+        }
+      ]
+    },
+    "alarm": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["event_id", "fire_type", "severity", "position"],
+          "properties": {
+            "type": { "const": "alarm" },
+            "event_id": { "type": "string" },
+            "fire_type": { "enum": ["smoke", "flame", "unknown"] },
+            "severity": { "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+            "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+            "parking_slot_code": { "type": ["string", "null"] },
+            "position": { "$ref": "#/$defs/pose" },
+            "media": { "type": "object" }
+          }
+        }
+      ]
+    },
+    "taskStatus": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["task_id", "status", "phase", "progress"],
+          "properties": {
+            "type": { "const": "task_status" },
+            "task_id": { "type": "string" },
+            "status": { "enum": ["ACCEPTED", "EXECUTING", "SUCCEEDED", "FAILED", "CANCELLED"] },
+            "phase": { "type": "string" },
+            "progress": { "type": "number", "minimum": 0, "maximum": 100 },
+            "failure_code": { "type": ["string", "null"] },
+            "failure_message": { "type": ["string", "null"] }
+          }
+        }
+      ]
+    },
+    "heartbeat": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        { "type": "object", "properties": { "type": { "const": "heartbeat" }, "uptime_seconds": { "type": "number" } } }
+      ]
+    },
+    "availability": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["state"],
+          "properties": { "type": { "const": "availability" }, "state": { "enum": ["online", "offline"] }, "reason": { "type": ["string", "null"] } }
+        }
+      ]
+    },
+    "capabilities": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["protocol_version", "supported_commands", "sensors", "media"],
+          "properties": {
+            "type": { "const": "capabilities" },
+            "protocol_version": { "const": "1.1" },
+            "supported_commands": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+            "sensors": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+            "media": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+          }
+        }
+      ]
+    },
+    "command": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["command_id", "correlation_id", "issued_at", "expires_at", "ttl_ms", "priority", "source", "operator_id", "cmd", "params"],
+          "properties": {
+            "type": { "const": "command" },
+            "command_id": { "type": "string" },
+            "correlation_id": { "type": "string" },
+            "task_id": { "type": ["string", "null"] },
+            "lease_id": { "type": ["string", "null"] },
+            "control_session_id": { "type": ["string", "null"] },
+            "issued_at": { "type": "string", "format": "date-time" },
+            "expires_at": { "type": "string", "format": "date-time" },
+            "ttl_ms": { "type": "integer", "minimum": 1 },
+            "priority": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "source": { "const": "WEB" },
+            "operator_id": { "type": "string" },
+            "cmd": { "enum": ["manual_control", "stop_motion", "emergency_stop", "reset_estop", "return_dock", "patrol", "extinguish", "cancel_task"] },
+            "params": { "type": "object" }
+          }
+        }
+      ]
+    },
+    "commandAck": {
+      "allOf": [
+        { "$ref": "#/$defs/base" },
+        {
+          "type": "object",
+          "required": ["command_id", "status"],
+          "properties": {
+            "type": { "const": "command_ack" },
+            "command_id": { "type": "string" },
+            "status": { "enum": ["accepted", "rejected", "unsupported"] },
+            "reason": { "type": ["string", "null"] }
+          }
+        }
+      ]
+    }
+  }
+}

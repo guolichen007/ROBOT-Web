@@ -1,0 +1,21 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["packages/generated-python"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["B008"]
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+exclude = ["apps/api/alembic", "packages/generated-python"]
+
+[tool.pytest.ini_options]
+testpaths = ["apps/api/tests", "services/protocol-tester/tests"]
+pythonpath = ["apps/api", "."]
+addopts = "-q --disable-warnings --maxfail=1"

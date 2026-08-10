@@ -1,0 +1,39 @@
+{
+  "name": "@firebot/web",
+  "private": true,
+  "version": "2.0.0-baseline",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vue-tsc -b && vite build",
+    "typecheck": "vue-tsc -b --force",
+    "lint": "eslint . --max-warnings=0",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@vitejs/plugin-vue": "6.0.1",
+    "axios": "1.11.0",
+    "echarts": "6.0.0",
+    "pinia": "3.0.3",
+    "vue": "3.5.18",
+    "vue-router": "4.5.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.33.0",
+    "@playwright/test": "1.54.2",
+    "@types/node": "24.2.1",
+    "@vue/test-utils": "2.4.6",
+    "eslint": "9.33.0",
+    "eslint-plugin-vue": "10.4.0",
+    "globals": "16.3.0",
+    "jsdom": "26.1.0",
+    "prettier": "3.6.2",
+    "typescript": "5.9.2",
+    "typescript-eslint": "8.39.1",
+    "vite": "7.1.1",
+    "vitest": "3.2.4",
+    "vue-tsc": "3.0.5"
+  }
+}

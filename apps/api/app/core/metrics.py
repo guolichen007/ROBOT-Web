@@ -1,0 +1,17 @@
+from prometheus_client import Counter, Gauge, Histogram
+
+robot_online_total = Gauge("firebot_robot_online_total", "Robots currently online")
+mqtt_ingress_rate = Gauge("firebot_mqtt_ingress_total", "MQTT messages received", ["type"])
+mqtt_invalid_total = Gauge("firebot_mqtt_invalid_total", "Invalid MQTT messages", ["reason"])
+mqtt_duplicate_total = Gauge("firebot_mqtt_duplicate_total", "Duplicate MQTT messages")
+mqtt_out_of_order_total = Gauge("firebot_mqtt_out_of_order_total", "Out-of-order MQTT messages")
+command_ack_latency = Histogram("firebot_command_ack_latency_seconds", "Command ACK latency")
+command_timeout_total = Counter("firebot_command_timeout_total", "Command ACK timeouts")
+command_unconfirmed_total = Gauge("firebot_command_unconfirmed_total", "Unconfirmed commands")
+ws_connection_total = Gauge("firebot_ws_connection_total", "Active WebSocket connections")
+ws_resync_total = Counter("firebot_ws_resync_total", "WebSocket resync requests")
+task_failure_total = Counter("firebot_task_failure_total", "Failed tasks")
+active_alarm_total = Gauge("firebot_active_alarm_total", "Active fire alarms")
+db_pool_usage = Gauge("firebot_db_pool_usage", "Database checked out connections")
+redis_latency = Histogram("firebot_redis_latency_seconds", "Redis operation latency")
+clock_skew = Histogram("firebot_clock_skew_milliseconds", "Robot clock skew in milliseconds")

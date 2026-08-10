@@ -1,0 +1,428 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import threading
+import time
+from datetime import UTC, datetime, timedelta
+from uuid import uuid4
+
+import paho.mqtt.client as mqtt
+from app.core.config import get_settings
+from app.core.events import append_event, get_redis
+from app.core.logging import configure_logging
+from app.core.metrics import (
+    clock_skew,
+    command_ack_latency,
+    mqtt_duplicate_total,
+    mqtt_ingress_rate,
+    mqtt_invalid_total,
+    mqtt_out_of_order_total,
+)
+from app.core.serialization import serialize_model
+from app.db.models import (
+    Command,
+    FireEvent,
+    ManualControlSession,
+    ParkingSlot,
+    Robot,
+    RobotCapability,
+    RobotConnectionLog,
+    SensorSample,
+    Task,
+    TaskEvent,
+    TelemetrySample,
+)
+from app.db.session import SessionLocal
+from jsonschema import ValidationError
+from sqlalchemy import select
+
+from services.protocol import validate_message
+
+settings = get_settings()
+configure_logging("mqtt-ingress")
+logger = logging.getLogger("mqtt-ingress")
+redis = get_redis()
+
+
+def increment_mqtt_metric(field: str) -> None:
+    redis.hincrby("metrics:mqtt", field, 1)
+
+
+def parse_time(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+
+
+def robot_for(db, vehicle_id: str) -> Robot | None:
+    return db.scalar(select(Robot).where(Robot.vehicle_id == vehicle_id))
+
+
+def invalidate_old_boot_leases(db, robot: Robot, boot_id: str) -> None:
+    if robot.boot_id and robot.boot_id != boot_id:
+        raw = redis.get(f"manual:lease:{robot.id}")
+        if raw:
+            lease = json.loads(raw)
+            redis.delete(f"manual:lease:{robot.id}")
+            session = db.scalar(
+                select(ManualControlSession).where(
+                    ManualControlSession.lease_id == lease["lease_id"]
+                )
+            )
+            if session and session.state == "HELD":
+                session.state = "FORCE_RELEASED"
+                session.ended_at = datetime.now(UTC)
+                session.end_reason = "ROBOT_REBOOT"
+        append_event(
+            "vehicle.rebooted",
+            {"vehicle_id": robot.vehicle_id, "old_boot_id": robot.boot_id, "boot_id": boot_id},
+        )
+
+
+def update_online(db, robot: Robot, state: str, message: dict, reason: str | None = None) -> None:
+    previous = robot.online_state
+    robot.online_state = state
+    robot.last_seen_at = datetime.now(UTC)
+    if previous != state:
+        db.add(
+            RobotConnectionLog(
+                robot_id=robot.id, state=state, boot_id=message["boot_id"], reason=reason
+            )
+        )
+        append_event(
+            f"vehicle.{state.lower()}",
+            {"vehicle_id": robot.vehicle_id, "state": state, "reason": reason},
+        )
+
+
+def handle_location(db, robot: Robot, msg: dict, source_ts: datetime, received: datetime) -> None:
+    latest_raw = redis.get(f"robot:{robot.vehicle_id}:latest")
+    latest = json.loads(latest_raw) if latest_raw else {}
+    pose = msg["position"]
+    latest.update(
+        {
+            "vehicle_id": robot.vehicle_id,
+            "robot_id": robot.id,
+            "online_state": "ONLINE",
+            "position": msg["position"],
+            "x": pose["x"],
+            "y": pose["y"],
+            "theta": pose["theta"],
+            "linear": msg.get("linear_speed", 0),
+            "angular": msg.get("angular_speed", 0),
+            "linear_speed": msg.get("linear_speed", 0),
+            "angular_speed": msg.get("angular_speed", 0),
+            "battery": msg.get("battery", robot.battery),
+            "site_code": msg["site_code"],
+            "map_code": msg["map_code"],
+            "map_version": msg["map_version"],
+            "frame_id": msg["frame_id"],
+            "parking_slot_code": msg.get("parking_slot_code"),
+            "localization_status": msg.get("localization_status", "UNKNOWN"),
+            "boot_id": msg["boot_id"],
+            "seq": msg["seq"],
+            "source_timestamp": source_ts.isoformat(),
+            "server_received_at": received.isoformat(),
+        }
+    )
+    redis.set(f"robot:{robot.vehicle_id}:latest", json.dumps(latest, ensure_ascii=False))
+    robot.battery = float(msg.get("battery", robot.battery))
+    if redis.set(f"downsample:location:{robot.id}", "1", ex=1, nx=True):
+        db.add(
+            TelemetrySample(
+                robot_id=robot.id,
+                source_timestamp=source_ts,
+                server_received_at=received,
+                x=pose["x"],
+                y=pose["y"],
+                theta=pose["theta"],
+                linear_speed=msg.get("linear_speed", 0),
+                angular_speed=msg.get("angular_speed", 0),
+                battery=msg.get("battery", robot.battery),
+                localization_status=msg.get("localization_status", "UNKNOWN"),
+                map_version=msg["map_version"],
+                boot_id=msg["boot_id"],
+                seq=msg["seq"],
+            )
+        )
+    append_event("vehicle.location", latest)
+
+
+def handle_status(db, robot: Robot, msg: dict) -> None:
+    robot.current_mode = msg["mode"]
+    robot.battery = msg["battery"]
+    robot.estop_active = bool(msg["estop_active"])
+    robot.current_task_id = msg.get("active_task_id")
+    raw = redis.get(f"robot:{robot.vehicle_id}:latest")
+    latest = json.loads(raw) if raw else {"vehicle_id": robot.vehicle_id, "robot_id": robot.id}
+    latest.update(
+        {
+            "mode": robot.current_mode,
+            "battery": robot.battery,
+            "estop_active": robot.estop_active,
+            "active_task_id": robot.current_task_id,
+        }
+    )
+    redis.set(f"robot:{robot.vehicle_id}:latest", json.dumps(latest, ensure_ascii=False))
+    append_event("vehicle.status", latest)
+
+
+def handle_sensor(db, robot: Robot, msg: dict, source_ts: datetime, received: datetime) -> None:
+    db.add(
+        SensorSample(
+            robot_id=robot.id,
+            source_timestamp=source_ts,
+            server_received_at=received,
+            smoke=msg["smoke"],
+            bottom_ir=msg["bottom_ir"],
+            top_ir_max=msg["top_ir_max"],
+            payload_json=msg.get("payload", {}),
+            boot_id=msg["boot_id"],
+            seq=msg["seq"],
+        )
+    )
+    raw = redis.get(f"robot:{robot.vehicle_id}:latest")
+    latest = json.loads(raw) if raw else {"vehicle_id": robot.vehicle_id, "robot_id": robot.id}
+    latest.update(
+        {
+            "smoke": msg["smoke"],
+            "bottom_ir": msg["bottom_ir"],
+            "top_ir": msg["top_ir_max"],
+            "top_ir_max": msg["top_ir_max"],
+            "server_received_at": received.isoformat(),
+        }
+    )
+    redis.set(f"robot:{robot.vehicle_id}:latest", json.dumps(latest, ensure_ascii=False))
+    append_event("vehicle.sensor", latest)
+
+
+def handle_alarm(db, robot: Robot, msg: dict, received: datetime) -> None:
+    by_message = db.scalar(
+        select(FireEvent).where(FireEvent.source_message_id == msg["message_id"])
+    )
+    if by_message:
+        return
+    slot = db.scalar(select(ParkingSlot).where(ParkingSlot.code == msg.get("parking_slot_code")))
+    if not slot:
+        logger.warning(
+            "alarm refers to unknown parking slot", extra={"vehicle_id": robot.vehicle_id}
+        )
+        return
+    fingerprint = hashlib.sha256(
+        f"{robot.id}:{msg.get('event_id')}:{slot.id}:{msg['fire_type']}".encode()
+    ).hexdigest()
+    row = db.scalar(
+        select(FireEvent).where(
+            FireEvent.fingerprint == fingerprint,
+            FireEvent.last_seen_at >= received - timedelta(minutes=5),
+        )
+    )
+    if row:
+        row.last_seen_at = received
+        row.occurrence_count += 1
+        row.confidence = msg.get("confidence")
+        append_event("alarm.updated", serialize_model(row))
+        return
+    row = FireEvent(
+        event_code=f"FE-{received:%Y%m%d%H%M%S}-{str(uuid4())[:6]}",
+        robot_id=robot.id,
+        parking_slot_id=slot.id,
+        detection_method="AUTO",
+        fire_type=msg["fire_type"],
+        confidence=msg.get("confidence"),
+        severity=msg["severity"],
+        fingerprint=fingerprint,
+        source_message_id=msg["message_id"],
+        source_event_id=msg["event_id"],
+        state="NEW",
+        first_seen_at=received,
+        last_seen_at=received,
+        source_position_json=msg["position"],
+        media_snapshot_json=msg.get("media", {}),
+    )
+    db.add(row)
+    db.flush()
+    append_event("alarm.created", serialize_model(row))
+
+
+def handle_capabilities(db, robot: Robot, msg: dict, received: datetime) -> None:
+    row = db.get(RobotCapability, robot.id)
+    values = {
+        "protocol_version": msg["protocol_version"],
+        "supported_commands_json": msg["supported_commands"],
+        "sensors_json": msg["sensors"],
+        "media_json": msg["media"],
+        "received_at": received,
+    }
+    if not row:
+        row = RobotCapability(robot_id=robot.id, **values)
+        db.add(row)
+    else:
+        for key, value in values.items():
+            setattr(row, key, value)
+    append_event("vehicle.capabilities", {"vehicle_id": robot.vehicle_id, **values})
+
+
+def handle_ack(db, robot: Robot, msg: dict, received: datetime) -> None:
+    command = db.scalar(
+        select(Command).where(Command.command_id == msg["command_id"], Command.robot_id == robot.id)
+    )
+    if not command:
+        logger.warning(
+            "ACK for unknown command",
+            extra={"vehicle_id": robot.vehicle_id, "command_id": msg["command_id"]},
+        )
+        return
+    if command.ack_at:
+        return
+    command.ack_at = received
+    command.ack_status = msg["status"]
+    command.ack_reason = msg.get("reason")
+    if msg["status"] == "accepted":
+        command.lifecycle_status = "ACK_ACCEPTED"
+    elif msg["status"] == "unsupported":
+        command.lifecycle_status = "ACK_UNSUPPORTED"
+        command.terminal_at = received
+    else:
+        command.lifecycle_status = "ACK_REJECTED"
+        command.terminal_at = received
+    if command.published_at:
+        command_ack_latency.observe((received - command.published_at).total_seconds())
+    append_event("command.updated", serialize_model(command))
+
+
+def handle_task_status(db, robot: Robot, msg: dict, received: datetime) -> None:
+    task = db.get(Task, msg["task_id"])
+    if not task or task.robot_id != robot.id:
+        return
+    task.status = msg["status"]
+    task.phase = msg["phase"]
+    task.progress = msg["progress"]
+    if msg["status"] == "ACCEPTED":
+        task.accepted_at = received
+    if msg["status"] == "EXECUTING" and not task.started_at:
+        task.started_at = received
+    if msg["status"] in {"SUCCEEDED", "FAILED", "CANCELLED"}:
+        task.completed_at = received
+    task.failure_code = msg.get("failure_code")
+    task.failure_message = msg.get("failure_message")
+    db.add(
+        TaskEvent(
+            task_id=task.id,
+            status=task.status,
+            phase=task.phase,
+            progress=task.progress,
+            payload_json=msg,
+        )
+    )
+    command = db.scalar(
+        select(Command).where(Command.task_id == task.id).order_by(Command.issued_at.desc())
+    )
+    if command:
+        command.lifecycle_status = "EXECUTING" if task.status == "EXECUTING" else task.status
+        if task.status in {"SUCCEEDED", "FAILED", "CANCELLED"}:
+            command.terminal_at = received
+    append_event("task.updated", serialize_model(task))
+
+
+def process(topic: str, payload: bytes) -> None:
+    received = datetime.now(UTC)
+    try:
+        msg = json.loads(payload.decode("utf-8"))
+        validate_message(msg)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValidationError) as exc:
+        mqtt_invalid_total.labels(reason=type(exc).__name__).inc()
+        increment_mqtt_metric(f"invalid:{type(exc).__name__}")
+        logger.warning("invalid MQTT payload")
+        return
+    expected = topic.rsplit("/", 1)[-1]
+    if msg["type"] != expected:
+        mqtt_invalid_total.labels(reason="topic_type_mismatch").inc()
+        increment_mqtt_metric("invalid:topic_type_mismatch")
+        return
+    if not redis.set(f"dedup:message:{msg['message_id']}", "1", ex=86400, nx=True):
+        mqtt_duplicate_total.inc()
+        increment_mqtt_metric("duplicate")
+        return
+    last_key = f"seq:{msg['vehicle_id']}:{msg['boot_id']}:{expected}"
+    last_seq = redis.get(last_key)
+    if last_seq is not None and msg["seq"] <= int(last_seq):
+        mqtt_out_of_order_total.inc()
+        increment_mqtt_metric("out_of_order")
+        return
+    redis.setex(last_key, 86400, msg["seq"])
+    source_ts = parse_time(msg["timestamp"])
+    skew_ms = (received - source_ts).total_seconds() * 1000
+    clock_skew.observe(abs(skew_ms))
+    mqtt_ingress_rate.labels(type=msg["type"]).inc()
+    increment_mqtt_metric(f"ingress:{msg['type']}")
+    with SessionLocal.begin() as db:
+        robot = robot_for(db, msg["vehicle_id"])
+        if not robot:
+            mqtt_invalid_total.labels(reason="unknown_vehicle").inc()
+            increment_mqtt_metric("invalid:unknown_vehicle")
+            return
+        invalidate_old_boot_leases(db, robot, msg["boot_id"])
+        robot.boot_id = msg["boot_id"]
+        if msg["type"] == "availability" and msg["state"] == "offline":
+            update_online(db, robot, "OFFLINE", msg, msg.get("reason"))
+            redis.delete(f"heartbeat:{robot.vehicle_id}")
+        else:
+            update_online(db, robot, "ONLINE", msg)
+            redis.setex(
+                f"heartbeat:{robot.vehicle_id}",
+                settings.robot_offline_seconds,
+                received.isoformat(),
+            )
+        handlers = {
+            "location": lambda: handle_location(db, robot, msg, source_ts, received),
+            "status": lambda: handle_status(db, robot, msg),
+            "sensor": lambda: handle_sensor(db, robot, msg, source_ts, received),
+            "alarm": lambda: handle_alarm(db, robot, msg, received),
+            "capabilities": lambda: handle_capabilities(db, robot, msg, received),
+            "command_ack": lambda: handle_ack(db, robot, msg, received),
+            "task_status": lambda: handle_task_status(db, robot, msg, received),
+        }
+        if msg["type"] in handlers:
+            handlers[msg["type"]]()
+
+
+def service_heartbeat() -> None:
+    while True:
+        redis.setex("service:mqtt-ingress:heartbeat", 5, datetime.now(UTC).isoformat())
+        time.sleep(1)
+
+
+def on_connect(client, userdata, flags, reason_code, properties):
+    if reason_code != 0:
+        logger.error("MQTT connect failed: %s", reason_code)
+        return
+    client.subscribe("robot/+/+", qos=1)
+    logger.info("MQTT ingress connected")
+
+
+def on_message(client, userdata, message):
+    process(message.topic, message.payload)
+
+
+def main() -> None:
+    threading.Thread(target=service_heartbeat, daemon=True).start()
+    client = mqtt.Client(
+        mqtt.CallbackAPIVersion.VERSION2, client_id="firebot-mqtt-ingress", protocol=mqtt.MQTTv5
+    )
+    if settings.mqtt_username:
+        client.username_pw_set(settings.mqtt_username, settings.effective_mqtt_password)
+    settings.configure_mqtt_client(client)
+    client.on_connect = on_connect
+    client.on_message = on_message
+    while True:
+        try:
+            client.connect(settings.mqtt_host, settings.mqtt_port, keepalive=30)
+            client.loop_forever(retry_first_connection=True)
+        except Exception:
+            logger.exception("MQTT ingress loop failed")
+            time.sleep(3)
+
+
+if __name__ == "__main__":
+    main()

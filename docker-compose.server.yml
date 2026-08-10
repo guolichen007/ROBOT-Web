@@ -1,0 +1,129 @@
+name: firebot-server
+
+x-python-service: &python-service
+  image: ${FIREBOT_PYTHON_IMAGE:-firebot-python:server}
+  build:
+    context: .
+    dockerfile: infra/docker/python.Dockerfile
+  env_file: ${SERVER_ENV_FILE:-.env.server}
+  secrets:
+    - jwt_secret
+    - refresh_secret
+    - csrf_secret
+    - bootstrap_admin_password
+    - mqtt_platform_password
+    - mqtt_ca
+  restart: unless-stopped
+  networks: [firebot]
+  logging:
+    driver: json-file
+    options: { max-size: "20m", max-file: "5" }
+
+services:
+  postgres:
+    image: postgres:18.4-alpine
+    env_file: ${SERVER_ENV_FILE:-.env.server}
+    volumes: [postgres_data:/var/lib/postgresql]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [firebot]
+
+  redis:
+    image: redis:8.4.5-alpine
+    command: ["sh", "-c", "redis-server --appendonly yes --requirepass '$${REDIS_PASSWORD}'"]
+    env_file: ${SERVER_ENV_FILE:-.env.server}
+    volumes: [redis_data:/data]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a '$${REDIS_PASSWORD}' ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    networks: [firebot]
+
+  mosquitto:
+    image: eclipse-mosquitto:2.1.2-alpine
+    ports: ["8883:8883"]
+    volumes:
+      - ./infra/mosquitto/mosquitto.server.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./secrets/mosquitto/passwords:/mosquitto/config/passwords:ro
+      - ./secrets/mosquitto/acl:/mosquitto/config/acl:ro
+      - ./secrets/mosquitto/certs:/mosquitto/certs:ro
+      - mosquitto_data:/mosquitto/data
+    restart: unless-stopped
+    networks: [firebot]
+
+  mediamtx:
+    image: bluenviron/mediamtx:1.18.2
+    volumes: ["./infra/mediamtx/mediamtx.server.yml:/mediamtx.yml:ro"]
+    restart: unless-stopped
+    networks: [firebot]
+
+  migrate:
+    <<: *python-service
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  api:
+    <<: *python-service
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    volumes: [assets_data:/data/assets]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  mqtt-ingress:
+    <<: *python-service
+    command: ["python", "/workspace/services/mqtt-ingress/main.py"]
+    depends_on: [migrate, mosquitto]
+
+  command-dispatcher:
+    <<: *python-service
+    command: ["python", "/workspace/services/command-dispatcher/main.py"]
+    depends_on: [migrate, mosquitto]
+
+  task-worker:
+    <<: *python-service
+    command: ["python", "/workspace/services/task-worker/main.py"]
+    depends_on: [migrate]
+
+  web:
+    image: ${FIREBOT_WEB_IMAGE:-firebot-web:server}
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    networks: [firebot]
+
+  nginx:
+    image: nginx:1.30.4-alpine
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./infra/nginx/nginx.server.conf:/etc/nginx/nginx.conf:ro
+      - ./secrets/nginx:/etc/nginx/tls:ro
+    depends_on: [api, web, mediamtx]
+    restart: unless-stopped
+    networks: [firebot]
+
+networks:
+  firebot:
+
+volumes:
+  postgres_data:
+  redis_data:
+  mosquitto_data:
+  assets_data:
+
+secrets:
+  jwt_secret: { file: ./secrets/app/jwt_secret }
+  refresh_secret: { file: ./secrets/app/refresh_secret }
+  csrf_secret: { file: ./secrets/app/csrf_secret }
+  bootstrap_admin_password: { file: ./secrets/app/bootstrap_admin_password }
+  mqtt_platform_password: { file: ./secrets/app/mqtt_platform_password }
+  mqtt_ca: { file: ./secrets/mosquitto/certs/ca.crt }

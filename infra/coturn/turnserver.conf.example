@@ -1,0 +1,7 @@
+listening-port=3478
+fingerprint
+lt-cred-mech
+realm=REPLACE_SERVER_HOST
+user=REPLACE_USER:REPLACE_PASSWORD
+no-cli
+no-multicast-peers

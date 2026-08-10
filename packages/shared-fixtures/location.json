@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.1",
+  "message_id": "00000000-0000-4000-8000-000000000001",
+  "type": "location",
+  "vehicle_id": "R001",
+  "boot_id": "00000000-0000-4000-8000-000000000002",
+  "timestamp": "2026-08-10T02:30:00Z",
+  "seq": 1,
+  "position": { "x": 2.5, "y": 3.0, "theta": 0.5 },
+  "linear_speed": 0.1,
+  "angular_speed": 0.0,
+  "battery": 96,
+  "site_code": "DEMO_PARKING",
+  "map_code": "parking_v1",
+  "map_version": "1",
+  "frame_id": "map",
+  "parking_slot_code": "A-01",
+  "localization_status": "OK"
+}
