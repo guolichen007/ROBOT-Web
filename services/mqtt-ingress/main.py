@@ -25,6 +25,7 @@ from app.db.models import (
     Command,
     FireEvent,
     ManualControlSession,
+    Map,
     ParkingSlot,
     Robot,
     RobotCapability,
@@ -103,7 +104,7 @@ def handle_location(db, robot: Robot, msg: dict, source_ts: datetime, received: 
         {
             "vehicle_id": robot.vehicle_id,
             "robot_id": robot.id,
-            "online_state": "ONLINE",
+            "online_state": robot.online_state,
             "position": msg["position"],
             "x": pose["x"],
             "y": pose["y"],
@@ -127,6 +128,11 @@ def handle_location(db, robot: Robot, msg: dict, source_ts: datetime, received: 
     )
     redis.set(f"robot:{robot.vehicle_id}:latest", json.dumps(latest, ensure_ascii=False))
     robot.battery = float(msg.get("battery", robot.battery))
+    robot.current_map_version = msg["map_version"]
+    reported_map = db.scalar(
+        select(Map).where(Map.site_id == robot.site_id, Map.code == msg["map_code"])
+    )
+    robot.current_map_id = reported_map.id if reported_map else None
     if redis.set(f"downsample:location:{robot.id}", "1", ex=1, nx=True):
         db.add(
             TelemetrySample(
@@ -208,9 +214,18 @@ def handle_alarm(db, robot: Robot, msg: dict, received: datetime) -> None:
             "alarm refers to unknown parking slot", extra={"vehicle_id": robot.vehicle_id}
         )
         return
-    fingerprint = hashlib.sha256(
-        f"{robot.id}:{msg.get('event_id')}:{slot.id}:{msg['fire_type']}".encode()
-    ).hexdigest()
+    by_event = db.scalar(
+        select(FireEvent).where(
+            FireEvent.robot_id == robot.id, FireEvent.source_event_id == msg.get("event_id")
+        )
+    )
+    fingerprint = hashlib.sha256(f"{robot.id}:{slot.id}:{msg['fire_type']}".encode()).hexdigest()
+    if by_event:
+        by_event.last_seen_at = received
+        by_event.occurrence_count += 1
+        by_event.confidence = msg.get("confidence")
+        append_event("alarm.updated", serialize_model(by_event))
+        return
     row = db.scalar(
         select(FireEvent).where(
             FireEvent.fingerprint == fingerprint,
@@ -322,6 +337,17 @@ def handle_task_status(db, robot: Robot, msg: dict, received: datetime) -> None:
         command.lifecycle_status = "EXECUTING" if task.status == "EXECUTING" else task.status
         if task.status in {"SUCCEEDED", "FAILED", "CANCELLED"}:
             command.terminal_at = received
+    if task.fire_event_id:
+        fire = db.get(FireEvent, task.fire_event_id)
+        if fire:
+            if task.status in {"ACCEPTED", "EXECUTING"}:
+                fire.state = "IN_PROGRESS" if task.status == "EXECUTING" else "DISPATCHED"
+            elif task.status == "SUCCEEDED":
+                fire.state = "RESOLVED"
+                fire.resolved_at = received
+            elif task.status in {"FAILED", "CANCELLED"}:
+                fire.state = "CONFIRMED"
+            append_event("alarm.updated", serialize_model(fire))
     append_event("task.updated", serialize_model(task))
 
 
@@ -367,7 +393,9 @@ def process(topic: str, payload: bytes) -> None:
         if msg["type"] == "availability" and msg["state"] == "offline":
             update_online(db, robot, "OFFLINE", msg, msg.get("reason"))
             redis.delete(f"heartbeat:{robot.vehicle_id}")
-        else:
+        elif msg["type"] in {"heartbeat", "availability"}:
+            # Online state is driven by the dedicated heartbeat/LWT contract.  High-rate
+            # location or sensor traffic must not hide a failed heartbeat publisher.
             update_online(db, robot, "ONLINE", msg)
             redis.setex(
                 f"heartbeat:{robot.vehicle_id}",
@@ -389,7 +417,10 @@ def process(topic: str, payload: bytes) -> None:
 
 def service_heartbeat() -> None:
     while True:
-        redis.setex("service:mqtt-ingress:heartbeat", 5, datetime.now(UTC).isoformat())
+        try:
+            redis.setex("service:mqtt-ingress:heartbeat", 5, datetime.now(UTC).isoformat())
+        except Exception:
+            logger.warning("MQTT ingress heartbeat store unavailable", exc_info=True)
         time.sleep(1)
 
 

@@ -4,7 +4,7 @@ import argparse
 import json
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -81,8 +81,26 @@ def broker_tests() -> list[str]:
         base("heartbeat", 100, uptime_seconds=5),
         base("availability", 101, state="online", reason="PROTOCOL_TEST"),
         base(
-            "location",
+            "capabilities",
             102,
+            protocol_version="1.1",
+            supported_commands=[
+                "manual_control",
+                "stop_motion",
+                "emergency_stop",
+                "reset_estop",
+                "return_dock",
+                "patrol",
+                "extinguish",
+                "cancel_task",
+            ],
+            sensors=["smoke", "bottom_ir", "top_ir"],
+            media=["roof_rgb", "roof_thermal", "bottom_ir"],
+        ),
+        base("status", 103, mode="IDLE", battery=90, estop_active=False, active_task_id=None),
+        base(
+            "location",
+            104,
             position={"x": 1, "y": 2, "theta": 0},
             linear_speed=0,
             angular_speed=0,
@@ -94,7 +112,28 @@ def broker_tests() -> list[str]:
             parking_slot_code="A-01",
             localization_status="OK",
         ),
-        base("sensor", 103, smoke=1, bottom_ir=30, top_ir_max=32, payload={}),
+        base("sensor", 105, smoke=1, bottom_ir=30, top_ir_max=32, payload={}),
+        base(
+            "alarm",
+            106,
+            event_id=f"PROTOCOL-{uuid4()}",
+            fire_type="smoke",
+            severity="LOW",
+            confidence=0.5,
+            parking_slot_code="A-12",
+            position={"x": 25, "y": 13, "theta": 0},
+            media={},
+        ),
+        base(
+            "task_status",
+            107,
+            task_id=str(uuid4()),
+            status="EXECUTING",
+            phase="PROTOCOL_TEST",
+            progress=10,
+            failure_code=None,
+            failure_message=None,
+        ),
     ]
     for message in messages:
         message["boot_id"] = boot
@@ -109,13 +148,81 @@ def broker_tests() -> list[str]:
     out_of_order = dict(messages[0], message_id=str(uuid4()), seq=50)
     client.publish("robot/R001/heartbeat", json.dumps(out_of_order), qos=0)
     client.publish("robot/R001/status", "{bad-json", qos=1)
-    time.sleep(0.5)
+    invalid_schema = dict(messages[0], message_id=str(uuid4()), seq=108, schema_version="9.9")
+    client.publish("robot/R001/heartbeat", json.dumps(invalid_schema), qos=0)
+
+    for index, ack_status in enumerate(("accepted", "rejected", "unsupported"), start=109):
+        ack = base(
+            "command_ack",
+            index,
+            command_id=str(uuid4()),
+            status=ack_status,
+            reason="PROTOCOL_TEST",
+        )
+        ack["boot_id"] = boot
+        client.publish("robot/R001/command_ack", json.dumps(ack), qos=1)
+
+    now = datetime.now(UTC)
+    command = base(
+        "command",
+        1,
+        command_id=f"C-PROTOCOL-{str(uuid4())[:8]}",
+        correlation_id=str(uuid4()),
+        task_id=None,
+        lease_id=None,
+        control_session_id=None,
+        issued_at=now.isoformat(),
+        expires_at=(now + timedelta(seconds=5)).isoformat(),
+        ttl_ms=5000,
+        priority=95,
+        source="WEB",
+        operator_id="protocol-tester",
+        cmd="stop_motion",
+        params={"reason": "PROTOCOL_TEST"},
+    )
+    command["boot_id"] = boot
+    validate_message(command)
+    client.publish("robot/R001/command", json.dumps(command), qos=1, retain=False)
+
+    expired = dict(
+        command,
+        message_id=str(uuid4()),
+        command_id=f"C-EXPIRED-{str(uuid4())[:8]}",
+        issued_at=(now - timedelta(seconds=10)).isoformat(),
+        expires_at=(now - timedelta(seconds=5)).isoformat(),
+    )
+    validate_message(expired)
+    client.publish("robot/R001/command", json.dumps(expired), qos=1, retain=False)
+
+    mismatch = dict(
+        messages[4],
+        message_id=str(uuid4()),
+        seq=120,
+        map_version="PROTOCOL_MISMATCH",
+    )
+    client.publish("robot/R001/location", json.dumps(mismatch), qos=0)
+    restored = dict(mismatch, message_id=str(uuid4()), seq=121, map_version="1")
+    client.publish("robot/R001/location", json.dumps(restored), qos=0)
+
+    restart = dict(messages[0], message_id=str(uuid4()), boot_id=str(uuid4()), seq=1)
+    client.publish("robot/R001/heartbeat", json.dumps(restart), qos=0)
+
+    deadline = time.time() + 3
+    while not received_command and time.time() < deadline:
+        time.sleep(0.05)
+    if not received_command:
+        raise RuntimeError("command subscription did not receive a conforming command")
     client.loop_stop()
     client.disconnect()
     return [
         "PASS broker connection",
-        "PASS publish valid fixtures",
-        "PASS publish duplicate/out-of-order/bad JSON",
+        "PASS publish heartbeat/availability/capabilities/telemetry/alarm/task status",
+        "PASS receive conforming command",
+        "PASS publish accepted/rejected/unsupported ACK",
+        "PASS duplicate/out-of-order/bad JSON/unknown schema",
+        "PASS TTL expiry and command retain=false",
+        "PASS boot restart and seq reset",
+        "PASS map mismatch and restore",
     ]
 
 

@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 
 from app.core.audit import write_audit
+from app.core.config import get_settings
 from app.core.dependencies import (
     AuthContext,
     CurrentAuth,
@@ -72,7 +73,7 @@ def manual(
         seq=payload.seq,
     )
     redis.setex(f"manual:lastseq:{payload.lease_id}", 30, payload.seq)
-    redis.expire(f"manual:lease:{robot.id}", 5)
+    redis.expire(f"manual:lease:{robot.id}", get_settings().manual_lease_ttl_seconds)
     redis.publish("firebot:manual_commands", json.dumps(command, ensure_ascii=False))
     return {"accepted": True, "expires_at": command["expires_at"], "seq": payload.seq}
 

@@ -89,10 +89,9 @@ def manual_alarm(
         fire_type=payload.fire_type,
         severity=payload.severity,
         fingerprint=fingerprint,
-        state="CONFIRMED",
+        state="NEW",
         first_seen_at=now,
         last_seen_at=now,
-        confirmed_at=now,
         source_position_json=slot.center_pose_json,
         media_snapshot_json=payload.media,
         note=payload.note,
@@ -129,6 +128,16 @@ def transition(
     if not row:
         raise HTTPException(404, "火情不存在")
     before = row.state
+    allowed = {
+        "NEW": {"ACKNOWLEDGED", "CONFIRMED", "DISMISSED"},
+        "ACKNOWLEDGED": {"CONFIRMED", "DISMISSED"},
+        "CONFIRMED": {"RESOLVED", "DISMISSED"},
+        "DISPATCHED": {"IN_PROGRESS", "RESOLVED"},
+        "IN_PROGRESS": {"RESOLVED"},
+        "RESOLVED": {"CLOSED"},
+    }
+    if target not in allowed.get(before, set()):
+        raise HTTPException(409, f"不允许从 {before} 转换为 {target}")
     now = datetime.now(UTC)
     row.state = target
     if target == "ACKNOWLEDGED":
@@ -208,6 +217,8 @@ def alarm_create_task(
     alarm = db.get(FireEvent, alarm_id)
     if not alarm:
         raise HTTPException(404, "火情不存在")
+    if alarm.state != "CONFIRMED":
+        raise HTTPException(409, "只有已确认火情可以创建灭火任务")
     task_payload = TaskInput(
         robot_id=payload.robot_id,
         target_parking_slot_id=alarm.parking_slot_id,

@@ -1,5 +1,27 @@
 name: firebot-test
 
+x-test-environment: &test-environment
+  APP_ENV: test
+  DATABASE_URL: postgresql+psycopg://firebot_test:firebot_test@postgres:5432/firebot_test
+  REDIS_URL: redis://redis:6379/15
+  MQTT_HOST: mosquitto
+  MQTT_PORT: 1883
+  JWT_SECRET: test-jwt-secret-at-least-32-bytes-long
+  REFRESH_SECRET: test-refresh-secret-at-least-32-bytes
+  CSRF_SECRET: test-csrf-secret-at-least-32-bytes-long
+  BOOTSTRAP_ADMIN_PASSWORD: TestOnly-ChangeMe-2026!
+  SEED_DEMO: "true"
+  MOCK_ENABLED: "true"
+  ALLOWED_ORIGINS: http://localhost:18080,http://127.0.0.1:18080,http://host.docker.internal:18080
+
+x-python-service: &python-service
+  build:
+    context: .
+    dockerfile: infra/docker/python.Dockerfile
+  environment: *test-environment
+  profiles: [full]
+  restart: "no"
+
 services:
   postgres:
     image: postgres:18.4-alpine
@@ -24,23 +46,109 @@ services:
   mosquitto:
     image: eclipse-mosquitto:2.1.2-alpine
     volumes: ["./infra/mosquitto/mosquitto.dev.conf:/mosquitto/config/mosquitto.conf:ro"]
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -t '$$SYS/broker/version' -C 1 -W 3 >/dev/null"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+
+  mediamtx:
+    image: bluenviron/mediamtx:1.18.2
+    profiles: [full]
+    volumes: ["./infra/mediamtx/mediamtx.yml:/mediamtx.yml:ro"]
+
+  migrate:
+    <<: *python-service
+    command: ["sh", "-c", "alembic upgrade head && python -m app.db.seed"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  api:
+    <<: *python-service
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live')"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+
+  mqtt-ingress:
+    <<: *python-service
+    command: ["python", "/workspace/services/mqtt-ingress/main.py"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      mosquitto: { condition: service_healthy }
+
+  command-dispatcher:
+    <<: *python-service
+    command: ["python", "/workspace/services/command-dispatcher/main.py"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      mosquitto: { condition: service_healthy }
+
+  task-worker:
+    <<: *python-service
+    command: ["python", "/workspace/services/task-worker/main.py"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+
+  mock-robot:
+    <<: *python-service
+    command: ["python", "/workspace/services/mock-robot/main.py"]
+    environment:
+      <<: *test-environment
+      MOCK_VEHICLE_ID: R001
+      MOCK_MAP_CODE: parking_v1
+      MOCK_MAP_VERSION: ${TEST_MOCK_MAP_VERSION:-1}
+      MOCK_PACKET_LOSS: ${TEST_MOCK_PACKET_LOSS:-0}
+      MOCK_PACKET_DELAY_MS: ${TEST_MOCK_PACKET_DELAY_MS:-0}
+      MOCK_DUPLICATE_EVERY: ${TEST_MOCK_DUPLICATE_EVERY:-0}
+      MOCK_OUT_OF_ORDER_EVERY: ${TEST_MOCK_OUT_OF_ORDER_EVERY:-0}
+      MOCK_INVALID_SCHEMA_EVERY: ${TEST_MOCK_INVALID_SCHEMA_EVERY:-0}
+      MOCK_BAD_JSON_EVERY: ${TEST_MOCK_BAD_JSON_EVERY:-0}
+      MOCK_TIMESTAMP_SKEW_SECONDS: ${TEST_MOCK_TIMESTAMP_SKEW_SECONDS:-0}
+      MOCK_LATE_ACK_MS: ${TEST_MOCK_LATE_ACK_MS:-0}
+      MOCK_DUPLICATE_ACK: ${TEST_MOCK_DUPLICATE_ACK:-false}
+      MOCK_WRONG_COMMAND_ID_ACK: ${TEST_MOCK_WRONG_COMMAND_ID_ACK:-false}
+      MOCK_REBOOT_AFTER_SECONDS: ${TEST_MOCK_REBOOT_AFTER_SECONDS:-0}
+      MOCK_OFFLINE_AFTER_SECONDS: ${TEST_MOCK_OFFLINE_AFTER_SECONDS:-0}
+    depends_on:
+      mosquitto: { condition: service_healthy }
+      mqtt-ingress: { condition: service_started }
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    profiles: [full]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/ >/dev/null"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+
+  nginx:
+    image: nginx:1.30.4-alpine
+    profiles: [full]
+    ports: ["18080:80"]
+    volumes: ["./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro"]
+    depends_on:
+      api: { condition: service_healthy }
+      web: { condition: service_healthy }
+      mediamtx: { condition: service_started }
   tests:
     build:
       context: .
       dockerfile: infra/docker/python-test.Dockerfile
     working_dir: /workspace
     command: ["pytest"]
-    environment:
-      APP_ENV: test
-      DATABASE_URL: postgresql+psycopg://firebot_test:firebot_test@postgres:5432/firebot_test
-      REDIS_URL: redis://redis:6379/15
-      MQTT_HOST: mosquitto
-      MQTT_PORT: 1883
-      JWT_SECRET: test-jwt-secret-at-least-32-bytes-long
-      REFRESH_SECRET: test-refresh-secret-at-least-32-bytes
-      CSRF_SECRET: test-csrf-secret-at-least-32-bytes-long
-      BOOTSTRAP_ADMIN_PASSWORD: TestOnly-ChangeMe-2026!
-      SEED_DEMO: "true"
+    profiles: [checks]
+    environment: *test-environment
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }

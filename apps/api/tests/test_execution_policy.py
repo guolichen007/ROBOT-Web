@@ -13,6 +13,9 @@ class FakeSession:
     def scalar(self, _query):
         return self.active_task
 
+    def get(self, _model, _identity):
+        return None
+
 
 def robot(**overrides) -> Robot:
     values = {

@@ -50,7 +50,7 @@ async function createManualAlarm(): Promise<void> {
     )
     selectedAlarm.value = data
     await monitor.loadSnapshot()
-    toast(`${selectedSlot.value.code} 人工火情已创建并确认`, 'danger')
+    toast(`${selectedSlot.value.code} 人工火情已创建，等待确认`, 'danger')
   } catch (error) {
     toast(errorMessage(error), 'danger')
   } finally {
@@ -60,7 +60,8 @@ async function createManualAlarm(): Promise<void> {
 
 async function transition(alarm: Alarm, action: 'acknowledge' | 'confirm' | 'resolve'): Promise<void> {
   try {
-    await api.post(`/alarms/${alarm.id}/${action}`)
+    const { data } = await api.post(`/alarms/${alarm.id}/${action}`)
+    selectedAlarm.value = data
     await monitor.loadSnapshot()
     toast(`火情状态已更新：${action}`)
   } catch (error) {
@@ -260,7 +261,14 @@ onMounted(() => {
             确认收到
           </button>
           <button
-            v-if="auth.can('extinguish.create')"
+            v-if="['NEW', 'ACKNOWLEDGED'].includes(selectedAlarm.state) && auth.can('alarm.confirm')"
+            class="primary-button"
+            @click="transition(selectedAlarm, 'confirm')"
+          >
+            确认火情
+          </button>
+          <button
+            v-if="selectedAlarm.state === 'CONFIRMED' && auth.can('extinguish.create')"
             class="primary-button"
             :disabled="working"
             @click="dispatch(selectedAlarm)"

@@ -7,11 +7,13 @@ from datetime import UTC, datetime
 from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy import select
 
+from app.core.audit import write_audit
 from app.core.config import get_settings
 from app.core.events import EVENT_STREAM, decode_stream_event, get_redis
 from app.core.metrics import ws_connection_total, ws_resync_total
-from app.db.models import ManualControlSession
+from app.db.models import Command, ManualControlSession, Robot
 from app.db.session import SessionLocal
+from app.modules.commands.service import build_command_payload, enqueue_safety_command
 
 
 def stream_tuple(value: str) -> tuple[int, int]:
@@ -39,6 +41,45 @@ def release_user_leases(user_id: str, reason: str) -> None:
                 session.state = "FORCE_RELEASED"
                 session.ended_at = datetime.now(UTC)
                 session.end_reason = reason
+            robot = db.get(Robot, lease["robot_id"])
+            if robot:
+                payload = build_command_payload(
+                    robot=robot,
+                    operator_id=user_id,
+                    cmd="stop_motion",
+                    params={"reason": reason},
+                    ttl_ms=5_000,
+                    priority=90,
+                )
+                command = Command(
+                    command_id=payload["command_id"],
+                    correlation_id=payload["correlation_id"],
+                    robot_id=robot.id,
+                    cmd="stop_motion",
+                    priority=90,
+                    payload_json=payload,
+                    lifecycle_status="CREATED",
+                    issued_by=user_id,
+                    issued_at=datetime.fromisoformat(payload["issued_at"]),
+                    expires_at=datetime.fromisoformat(payload["expires_at"]),
+                )
+                db.add(command)
+                db.flush()
+                if robot.online_state in {"STALE", "OFFLINE"}:
+                    command.lifecycle_status = "PUBLISHED_UNCONFIRMED"
+                    command.ack_reason = "OFFLINE_NOT_DELIVERED"
+                else:
+                    enqueue_safety_command(payload)
+                write_audit(
+                    db,
+                    action="STOP_MOTION_ON_WS_DISCONNECT",
+                    resource_type="COMMAND",
+                    user_id=user_id,
+                    robot_id=robot.id,
+                    resource_id=command.command_id,
+                    after={"reason": reason, "lifecycle_status": command.lifecycle_status},
+                    actor_type="SYSTEM",
+                )
 
 
 async def monitor_socket(websocket: WebSocket, ticket: str, after: str = "0-0") -> None:
