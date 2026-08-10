@@ -38,6 +38,7 @@ jobs:
       CSRF_SECRET: ci-csrf-secret-at-least-32-characters-long
       BOOTSTRAP_ADMIN_PASSWORD: Firebot-CI-Only-2026!
       SEED_DEMO: "true"
+      ASSET_ROOT: /tmp/firebot-assets
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
