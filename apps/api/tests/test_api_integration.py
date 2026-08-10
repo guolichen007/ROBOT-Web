@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 from app.core.config import get_settings
 from app.core.events import append_event, get_redis
+from app.core.security import hash_password, verify_password
 from app.db.models import (
     Command,
     FireEvent,
@@ -30,6 +31,9 @@ def stable_baseline() -> None:
     with SessionLocal.begin() as db:
         admin = db.scalar(select(User).where(User.username == "admin"))
         assert admin
+        test_password = get_settings().effective_admin_password
+        if not verify_password(test_password, admin.password_hash):
+            admin.password_hash = hash_password(test_password)
         admin.must_change_password = False
         admin.failed_attempts = 0
         admin.locked_until = None
