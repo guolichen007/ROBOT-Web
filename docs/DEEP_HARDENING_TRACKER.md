@@ -37,7 +37,7 @@
 | AUDIT-12 | PASS | supply chain | Python production image 未以非 root 用户运行；GitHub workflow 三方 action pinning 不完整范围未自动验证。 | non-root 容器与 action SHA/pinned image 政策检查通过。 |
 | AUDIT-13 | PASS | protocol package | canonical schema、Python/TS models、fixtures、Mock、tester、文档仍为 1.1，缺 machine-readable 1.2.0 handoff。 | schema 1.2、contract 1.2.0、模型漂移与 handoff conformance 通过。 |
 | AUDIT-14 | PASS | stability | 无一小时 soak、多车 burst、default partition 增长和内存趋势报告。 | 36,000 location soak 与 60,000 location burst 均 PASS；详见 `SOAK_TEST_REPORT.md`。 |
-| AUDIT-15 | IN_PROGRESS | clean clone | 尚无从干净 clone 按 README 完成启动的自动 smoke。 | 待 hardening commit/push 后从远端新目录执行。 |
+| AUDIT-15 | PASS | clean clone | 尚无从干净 clone 按 README 完成启动的自动 smoke。 | 已从远端 `hardening/v2-integration-ready-final` 新目录 clone，完成 TEST 全栈构建、ready/Web、首次改密、登录、R001/地图、Gitleaks 与干净工作区验证后清理临时环境。 |
 | AUDIT-16 | PASS | migrations | 旧 migration 与 ORM metadata 存在 UUID/default 定义兼容差异。 | UUID 兼容迁移与空库/上一 revision upgrade 测试通过。 |
 | AUDIT-17 | PASS | MQTT ingress | ingress 误订阅 command topic，扩大不必要的信任面。 | 仅订阅车端上行 topic，协议不变量测试通过。 |
 | AUDIT-18 | PASS | SERVER startup | Mosquitto secret 配置权限及 worker 对 migrate 的启动条件会造成冷启动失败。 | config-init 权限修复、`service_completed_successfully` 依赖和全新 volume smoke 通过。 |
