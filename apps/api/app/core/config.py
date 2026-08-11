@@ -13,7 +13,9 @@ class Settings(BaseSettings):
     app_env: str = "dev"
     app_name: str = "Firebot Cloud Control Platform"
     database_url: str = "postgresql+psycopg://firebot:firebot_dev@postgres:5432/firebot"
+    database_url_file: str | None = None
     redis_url: str = "redis://redis:6379/0"
+    redis_url_file: str | None = None
     mqtt_host: str = "mosquitto"
     mqtt_port: int = 1883
     mqtt_username: str | None = None
@@ -24,6 +26,8 @@ class Settings(BaseSettings):
     mqtt_ca_file: str | None = None
     mqtt_client_cert_file: str | None = None
     mqtt_client_key_file: str | None = None
+    media_publish_token: str = "dev-media-publisher-token"
+    media_publish_token_file: str | None = None
 
     jwt_secret: str = "dev-only-jwt-secret-change-before-server"
     jwt_secret_file: str | None = None
@@ -41,6 +45,7 @@ class Settings(BaseSettings):
     cookie_secure: bool = False
     allowed_origins: str = "http://localhost,http://127.0.0.1"
     public_base_url: str = "http://localhost"
+    enable_api_docs: bool = True
 
     seed_demo: bool = True
     mock_enabled: bool = True
@@ -52,6 +57,11 @@ class Settings(BaseSettings):
     manual_lease_ttl_seconds: int = 5
     command_ack_timeout_seconds: int = 3
     event_stream_maxlen: int = 10_000
+    media_ticket_seconds: int = 60
+    max_mqtt_payload_bytes: int = 256 * 1024
+    max_json_depth: int = 20
+    mqtt_rate_limit_per_second: int = 50
+    mqtt_location_rate_limit_per_second: int = 30
     robot_stale_seconds: int = 3
     robot_offline_seconds: int = 10
     login_failure_limit: int = 5
@@ -59,7 +69,7 @@ class Settings(BaseSettings):
     upload_max_bytes: int = 10 * 1024 * 1024
     ws_ticket_seconds: int = 60
     protocol_schema: Path = Field(
-        default=Path("/workspace/packages/protocol-schemas/firebot-message-1.1.schema.json")
+        default=Path("/workspace/packages/protocol-schemas/firebot-message-1.2.schema.json")
     )
 
     @property
@@ -68,13 +78,24 @@ class Settings(BaseSettings):
 
     @staticmethod
     def _read_secret(value: str, filename: str | None) -> str:
-        if filename and Path(filename).exists():
-            return Path(filename).read_text(encoding="utf-8").strip()
+        if filename:
+            path = Path(filename)
+            if not path.exists():
+                raise RuntimeError(f"secret file does not exist: {filename}")
+            return path.read_text(encoding="utf-8").strip()
         return value
 
     @property
     def effective_jwt_secret(self) -> str:
         return self._read_secret(self.jwt_secret, self.jwt_secret_file)
+
+    @property
+    def effective_database_url(self) -> str:
+        return self._read_secret(self.database_url, self.database_url_file)
+
+    @property
+    def effective_redis_url(self) -> str:
+        return self._read_secret(self.redis_url, self.redis_url_file)
 
     @property
     def effective_refresh_secret(self) -> str:
@@ -93,6 +114,10 @@ class Settings(BaseSettings):
         if self.mqtt_password_file and Path(self.mqtt_password_file).exists():
             return Path(self.mqtt_password_file).read_text(encoding="utf-8").strip()
         return self.mqtt_password
+
+    @property
+    def effective_media_publish_token(self) -> str:
+        return self._read_secret(self.media_publish_token, self.media_publish_token_file)
 
     def configure_mqtt_client(self, client) -> None:
         if not self.mqtt_tls:
@@ -114,6 +139,10 @@ class Settings(BaseSettings):
             errors.append("server profile forbids anonymous MQTT")
         if not self.cookie_secure:
             errors.append("server profile requires secure cookies")
+        if self.enable_api_docs:
+            errors.append("server profile requires ENABLE_API_DOCS=false")
+        if not self.database_url_file or not self.redis_url_file:
+            errors.append("server profile requires DATABASE_URL_FILE and REDIS_URL_FILE")
         for name, secret in {
             "JWT": self.effective_jwt_secret,
             "refresh": self.effective_refresh_secret,
@@ -125,8 +154,21 @@ class Settings(BaseSettings):
             errors.append("server profile requires a strong bootstrap admin secret")
         if not self.mqtt_username or not self.effective_mqtt_password:
             errors.append("server profile requires MQTT credentials")
+        if (
+            len(self.effective_media_publish_token) < 24
+            or "dev-" in self.effective_media_publish_token
+        ):
+            errors.append("server profile requires a strong media publisher token")
         if not self.mqtt_tls or self.mqtt_port != 8883 or not self.mqtt_ca_file:
             errors.append("server profile requires verified MQTT TLS on port 8883")
+        for name, value in {
+            "DATABASE_URL": self.effective_database_url,
+            "REDIS_URL": self.effective_redis_url,
+            "ALLOWED_ORIGINS": self.allowed_origins,
+            "PUBLIC_BASE_URL": self.public_base_url,
+        }.items():
+            if any(marker in value.upper() for marker in ("REPLACE_", "CHANGE_ME", "TODO")):
+                errors.append(f"server profile contains placeholder in {name}")
         if errors:
             raise RuntimeError("; ".join(errors))
 

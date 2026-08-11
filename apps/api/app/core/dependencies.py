@@ -10,6 +10,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.errors import PlatformError
 from app.core.security import decode_access_token
 from app.db.models import Permission, Role, User, role_permissions, user_roles
 from app.db.session import get_db
@@ -42,12 +43,12 @@ def get_auth_context(
     try:
         payload = decode_access_token(token)
     except jwt.InvalidTokenError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="无效或过期的访问令牌"
+        raise PlatformError(
+            "AUTH_REQUIRED", "无效或过期的访问令牌", status_code=status.HTTP_401_UNAUTHORIZED
         ) from exc
     user = db.get(User, str(payload["sub"]))
     if not user or user.status != "ACTIVE":
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不可用")
+        raise PlatformError("AUTH_REQUIRED", "用户不可用", status_code=401)
     allowed_during_password_change = {
         "/api/v1/auth/me",
         "/api/v1/auth/change-password",
@@ -65,7 +66,12 @@ DbSession = Annotated[Session, Depends(get_db)]
 def require_permission(code: str) -> Callable:
     def dependency(auth: CurrentAuth) -> AuthContext:
         if code not in auth.permissions:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"缺少权限: {code}")
+            raise PlatformError(
+                "PERMISSION_DENIED",
+                "当前用户没有执行此操作的权限",
+                status_code=status.HTTP_403_FORBIDDEN,
+                details={"permission": code},
+            )
         return auth
 
     return dependency

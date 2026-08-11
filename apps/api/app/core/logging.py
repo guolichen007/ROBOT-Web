@@ -8,11 +8,15 @@ from app.core.config import get_settings
 
 
 class JsonFormatter(logging.Formatter):
+    def __init__(self, service: str) -> None:
+        super().__init__()
+        self.service = service
+
     def format(self, record: logging.LogRecord) -> str:
         payload = {
             "timestamp": datetime.now(UTC).isoformat(),
             "level": record.levelname,
-            "service": getattr(record, "service", "api"),
+            "service": getattr(record, "service", self.service),
             "message": record.getMessage(),
         }
         for field in (
@@ -27,14 +31,15 @@ class JsonFormatter(logging.Formatter):
             value = getattr(record, field, None)
             if value is not None:
                 payload[field] = value
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
         return json.dumps(payload, ensure_ascii=False)
 
 
 def configure_logging(service: str = "api") -> None:
     handler = logging.StreamHandler()
-    handler.setFormatter(JsonFormatter())
+    handler.setFormatter(JsonFormatter(service))
     root = logging.getLogger()
     root.handlers.clear()
     root.addHandler(handler)
     root.setLevel(get_settings().log_level.upper())
-    logging.LoggerAdapter(logging.getLogger(__name__), {"service": service})

@@ -25,6 +25,8 @@ export const useMonitorStore = defineStore('monitor', () => {
   const lastStreamId = ref('0-0')
   let socket: WebSocket | null = null
   let reconnectTimer = 0
+  let reconnectAttempt = 0
+  let connecting = false
 
   const robot = computed(() => snapshot.value.robots.find((item) => item.vehicle_id === 'R001'))
   const activeAlarm = computed(() => snapshot.value.alarms[0])
@@ -62,28 +64,49 @@ export const useMonitorStore = defineStore('monitor', () => {
   }
 
   async function connect(): Promise<void> {
+    if (connecting) return
+    connecting = true
     disconnect(false)
-    if (!snapshot.value.snapshot_watermark) await loadSnapshot()
-    const { data } = await api.post('/auth/ws-ticket')
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    socket = new WebSocket(
-      `${protocol}//${location.host}/ws/v1/monitor?ticket=${encodeURIComponent(data.ticket)}&after=${encodeURIComponent(lastStreamId.value)}`,
-    )
-    socket.onopen = () => {
-      connected.value = true
-    }
-    socket.onmessage = async (message) => {
-      const event = JSON.parse(message.data)
-      if (event.event_type === 'resync_required') {
-        await loadSnapshot()
-        await connect()
-      } else if (event.stream_id) applyEvent(event)
-    }
-    socket.onclose = () => {
+    try {
+      if (!snapshot.value.snapshot_watermark) await loadSnapshot()
+      const { data } = await api.post('/auth/ws-ticket')
+      const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+      socket = new WebSocket(
+        `${protocol}//${location.host}/ws/v1/monitor?ticket=${encodeURIComponent(data.ticket)}&after=${encodeURIComponent(lastStreamId.value)}`,
+      )
+      socket.onopen = () => {
+        connected.value = true
+        reconnectAttempt = 0
+      }
+      socket.onmessage = async (message) => {
+        const event = JSON.parse(message.data)
+        if (event.event_type === 'resync_required') {
+          await loadSnapshot()
+          await connect()
+        } else if (event.stream_id) applyEvent(event)
+      }
+      socket.onerror = () => socket?.close()
+      socket.onclose = () => {
+        connected.value = false
+        scheduleReconnect()
+      }
+    } catch {
       connected.value = false
-      window.clearTimeout(reconnectTimer)
-      reconnectTimer = window.setTimeout(() => void connect(), 1500)
+      scheduleReconnect()
+    } finally {
+      connecting = false
     }
+  }
+
+  function reconnectDelay(attempt: number, random = Math.random()): number {
+    const exponential = Math.min(30_000, 500 * 2 ** Math.min(attempt, 6))
+    return Math.round(exponential * (0.8 + random * 0.4))
+  }
+
+  function scheduleReconnect(): void {
+    window.clearTimeout(reconnectTimer)
+    const delay = reconnectDelay(reconnectAttempt++)
+    reconnectTimer = window.setTimeout(() => void connect(), delay)
   }
 
   function disconnect(reconnect = false): void {
@@ -114,5 +137,6 @@ export const useMonitorStore = defineStore('monitor', () => {
     disconnect,
     loadSnapshot,
     applyEvent,
+    reconnectDelay,
   }
 })

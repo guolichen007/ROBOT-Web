@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import * as echarts from 'echarts'
+import { LineChart } from 'echarts/charts'
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
+import { init, use, type ECharts } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
 import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import DataTable from '@/components/DataTable.vue'
 import PageHeader from '@/components/PageHeader.vue'
@@ -9,7 +12,9 @@ const telemetry = ref<any[]>([]),
   tab = ref<'telemetry' | 'commands' | 'tasks'>('telemetry'),
   rows = ref<any[]>([])
 const chartEl = ref<HTMLDivElement>()
-let chart: echarts.ECharts | null = null
+use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
+let chart: ECharts | null = null
+const resizeChart = (): void => chart?.resize()
 async function changeTab(name: typeof tab.value): Promise<void> {
   tab.value = name
   if (name === 'telemetry') rows.value = telemetry.value
@@ -19,7 +24,7 @@ onMounted(async () => {
   telemetry.value = (await api.get('/history/telemetry', { params: { robot_id: 'R001', limit: 600 } })).data
   rows.value = telemetry.value
   await nextTick()
-  chart = echarts.init(chartEl.value!)
+  chart = init(chartEl.value!)
   chart.setOption({
     backgroundColor: 'transparent',
     grid: { left: 42, right: 18, top: 28, bottom: 32 },
@@ -52,9 +57,12 @@ onMounted(async () => {
       },
     ],
   })
-  window.addEventListener('resize', () => chart?.resize())
+  window.addEventListener('resize', resizeChart)
 })
-onUnmounted(() => chart?.dispose())
+onUnmounted(() => {
+  window.removeEventListener('resize', resizeChart)
+  chart?.dispose()
+})
 </script>
 
 <template>

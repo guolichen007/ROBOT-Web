@@ -257,7 +257,7 @@ class RobotCapability(Base):
     robot_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("robots.id", ondelete="CASCADE"), primary_key=True
     )
-    protocol_version: Mapped[str] = mapped_column(String(16), default="1.1")
+    protocol_version: Mapped[str] = mapped_column(String(16), default="1.2.0")
     supported_commands_json: Mapped[list[str]] = mapped_column(JsonType)
     sensors_json: Mapped[list[str]] = mapped_column(JsonType)
     media_json: Mapped[list[str]] = mapped_column(JsonType)
@@ -274,6 +274,17 @@ class RobotConnectionLog(Base):
     server_received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, index=True
     )
+
+
+class RobotBootSession(Base):
+    __tablename__ = "robot_boot_sessions"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    robot_id: Mapped[str] = mapped_column(String(36), ForeignKey("robots.id"), index=True)
+    boot_id: Mapped[str] = mapped_column(String(36))
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    __table_args__ = (UniqueConstraint("robot_id", "boot_id", name="uq_robot_boot_session"),)
 
 
 class ManualControlSession(Base):

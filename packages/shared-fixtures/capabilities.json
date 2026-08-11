@@ -1,12 +1,12 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "message_id": "00000000-0000-4000-8000-000000000003",
   "type": "capabilities",
   "vehicle_id": "R001",
   "boot_id": "00000000-0000-4000-8000-000000000002",
   "timestamp": "2026-08-10T02:30:00Z",
   "seq": 2,
-  "protocol_version": "1.1",
+  "protocol_version": "1.2.0",
   "supported_commands": ["manual_control", "stop_motion", "emergency_stop", "reset_estop", "return_dock", "patrol", "extinguish", "cancel_task"],
   "sensors": ["smoke", "bottom_ir", "top_ir"],
   "media": ["roof_rgb", "roof_thermal", "bottom_ir"]

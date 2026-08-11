@@ -90,6 +90,20 @@ jobs:
       - run: python scripts/check_protocol_drift.py
       - run: pytest services/protocol-tester/tests
 
+  docs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        with:
+          python-version: "3.12"
+      - run: python scripts/check_docs_links.py
+      - run: python scripts/check_repository_policy.py
+      - run: python scripts/generate_ros2_handoff.py
+      - run: git diff --exit-code -- integration/ros2
+      - run: python scripts/generate_ros2_handoff.py --dist
+      - run: python scripts/check_server_surface.py
+
   containers:
     runs-on: ubuntu-24.04
     steps:
@@ -100,12 +114,13 @@ jobs:
       - run: SERVER_ENV_FILE=.env.server.example docker compose --env-file .env.server.example -f docker-compose.server.yml config --quiet
       - run: docker build -f infra/docker/python.Dockerfile -t firebot-api:ci .
       - run: docker build -f apps/web/Dockerfile -t firebot-web:ci .
+      - run: docker build -f infra/docker/mediamtx.Dockerfile -t firebot-mediamtx:ci .
       - run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/aquasecurity/trivy:0.59.1 image --db-repository ghcr.io/aquasecurity/trivy-db:2 --exit-code 1 --severity CRITICAL --ignore-unfixed firebot-api:ci
       - run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/aquasecurity/trivy:0.59.1 image --db-repository ghcr.io/aquasecurity/trivy-db:2 --exit-code 1 --severity CRITICAL --ignore-unfixed firebot-web:ci
 
   e2e:
     runs-on: ubuntu-24.04
-    needs: [backend, frontend, protocol, containers]
+    needs: [backend, frontend, protocol, docs, containers]
     env:
       E2E_BASE_URL: http://127.0.0.1:18080
       E2E_ADMIN_PASSWORD: TestOnly-ChangeMe-2026!
@@ -137,3 +152,8 @@ jobs:
           fetch-depth: 0
       - run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.24.2 git --config=/repo/.gitleaks.toml --no-banner /repo
       - run: docker run --rm -v "$PWD:/repo" ghcr.io/aquasecurity/trivy:0.59.1 fs --db-repository ghcr.io/aquasecurity/trivy-db:2 --exit-code 1 --severity CRITICAL --ignore-unfixed /repo
+      - run: docker run --rm -v "$PWD:/repo" ghcr.io/aquasecurity/trivy:0.59.1 fs --db-repository ghcr.io/aquasecurity/trivy-db:2 --exit-code 0 --severity HIGH,CRITICAL --format json --output /repo/trivy-high.json /repo
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: trivy-high-report
+          path: trivy-high.json

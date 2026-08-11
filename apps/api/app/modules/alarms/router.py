@@ -16,6 +16,7 @@ from app.core.dependencies import (
     request_meta,
     require_permission,
 )
+from app.core.errors import PlatformError
 from app.core.events import append_event
 from app.core.idempotency import lookup, store
 from app.core.serialization import serialize_model
@@ -77,7 +78,11 @@ def manual_alarm(
         raise HTTPException(404, "车位不存在")
     version = db.get(MapVersion, slot.map_version_id)
     if not version or version.version != payload.map_version:
-        raise HTTPException(409, "人工火情地图版本不匹配")
+        raise PlatformError(
+            "MAP_VERSION_MISMATCH",
+            "人工火情地图版本不匹配",
+            details={"requested_map_version": payload.map_version},
+        )
     now = datetime.now(UTC)
     fingerprint = hashlib.sha256(
         f"MANUAL:{slot.id}:{payload.fire_type}:{now:%Y%m%d%H%M}".encode()

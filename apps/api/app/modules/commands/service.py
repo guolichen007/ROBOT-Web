@@ -5,10 +5,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.errors import PlatformError
 from app.core.events import get_redis
 from app.db.models import Command, OutboxEvent, Robot, RobotCapability, Task
 
@@ -27,18 +27,29 @@ def assert_robot_can_execute(
     db: Session, robot: Robot, action: str, ignore_task_id: str | None = None
 ) -> None:
     if not robot.enabled:
-        raise HTTPException(409, "机器人已禁用")
-    if robot.online_state in {"STALE", "OFFLINE"} and action != "emergency_stop":
-        raise HTTPException(409, f"机器人状态为 {robot.online_state}，拒绝执行 {action}")
+        raise PlatformError("ROBOT_DISABLED", "机器人已禁用")
+    if robot.online_state in {"STALE", "OFFLINE"} and action not in {
+        "emergency_stop",
+        "stop_motion",
+    }:
+        raise PlatformError(
+            f"ROBOT_{robot.online_state}",
+            f"机器人状态为 {robot.online_state}，拒绝执行 {action}",
+            details={"state": robot.online_state, "action": action},
+        )
     if robot.estop_active and action not in {"emergency_stop", "reset_estop"}:
-        raise HTTPException(409, "软件急停已锁存")
+        raise PlatformError("ROBOT_ESTOP_ACTIVE", "软件急停已锁存")
     if action in {"patrol", "extinguish", "return_dock"} and get_redis().exists(
         f"manual:lease:{robot.id}"
     ):
-        raise HTTPException(409, "机器人已有有效手动控制租约，请先显式释放")
+        raise PlatformError("MANUAL_LEASE_CONFLICT", "机器人已有有效手动控制租约，请先显式释放")
     capability = db.get(RobotCapability, robot.id)
     if capability and action not in capability.supported_commands_json:
-        raise HTTPException(409, f"机器人能力声明不支持 {action}")
+        raise PlatformError(
+            "ROBOT_CAPABILITY_UNSUPPORTED",
+            f"机器人能力声明不支持 {action}",
+            details={"command": action},
+        )
     active_query = select(Task).where(
         Task.robot_id == robot.id, Task.status.in_(ACTIVE_TASK_STATES)
     )
@@ -48,13 +59,13 @@ def assert_robot_can_execute(
     if not active_task:
         return
     if action == "manual_control":
-        raise HTTPException(409, "存在自动任务，请先显式取消任务再进入手动模式")
+        raise PlatformError("ACTIVE_TASK_CONFLICT", "存在自动任务，请先显式取消任务再进入手动模式")
     if action == "patrol":
-        raise HTTPException(409, "机器人已有活动业务任务")
+        raise PlatformError("ACTIVE_TASK_CONFLICT", "机器人已有活动业务任务")
     if action == "return_dock" and active_task.type == "EXTINGUISH":
-        raise HTTPException(409, "灭火任务活动时不能回充")
+        raise PlatformError("ACTIVE_TASK_CONFLICT", "灭火任务活动时不能回充")
     if action == "extinguish":
-        raise HTTPException(409, "灭火任务不得静默覆盖现有任务，请先显式取消")
+        raise PlatformError("ACTIVE_TASK_CONFLICT", "灭火任务不得静默覆盖现有任务，请先显式取消")
 
 
 def build_command_payload(
@@ -72,14 +83,18 @@ def build_command_payload(
     seq: int = 0,
 ) -> dict[str, Any]:
     now = datetime.now(UTC)
+    if not robot.boot_id and cmd != "emergency_stop":
+        raise PlatformError(
+            "ROBOT_BOOT_SESSION_UNKNOWN",
+            "机器人当前 boot 会话未知，拒绝发送命令",
+            details={"vehicle_id": robot.vehicle_id, "command": cmd},
+        )
     return {
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "message_id": str(uuid4()),
         "type": "command",
         "vehicle_id": robot.vehicle_id,
-        "boot_id": robot.boot_id or str(uuid4()),
-        "timestamp": now.isoformat(),
-        "seq": seq,
+        "target_boot_id": robot.boot_id,
         "command_id": command_id or command_code(),
         "correlation_id": str(uuid4()),
         "task_id": task_id,
@@ -93,6 +108,7 @@ def build_command_payload(
         "operator_id": operator_id,
         "cmd": cmd,
         "params": params,
+        **({"seq": seq} if cmd == "manual_control" else {}),
     }
 
 

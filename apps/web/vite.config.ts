@@ -14,4 +14,9 @@ export default defineConfig({
     },
   },
   test: { environment: 'jsdom', globals: true, exclude: [...configDefaults.exclude, 'e2e/**'] },
+  build: {
+    // History is route-lazy and ECharts uses only Line/Grid/Legend/Tooltip/Canvas.
+    // The resulting isolated chart runtime is ~508 KiB; keep a tight, explicit budget.
+    chunkSizeWarningLimit: 520,
+  },
 })

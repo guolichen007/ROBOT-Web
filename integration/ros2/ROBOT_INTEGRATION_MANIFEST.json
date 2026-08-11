@@ -1,0 +1,196 @@
+{
+  "contract_version": "1.2.0",
+  "schema_version": "1.2",
+  "status": "FROZEN_FOR_ROS2_INTEGRATION",
+  "broker": {
+    "dev": "mqtt://PLATFORM_LAN_IP:1883",
+    "server": "mqtts://OWNER_PRODUCTION_HOST:8883",
+    "anonymous_server": false
+  },
+  "identity": {
+    "vehicle_id": "owner-assigned",
+    "boot_id": "new UUID per vehicle process boot",
+    "seq_scope": "boot_id + topic"
+  },
+  "coordinates": {
+    "frame_id": "map",
+    "x_y_unit": "m",
+    "theta_unit": "rad",
+    "theta_zero": "+X",
+    "positive_rotation": "CCW"
+  },
+  "topics": [
+    {
+      "topic": "robot/{vehicle_id}/availability",
+      "direction": "vehicle->platform",
+      "qos": 1,
+      "retain": true,
+      "nominal": "connect/LWT",
+      "schema": "schemas/firebot-message-1.2.schema.json"
+    },
+    {
+      "topic": "robot/{vehicle_id}/heartbeat",
+      "direction": "vehicle->platform",
+      "qos": 0,
+      "retain": false,
+      "nominal": "1Hz",
+      "schema": "schemas/firebot-message-1.2.schema.json"
+    },
+    {
+      "topic": "robot/{vehicle_id}/capabilities",
+      "direction": "vehicle->platform",
+      "qos": 1,
+      "retain": true,
+      "nominal": "boot/config",
+      "schema": "schemas/firebot-message-1.2.schema.json"
+    },
+    {
+      "topic": "robot/{vehicle_id}/location",
+      "direction": "vehicle->platform",
+      "qos": 0,
+      "retain": false,
+      "nominal": "5-10Hz; recommended 10Hz",
+      "schema": "schemas/firebot-message-1.2.schema.json"
+    },
+    {
+      "topic": "robot/{vehicle_id}/status",
+      "direction": "vehicle->platform",
+      "qos": 1,
+      "retain": false,
+      "nominal": "1Hz",
+      "schema": "schemas/firebot-message-1.2.schema.json"
+    },
+    {
+      "topic": "robot/{vehicle_id}/sensor",
+      "direction": "vehicle->platform",
+      "qos": 0,
+      "retain": false,
+      "nominal": "1-2Hz",
+      "schema": "schemas/firebot-message-1.2.schema.json"
+    },
+    {
+      "topic": "robot/{vehicle_id}/alarm",
+      "direction": "vehicle->platform",
+      "qos": 1,
+      "retain": false,
+      "nominal": "event",
+      "schema": "schemas/firebot-message-1.2.schema.json"
+    },
+    {
+      "topic": "robot/{vehicle_id}/task_status",
+      "direction": "vehicle->platform",
+      "qos": 1,
+      "retain": false,
+      "nominal": "event/progress",
+      "schema": "schemas/firebot-message-1.2.schema.json"
+    },
+    {
+      "topic": "robot/{vehicle_id}/command",
+      "direction": "platform->vehicle",
+      "qos": 1,
+      "retain": false,
+      "nominal": "event; manual QoS0",
+      "schema": "schemas/firebot-message-1.2.schema.json"
+    },
+    {
+      "topic": "robot/{vehicle_id}/command_ack",
+      "direction": "vehicle->platform",
+      "qos": 1,
+      "retain": false,
+      "nominal": "event",
+      "schema": "schemas/firebot-message-1.2.schema.json"
+    }
+  ],
+  "commands": [
+    {
+      "name": "manual_control",
+      "qos": 0,
+      "retain": false,
+      "ttl_ms": 500,
+      "idempotency": "command_id"
+    },
+    {
+      "name": "stop_motion",
+      "qos": 1,
+      "retain": false,
+      "ttl_ms": 3000,
+      "idempotency": "command_id"
+    },
+    {
+      "name": "emergency_stop",
+      "qos": 1,
+      "retain": false,
+      "ttl_ms": 5000,
+      "idempotency": "command_id"
+    },
+    {
+      "name": "reset_estop",
+      "qos": 1,
+      "retain": false,
+      "ttl_ms": 5000,
+      "idempotency": "command_id"
+    },
+    {
+      "name": "patrol",
+      "qos": 1,
+      "retain": false,
+      "ttl_ms": 30000,
+      "idempotency": "command_id"
+    },
+    {
+      "name": "extinguish",
+      "qos": 1,
+      "retain": false,
+      "ttl_ms": 30000,
+      "idempotency": "command_id"
+    },
+    {
+      "name": "return_dock",
+      "qos": 1,
+      "retain": false,
+      "ttl_ms": 30000,
+      "idempotency": "command_id"
+    },
+    {
+      "name": "cancel_task",
+      "qos": 1,
+      "retain": false,
+      "ttl_ms": 10000,
+      "idempotency": "command_id"
+    }
+  ],
+  "ack": {
+    "status": [
+      "accepted",
+      "rejected",
+      "unsupported"
+    ],
+    "accepted_semantics": "vehicle application validation completed and execution accepted",
+    "completion_source": "task_status"
+  },
+  "map_rules": {
+    "required_location_fields": [
+      "site_code",
+      "map_code",
+      "map_version",
+      "map_checksum",
+      "frame_id"
+    ],
+    "mismatch": "reject navigation/extinguish task"
+  },
+  "time_rules": {
+    "timestamp": "UTC ISO-8601",
+    "ttl_watchdog": "vehicle local monotonic receive time",
+    "online_source": "platform receive time + heartbeat/LWT"
+  },
+  "safety_rules": [
+    "manual TTL expiry stops locally",
+    "network loss never continues manual indefinitely",
+    "expired commands are rejected",
+    "command_id is end-to-end idempotent",
+    "old boot commands never execute",
+    "software e-stop latches after acceptance",
+    "reset_estop is explicit",
+    "physical e-stop overrides platform"
+  ]
+}

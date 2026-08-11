@@ -16,6 +16,7 @@ test-results/
 .DS_Store
 Thumbs.db
 backups/
+artifacts/
 data/
 secrets/
 *.pem

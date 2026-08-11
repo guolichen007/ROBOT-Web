@@ -19,6 +19,20 @@ export function clearAccessToken(): void {
   accessToken = ''
 }
 
+export function keepaliveRequest(path: string, init: RequestInit): Promise<Response> {
+  const headers = new Headers(init.headers)
+  if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
+  const csrf = cookie('csrf_token')
+  if (csrf) headers.set('X-CSRF-Token', csrf)
+  headers.set('X-Request-ID', newUuid())
+  return fetch(`/api/v1${path}`, {
+    ...init,
+    headers,
+    credentials: 'include',
+    keepalive: true,
+  })
+}
+
 export async function refreshAccessToken(): Promise<string> {
   if (!refreshPromise) {
     refreshPromise = axios
@@ -64,6 +78,8 @@ api.interceptors.response.use(undefined, async (error) => {
 })
 
 export function errorMessage(error: any): string {
+  const platform = error?.response?.data?.error
+  if (platform?.message) return `${platform.message}${platform.code ? ` (${platform.code})` : ''}`
   const detail = error?.response?.data?.detail
   if (typeof detail === 'string') return detail
   if (detail?.message) return detail.message

@@ -17,7 +17,8 @@ from app.core.dependencies import (
     request_meta,
     require_permission,
 )
-from app.core.events import current_watermark, get_redis
+from app.core.errors import PlatformError
+from app.core.events import current_watermark, get_redis, queue_redis_delete
 from app.core.serialization import serialize_model
 from app.db.models import (
     ManualControlSession,
@@ -165,10 +166,10 @@ def acquire_lease(
     if not redis.set(f"manual:lease:{robot.id}", value, ex=ttl, nx=True):
         held = active_lease(redis, robot) or {}
         holder = db.get(User, held.get("user_id")) if held.get("user_id") else None
-        raise HTTPException(
-            409,
-            detail={
-                "message": "机器人已被其他会话控制",
+        raise PlatformError(
+            "MANUAL_LEASE_CONFLICT",
+            "机器人已被其他会话控制",
+            details={
                 "holder": holder.display_name if holder else "未知用户",
                 "expires_at": held.get("expires_at"),
             },
@@ -191,7 +192,11 @@ def acquire_lease(
         after={"control_session_id": control_session_id, "expires_at": expires_at.isoformat()},
         **request_meta(request),
     )
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        redis.delete(f"manual:lease:{robot.id}")
+        raise
     return {
         "lease_id": lease_id,
         "control_session_id": control_session_id,
@@ -224,8 +229,8 @@ def release_lease(
     if not lease:
         return Response(status_code=204)
     if lease["user_id"] != auth.user.id:
-        raise HTTPException(403, "只有租约持有人可以释放")
-    redis.delete(f"manual:lease:{robot.id}")
+        raise PlatformError("PERMISSION_DENIED", "只有租约持有人可以释放", status_code=403)
+    queue_redis_delete(db, f"manual:lease:{robot.id}")
     end_lease(db, robot, lease, "USER_RELEASE")
     write_audit(
         db,
@@ -252,7 +257,7 @@ def force_release_lease(
     lease = active_lease(redis, robot)
     if not lease:
         return {"released": False, "reason": "NO_ACTIVE_LEASE"}
-    redis.delete(f"manual:lease:{robot.id}")
+    queue_redis_delete(db, f"manual:lease:{robot.id}")
     end_lease(db, robot, lease, "ADMIN_FORCE_RELEASE", "FORCE_RELEASED")
     write_audit(
         db,

@@ -1,0 +1,38 @@
+vehicle:
+  vehicle_id: TODO
+  site_code: TODO
+  map_code: TODO
+  map_version: TODO
+  map_checksum: TODO
+
+mqtt:
+  host: TODO
+  port: 8883
+  tls: true
+  username: TODO
+  ca_file: TODO
+
+frames:
+  map: map
+  base: base_link
+
+motion:
+  max_linear_x_mps: TODO
+  max_angular_z_radps: TODO
+
+ros_mapping:
+  localization_source: TODO
+  battery_source: TODO
+  smoke_source: TODO
+  bottom_ir_source: TODO
+  top_ir_source: TODO
+  command_target: TODO
+  estop_target: TODO
+
+video:
+  roof_rgb: TODO
+  roof_thermal: TODO
+  bottom_ir: TODO
+
+time_sync:
+  method: TODO_NTP_CHRONY_PTP

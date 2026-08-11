@@ -1,13 +1,9 @@
-# Security Baseline
+# 平台安全设计
 
-- Passwords use Argon2id. Access tokens are short-lived and kept only in browser memory.
-- Refresh tokens are HttpOnly, SameSite=Strict cookies; server profile additionally requires Secure. Token families rotate and are revoked on reuse/logout/password change.
-- Cookie-auth endpoints require the matching CSRF cookie/header. Login has Redis rate limiting and temporary account/IP lockout.
-- WebSocket authentication exchanges an access token for a 60-second one-use ticket. Origin and permissions are checked; long-lived JWTs never appear in the URL.
-- RBAC separates read, manual, stop, software e-stop, reset, force release and task permissions.
-- High-risk commands, map publication, identity changes and alarm transitions are audited with request/operator/resource/robot/result context.
-- Asset upload checks size, MIME, extension, SHA-256, randomized storage name and resolved path containment.
-- `.env`, certificates, private keys, backups and local data are ignored by Git. Logs must never emit tokens, passwords or credential material.
-- SERVER rejects demo seed, Mock Robot, anonymous MQTT, insecure cookies and weak/default secrets at application startup.
+认证使用 Argon2id、短期 access token、HttpOnly refresh cookie、rotation/revoke、CSRF、登录限流和 WebSocket 一次性 ticket。权限按 manual/stop/e-stop/reset/task/force-release 拆分。
 
-Deployment owner must provide TLS certificates, Mosquitto password/ACL files, secret-file mounts, allowed origins and a vulnerability-management policy. This baseline is not a formal penetration-test or functional-safety certification.
+SERVER secret 优先 Docker secrets/`*_FILE`，`.env.server` 只保存非敏感配置和 secret path。preflight 遇到缺失、空值、placeholder、弱媒体 token、匿名 MQTT、Mock/demo、非 TLS 或 API docs 开启时 fail-fast。
+
+公网仅 80/443/8883；ready、metrics、MediaMTX admin、PostgreSQL、Redis 不公网。Nginx 启用 HSTS、nosniff、Referrer-Policy、CSP/frame-ancestors、Permissions-Policy、server_tokens off。
+
+浏览器 media ticket 绑定 user/robot/camera/expiry；MediaMTX HTTP auth 对 read/publish 回调平台。报告漏洞请遵循根目录 [SECURITY.md](../SECURITY.md)。

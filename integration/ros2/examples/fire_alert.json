@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.2",
+  "message_id": "00000000-0000-4000-8000-000000000007",
+  "type": "alarm",
+  "vehicle_id": "R001",
+  "boot_id": "11111111-1111-4111-8111-111111111111",
+  "timestamp": "2026-08-11T00:00:07Z",
+  "seq": 7,
+  "event_id": "FIRE-OWNER-001",
+  "fire_type": "smoke",
+  "severity": "HIGH",
+  "confidence": 0.92,
+  "parking_slot_code": null,
+  "position": {
+    "x": 1.2,
+    "y": 3.4,
+    "theta": 0.5
+  },
+  "media": {}
+}

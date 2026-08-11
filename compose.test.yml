@@ -12,6 +12,8 @@ x-test-environment: &test-environment
   BOOTSTRAP_ADMIN_PASSWORD: TestOnly-ChangeMe-2026!
   SEED_DEMO: "true"
   MOCK_ENABLED: "true"
+  MEDIA_PUBLISH_TOKEN: test-media-publisher-token-2026
+  MEDIA_TICKET_SECONDS: "2"
   ALLOWED_ORIGINS: http://localhost:18080,http://127.0.0.1:18080,http://host.docker.internal:18080
 
 x-python-service: &python-service
@@ -53,9 +55,37 @@ services:
       retries: 30
 
   mediamtx:
-    image: bluenviron/mediamtx:1.18.2
+    image: firebot-mediamtx:1.18.2
+    build:
+      context: .
+      dockerfile: infra/docker/mediamtx.Dockerfile
     profiles: [full]
     volumes: ["./infra/mediamtx/mediamtx.yml:/mediamtx.yml:ro"]
+    healthcheck:
+      test: ["CMD", "/busybox", "wget", "-q", "-O", "-", "http://127.0.0.1:9997/v3/config/global/get"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
+
+  media-test-source:
+    image: firebot-media-test-source:1.2.0
+    build:
+      context: .
+      dockerfile: infra/docker/media-test-source.Dockerfile
+    profiles: [full]
+    environment:
+      MEDIA_RTSP_ORIGIN: rtsp://mediamtx:8554
+      MEDIA_STREAM_ID: R001-roof_rgb
+      MEDIA_PUBLISH_TOKEN: test-media-publisher-token-2026
+    depends_on:
+      api: { condition: service_healthy }
+      mediamtx: { condition: service_healthy }
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8090').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 3s
+      timeout: 2s
+      retries: 30
 
   migrate:
     <<: *python-service
@@ -140,7 +170,7 @@ services:
     depends_on:
       api: { condition: service_healthy }
       web: { condition: service_healthy }
-      mediamtx: { condition: service_started }
+      mediamtx: { condition: service_healthy }
   tests:
     build:
       context: .
