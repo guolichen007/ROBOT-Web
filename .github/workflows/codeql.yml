@@ -6,15 +6,17 @@ on:
   pull_request:
     branches: [develop, main]
   schedule:
-    - cron: "17 3 * * 1"
+    - cron: "17 2 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
   security-events: write
+  packages: read
 
 jobs:
-  codeql:
-    name: codeql (${{ matrix.language }})
+  analyze:
+    name: Analyze (${{ matrix.language }})
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -22,10 +24,12 @@ jobs:
         language: [python, javascript-typescript]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - uses: github/codeql-action/init@c3400c2f38909e0dcf3c3a41f2030a8217be5d3e
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         with:
           languages: ${{ matrix.language }}
-      - uses: github/codeql-action/autobuild@c3400c2f38909e0dcf3c3a41f2030a8217be5d3e
-      - uses: github/codeql-action/analyze@c3400c2f38909e0dcf3c3a41f2030a8217be5d3e
+          queries: security-extended
+      - name: Analyze
+        uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
         with:
           category: "/language:${{ matrix.language }}"
