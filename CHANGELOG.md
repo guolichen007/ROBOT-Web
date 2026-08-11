@@ -12,6 +12,8 @@
 - 统一 machine-readable API/ACK 错误码和 MQTT ingress 防护。
 - 消除 History 大 chunk warning，统一 WS/lease/ACK 异常体验。
 - 新增中文工程文档、GitHub 模板、CodeQL、Dependabot、ROS2 handoff ZIP/SHA256。
+- Python 镜像加入慢网络 read timeout/重试策略，并在真实连接失败后验证恢复构建。
+- ROS2 handoff 生成器固定 LF、ZIP 时间戳/权限/排序并归一化文本成员，确保跨 worktree SHA256 一致。
 
 ## V2 Baseline
 
