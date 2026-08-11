@@ -1,6 +1,12 @@
 logLevel: info
 api: yes
 apiAddress: :9997
+authMethod: http
+authHTTPAddress: http://api:8000/api/v1/media/authorize
+authHTTPExclude:
+  - action: api
+  - action: metrics
+  - action: pprof
 metrics: yes
 metricsAddress: :9998
 rtsp: yes
@@ -8,4 +14,5 @@ rtspAddress: :8554
 webrtc: yes
 webrtcAddress: :8889
 webrtcAllowOrigins: ['*']
-paths: {}
+paths:
+  all_others:

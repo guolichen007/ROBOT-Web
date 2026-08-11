@@ -1,17 +1,5 @@
-# ROS2 Integration Contract
+# ROS2 现场集成入口
 
-No ROS2 node is implemented in this repository. The future vehicle MQTT adapter connects outbound to the platform and is the sole bridge between ROS2/device state and the cloud protocol.
+最终冻结合同与可交付文件位于 [integration/ros2](../integration/ros2/README_现场对接说明.md)。现场按 Broker/TLS → heartbeat/capabilities → location/map → status/sensor/time → command/ACK → stop → low-speed manual/TTL → e-stop → patrol → fire → extinguish 的 Gate 顺序执行。
 
-## Required adapter inputs
-
-- Broker hostname/port; Internet deployments use MQTT TLS on 8883.
-- Per-robot `vehicle_id`, credential and ACL.
-- Protocol version 1.1, topics and QoS from `MQTT_PROTOCOL.md`.
-- LWT retained offline payload and retained online/capabilities payloads.
-- A new UUID `boot_id` on each adapter-process start and monotonic per-topic `seq`.
-- UTC source timestamps backed by the site-approved NTP/chrony/PTP policy.
-- Real map code/version/frame and capability list.
-
-The R001 identity may publish only its location/status/sensor/alarm/task-status/ACK/heartbeat/availability/capabilities topics and subscribe only to `robot/R001/command`. It must not read or write R002. ROS2 DDS is never exposed to the browser or Internet.
-
-The adapter enforces 500 ms manual TTL locally, command expiry, idempotent `command_id`, e-stop latch and explicit reset. It maps accepted/rejected/unsupported ACKs and task phases without weakening the semantics in `VEHICLE_SAFETY_CONTRACT.md`.
+本仓库不包含 ROS2 node、SLAM、Nav2、驱动、底盘或执行机构实现。

@@ -16,7 +16,7 @@ from services.protocol import validate_message
 
 def base(message_type: str, seq: int, **extra) -> dict:
     return {
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "message_id": str(uuid4()),
         "type": message_type,
         "vehicle_id": "R001",
@@ -83,7 +83,7 @@ def broker_tests() -> list[str]:
         base(
             "capabilities",
             102,
-            protocol_version="1.1",
+            protocol_version="1.2.0",
             supported_commands=[
                 "manual_control",
                 "stop_motion",
@@ -108,6 +108,7 @@ def broker_tests() -> list[str]:
             site_code="DEMO_PARKING",
             map_code="parking_v1",
             map_version="1",
+            map_checksum="demo-map-v1",
             frame_id="map",
             parking_slot_code="A-01",
             localization_status="OK",
@@ -128,7 +129,7 @@ def broker_tests() -> list[str]:
             "task_status",
             107,
             task_id=str(uuid4()),
-            status="EXECUTING",
+            status="executing",
             phase="PROTOCOL_TEST",
             progress=10,
             failure_code=None,
@@ -157,15 +158,25 @@ def broker_tests() -> list[str]:
             index,
             command_id=str(uuid4()),
             status=ack_status,
+            reason_code=(
+                None
+                if ack_status == "accepted"
+                else "COMMAND_REJECTED"
+                if ack_status == "rejected"
+                else "COMMAND_UNSUPPORTED"
+            ),
             reason="PROTOCOL_TEST",
         )
         ack["boot_id"] = boot
         client.publish("robot/R001/command_ack", json.dumps(ack), qos=1)
 
     now = datetime.now(UTC)
-    command = base(
-        "command",
-        1,
+    command = dict(
+        schema_version="1.2",
+        message_id=str(uuid4()),
+        type="command",
+        vehicle_id="R001",
+        target_boot_id=boot,
         command_id=f"C-PROTOCOL-{str(uuid4())[:8]}",
         correlation_id=str(uuid4()),
         task_id=None,
@@ -180,7 +191,6 @@ def broker_tests() -> list[str]:
         cmd="stop_motion",
         params={"reason": "PROTOCOL_TEST"},
     )
-    command["boot_id"] = boot
     validate_message(command)
     client.publish("robot/R001/command", json.dumps(command), qos=1, retain=False)
 

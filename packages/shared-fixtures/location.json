@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "message_id": "00000000-0000-4000-8000-000000000001",
   "type": "location",
   "vehicle_id": "R001",
@@ -13,6 +13,7 @@
   "site_code": "DEMO_PARKING",
   "map_code": "parking_v1",
   "map_version": "1",
+  "map_checksum": "demo-map-v1",
   "frame_id": "map",
   "parking_slot_code": "A-01",
   "localization_status": "OK"

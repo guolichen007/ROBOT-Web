@@ -62,6 +62,15 @@ if (Test-Path -LiteralPath $assets) {
 docker compose -f compose.dev.yml exec -T api alembic upgrade head
 Assert-NativeCommand 'Validating database migration head'
 
+$partitionSql = "SELECT count(*) FROM pg_inherits i JOIN pg_class p ON p.oid=i.inhparent JOIN pg_class c ON c.oid=i.inhrelid WHERE p.relname IN ('telemetry_samples','sensor_samples') AND c.relname ~ '_(20[0-9]{2})_([0-9]{2})$';"
+$partitionCount = docker compose -f compose.dev.yml exec -T postgres psql -v ON_ERROR_STOP=1 -U $postgresUser -d $postgresDatabase -Atc $partitionSql
+Assert-NativeCommand 'Verifying restored month partitions'
+if ([int](($partitionCount -join '').Trim()) -lt 6) { throw "Expected current and future month partitions, found $partitionCount" }
+$defaultSql = "SELECT (SELECT count(*) FROM telemetry_samples_default),(SELECT count(*) FROM sensor_samples_default);"
+$defaultRows = docker compose -f compose.dev.yml exec -T postgres psql -v ON_ERROR_STOP=1 -U $postgresUser -d $postgresDatabase -Atc $defaultSql
+Assert-NativeCommand 'Verifying default partition rows'
+Write-Host "RESTORE_PARTITIONS=$partitionCount DEFAULT_ROWS=$defaultRows"
+
 $countSql = 'SELECT (SELECT count(*) FROM users),(SELECT count(*) FROM maps),(SELECT count(*) FROM telemetry_samples),(SELECT count(*) FROM fire_events),(SELECT count(*) FROM tasks),(SELECT count(*) FROM audit_logs),(SELECT count(*) FROM commands);'
 $counts = docker compose -f compose.dev.yml exec -T postgres psql -v ON_ERROR_STOP=1 -U $postgresUser -d $postgresDatabase -Atc $countSql
 Assert-NativeCommand 'Verifying restored business records'

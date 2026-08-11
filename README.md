@@ -1,35 +1,162 @@
-# Firebot Cloud Control Platform
+# 智能灭火机器人云控平台
 
-智能灭火机器人云控平台的正式 V2 Baseline 仓库。
+ROBOT-Web 是智能灭火机器人项目的云端与 Web 平台，当前发布目标为 **V2 Integration-Ready Final**。平台已经完成真实 ROS2 接入前的集中工程化加固，Robot Integration Contract 冻结为 `1.2.0`，MQTT Schema 冻结为 `1.2`。
 
-本仓库负责 Web、FastAPI、PostgreSQL、Redis、MQTT、WebSocket、媒体接入框架、权限审计、Mock Robot、测试与部署包；不包含 ROS2、SLAM、Nav2、传感器驱动、底盘、灭火执行机构或车端安全 watchdog。
+## 1. 项目简介
 
-当前唯一实施规格：`CODEX_MASTER_SPEC_FIREBOT_V2_BASELINE_FINAL.md`。
+平台提供机器人监控、地图版本、报警、任务、手动控制安全租约、命令/ACK、历史、审计、媒体接入、Mock Robot、自动测试、备份恢复和服务器部署包。
 
-开发分支：`develop`；通过全部本机验收后才合并 `main`。
+## 2. 职责边界
 
-## Windows 本机运行
+本仓库负责 Vue、FastAPI、PostgreSQL、Redis、Mosquitto、MQTT ingress、dispatcher、worker、WebSocket、MediaMTX、RBAC、审计和部署运维。
 
-前置条件：Docker Desktop / Docker Engine 与 Git。首次启动：
+本仓库**不开发** ROS2 节点、SLAM、Nav2、传感器/相机驱动、底盘、灭火执行机构、车端 watchdog 或物理急停。平台与车端唯一业务边界是 `MQTT + Media Protocol`。
+
+## 3. 当前版本与状态
+
+- 平台：`v2.0.0-integration-ready`
+- 合同：`1.2.0`
+- Schema：`1.2`
+- 本机 DEV/TEST：可运行
+- SERVER：部署就绪，未在第二台服务器实际部署
+- 真车/真实视频：待现场接入
+
+## 4. 架构
+
+```mermaid
+flowchart LR
+  WEB["Vue Web"] --> NGINX["Nginx"]
+  NGINX --> API["FastAPI"]
+  NGINX --> MEDIA["MediaMTX / WHEP"]
+  API --> PG["PostgreSQL"]
+  API --> REDIS["Redis Stream / Lease"]
+  MQTT["Mosquitto"] --> INGRESS["MQTT Ingress"]
+  API --> OUTBOX["Transactional Outbox"]
+  OUTBOX --> DISPATCHER["Command Dispatcher"]
+  DISPATCHER --> MQTT
+  INGRESS --> PG
+  INGRESS --> REDIS
+  MOCK["Mock R001"] <-->|"Schema 1.2"| MQTT
+  ROS2["现场 ROS2 Adapter"] -.->|"同一 MQTT 合同"| MQTT
+```
+
+详细说明见 [架构文档](docs/ARCHITECTURE.md)。
+
+## 5. 功能矩阵
+
+| 能力 | 状态 |
+| --- | --- |
+| 登录、refresh rotation、RBAC、审计 | 完成 |
+| 实时位置、状态、传感器、Snapshot/Delta | 完成 |
+| Manual Lease、TTL、stop、software e-stop | 完成 |
+| Transactional Outbox、ACK、任务状态 | 完成 |
+| Site/Map Version/车位/点位/轨迹 | 完成 |
+| 自动/人工火情、去重、灭火任务 | 完成 |
+| Media ticket 与 MediaMTX HTTP 鉴权 | 完成 |
+| 真实 ROS2、真车、真实视频 | 现场输入待接 |
+
+## 6. 技术栈
+
+Vue 3、TypeScript、Vite、Pinia、FastAPI、SQLAlchemy 2、Alembic、PostgreSQL 18、Redis 8、Mosquitto 2、MediaMTX、Nginx、Pytest、Vitest、Playwright。
+
+## 7. 目录
+
+```text
+apps/                 Web 与 API
+services/             ingress、dispatcher、worker、Mock、protocol tester
+packages/             canonical Schema 与生成模型
+integration/ros2/     现场 ROS2 对接交付源文件
+infra/                Broker、Media、Nginx、容器配置
+docs/                 中文工程文档
+scripts/              启停、测试、备份、preflight、handoff 构建
+```
+
+## 8. Windows 快速启动
+
+前置条件：Git、Docker Desktop、WSL2 后端。详细步骤见 [Windows 入门](docs/GETTING_STARTED_WINDOWS.md)。
 
 ```powershell
+git clone git@github.com:guolichen007/ROBOT-Web.git C:\Users\13576\Desktop\web_robot
 Set-Location C:\Users\13576\Desktop\web_robot
+Copy-Item .env.example .env
 .\scripts\dev.ps1
 ```
 
-默认统一入口为 `http://localhost:8080`，API 文档为 `http://localhost:8080/api/docs`，健康检查为 `http://localhost:8080/health/ready`。开发管理员密码由首次运行脚本生成并只显示一次；仓库不保存实际 `.env` 或密码。
+## 9. Bootstrap 登录
 
-停止与测试：
+DEV 首次启动生成一次性 `admin` 密码并仅在终端显示一次；首次登录必须改密。SERVER 密码只允许通过 Docker secret file 注入，不进入 Git 或日志。
+
+## 10. URLs
+
+- Web：<http://localhost:8080>
+- API docs（仅 DEV/TEST）：<http://localhost:8080/api/docs>
+- Live：<http://localhost:8080/health/live>
+- Ready：<http://localhost:8080/health/ready>
+- Metrics（DEV/内部管理网）：<http://localhost:8080/metrics>
+
+## 11. 停止与重置
 
 ```powershell
 .\scripts\stop.ps1
-.\scripts\test.ps1
+.\scripts\reset.ps1
 ```
 
-## Profiles
+`reset.ps1` 会清理项目 DEV 数据卷，执行前阅读脚本提示并确认目标目录。
 
-- `compose.dev.yml`：本机开发，幂等 seed 和真实 MQTT Mock R001。
-- `compose.test.yml`：独立临时数据库、Redis 和 Mosquitto。
-- `docker-compose.server.yml`：服务器部署就绪配置；默认关闭 Mock、匿名 MQTT 和 demo seed。
+## 12. 测试
 
-第二台服务器尚未部署。当前状态是 `SERVER_DEPLOYMENT_READY`，不是 `SERVER_DEPLOYED`。
+```powershell
+.\scripts\test.ps1
+docker compose -f compose.test.yml --profile full up -d --build --wait
+docker compose -f compose.test.yml --profile full down --volumes
+```
+
+完整门禁见 [测试文档](docs/TESTING.md)。
+
+## 13. DEV / TEST / SERVER
+
+- `compose.dev.yml`：真实 MQTT Mock、demo seed、本机调试端口。
+- `compose.test.yml`：隔离数据库/Redis、媒体测试源、故障注入。
+- `docker-compose.server.yml`：Mock OFF、demo OFF、TLS/ACL/secrets、最小公网暴露。
+
+## 14. Mock Robot
+
+Mock R001 是独立 MQTT client，遵循与未来真车完全相同的 Schema 1.2；禁止直接调用 API/DB。支持 reboot、丢包、延迟、重复、乱序、错误 Schema、时钟偏差、迟到/重复/错误 ACK 等故障注入。
+
+## 15. ROS2 边界与交付
+
+现场包源目录为 [integration/ros2](integration/ros2/README_现场对接说明.md)。构建：
+
+```powershell
+.\scripts\build-ros2-handoff.ps1
+```
+
+输出 `dist/firebot-ros2-integration-1.2.0.zip` 与 `.sha256`。平台不会猜测现场 ROS topic、速度、量程、地图或视频地址。
+
+## 16. 服务器部署
+
+从空 Ubuntu 部署见 [Ubuntu SERVER 部署](docs/SERVER_DEPLOYMENT_UBUNTU.md)。执行 `scripts/server-preflight.sh` 通过后才允许启动 SERVER profile。
+
+## 17. 安全说明
+
+SERVER 公网默认只开放 80（跳转）、443（HTTPS/WSS/WebRTC gateway）和 8883（MQTT TLS）。ready、metrics、MediaMTX admin API 不公网开放。漏洞报告流程见根目录 [SECURITY.md](SECURITY.md)。
+
+## 18. 视频状态
+
+浏览器通过平台签发的短时 media ticket 访问 WHEP；ticket 绑定用户、机器人、摄像头和过期时间。未登录、越权或过期返回 401/403。没有真实流时页面明确显示 OFFLINE，不伪造 LIVE。
+
+## 19. Troubleshooting
+
+端口、Docker、数据库、MQTT、R001 offline、WebSocket、租约、ACK、地图、boot、Media、备份和 TLS 排查见 [故障排查](docs/TROUBLESHOOTING.md)。
+
+## 20. 文档索引
+
+统一入口：[docs/README.md](docs/README.md)。API、数据库、运维、安全、协议、坐标、车辆安全合同和发布检查均从该索引进入。
+
+## 21. Git 与贡献流程
+
+功能/修复分支通过 PR 合入 `develop`，全部 required checks 通过后再由 PR 合入 `main`。禁止 force push、删除主线和绕过失败测试。详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 22. License 状态
+
+**当前未声明开源许可证，未经仓库所有者明确授权，不得复制、分发或用于其他项目。** License 选择属于 `OWNER_DECISION`。

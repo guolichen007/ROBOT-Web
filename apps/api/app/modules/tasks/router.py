@@ -12,6 +12,7 @@ from app.core.dependencies import (
     request_meta,
     require_permission,
 )
+from app.core.errors import PlatformError
 from app.core.events import append_event
 from app.core.idempotency import lookup, store
 from app.core.serialization import serialize_model
@@ -49,10 +50,10 @@ def target_snapshot(
     if not version or version.status != "PUBLISHED":
         raise HTTPException(409, "目标必须属于 Published 地图版本")
     if robot.current_map_id != version.map_id or robot.current_map_version != version.version:
-        raise HTTPException(
-            409,
-            detail={
-                "message": "机器人地图版本与任务目标不一致",
+        raise PlatformError(
+            "MAP_VERSION_MISMATCH",
+            "机器人地图版本与任务目标不一致",
+            details={
                 "robot_map_version": robot.current_map_version,
                 "target_map_version": version.version,
             },

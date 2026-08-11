@@ -14,7 +14,7 @@ def test_manual_command_ttl_and_identity() -> None:
         robot=robot,
         operator_id="user-id",
         cmd="manual_control",
-        params={"linear": 0.1, "angular": 0},
+        params={"linear_x": 0.1, "angular_z": 0},
         ttl_ms=500,
         priority=80,
         lease_id="lease-id",

@@ -15,3 +15,16 @@ active_alarm_total = Gauge("firebot_active_alarm_total", "Active fire alarms")
 db_pool_usage = Gauge("firebot_db_pool_usage", "Database checked out connections")
 redis_latency = Histogram("firebot_redis_latency_seconds", "Redis operation latency")
 clock_skew = Histogram("firebot_clock_skew_milliseconds", "Robot clock skew in milliseconds")
+partition_default_rows = Gauge(
+    "firebot_partition_default_rows",
+    "Rows that unexpectedly landed in a default time partition",
+    ["table"],
+)
+robot_boot_rejected_total = Counter(
+    "firebot_robot_boot_rejected_total", "Messages rejected from an ended robot boot session"
+)
+mqtt_payload_rejected_total = Counter(
+    "firebot_mqtt_payload_rejected_total",
+    "MQTT payloads rejected by ingress protection",
+    ["reason"],
+)

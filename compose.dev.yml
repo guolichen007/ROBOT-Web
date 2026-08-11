@@ -48,11 +48,25 @@ services:
     networks: [firebot]
 
   mediamtx:
-    image: bluenviron/mediamtx:1.18.2
+    image: firebot-mediamtx:1.18.2
+    build:
+      context: .
+      dockerfile: infra/docker/mediamtx.Dockerfile
     volumes: ["./infra/mediamtx/mediamtx.yml:/mediamtx.yml:ro"]
-    ports: ["8554:8554", "8889:8889", "9997:9997"]
+    ports: ["127.0.0.1:8554:8554", "127.0.0.1:8889:8889", "127.0.0.1:9997:9997"]
     restart: unless-stopped
     networks: [firebot]
+    healthcheck:
+      test: ["CMD", "/busybox", "wget", "-q", "-O", "-", "http://127.0.0.1:9997/v3/config/global/get"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  asset-init:
+    image: busybox:1.37.0-musl
+    command: ["sh", "-c", "mkdir -p /data/assets && chown -R 10001:10001 /data/assets"]
+    volumes: [assets_data:/data/assets]
+    restart: "no"
 
   migrate:
     <<: *python-service
@@ -69,6 +83,7 @@ services:
     depends_on:
       migrate: { condition: service_completed_successfully }
       redis: { condition: service_healthy }
+      asset-init: { condition: service_completed_successfully }
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live')"]
       interval: 5s
@@ -128,7 +143,7 @@ services:
     depends_on:
       api: { condition: service_healthy }
       web: { condition: service_healthy }
-      mediamtx: { condition: service_started }
+      mediamtx: { condition: service_healthy }
     restart: unless-stopped
     networks: [firebot]
 

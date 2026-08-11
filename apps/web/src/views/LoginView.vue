@@ -33,7 +33,7 @@ async function submit(): Promise<void> {
         <h1>在风险抵达之前<br />看见每一次变化。</h1>
         <p>智能灭火机器人云控平台，连接任务、地图、告警与控制安全闭环。</p>
       </div>
-      <footer><span>RUNNABLE V2 BASELINE</span><span>SCHEMA 1.1</span></footer>
+      <footer><span>INTEGRATION-READY FINAL</span><span>SCHEMA 1.2</span></footer>
     </section>
     <section class="login-form-wrap">
       <form class="login-form" @submit.prevent="submit">

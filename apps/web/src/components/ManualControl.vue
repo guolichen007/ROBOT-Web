@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { api, errorMessage } from '@/lib/api'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { api, errorMessage, keepaliveRequest } from '@/lib/api'
 import { newUuid } from '@/lib/id'
 import { useAuthStore } from '@/stores/auth'
 import type { RobotState } from '@/types'
@@ -120,6 +120,26 @@ async function safeRelease(reason: string, notify = true): Promise<void> {
   if (notify) emit('notice', reason)
 }
 
+function keepaliveStopAndRelease(reason: string): void {
+  pointerHeld = false
+  window.clearInterval(pulseTimer)
+  activeDirection.value = ''
+  const held = lease.value
+  lease.value = null
+  const vehicleId = props.robot?.vehicle_id
+  if (!held || !vehicleId) return
+  void keepaliveRequest(`/robots/${vehicleId}/commands/stop-motion`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': newUuid(),
+    },
+    body: '{}',
+  }).catch(() => undefined)
+  void keepaliveRequest(`/robots/${vehicleId}/manual-lease`, { method: 'DELETE' }).catch(() => undefined)
+  emit('notice', `停止指令已发送，等待车端 ACK；${reason}`, 'warn')
+}
+
 async function emergencyStop(): Promise<void> {
   window.clearInterval(pulseTimer)
   activeDirection.value = ''
@@ -165,20 +185,32 @@ function safetyRelease(): void {
   if (lease.value) void stopAndRelease('页面失焦，租约已释放')
 }
 function visibilityRelease(): void {
-  if (document.hidden) safetyRelease()
+  if (document.hidden) keepaliveStopAndRelease('页面隐藏，租约已释放')
 }
+function pageHideRelease(): void {
+  keepaliveStopAndRelease('控制页面已关闭')
+}
+
+watch(
+  () => [available.value, auth.can('robot.control.manual')],
+  ([isAvailable, permitted]) => {
+    if (lease.value && (!isAvailable || !permitted)) void stopAndRelease('控制条件失效，租约已释放')
+  },
+)
 
 onMounted(() => {
   window.addEventListener('blur', safetyRelease)
   window.addEventListener('pointerup', safetyRelease)
   document.addEventListener('visibilitychange', visibilityRelease)
+  window.addEventListener('pagehide', pageHideRelease)
 })
 onUnmounted(() => {
   window.clearInterval(pulseTimer)
   window.removeEventListener('blur', safetyRelease)
   window.removeEventListener('pointerup', safetyRelease)
   document.removeEventListener('visibilitychange', visibilityRelease)
-  if (lease.value) void stopAndRelease('控制页面已关闭')
+  window.removeEventListener('pagehide', pageHideRelease)
+  if (lease.value) keepaliveStopAndRelease('控制页面已关闭')
 })
 </script>
 
@@ -232,7 +264,7 @@ onUnmounted(() => {
         ↓<small>后退</small>
       </button>
     </div>
-    <p class="safety-note">150 ms 脉冲 · TTL 500 ms · 松键/失焦自动停止</p>
+    <p class="safety-note">150 ms 脉冲 · TTL 500 ms · 松键/失焦自动停止；最终安全保障为车端 TTL watchdog</p>
     <div class="estop-row">
       <button
         v-if="!robot?.estop_active"

@@ -7,12 +7,15 @@ x-python-service: &python-service
     dockerfile: infra/docker/python.Dockerfile
   env_file: ${SERVER_ENV_FILE:-.env.server}
   secrets:
+    - database_url
+    - redis_url
     - jwt_secret
     - refresh_secret
     - csrf_secret
     - bootstrap_admin_password
     - mqtt_platform_password
     - mqtt_ca
+    - media_publish_token
   restart: unless-stopped
   networks: [firebot]
   logging:
@@ -20,9 +23,34 @@ x-python-service: &python-service
     options: { max-size: "20m", max-file: "5" }
 
 services:
+  mosquitto-config-init:
+    image: busybox:1.37.0-musl
+    command:
+      - sh
+      - -c
+      - >-
+        mkdir -p /target/certs &&
+        cp /source/passwords /target/passwords &&
+        cp /source/acl /target/acl &&
+        cp /source/certs/ca.crt /target/certs/ca.crt &&
+        cp /source/certs/server.crt /target/certs/server.crt &&
+        cp /source/certs/server.key /target/certs/server.key &&
+        chown -R 1883:1883 /target &&
+        chmod 750 /target /target/certs &&
+        chmod 640 /target/passwords /target/acl /target/certs/ca.crt /target/certs/server.crt /target/certs/server.key
+    volumes:
+      - ./secrets/mosquitto:/source:ro
+      - mosquitto_config:/target
+    restart: "no"
+    networks: [firebot]
+
   postgres:
     image: postgres:18.4-alpine
-    env_file: ${SERVER_ENV_FILE:-.env.server}
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
     volumes: [postgres_data:/var/lib/postgresql]
     restart: unless-stopped
     healthcheck:
@@ -34,12 +62,12 @@ services:
 
   redis:
     image: redis:8.4.5-alpine
-    command: ["sh", "-c", "redis-server --appendonly yes --requirepass '$${REDIS_PASSWORD}'"]
-    env_file: ${SERVER_ENV_FILE:-.env.server}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$(cat /run/secrets/redis_password)\""]
+    secrets: [redis_password]
     volumes: [redis_data:/data]
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a '$${REDIS_PASSWORD}' ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$(cat /run/secrets/redis_password)\" ping | grep PONG"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -50,26 +78,49 @@ services:
     ports: ["8883:8883"]
     volumes:
       - ./infra/mosquitto/mosquitto.server.conf:/mosquitto/config/mosquitto.conf:ro
-      - ./secrets/mosquitto/passwords:/mosquitto/config/passwords:ro
-      - ./secrets/mosquitto/acl:/mosquitto/config/acl:ro
-      - ./secrets/mosquitto/certs:/mosquitto/certs:ro
+      - mosquitto_config:/mosquitto/secure:ro
       - mosquitto_data:/mosquitto/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_pub -h 127.0.0.1 -p 8883 --cafile /mosquitto/secure/certs/ca.crt -u platform -P \"$$(cat /run/secrets/mqtt_platform_password)\" -t 'robot/platform/health' -m ping -q 1 >/dev/null"]
+      interval: 10s
+      timeout: 7s
+      retries: 12
+    secrets: [mqtt_platform_password]
+    depends_on:
+      mosquitto-config-init: { condition: service_completed_successfully }
     networks: [firebot]
 
   mediamtx:
-    image: bluenviron/mediamtx:1.18.2
+    image: ${FIREBOT_MEDIAMTX_IMAGE:-firebot-mediamtx:1.18.2}
+    build:
+      context: .
+      dockerfile: infra/docker/mediamtx.Dockerfile
     volumes: ["./infra/mediamtx/mediamtx.server.yml:/mediamtx.yml:ro"]
+    environment:
+      MTX_WEBRTCALLOWORIGINS: ${MEDIAMTX_WEBRTC_ALLOW_ORIGINS}
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/busybox", "wget", "-q", "-O", "-", "http://127.0.0.1:9997/v3/config/global/get"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     networks: [firebot]
 
   migrate:
     <<: *python-service
-    command: ["alembic", "upgrade", "head"]
+    command: ["sh", "-c", "alembic upgrade head && python -m app.db.seed"]
     restart: "no"
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
+
+  asset-init:
+    image: busybox:1.37.0-musl
+    command: ["sh", "-c", "mkdir -p /data/assets && chown -R 10001:10001 /data/assets"]
+    volumes: [assets_data:/data/assets]
+    restart: "no"
+    networks: [firebot]
 
   api:
     <<: *python-service
@@ -77,21 +128,47 @@ services:
     volumes: [assets_data:/data/assets]
     depends_on:
       migrate: { condition: service_completed_successfully }
+      asset-init: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   mqtt-ingress:
     <<: *python-service
     command: ["python", "/workspace/services/mqtt-ingress/main.py"]
-    depends_on: [migrate, mosquitto]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      mosquitto: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "from app.core.events import get_redis; raise SystemExit(0 if get_redis().get('service:mqtt-ingress:heartbeat') else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   command-dispatcher:
     <<: *python-service
     command: ["python", "/workspace/services/command-dispatcher/main.py"]
-    depends_on: [migrate, mosquitto]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      mosquitto: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "from app.core.events import get_redis; raise SystemExit(0 if get_redis().get('service:command-dispatcher:heartbeat') else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   task-worker:
     <<: *python-service
     command: ["python", "/workspace/services/task-worker/main.py"]
-    depends_on: [migrate]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    healthcheck:
+      test: ["CMD", "python", "-c", "from app.core.events import get_redis; raise SystemExit(0 if get_redis().get('service:task-worker:heartbeat') else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   web:
     image: ${FIREBOT_WEB_IMAGE:-firebot-web:server}
@@ -100,16 +177,29 @@ services:
       dockerfile: apps/web/Dockerfile
     restart: unless-stopped
     networks: [firebot]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/ >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   nginx:
     image: nginx:1.30.4-alpine
-    ports: ["80:80", "443:443"]
+    ports: ["${SERVER_HTTP_PORT:-80}:80", "${SERVER_HTTPS_PORT:-443}:443"]
     volumes:
       - ./infra/nginx/nginx.server.conf:/etc/nginx/nginx.conf:ro
       - ./secrets/nginx:/etc/nginx/tls:ro
-    depends_on: [api, web, mediamtx]
+    depends_on:
+      api: { condition: service_healthy }
+      web: { condition: service_healthy }
+      mediamtx: { condition: service_healthy }
     restart: unless-stopped
     networks: [firebot]
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-check-certificate -q -O - https://127.0.0.1/health/live >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
 networks:
   firebot:
@@ -118,12 +208,18 @@ volumes:
   postgres_data:
   redis_data:
   mosquitto_data:
+  mosquitto_config:
   assets_data:
 
 secrets:
+  database_url: { file: ./secrets/app/database_url }
+  redis_url: { file: ./secrets/app/redis_url }
+  postgres_password: { file: ./secrets/postgres/password }
+  redis_password: { file: ./secrets/redis/password }
   jwt_secret: { file: ./secrets/app/jwt_secret }
   refresh_secret: { file: ./secrets/app/refresh_secret }
   csrf_secret: { file: ./secrets/app/csrf_secret }
   bootstrap_admin_password: { file: ./secrets/app/bootstrap_admin_password }
   mqtt_platform_password: { file: ./secrets/app/mqtt_platform_password }
   mqtt_ca: { file: ./secrets/mosquitto/certs/ca.crt }
+  media_publish_token: { file: ./secrets/app/media_publish_token }

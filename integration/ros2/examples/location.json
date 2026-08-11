@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.2",
+  "message_id": "00000000-0000-4000-8000-000000000004",
+  "type": "location",
+  "vehicle_id": "R001",
+  "boot_id": "11111111-1111-4111-8111-111111111111",
+  "timestamp": "2026-08-11T00:00:04Z",
+  "seq": 4,
+  "position": {
+    "x": 1.2,
+    "y": 3.4,
+    "theta": 0.5
+  },
+  "linear_speed": 0.2,
+  "angular_speed": 0.0,
+  "battery": 88.0,
+  "site_code": "OWNER_TODO",
+  "map_code": "OWNER_TODO",
+  "map_version": "OWNER_TODO",
+  "map_checksum": "OWNER_TODO_CHECKSUM",
+  "frame_id": "map",
+  "parking_slot_code": null,
+  "localization_status": "OK"
+}

@@ -1,0 +1,19 @@
+name: 平台功能建议
+description: 对已冻结范围之外的平台能力提出建议
+title: "[Feature] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes: { label: 要解决的问题 }
+    validations: { required: true }
+  - type: textarea
+    id: proposal
+    attributes: { label: 建议方案与验收标准 }
+    validations: { required: true }
+  - type: dropdown
+    id: boundary
+    attributes:
+      label: 是否涉及车端实现
+      options: [否，仅平台, 是，需要现场 owner 评审]
+    validations: { required: true }

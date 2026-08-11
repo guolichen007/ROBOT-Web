@@ -51,6 +51,14 @@ async function token(request: APIRequestContext): Promise<string> {
   return (await response.json()).access_token
 }
 
+async function forceRelease(request: APIRequestContext): Promise<void> {
+  const accessToken = await token(request)
+  const response = await request.post('/api/v1/robots/R001/manual-lease/force-release', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  expect(response.ok()).toBeTruthy()
+}
+
 test('login and R001 live monitor baseline', async ({ page, request }) => {
   await login(page, request)
   await expect(page.getByText('R001', { exact: true }).first()).toBeVisible()
@@ -59,7 +67,89 @@ test('login and R001 live monitor baseline', async ({ page, request }) => {
   await expect(page.getByText('软件急停不等于物理急停')).toBeVisible()
 })
 
+test('MediaMTX rejects anonymous and expired WHEP, then serves authorized H264', async ({
+  page,
+  request,
+}) => {
+  await login(page, request)
+  const accessToken = await token(request)
+  const streams = await request.get('/api/v1/media/streams', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  expect(streams.ok()).toBeTruthy()
+  const stream = (await streams.json()).find((item: any) => item.stream_id === 'R001-roof_rgb')
+  expect(stream).toBeTruthy()
+
+  const anonymous = await request.post('/media/R001-roof_rgb/whep', {
+    headers: { 'content-type': 'application/sdp' },
+    data: 'invalid-sdp',
+  })
+  expect(anonymous.status()).toBe(401)
+
+  const ticketResponse = await request.post('/api/v1/media/tickets', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    data: { stream_id: stream.stream_id },
+  })
+  expect(ticketResponse.ok()).toBeTruthy()
+  const issued = await ticketResponse.json()
+  const playback = await page.evaluate(async (url: string) => {
+    const peer = new RTCPeerConnection()
+    const transceiver = peer.addTransceiver('video', { direction: 'recvonly' })
+    const codecs = RTCRtpReceiver.getCapabilities('video')?.codecs || []
+    const h264 = codecs.filter((item) => item.mimeType.toLowerCase() === 'video/h264')
+    if (h264.length) transceiver.setCodecPreferences(h264)
+    const offer = await peer.createOffer()
+    await peer.setLocalDescription(offer)
+    if (peer.iceGatheringState !== 'complete') {
+      await new Promise<void>((resolve) => {
+        peer.addEventListener('icegatheringstatechange', () => {
+          if (peer.iceGatheringState === 'complete') resolve()
+        })
+        setTimeout(resolve, 5000)
+      })
+    }
+    let sdp = peer.localDescription?.sdp || ''
+    if (!h264.length) {
+      const lines = sdp.split('\r\n').filter((line) => !/^a=(rtpmap|fmtp|rtcp-fb):\d+/.test(line))
+      const mediaIndex = lines.findIndex((line) => line.startsWith('m=video '))
+      lines[mediaIndex] = lines[mediaIndex].replace(/(m=video \d+ \S+) .+/, '$1 96')
+      lines.splice(
+        mediaIndex + 1,
+        0,
+        'a=rtpmap:96 H264/90000',
+        'a=fmtp:96 packetization-mode=1;profile-level-id=42e01f;level-asymmetry-allowed=1',
+        'a=rtcp-fb:96 goog-remb',
+        'a=rtcp-fb:96 transport-cc',
+        'a=rtcp-fb:96 ccm fir',
+        'a=rtcp-fb:96 nack',
+        'a=rtcp-fb:96 nack pli',
+      )
+      sdp = `${lines.join('\r\n')}\r\n`
+    }
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/sdp' },
+      body: sdp,
+    })
+    const answer = await response.text()
+    if (response.ok && h264.length) {
+      await peer.setRemoteDescription({ type: 'answer', sdp: answer })
+    }
+    return { status: response.status, answer }
+  }, issued.playback_url)
+  expect(playback.status).toBe(201)
+  expect(playback.answer).toMatch(/H264/i)
+
+  await page.waitForTimeout(2300)
+  const expired = await request.post(issued.playback_url, {
+    headers: { 'content-type': 'application/sdp' },
+    data: 'invalid-sdp',
+  })
+  expect(expired.status()).toBe(401)
+})
+
 test('map A-12 creates, confirms and dispatches a manual fire event', async ({ page, request }) => {
+  await forceRelease(request)
   await login(page, request)
   await page.getByRole('button', { name: '车位 A-12' }).click()
   await page.getByRole('button', { name: '创建人工火情' }).click()
@@ -80,7 +170,8 @@ test('map A-12 creates, confirms and dispatches a manual fire event', async ({ p
     .toContain('SUCCEEDED')
 })
 
-test('two clients cannot hold the same manual lease', async ({ browser }) => {
+test('two clients cannot hold the same manual lease', async ({ browser, request }) => {
+  await forceRelease(request)
   const first = await browser.newContext(),
     second = await browser.newContext()
   const firstToken = await token(first.request),
@@ -103,17 +194,20 @@ test('two clients cannot hold the same manual lease', async ({ browser }) => {
 })
 
 test('manual pointer release stops pulses and releases the lease', async ({ page, request }) => {
+  await forceRelease(request)
   await login(page, request)
   const forward = page.getByRole('button', { name: '↑ 前进' })
-  await forward.dispatchEvent('pointerdown')
+  await forward.hover()
+  await page.mouse.down()
   await expect(page.getByText('租约 HELD')).toBeVisible()
   await page.waitForTimeout(650)
-  await page.dispatchEvent('body', 'pointerup')
+  await page.mouse.up()
   await expect(page.getByText('无租约')).toBeVisible()
   await expect(page.getByText(/停止指令已发送/)).toBeVisible()
 })
 
 test('quick click cannot start pulses after pointer release', async ({ page, request }) => {
+  await forceRelease(request)
   await login(page, request)
   await page.getByRole('button', { name: '↑ 前进' }).click()
   await page.waitForTimeout(800)
@@ -121,6 +215,7 @@ test('quick click cannot start pulses after pointer release', async ({ page, req
 })
 
 test('visibility hidden stops manual pulses and releases the lease', async ({ page, request }) => {
+  await forceRelease(request)
   await login(page, request)
   const forward = page.getByRole('button', { name: '↑ 前进' })
   await forward.dispatchEvent('pointerdown')
@@ -131,4 +226,18 @@ test('visibility hidden stops manual pulses and releases the lease', async ({ pa
   })
   await expect(page.getByText('无租约')).toBeVisible()
   await expect(page.getByText(/停止指令已发送/)).toBeVisible()
+  const verificationToken = await token(request)
+  await expect
+    .poll(async () => {
+      const acquired = await request.post('/api/v1/robots/R001/manual-lease', {
+        headers: { Authorization: `Bearer ${verificationToken}` },
+        data: { control_session_id: crypto.randomUUID() },
+      })
+      if (acquired.status() !== 201) return acquired.status()
+      await request.delete('/api/v1/robots/R001/manual-lease', {
+        headers: { Authorization: `Bearer ${verificationToken}` },
+      })
+      return 201
+    })
+    .toBe(201)
 })

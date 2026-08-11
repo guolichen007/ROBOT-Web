@@ -15,7 +15,7 @@ def validator() -> Draft202012Validator:
     if not path.exists():
         path = (
             Path(__file__).resolve().parents[1]
-            / "packages/protocol-schemas/firebot-message-1.1.schema.json"
+            / "packages/protocol-schemas/firebot-message-1.2.schema.json"
         )
     return Draft202012Validator(
         json.loads(path.read_text(encoding="utf-8")), format_checker=FormatChecker()
