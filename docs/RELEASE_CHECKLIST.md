@@ -3,6 +3,7 @@
 - [x] Ruff/format/mypy/Pytest
 - [x] ESLint/Prettier/vue-tsc/Vitest/production build，无 chunk warning
 - [x] Schema/generated/Mock/tester/handoff 漂移检查
+- [x] CI 上传 `firebot-ros2-integration-1.2.0` ZIP/SHA256 artifact，缺文件即失败
 - [x] production TODO/FIXME/HACK=0（明确 allowlist 除外）
 - [x] Gitleaks、Trivy CRITICAL=0、HIGH=0（文件系统与最终 API/Web 镜像）
 - [x] GitHub CodeQL（develop run `31477199650`、main run `31477708537`）
