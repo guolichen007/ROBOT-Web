@@ -14,6 +14,7 @@
 - 新增中文工程文档、GitHub 模板、CodeQL、Dependabot、ROS2 handoff ZIP/SHA256。
 - Python 镜像加入慢网络 read timeout/重试策略，并在真实连接失败后验证恢复构建。
 - ROS2 handoff 生成器固定 LF、ZIP 时间戳/权限/排序并归一化文本成员，确保跨 worktree SHA256 一致。
+- CI 将 ROS2 对接 ZIP 与 SHA256 作为 `firebot-ros2-integration-1.2.0` artifact 上传，缺文件直接使门禁失败。
 
 ## V2 Baseline
 
