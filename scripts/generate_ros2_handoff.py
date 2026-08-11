@@ -17,6 +17,7 @@ SCHEMA = ROOT / "packages/protocol-schemas/firebot-message-1.2.schema.json"
 DIST_NAME = "firebot-ros2-integration-1.2.0"
 BOOT = "11111111-1111-4111-8111-111111111111"
 NOW = datetime(2026, 8, 11, 0, 0, tzinfo=UTC)
+TEXT_SUFFIXES = {".csv", ".json", ".md", ".txt", ".yaml", ".yml"}
 
 TOPICS = {
     "availability": ("vehicle->platform", 1, True, "connect/LWT"),
@@ -333,7 +334,10 @@ def build_dist() -> tuple[Path, Path]:
                 info = zipfile.ZipInfo(path.relative_to(dist).as_posix(), (2026, 8, 11, 0, 0, 0))
                 info.compress_type = zipfile.ZIP_DEFLATED
                 info.external_attr = 0o100644 << 16
-                output.writestr(info, path.read_bytes())
+                payload = path.read_bytes()
+                if path.suffix.lower() in TEXT_SUFFIXES:
+                    payload = payload.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+                output.writestr(info, payload)
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     checksum = dist / f"{DIST_NAME}.sha256"
     checksum.write_text(f"{digest}  {archive.name}\n", encoding="ascii", newline="\n")
