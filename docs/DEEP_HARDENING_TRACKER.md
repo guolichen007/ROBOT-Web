@@ -50,6 +50,8 @@
 | AUDIT-25 | PASS | SERVER migration | Alembic `ConfigParser` 会把数据库密码 URL 中合法的 `%xx` 编码当作插值语法，SERVER 冷启动迁移失败。 | 对 Alembic 配置值转义 `%` 并增加回归测试；含 `%21` 密码的全新 SERVER volume smoke 通过。 |
 | AUDIT-26 | PASS | SERVER MQTT health | Mosquitto healthcheck 订阅 ACL 未授权的 `$SYS` topic，合法 TLS/auth 连接仍永久 unhealthy。 | 健康检查改为 ACL 允许的 QoS1 publish；全新 SERVER profile 所有关键服务 healthy。 |
 | AUDIT-27 | PASS | release tooling | 仓库政策脚本会递归扫描 ignored 的 Trivy 构建上下文和本地虚拟环境，产生与可提交源无关的假阳性。 | 明确排除 `artifacts` 与 `.venv`；可提交源、固定镜像和 CI action 政策检查通过。 |
+| AUDIT-28 | PASS | build reliability | 慢网络下 pip 默认 read timeout 会使无缓存的 DEV/SERVER Python 镜像构建失败。 | production/test Python 镜像固定 `PIP_DEFAULT_TIMEOUT=120`、`PIP_RETRIES=5`；在首次连接拒绝后自动重试并实际构建成功。 |
+| AUDIT-29 | PASS | handoff reproducibility | Windows `autocrlf` 使对接包成员行尾依赖 worktree，且生成器重写模板后产生虚假 dirty 状态。 | 所有生成源固定 LF，ZIP 文本成员在写入层归一化，固定时间戳/权限/排序；连续生成及 hardening/develop/main worktree SHA256 完全一致。 |
 
 ## 审查覆盖面
 
@@ -60,6 +62,6 @@
 - [x] Compose/Nginx/MediaMTX/SERVER 初审
 - [x] GitHub Actions/测试/文档初审
 - [x] 修复后复审与 production TODO/FIXME/HACK 扫描
-- [ ] 全部 Release Gate 证据回填
+- [x] 全部 Release Gate 证据回填
 
 最终目标：`Remaining platform defects = 0`。仅真实设备、现场网络/证书、真实地图/速度/量程、RPO/RTO 和 License owner decision 可留作外部输入。
