@@ -102,6 +102,14 @@ jobs:
       - run: python scripts/generate_ros2_handoff.py
       - run: git diff --exit-code -- integration/ros2
       - run: python scripts/generate_ros2_handoff.py --dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: firebot-ros2-integration-1.2.0
+          path: |
+            dist/firebot-ros2-integration-1.2.0.zip
+            dist/firebot-ros2-integration-1.2.0.sha256
+          if-no-files-found: error
+          retention-days: 90
       - run: python scripts/check_server_surface.py
 
   containers:

@@ -52,6 +52,7 @@
 | AUDIT-27 | PASS | release tooling | 仓库政策脚本会递归扫描 ignored 的 Trivy 构建上下文和本地虚拟环境，产生与可提交源无关的假阳性。 | 明确排除 `artifacts` 与 `.venv`；可提交源、固定镜像和 CI action 政策检查通过。 |
 | AUDIT-28 | PASS | build reliability | 慢网络下 pip 默认 read timeout 会使无缓存的 DEV/SERVER Python 镜像构建失败。 | production/test Python 镜像固定 `PIP_DEFAULT_TIMEOUT=120`、`PIP_RETRIES=5`；在首次连接拒绝后自动重试并实际构建成功。 |
 | AUDIT-29 | PASS | handoff reproducibility | Windows `autocrlf` 使对接包成员行尾依赖 worktree，且生成器重写模板后产生虚假 dirty 状态。 | 所有生成源固定 LF，ZIP 文本成员在写入层归一化，固定时间戳/权限/排序；连续生成及 hardening/develop/main worktree SHA256 完全一致。 |
+| AUDIT-30 | PASS | CI handoff artifact | CI 生成 ROS2 对接 ZIP/SHA256 但未上传 artifact，无法从门禁运行直接下载现场交付包。 | docs job 使用固定 SHA 的 `actions/upload-artifact` 上传 ZIP 与 SHA256，缺文件直接失败并保留 90 天；最终 main CI artifact 实际核验通过。 |
 
 ## 审查覆盖面
 
