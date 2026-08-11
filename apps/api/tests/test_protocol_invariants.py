@@ -69,8 +69,9 @@ def test_command_identity_and_expiry_are_explicit() -> None:
         ttl_ms=3000,
         priority=95,
     )
-    assert payload["schema_version"] == "1.1"
-    assert payload["boot_id"] == robot.boot_id
+    assert payload["schema_version"] == "1.2"
+    assert payload["target_boot_id"] == robot.boot_id
+    assert "boot_id" not in payload
     assert payload["command_id"].startswith("C")
     assert datetime.fromisoformat(payload["expires_at"]) > datetime.fromisoformat(
         payload["issued_at"]

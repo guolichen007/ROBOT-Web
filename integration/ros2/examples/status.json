@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.2",
+  "message_id": "00000000-0000-4000-8000-000000000005",
+  "type": "status",
+  "vehicle_id": "R001",
+  "boot_id": "11111111-1111-4111-8111-111111111111",
+  "timestamp": "2026-08-11T00:00:05Z",
+  "seq": 5,
+  "mode": "IDLE",
+  "battery": 88.0,
+  "estop_active": false,
+  "active_task_id": null
+}

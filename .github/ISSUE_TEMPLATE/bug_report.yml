@@ -1,0 +1,27 @@
+name: 平台缺陷
+description: 报告可复现的 ROBOT-Web 平台问题；安全漏洞请勿公开提交
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes: { label: 问题描述 }
+    validations: { required: true }
+  - type: textarea
+    id: reproduce
+    attributes: { label: 最小复现步骤 }
+    validations: { required: true }
+  - type: input
+    id: revision
+    attributes: { label: 分支、tag 或 commit SHA }
+    validations: { required: true }
+  - type: textarea
+    id: evidence
+    attributes: { label: 日志与 request_id/command_id（不得包含 secret） }
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: 信息安全确认
+      options:
+        - label: 我已移除密码、token、证书、真实地址和个人数据
+          required: true

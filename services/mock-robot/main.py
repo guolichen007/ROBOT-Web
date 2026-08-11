@@ -39,6 +39,7 @@ class MockRobot:
         self.site_code = os.getenv("MOCK_SITE_CODE", "DEMO_PARKING")
         self.map_code = os.getenv("MOCK_MAP_CODE", "parking_v1")
         self.map_version = os.getenv("MOCK_MAP_VERSION", "1")
+        self.map_checksum = os.getenv("MOCK_MAP_CHECKSUM", "demo-map-v1")
         self.boot_id = str(uuid4())
         self.seq = 0
         self.x, self.y, self.theta = 2.0, 10.0, 0.0
@@ -95,7 +96,7 @@ class MockRobot:
 
     def message(self, message_type: str, **payload) -> dict:
         return {
-            "schema_version": "1.1",
+            "schema_version": "1.2",
             "message_id": str(uuid4()),
             "type": message_type,
             "vehicle_id": self.vehicle_id,
@@ -148,7 +149,7 @@ class MockRobot:
             "capabilities",
             self.message(
                 "capabilities",
-                protocol_version="1.1",
+                protocol_version="1.2.0",
                 supported_commands=sorted(self.supported_commands),
                 sensors=["smoke", "bottom_ir", "top_ir"],
                 media=["roof_rgb", "roof_thermal", "bottom_ir"],
@@ -158,9 +159,14 @@ class MockRobot:
         )
         logger.info("Mock R001 connected through MQTT")
 
-    def ack(self, command: dict, status: str, reason: str | None = None) -> dict:
+    def ack(self, command: dict, status: str, reason_code: str | None = None) -> dict:
         payload = self.message(
-            "command_ack", command_id=command["command_id"], status=status, reason=reason
+            "command_ack",
+            command_id=command["command_id"],
+            task_id=command.get("task_id"),
+            status=status,
+            reason_code=reason_code,
+            reason=None,
         )
         late_ms = int(os.getenv("MOCK_LATE_ACK_MS", "0"))
         if late_ms:
@@ -200,7 +206,7 @@ class MockRobot:
                 if command["cmd"] == "patrol"
                 else "RETURN_DOCK"
             )
-        emitted = [self.task_status(task_id, "ACCEPTED", "ACCEPTED", 0)]
+        emitted = [self.task_status(task_id, "accepted", "ACCEPTED", 0)]
         for progress in (10, 25, 45, 65, 85):
             if self.stop_event.wait(0.6):
                 return
@@ -209,11 +215,11 @@ class MockRobot:
                     return
                 self.linear = 0.18
                 self.angular = 0.08 * math.sin(progress)
-            emitted.append(self.task_status(task_id, "EXECUTING", "NAVIGATING", progress))
+            emitted.append(self.task_status(task_id, "executing", "NAVIGATING", progress))
         if command["cmd"] == "extinguish":
-            emitted.append(self.task_status(task_id, "EXECUTING", "EXTINGUISHING", 95))
+            emitted.append(self.task_status(task_id, "executing", "EXTINGUISHING", 95))
             time.sleep(0.8)
-        emitted.append(self.task_status(task_id, "SUCCEEDED", "COMPLETED", 100))
+        emitted.append(self.task_status(task_id, "completed", "COMPLETED", 100))
         with self.lock:
             self.active_task_id = None
             self.mode = "IDLE"
@@ -230,22 +236,30 @@ class MockRobot:
                 self.publish("task_status", status, 1)
             return
         if datetime.fromisoformat(command["expires_at"]) <= datetime.now(UTC):
-            ack = self.ack(command, "rejected", "EXPIRED")
+            ack = self.ack(command, "rejected", "COMMAND_EXPIRED")
             self.processed[command["command_id"]] = (ack, [])
             return
         cmd = command["cmd"]
+        if cmd != "emergency_stop" and command.get("target_boot_id") != self.boot_id:
+            ack = self.ack(command, "rejected", "ROBOT_BOOT_SESSION_UNKNOWN")
+            self.processed[command["command_id"]] = (ack, [])
+            return
+        if cmd == "emergency_stop" and command.get("target_boot_id") not in {None, self.boot_id}:
+            ack = self.ack(command, "rejected", "ROBOT_BOOT_SESSION_UNKNOWN")
+            self.processed[command["command_id"]] = (ack, [])
+            return
         if cmd not in self.supported_commands:
-            ack = self.ack(command, "unsupported", "UNKNOWN_COMMAND")
+            ack = self.ack(command, "unsupported", "COMMAND_UNSUPPORTED")
             self.processed[command["command_id"]] = (ack, [])
             return
         if cmd == "manual_control":
             with self.lock:
                 if self.estop:
-                    ack = self.ack(command, "rejected", "ESTOP_ACTIVE")
+                    ack = self.ack(command, "rejected", "ROBOT_ESTOP_ACTIVE")
                     self.processed[command["command_id"]] = (ack, [])
                     return
-                self.linear = float(command["params"].get("linear", 0))
-                self.angular = float(command["params"].get("angular", 0))
+                self.linear = float(command["params"].get("linear_x", 0))
+                self.angular = float(command["params"].get("angular_z", 0))
                 self.last_manual = time.monotonic()
                 self.mode = "MANUAL"
             return
@@ -273,7 +287,7 @@ class MockRobot:
             self.processed[command["command_id"]] = (ack, [])
             return
         if self.estop:
-            ack = self.ack(command, "rejected", "ESTOP_ACTIVE")
+            ack = self.ack(command, "rejected", "ROBOT_ESTOP_ACTIVE")
             self.processed[command["command_id"]] = (ack, [])
             return
         if cmd == "cancel_task":
@@ -283,19 +297,19 @@ class MockRobot:
                 self.linear = self.angular = 0
                 self.mode = "IDLE"
             ack = self.ack(command, "accepted")
-            statuses = [self.task_status(task_id, "CANCELLED", "CANCELLED", 0)] if task_id else []
+            statuses = [self.task_status(task_id, "cancelled", "CANCELLED", 0)] if task_id else []
             self.processed[command["command_id"]] = (ack, statuses)
             return
         if cmd in {"patrol", "extinguish", "return_dock"}:
             if self.active_task_id:
-                ack = self.ack(command, "rejected", "ACTIVE_TASK")
+                ack = self.ack(command, "rejected", "ACTIVE_TASK_CONFLICT")
                 self.processed[command["command_id"]] = (ack, [])
                 return
             ack = self.ack(command, "accepted")
             self.processed[command["command_id"]] = (ack, [])
             threading.Thread(target=self.simulate_task, args=(command,), daemon=True).start()
             return
-        ack = self.ack(command, "unsupported", "UNKNOWN_COMMAND")
+        ack = self.ack(command, "unsupported", "COMMAND_UNSUPPORTED")
         self.processed[command["command_id"]] = (ack, [])
 
     def on_message(self, client, userdata, message) -> None:
@@ -331,6 +345,7 @@ class MockRobot:
                     site_code=self.site_code,
                     map_code=self.map_code,
                     map_version=self.map_version,
+                    map_checksum=self.map_checksum,
                     frame_id="map",
                     parking_slot_code=f"A-{max(1, min(12, int(self.x / 2.5) + 1)):02d}",
                     localization_status="OK",
@@ -354,6 +369,18 @@ class MockRobot:
                 self.publish(
                     "availability",
                     self.message("availability", state="online", reason="MOCK_REBOOT"),
+                    1,
+                    True,
+                )
+                self.publish(
+                    "capabilities",
+                    self.message(
+                        "capabilities",
+                        protocol_version="1.2.0",
+                        supported_commands=sorted(self.supported_commands),
+                        sensors=["smoke", "bottom_ir", "top_ir"],
+                        media=["roof_rgb", "roof_thermal", "bottom_ir"],
+                    ),
                     1,
                     True,
                 )

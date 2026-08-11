@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -10,7 +11,7 @@ from uuid import uuid4
 
 import paho.mqtt.client as mqtt
 from app.core.config import get_settings
-from app.core.events import append_event, get_redis
+from app.core.events import get_redis, queue_event, queue_redis_delete, queue_redis_set
 from app.core.logging import configure_logging
 from app.core.metrics import (
     clock_skew,
@@ -19,6 +20,8 @@ from app.core.metrics import (
     mqtt_ingress_rate,
     mqtt_invalid_total,
     mqtt_out_of_order_total,
+    mqtt_payload_rejected_total,
+    robot_boot_rejected_total,
 )
 from app.core.serialization import serialize_model
 from app.db.models import (
@@ -28,6 +31,7 @@ from app.db.models import (
     Map,
     ParkingSlot,
     Robot,
+    RobotBootSession,
     RobotCapability,
     RobotConnectionLog,
     SensorSample,
@@ -44,7 +48,31 @@ from services.protocol import validate_message
 settings = get_settings()
 configure_logging("mqtt-ingress")
 logger = logging.getLogger("mqtt-ingress")
+
+# `message_id` is useful for event idempotency, but retaining every 10 Hz
+# location UUID for a day costs ~864k Redis keys per robot. Sequence tracking
+# already rejects high-rate duplicates, so keep only a short retry window for
+# telemetry and a longer business window for durable events.
+DEDUP_TTL_SECONDS = {
+    "location": 120,
+    "sensor": 120,
+    "heartbeat": 120,
+    "status": 600,
+    "availability": 86400,
+    "capabilities": 86400,
+    "alarm": 86400,
+    "command_ack": 86400,
+    "task_status": 86400,
+}
+
+
+def dedup_ttl(message_type: str) -> int:
+    return DEDUP_TTL_SECONDS.get(message_type, 600)
+
+
 redis = get_redis()
+BOOT_ESTABLISH_TYPES = {"availability", "heartbeat", "capabilities"}
+BASE64_DATA_RE = re.compile(r"^data:(?:image|video)/[^;]+;base64,", re.IGNORECASE)
 
 
 def increment_mqtt_metric(field: str) -> None:
@@ -55,8 +83,93 @@ def parse_time(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
 
 
+def json_depth(value, depth: int = 0) -> int:
+    if isinstance(value, dict):
+        return max([depth, *(json_depth(item, depth + 1) for item in value.values())])
+    if isinstance(value, list):
+        return max([depth, *(json_depth(item, depth + 1) for item in value)])
+    return depth
+
+
+def contains_video_payload(value) -> bool:
+    if isinstance(value, str):
+        return bool(BASE64_DATA_RE.match(value)) or (
+            len(value) > 65_536 and "base64" in value[:128].lower()
+        )
+    if isinstance(value, dict):
+        return any(contains_video_payload(item) for item in value.values())
+    if isinstance(value, list):
+        return any(contains_video_payload(item) for item in value)
+    return False
+
+
+def rate_allowed(vehicle_id: str, message_type: str) -> bool:
+    bucket = int(time.time())
+    key = f"ratelimit:mqtt:{vehicle_id}:{message_type}:{bucket}"
+    count = redis.incr(key)
+    if count == 1:
+        redis.expire(key, 2)
+    limit = (
+        settings.mqtt_location_rate_limit_per_second
+        if message_type == "location"
+        else settings.mqtt_rate_limit_per_second
+    )
+    return int(count) <= limit
+
+
 def robot_for(db, vehicle_id: str) -> Robot | None:
     return db.scalar(select(Robot).where(Robot.vehicle_id == vehicle_id))
+
+
+def accept_boot_session(db, robot: Robot, msg: dict, received: datetime) -> bool:
+    boot_id = msg["boot_id"]
+    session = db.scalar(
+        select(RobotBootSession).where(
+            RobotBootSession.robot_id == robot.id, RobotBootSession.boot_id == boot_id
+        )
+    )
+    if robot.boot_id == boot_id:
+        if session:
+            session.last_seen_at = received
+        else:
+            db.add(
+                RobotBootSession(
+                    robot_id=robot.id,
+                    boot_id=boot_id,
+                    first_seen_at=received,
+                    last_seen_at=received,
+                )
+            )
+        return True
+    if session and session.ended_at is not None:
+        robot_boot_rejected_total.inc()
+        increment_mqtt_metric("invalid:ended_boot_session")
+        return False
+    if msg["type"] not in BOOT_ESTABLISH_TYPES:
+        robot_boot_rejected_total.inc()
+        increment_mqtt_metric("invalid:boot_not_established")
+        return False
+    if robot.boot_id:
+        current = db.scalar(
+            select(RobotBootSession).where(
+                RobotBootSession.robot_id == robot.id,
+                RobotBootSession.boot_id == robot.boot_id,
+            )
+        )
+        if current and current.ended_at is None:
+            current.ended_at = received
+        invalidate_old_boot_leases(db, robot, boot_id)
+    if not session:
+        db.add(
+            RobotBootSession(
+                robot_id=robot.id,
+                boot_id=boot_id,
+                first_seen_at=received,
+                last_seen_at=received,
+            )
+        )
+    robot.boot_id = boot_id
+    return True
 
 
 def invalidate_old_boot_leases(db, robot: Robot, boot_id: str) -> None:
@@ -64,7 +177,7 @@ def invalidate_old_boot_leases(db, robot: Robot, boot_id: str) -> None:
         raw = redis.get(f"manual:lease:{robot.id}")
         if raw:
             lease = json.loads(raw)
-            redis.delete(f"manual:lease:{robot.id}")
+            queue_redis_delete(db, f"manual:lease:{robot.id}")
             session = db.scalar(
                 select(ManualControlSession).where(
                     ManualControlSession.lease_id == lease["lease_id"]
@@ -74,7 +187,8 @@ def invalidate_old_boot_leases(db, robot: Robot, boot_id: str) -> None:
                 session.state = "FORCE_RELEASED"
                 session.ended_at = datetime.now(UTC)
                 session.end_reason = "ROBOT_REBOOT"
-        append_event(
+        queue_event(
+            db,
             "vehicle.rebooted",
             {"vehicle_id": robot.vehicle_id, "old_boot_id": robot.boot_id, "boot_id": boot_id},
         )
@@ -90,7 +204,8 @@ def update_online(db, robot: Robot, state: str, message: dict, reason: str | Non
                 robot_id=robot.id, state=state, boot_id=message["boot_id"], reason=reason
             )
         )
-        append_event(
+        queue_event(
+            db,
             f"vehicle.{state.lower()}",
             {"vehicle_id": robot.vehicle_id, "state": state, "reason": reason},
         )
@@ -126,7 +241,7 @@ def handle_location(db, robot: Robot, msg: dict, source_ts: datetime, received: 
             "server_received_at": received.isoformat(),
         }
     )
-    redis.set(f"robot:{robot.vehicle_id}:latest", json.dumps(latest, ensure_ascii=False))
+    queue_redis_set(db, f"robot:{robot.vehicle_id}:latest", json.dumps(latest, ensure_ascii=False))
     robot.battery = float(msg.get("battery", robot.battery))
     robot.current_map_version = msg["map_version"]
     reported_map = db.scalar(
@@ -151,7 +266,7 @@ def handle_location(db, robot: Robot, msg: dict, source_ts: datetime, received: 
                 seq=msg["seq"],
             )
         )
-    append_event("vehicle.location", latest)
+    queue_event(db, "vehicle.location", latest)
 
 
 def handle_status(db, robot: Robot, msg: dict) -> None:
@@ -169,8 +284,8 @@ def handle_status(db, robot: Robot, msg: dict) -> None:
             "active_task_id": robot.current_task_id,
         }
     )
-    redis.set(f"robot:{robot.vehicle_id}:latest", json.dumps(latest, ensure_ascii=False))
-    append_event("vehicle.status", latest)
+    queue_redis_set(db, f"robot:{robot.vehicle_id}:latest", json.dumps(latest, ensure_ascii=False))
+    queue_event(db, "vehicle.status", latest)
 
 
 def handle_sensor(db, robot: Robot, msg: dict, source_ts: datetime, received: datetime) -> None:
@@ -198,8 +313,8 @@ def handle_sensor(db, robot: Robot, msg: dict, source_ts: datetime, received: da
             "server_received_at": received.isoformat(),
         }
     )
-    redis.set(f"robot:{robot.vehicle_id}:latest", json.dumps(latest, ensure_ascii=False))
-    append_event("vehicle.sensor", latest)
+    queue_redis_set(db, f"robot:{robot.vehicle_id}:latest", json.dumps(latest, ensure_ascii=False))
+    queue_event(db, "vehicle.sensor", latest)
 
 
 def handle_alarm(db, robot: Robot, msg: dict, received: datetime) -> None:
@@ -224,7 +339,7 @@ def handle_alarm(db, robot: Robot, msg: dict, received: datetime) -> None:
         by_event.last_seen_at = received
         by_event.occurrence_count += 1
         by_event.confidence = msg.get("confidence")
-        append_event("alarm.updated", serialize_model(by_event))
+        queue_event(db, "alarm.updated", serialize_model(by_event))
         return
     row = db.scalar(
         select(FireEvent).where(
@@ -236,7 +351,7 @@ def handle_alarm(db, robot: Robot, msg: dict, received: datetime) -> None:
         row.last_seen_at = received
         row.occurrence_count += 1
         row.confidence = msg.get("confidence")
-        append_event("alarm.updated", serialize_model(row))
+        queue_event(db, "alarm.updated", serialize_model(row))
         return
     row = FireEvent(
         event_code=f"FE-{received:%Y%m%d%H%M%S}-{str(uuid4())[:6]}",
@@ -257,7 +372,7 @@ def handle_alarm(db, robot: Robot, msg: dict, received: datetime) -> None:
     )
     db.add(row)
     db.flush()
-    append_event("alarm.created", serialize_model(row))
+    queue_event(db, "alarm.created", serialize_model(row))
 
 
 def handle_capabilities(db, robot: Robot, msg: dict, received: datetime) -> None:
@@ -275,7 +390,7 @@ def handle_capabilities(db, robot: Robot, msg: dict, received: datetime) -> None
     else:
         for key, value in values.items():
             setattr(row, key, value)
-    append_event("vehicle.capabilities", {"vehicle_id": robot.vehicle_id, **values})
+    queue_event(db, "vehicle.capabilities", {"vehicle_id": robot.vehicle_id, **values})
 
 
 def handle_ack(db, robot: Robot, msg: dict, received: datetime) -> None:
@@ -292,7 +407,7 @@ def handle_ack(db, robot: Robot, msg: dict, received: datetime) -> None:
         return
     command.ack_at = received
     command.ack_status = msg["status"]
-    command.ack_reason = msg.get("reason")
+    command.ack_reason = msg.get("reason_code") or msg.get("reason")
     if msg["status"] == "accepted":
         command.lifecycle_status = "ACK_ACCEPTED"
     elif msg["status"] == "unsupported":
@@ -303,21 +418,28 @@ def handle_ack(db, robot: Robot, msg: dict, received: datetime) -> None:
         command.terminal_at = received
     if command.published_at:
         command_ack_latency.observe((received - command.published_at).total_seconds())
-    append_event("command.updated", serialize_model(command))
+    queue_event(db, "command.updated", serialize_model(command))
 
 
 def handle_task_status(db, robot: Robot, msg: dict, received: datetime) -> None:
     task = db.get(Task, msg["task_id"])
     if not task or task.robot_id != robot.id:
         return
-    task.status = msg["status"]
+    internal_status = {
+        "accepted": "ACCEPTED",
+        "executing": "EXECUTING",
+        "completed": "SUCCEEDED",
+        "failed": "FAILED",
+        "cancelled": "CANCELLED",
+    }[msg["status"]]
+    task.status = internal_status
     task.phase = msg["phase"]
     task.progress = msg["progress"]
-    if msg["status"] == "ACCEPTED":
+    if internal_status == "ACCEPTED":
         task.accepted_at = received
-    if msg["status"] == "EXECUTING" and not task.started_at:
+    if internal_status == "EXECUTING" and not task.started_at:
         task.started_at = received
-    if msg["status"] in {"SUCCEEDED", "FAILED", "CANCELLED"}:
+    if internal_status in {"SUCCEEDED", "FAILED", "CANCELLED"}:
         task.completed_at = received
     task.failure_code = msg.get("failure_code")
     task.failure_message = msg.get("failure_message")
@@ -347,14 +469,26 @@ def handle_task_status(db, robot: Robot, msg: dict, received: datetime) -> None:
                 fire.resolved_at = received
             elif task.status in {"FAILED", "CANCELLED"}:
                 fire.state = "CONFIRMED"
-            append_event("alarm.updated", serialize_model(fire))
-    append_event("task.updated", serialize_model(task))
+            queue_event(db, "alarm.updated", serialize_model(fire))
+    queue_event(db, "task.updated", serialize_model(task))
 
 
 def process(topic: str, payload: bytes) -> None:
     received = datetime.now(UTC)
+    if len(payload) > settings.max_mqtt_payload_bytes:
+        mqtt_payload_rejected_total.labels(reason="payload_too_large").inc()
+        increment_mqtt_metric("invalid:payload_too_large")
+        return
     try:
         msg = json.loads(payload.decode("utf-8"))
+        if json_depth(msg) > settings.max_json_depth:
+            mqtt_payload_rejected_total.labels(reason="json_too_deep").inc()
+            increment_mqtt_metric("invalid:json_too_deep")
+            return
+        if contains_video_payload(msg):
+            mqtt_payload_rejected_total.labels(reason="video_payload_forbidden").inc()
+            increment_mqtt_metric("invalid:video_payload_forbidden")
+            return
         validate_message(msg)
     except (UnicodeDecodeError, json.JSONDecodeError, ValidationError) as exc:
         mqtt_invalid_total.labels(reason=type(exc).__name__).inc()
@@ -366,7 +500,13 @@ def process(topic: str, payload: bytes) -> None:
         mqtt_invalid_total.labels(reason="topic_type_mismatch").inc()
         increment_mqtt_metric("invalid:topic_type_mismatch")
         return
-    if not redis.set(f"dedup:message:{msg['message_id']}", "1", ex=86400, nx=True):
+    if not rate_allowed(msg["vehicle_id"], msg["type"]):
+        mqtt_payload_rejected_total.labels(reason="rate_limit").inc()
+        increment_mqtt_metric("invalid:rate_limit")
+        return
+    dedup_key = f"dedup:message:{msg['message_id']}"
+    pending_key = f"dedup:pending:{msg['message_id']}"
+    if redis.exists(dedup_key) or not redis.set(pending_key, "1", ex=30, nx=True):
         mqtt_duplicate_total.inc()
         increment_mqtt_metric("duplicate")
         return
@@ -375,44 +515,55 @@ def process(topic: str, payload: bytes) -> None:
     if last_seq is not None and msg["seq"] <= int(last_seq):
         mqtt_out_of_order_total.inc()
         increment_mqtt_metric("out_of_order")
+        redis.setex(dedup_key, dedup_ttl(msg["type"]), "1")
+        redis.delete(pending_key)
         return
-    redis.setex(last_key, 86400, msg["seq"])
     source_ts = parse_time(msg["timestamp"])
     skew_ms = (received - source_ts).total_seconds() * 1000
     clock_skew.observe(abs(skew_ms))
     mqtt_ingress_rate.labels(type=msg["type"]).inc()
     increment_mqtt_metric(f"ingress:{msg['type']}")
-    with SessionLocal.begin() as db:
-        robot = robot_for(db, msg["vehicle_id"])
-        if not robot:
-            mqtt_invalid_total.labels(reason="unknown_vehicle").inc()
-            increment_mqtt_metric("invalid:unknown_vehicle")
-            return
-        invalidate_old_boot_leases(db, robot, msg["boot_id"])
-        robot.boot_id = msg["boot_id"]
-        if msg["type"] == "availability" and msg["state"] == "offline":
-            update_online(db, robot, "OFFLINE", msg, msg.get("reason"))
-            redis.delete(f"heartbeat:{robot.vehicle_id}")
-        elif msg["type"] in {"heartbeat", "availability"}:
-            # Online state is driven by the dedicated heartbeat/LWT contract.  High-rate
-            # location or sensor traffic must not hide a failed heartbeat publisher.
-            update_online(db, robot, "ONLINE", msg)
-            redis.setex(
-                f"heartbeat:{robot.vehicle_id}",
-                settings.robot_offline_seconds,
-                received.isoformat(),
-            )
-        handlers = {
-            "location": lambda: handle_location(db, robot, msg, source_ts, received),
-            "status": lambda: handle_status(db, robot, msg),
-            "sensor": lambda: handle_sensor(db, robot, msg, source_ts, received),
-            "alarm": lambda: handle_alarm(db, robot, msg, received),
-            "capabilities": lambda: handle_capabilities(db, robot, msg, received),
-            "command_ack": lambda: handle_ack(db, robot, msg, received),
-            "task_status": lambda: handle_task_status(db, robot, msg, received),
-        }
-        if msg["type"] in handlers:
-            handlers[msg["type"]]()
+    accepted = False
+    try:
+        with SessionLocal.begin() as db:
+            robot = robot_for(db, msg["vehicle_id"])
+            if not robot:
+                mqtt_invalid_total.labels(reason="unknown_vehicle").inc()
+                increment_mqtt_metric("invalid:unknown_vehicle")
+            elif not accept_boot_session(db, robot, msg, received):
+                mqtt_invalid_total.labels(reason="ended_or_unknown_boot").inc()
+            else:
+                accepted = True
+                if msg["type"] == "availability" and msg["state"] == "offline":
+                    update_online(db, robot, "OFFLINE", msg, msg.get("reason"))
+                    queue_redis_delete(db, f"heartbeat:{robot.vehicle_id}")
+                elif msg["type"] in {"heartbeat", "availability"}:
+                    update_online(db, robot, "ONLINE", msg)
+                    queue_redis_set(
+                        db,
+                        f"heartbeat:{robot.vehicle_id}",
+                        received.isoformat(),
+                        ttl_seconds=settings.robot_offline_seconds,
+                    )
+                handlers = {
+                    "location": lambda: handle_location(db, robot, msg, source_ts, received),
+                    "status": lambda: handle_status(db, robot, msg),
+                    "sensor": lambda: handle_sensor(db, robot, msg, source_ts, received),
+                    "alarm": lambda: handle_alarm(db, robot, msg, received),
+                    "capabilities": lambda: handle_capabilities(db, robot, msg, received),
+                    "command_ack": lambda: handle_ack(db, robot, msg, received),
+                    "task_status": lambda: handle_task_status(db, robot, msg, received),
+                }
+                if msg["type"] in handlers:
+                    handlers[msg["type"]]()
+    except Exception:
+        redis.delete(pending_key)
+        logger.exception("MQTT database transaction failed; message remains retryable")
+        return
+    redis.setex(dedup_key, dedup_ttl(msg["type"]), "1")
+    if accepted:
+        redis.setex(last_key, 86400, msg["seq"])
+    redis.delete(pending_key)
 
 
 def service_heartbeat() -> None:
@@ -428,7 +579,18 @@ def on_connect(client, userdata, flags, reason_code, properties):
     if reason_code != 0:
         logger.error("MQTT connect failed: %s", reason_code)
         return
-    client.subscribe("robot/+/+", qos=1)
+    for topic in (
+        "availability",
+        "heartbeat",
+        "capabilities",
+        "location",
+        "status",
+        "sensor",
+        "alarm",
+        "task_status",
+        "command_ack",
+    ):
+        client.subscribe(f"robot/+/{topic}", qos=1)
     logger.info("MQTT ingress connected")
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 
@@ -16,7 +16,8 @@ from app.core.dependencies import (
     request_meta,
     require_permission,
 )
-from app.core.events import append_event, get_redis
+from app.core.errors import PlatformError
+from app.core.events import append_event, get_redis, queue_redis_delete
 from app.core.idempotency import lookup, store
 from app.core.serialization import serialize_model
 from app.db.models import Command, Robot
@@ -55,9 +56,9 @@ def manual(
     redis = get_redis()
     lease = active_lease(redis, robot)
     if not lease or lease["lease_id"] != payload.lease_id or lease["user_id"] != auth.user.id:
-        raise HTTPException(409, "manual lease 无效或已过期")
+        raise PlatformError("MANUAL_LEASE_INVALID", "manual lease 无效或已过期")
     if lease["control_session_id"] != payload.control_session_id:
-        raise HTTPException(409, "manual control session 不匹配")
+        raise PlatformError("MANUAL_LEASE_INVALID", "manual control session 不匹配")
     last_seq = int(redis.get(f"manual:lastseq:{payload.lease_id}") or -1)
     if payload.seq <= last_seq:
         return {"accepted": False, "reason": "DUPLICATE_OR_OUT_OF_ORDER", "last_seq": last_seq}
@@ -65,7 +66,7 @@ def manual(
         robot=robot,
         operator_id=auth.user.id,
         cmd="manual_control",
-        params={"linear": payload.linear, "angular": payload.angular},
+        params={"linear_x": payload.linear, "angular_z": payload.angular},
         ttl_ms=500,
         priority=80,
         lease_id=payload.lease_id,
@@ -90,6 +91,7 @@ def safety_command(
     idempotency_key: str,
     endpoint: str,
 ) -> dict:
+    assert_robot_can_execute(db, robot, cmd)
     request_body: dict = {}
     cached = lookup(
         db,
@@ -121,15 +123,14 @@ def safety_command(
         expires_at=datetime.fromisoformat(command_payload["expires_at"]),
     )
     db.add(row)
-    if robot.online_state in {"STALE", "OFFLINE"}:
+    should_enqueue = robot.online_state not in {"STALE", "OFFLINE"}
+    if not should_enqueue:
         row.lifecycle_status = "PUBLISHED_UNCONFIRMED"
         row.ack_reason = "OFFLINE_NOT_DELIVERED"
-    else:
-        enqueue_safety_command(command_payload)
     if cmd == "emergency_stop":
         lease = active_lease(get_redis(), robot)
         if lease:
-            get_redis().delete(f"manual:lease:{robot.id}")
+            queue_redis_delete(db, f"manual:lease:{robot.id}")
             end_lease(db, robot, lease, "EMERGENCY_STOP", "FORCE_RELEASED")
     write_audit(
         db,
@@ -143,7 +144,7 @@ def safety_command(
     )
     db.flush()
     response = serialize_model(row)
-    store(
+    idempotency = store(
         db,
         actor_id=auth.user.id,
         endpoint=endpoint,
@@ -153,7 +154,17 @@ def safety_command(
         status_code=202,
     )
     db.commit()
-    append_event("command.updated", serialize_model(row))
+    if should_enqueue:
+        try:
+            enqueue_safety_command(command_payload)
+        except Exception:
+            row.lifecycle_status = "PUBLISHED_UNCONFIRMED"
+            row.ack_reason = "SAFETY_QUEUE_UNAVAILABLE"
+            idempotency.response_json = serialize_model(row)
+            db.add(row)
+            db.commit()
+    response = serialize_model(row)
+    append_event("command.updated", response)
     return response
 
 
@@ -211,7 +222,7 @@ def reset_estop(
 ) -> dict:
     robot = find_robot(db, robot_id)
     if robot.online_state in {"STALE", "OFFLINE"}:
-        raise HTTPException(409, "离线机器人不能复位软件急停")
+        raise PlatformError(f"ROBOT_{robot.online_state}", "离线或陈旧机器人不能复位软件急停")
     return safety_command(
         robot=robot,
         cmd="reset_estop",
@@ -292,5 +303,5 @@ def get_command(command_id: str, db: DbSession, auth: CurrentAuth) -> dict:
         select(Command).where(or_(Command.command_id == command_id, Command.id == command_id))
     )
     if not row:
-        raise HTTPException(404, "命令不存在")
+        raise PlatformError("RESOURCE_NOT_FOUND", "命令不存在", status_code=404)
     return serialize_model(row)

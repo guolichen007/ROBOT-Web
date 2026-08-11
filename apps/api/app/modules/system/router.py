@@ -10,6 +10,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import func, select, text
 from starlette.responses import JSONResponse, Response
 
+from app.core.config import get_settings
 from app.core.dependencies import AuthContext, CurrentAuth, DbSession, require_permission
 from app.core.events import current_watermark, get_redis
 from app.core.metrics import (
@@ -58,10 +59,11 @@ def bounded_tcp_probe(host: str, port: int, timeout: float = 1.5) -> tuple[bool,
 
 @router.get("/health/live")
 def live() -> dict:
-    return {"status": "live", "service": "api"}
+    return {"status": "live"}
 
 
 def readiness_payload(db: DbSession) -> dict:
+    settings = get_settings()
     checks: dict[str, dict] = {}
     postgres_ok, postgres_error = bounded_tcp_probe("postgres", 5432)
     if postgres_ok:
@@ -85,9 +87,19 @@ def readiness_payload(db: DbSession) -> dict:
         else None
     )
     checks["mqtt_ingress"] = {"ok": bool(mqtt_heartbeat), "last_heartbeat": mqtt_heartbeat}
-    mqtt_ok, mqtt_error = bounded_tcp_probe("mosquitto", 1883)
+    for service_name in ("command-dispatcher", "task-worker"):
+        heartbeat = (
+            get_redis().get(f"service:{service_name}:heartbeat")
+            if checks.get("redis", {}).get("ok")
+            else None
+        )
+        checks[service_name.replace("-", "_")] = {
+            "ok": bool(heartbeat),
+            "last_heartbeat": heartbeat,
+        }
+    mqtt_ok, mqtt_error = bounded_tcp_probe(settings.mqtt_host, settings.mqtt_port)
     checks["mqtt_broker"] = (
-        {"ok": True, "endpoint": "mosquitto:1883"}
+        {"ok": True, "endpoint": f"{settings.mqtt_host}:{settings.mqtt_port}"}
         if mqtt_ok
         else {"ok": False, "error": mqtt_error}
     )

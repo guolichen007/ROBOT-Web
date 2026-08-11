@@ -1,30 +1,7 @@
-# Vehicle Safety Contract
+# 车辆安全责任合同
 
-Status: V2 Baseline contractual interface. It is not a certification of the physical vehicle.
+云平台不能承担网络失联后的最终运动安全闭环。真实车端必须：manual 500ms TTL 到期本地停止；断网不无限运动；过期/错误 target_boot 命令不执行；command_id 幂等；重启后旧 boot 不重放；software e-stop accepted 后锁存；reset 显式；硬件急停优先。
 
-## Responsibility boundary
+ACK accepted 表示车端应用层本地校验通过并接受执行，不只是 MQTT 收包。平台显示“stop/e-stop 已发送”不等于车辆已经停止；未收到 ACK 只能显示未确认。
 
-The cloud platform provides authenticated intent, leases, expiry metadata, command identity, audit, ACK tracking and conservative UI state. It cannot close the final motion-safety loop after network loss. The ROS2/vehicle team owns local motion arbitration, watchdogs, actuator interlocks, hardware emergency stop and functional-safety validation.
-
-## Mandatory vehicle behavior
-
-- Stop locally when a manual pulse is older than 500 ms or the active lease/control session stops receiving valid pulses.
-- Never continue manual motion indefinitely after broker, network, ROS2 bridge or process failure.
-- Reject expired commands and commands whose `vehicle_id`, active `boot_id`, map version, capability or local state is invalid.
-- Treat `command_id` as an end-to-end idempotency key. A duplicate may repeat its result, but must not repeat a dangerous physical action.
-- After reboot, create a new `boot_id`; do not replay or resume commands from the previous boot context.
-- Latch an accepted `emergency_stop` locally. Only an explicit, authorized and locally valid `reset_estop` may clear it.
-- `command_ack.status=accepted` means application-level validation completed and the command was accepted for execution. It never means “MQTT packet received”.
-- A physical emergency-stop circuit overrides every software command and remains independent of the platform.
-- Apply local maximum speed, acceleration, steering, proximity and actuator limits. Cloud values are requests, not safety limits.
-
-## Platform behavior
-
-- Manual pulses are QoS 0, non-retained, last-command-wins and never enter the durable outbox.
-- `stop_motion` and software `emergency_stop` are QoS 1, non-retained and remain unconfirmed until a valid ACK.
-- Stale/offline robots reject motion/task/reset commands. An offline emergency-stop attempt is shown as not delivered/unconfirmed.
-- Software emergency stop invalidates the active manual lease and takes the safety fast path.
-- Durable task commands use a PostgreSQL command row plus transactional outbox, retrying the same `command_id`.
-- The UI distinguishes created, queued, published, accepted, executing, succeeded, failed and unconfirmed.
-
-“Stop sent” or “e-stop published” is never proof that the vehicle has stopped. Physical acceptance must be confirmed by the real vehicle integration and site tests.
+Mock 模拟以上合同不代表真实 ROS2、底盘、执行机构或现场安全认证已经完成。

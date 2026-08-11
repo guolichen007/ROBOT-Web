@@ -1,17 +1,12 @@
-# Real Robot Integration Checklist
+# 真实机器人接入检查
 
-- [ ] Vehicle outbound network reaches broker and time source.
-- [ ] Per-robot TLS credential and ACL verified; R001 cannot access R002.
-- [ ] LWT offline and retained online/capabilities behavior verified.
-- [ ] All protocol 1.1 messages validate against canonical JSON Schema.
-- [ ] `boot_id` changes on restart and per-topic `seq` resets safely.
-- [ ] Duplicate `command_id` does not repeat a dangerous action.
-- [ ] Expired manual/task commands are rejected locally.
-- [ ] Manual motion stops within the approved local watchdog interval after network loss.
-- [ ] Software e-stop latches; explicit reset and hardware e-stop precedence verified.
-- [ ] ACK accepted means local validation/acceptance, not MQTT receipt.
-- [ ] Task phases and failure codes map to platform semantics.
-- [ ] Map code/version/frame/checksum and coordinate transform validated at known points.
-- [ ] Speed/acceleration/sensor units/capabilities entered from approved vehicle values.
-- [ ] Camera provider paths and codec compatibility validated on target browsers.
-- [ ] Site fault and physical safety tests signed off by the vehicle/site owner.
+- [ ] 使用 contract 1.2.0 / schema 1.2 canonical JSON Schema。
+- [ ] 每次车端进程启动生成新 boot_id；seq 在 boot+topic 内单调递增。
+- [ ] availability/LWT、heartbeat、capabilities Gate 通过后才发送业务数据。
+- [ ] location 的 site/map/version/checksum/frame/x/y/theta 与 Published 地图一致。
+- [ ] 相同 command_id 幂等；target_boot_id 不匹配拒绝。
+- [ ] manual 500ms TTL 使用本地 monotonic receive time，断网自动停止。
+- [ ] stop、software e-stop、latch/reset 在安全区域验证。
+- [ ] ACK accepted 为应用层校验通过，任务完成由 task_status 提供。
+- [ ] 现场参数只填 [ROS2 参数模板](../integration/ros2/ROS2_对接参数模板.yaml)。
+- [ ] 按 [现场验收清单](../integration/ros2/ROS2_验收清单.md) Gate 顺序签字。

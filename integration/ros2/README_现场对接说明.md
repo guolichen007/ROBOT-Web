@@ -1,0 +1,7 @@
+# ROS2 现场对接交付包
+
+本包冻结 `contract_version=1.2.0`、`schema_version=1.2`。它只定义 MQTT + Media Protocol，不包含任何 ROS2 节点、SLAM、Nav2、驱动、底盘、执行机构或车端 watchdog 实现。
+
+现场严格按验收清单 Gate 顺序推进；未知 ROS topic、速度、量程、地图、视频和网络值只填写参数模板，平台不会代替现场猜测。
+
+机器可读总合同见 `ROBOT_INTEGRATION_MANIFEST.json`，canonical JSON Schema 见 `schemas/`，所有命令与上报示例见 `examples/`。

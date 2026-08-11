@@ -53,7 +53,7 @@ async function logout(): Promise<void> {
       </nav>
       <div class="sidebar-foot">
         <span class="profile-chip">DEV</span>
-        <span>协议 1.1</span>
+        <span>协议 1.2</span>
       </div>
     </aside>
     <main class="workspace">

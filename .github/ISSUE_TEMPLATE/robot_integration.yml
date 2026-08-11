@@ -1,0 +1,26 @@
+name: ROS2 现场对接记录
+description: 按冻结的 1.2.0 Gate 记录现场证据，不在本仓库开发 ROS2 节点
+title: "[Robot Integration] "
+labels: [robot-integration]
+body:
+  - type: input
+    id: vehicle
+    attributes: { label: Vehicle ID }
+    validations: { required: true }
+  - type: input
+    id: gate
+    attributes: { label: 当前 Gate（1-12） }
+    validations: { required: true }
+  - type: textarea
+    id: evidence
+    attributes: { label: Schema、topic、QoS、ACK 和安全测试证据（不得含 secret） }
+    validations: { required: true }
+  - type: checkboxes
+    id: contract
+    attributes:
+      label: 合同确认
+      options:
+        - label: 使用 contract 1.2.0 / schema 1.2
+          required: true
+        - label: 前一 Gate 已通过，未跳级启用真实执行机构
+          required: true

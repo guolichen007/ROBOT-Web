@@ -1,21 +1,5 @@
-# Map Coordinate Contract
+# 地图坐标与版本合同
 
-- Canonical database coordinates are world coordinates in metres; pixels are never persisted as navigation truth.
-- Default `frame_id` is `map`.
-- `x` increases toward the map right/east axis. `y` increases toward the map top/north axis.
-- `theta` is radians; zero points along positive `x`; positive rotation is counter-clockwise in world space.
-- `origin_x`, `origin_y` locate the lower-left image/world origin before map rotation.
-- `rotation_rad` rotates local map coordinates counter-clockwise into the displayed world frame.
-- Image pixels use a top-left origin and positive Y downward. `MapAdapter` performs the final Y flip.
-- `resolution_m_per_pixel` defines image scale. Background assets are addressed by random object name and SHA-256.
+`frame_id=map`；x/y 为米；theta 为弧度；theta=0 指向 +X；正方向逆时针。世界原点、rotation、resolution、image pixel origin 和 screen Y flip 由 MapAdapter 最后一层转换，数据库与 MQTT 永远保存世界坐标。
 
-For an unrotated map with screen scale `s` and fitted offsets `ox/oy`:
-
-```text
-screen_x = ox + (world_x - origin_x) * s
-screen_y = oy + (height_m - (world_y - origin_y)) * s
-```
-
-The inverse transform is tested in `apps/web/tests/map-adapter.test.ts`, including rotation.
-
-Every pose, polygon, inspection point, extinguish point and trajectory references a `map_version_id`. A task stores `map_id_snapshot`, `map_version_snapshot`, `semantic_revision_snapshot`, target pose and optional trajectory. A Published map is immutable; edits produce a Draft/new version. Dispatch is rejected when the robot map version differs from the target Published version.
+location 必须带 site_code、map_code、map_version、map_checksum、frame_id。Published map version 不可原地修改，变更产生新版本。任务派发前机器人版本/checksum 必须与目标一致；任务保存 map/version/semantic revision/目标姿态/轨迹快照。

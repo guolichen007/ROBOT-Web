@@ -158,6 +158,7 @@ def seed() -> None:
             )
 
         if not settings.seed_demo:
+            print("seed completed: roles and bootstrap admin (demo data disabled)")
             return
 
         site = _get_or_create(
@@ -265,7 +266,7 @@ def seed() -> None:
             RobotCapability,
             robot_id=robot.id,
             defaults={
-                "protocol_version": "1.1",
+                "protocol_version": "1.2.0",
                 "supported_commands_json": [
                     "manual_control",
                     "stop_motion",

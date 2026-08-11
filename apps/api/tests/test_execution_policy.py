@@ -1,9 +1,9 @@
 from types import SimpleNamespace
 
 import pytest
+from app.core.errors import PlatformError
 from app.db.models import Robot
 from app.modules.commands.service import assert_robot_can_execute
-from fastapi import HTTPException
 
 
 class FakeSession:
@@ -33,9 +33,10 @@ def robot(**overrides) -> Robot:
 
 @pytest.mark.parametrize("action", ["manual_control", "patrol", "extinguish", "return_dock"])
 def test_offline_robot_rejects_motion_actions(action: str) -> None:
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(PlatformError) as exc:
         assert_robot_can_execute(FakeSession(), robot(online_state="OFFLINE"), action)
     assert exc.value.status_code == 409
+    assert exc.value.code == "ROBOT_OFFLINE"
 
 
 def test_offline_robot_allows_estop_attempt() -> None:
@@ -43,20 +44,20 @@ def test_offline_robot_allows_estop_attempt() -> None:
 
 
 def test_estop_latch_blocks_normal_motion() -> None:
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(PlatformError) as exc:
         assert_robot_can_execute(FakeSession(), robot(estop_active=True), "patrol")
-    assert "急停" in str(exc.value.detail)
+    assert exc.value.code == "ROBOT_ESTOP_ACTIVE"
 
 
 def test_active_autonomous_task_blocks_manual() -> None:
     active = SimpleNamespace(id="task-1", type="PATROL")
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(PlatformError) as exc:
         assert_robot_can_execute(FakeSession(active), robot(), "manual_control")
-    assert "显式取消" in str(exc.value.detail)
+    assert exc.value.code == "ACTIVE_TASK_CONFLICT"
 
 
 def test_active_extinguish_blocks_return_dock() -> None:
     active = SimpleNamespace(id="task-1", type="EXTINGUISH")
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(PlatformError) as exc:
         assert_robot_can_execute(FakeSession(active), robot(), "return_dock")
-    assert "不能回充" in str(exc.value.detail)
+    assert exc.value.code == "ACTIVE_TASK_CONFLICT"

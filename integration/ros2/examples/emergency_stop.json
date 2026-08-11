@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.2",
+  "message_id": "10000000-0000-4000-8000-000000000003",
+  "type": "command",
+  "vehicle_id": "R001",
+  "target_boot_id": null,
+  "command_id": "C-INTEGRATION-003",
+  "correlation_id": "20000000-0000-4000-8000-000000000003",
+  "task_id": null,
+  "lease_id": null,
+  "control_session_id": null,
+  "issued_at": "2026-08-11T00:01:03Z",
+  "expires_at": "2026-08-11T00:01:08Z",
+  "ttl_ms": 5000,
+  "priority": 100,
+  "source": "WEB",
+  "operator_id": "OWNER_PROVIDED_PLATFORM_USER",
+  "cmd": "emergency_stop",
+  "params": {}
+}

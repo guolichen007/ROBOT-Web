@@ -1,31 +1,11 @@
-# MQTT Protocol 1.1
+# MQTT 协议 1.2
 
-JSON Schema under `packages/protocol-schemas` is the canonical definition. Generated Python and TypeScript artifacts must match its recorded SHA-256.
+Robot Integration Contract=`1.2.0`，`schema_version=1.2`。canonical Schema：`packages/protocol-schemas/firebot-message-1.2.schema.json`。
 
-## Common envelope
+Vehicle envelope 必须含 schema_version、message_id、type、vehicle_id、boot_id、timestamp、seq。seq 在 `boot_id + topic` 内单调递增；平台记录 server_received_at 与 clock_skew_ms。
 
-Every robot message contains `schema_version=1.1`, UUID `message_id`, `type`, `vehicle_id`, per-process UUID `boot_id`, UTC ISO-8601 `timestamp` and monotonically increasing `seq`. The platform records `server_received_at` and `clock_skew_ms`. Ordering identity is `vehicle_id + boot_id + topic + seq`; event/command identity remains `message_id` or `command_id`.
+Topic 为 `robot/{vehicle_id}/{availability|heartbeat|capabilities|location|status|sensor|alarm|task_status|command|command_ack}`。availability/capabilities QoS1 retain=true；location/sensor/heartbeat QoS0 retain=false；status/alarm/task_status/ACK QoS1 retain=false。
 
-## Topic policy
+command 全部 retain=false。manual QoS0/TTL500ms；stop/e-stop/业务命令 QoS1。Vehicle 使用 boot_id，Platform 使用 target_boot_id。普通命令无 current boot session 时返回 `ROBOT_BOOT_SESSION_UNKNOWN`；software e-stop 可 target null，但必须等待 ACK。
 
-| Topic | QoS | Retain |
-|---|---:|---:|
-| `robot/{id}/location` | 0 | false |
-| `robot/{id}/sensor` | 0 | false |
-| `robot/{id}/heartbeat` | 0 | false |
-| `robot/{id}/status` | 1 | false |
-| `robot/{id}/alarm` | 1 | false |
-| `robot/{id}/task_status` | 1 | false |
-| `robot/{id}/command_ack` | 1 | false |
-| `robot/{id}/command` manual pulse | 0 | false |
-| `robot/{id}/command` stop/e-stop/task | 1 | false |
-| `robot/{id}/availability` | 1 | true |
-| `robot/{id}/capabilities` | 1 | true |
-
-LWT is `availability=offline`, QoS 1, retained. On connect publish `availability=online`, QoS 1, retained. Every command topic is published with `retain=false`.
-
-## ACK semantics
-
-`command_ack.status` is `accepted`, `rejected` or `unsupported`. Accepted means local application validation completed and execution was accepted. Actual start/progress/completion comes from `task_status`. A missing or late ACK yields `PUBLISHED_UNCONFIRMED`; it never yields success. QoS 1 is at-least-once, not exactly-once.
-
-Manual packets contain `lease_id`, `control_session_id`, `seq`, a 500 ms TTL and velocity request. They are not queued or replayed. Durable commands preserve one `command_id` across outbox retries.
+ACK 只允许 accepted/rejected/unsupported，并携带稳定 reason_code。accepted 代表车端应用层完成状态/参数校验并接受执行，不代表任务完成；完成由 task_status 表示。

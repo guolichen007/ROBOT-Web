@@ -4,10 +4,10 @@ import hashlib
 import json
 from typing import Any
 
-from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.errors import PlatformError
 from app.db.models import IdempotencyRecord
 
 
@@ -27,7 +27,11 @@ def lookup(
         )
     )
     if row and row.request_hash != request_hash(payload):
-        raise HTTPException(status_code=409, detail="相同 Idempotency-Key 对应不同请求内容")
+        raise PlatformError(
+            "IDEMPOTENCY_KEY_CONFLICT",
+            "相同 Idempotency-Key 对应不同请求内容",
+            details={"endpoint": endpoint},
+        )
     return row
 
 
@@ -40,14 +44,14 @@ def store(
     payload: dict[str, Any],
     response: dict[str, Any],
     status_code: int = 201,
-) -> None:
-    db.add(
-        IdempotencyRecord(
-            actor_id=actor_id,
-            endpoint=endpoint,
-            idempotency_key=key,
-            request_hash=request_hash(payload),
-            response_status=status_code,
-            response_json=response,
-        )
+) -> IdempotencyRecord:
+    row = IdempotencyRecord(
+        actor_id=actor_id,
+        endpoint=endpoint,
+        idempotency_key=key,
+        request_hash=request_hash(payload),
+        response_status=status_code,
+        response_json=response,
     )
+    db.add(row)
+    return row

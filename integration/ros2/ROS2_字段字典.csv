@@ -1,0 +1,15 @@
+﻿消息,字段,类型,必填,说明
+VehicleEnvelope,schema_version,string,required,1.2
+VehicleEnvelope,message_id,UUID,required,消息幂等标识
+VehicleEnvelope,vehicle_id,string,required,现场分配
+VehicleEnvelope,boot_id,UUID,required,每次车端进程启动新建
+VehicleEnvelope,timestamp,UTC ISO8601,required,源时间
+VehicleEnvelope,seq,integer,required,boot_id+topic 内单调递增
+Location,x/y/theta,number,required,"m/m/rad, +X, CCW"
+Location,map_checksum,string,required,发布地图 checksum
+Command,target_boot_id,UUID|null,required,仅 emergency_stop 可 null
+Command,command_id,string,required,端到端幂等
+Command,ttl_ms,integer,required,车端 monotonic watchdog
+CommandAck,status,enum,required,accepted/rejected/unsupported
+CommandAck,reason_code,enum|null,required,稳定 machine-readable code
+TaskStatus,status,enum,required,accepted/executing/completed/failed/cancelled

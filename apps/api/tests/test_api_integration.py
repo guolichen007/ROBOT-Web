@@ -44,6 +44,7 @@ def stable_baseline() -> None:
         version = db.get(MapVersion, active_map.active_version_id)
         assert version
         robot.online_state = "ONLINE"
+        robot.boot_id = "00000000-0000-4000-8000-000000000002"
         robot.last_seen_at = datetime.now(UTC)
         robot.estop_active = False
         robot.current_map_id = active_map.id
@@ -222,7 +223,8 @@ def test_task_idempotency_outbox_and_map_mismatch(client: TestClient) -> None:
         headers=auth(token, **{"Idempotency-Key": str(uuid4())}),
     )
     assert mismatch.status_code == 409
-    assert mismatch.json()["detail"]["robot_map_version"] == "MISMATCH"
+    assert mismatch.json()["error"]["code"] == "MAP_VERSION_MISMATCH"
+    assert mismatch.json()["error"]["details"]["robot_map_version"] == "MISMATCH"
 
 
 def test_manual_alarm_idempotency_lifecycle_and_audit(client: TestClient) -> None:
