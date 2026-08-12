@@ -1,20 +1,118 @@
 <script setup lang="ts">
+import { computed, onUnmounted, ref, watch } from 'vue'
+import { api, errorMessage } from '@/lib/api'
 import type { StreamInfo } from '@/types'
 import StateChip from './StateChip.vue'
 
-const props = defineProps<{ stream?: StreamInfo; title: string; glyph: string }>()
+const props = withDefaults(
+  defineProps<{ stream?: StreamInfo; title: string; glyph?: string; prominent?: boolean }>(),
+  { glyph: 'RGB', prominent: false },
+)
+const video = ref<HTMLVideoElement>()
+const state = ref<'DISABLED' | 'OFFLINE' | 'CONNECTING' | 'LIVE' | 'ERROR'>(props.stream?.state || 'OFFLINE')
+const detail = ref('')
+let peer: RTCPeerConnection | null = null
+let resourceUrl = ''
+
+const canPlay = computed(() => Boolean(props.stream?.stream_id && props.stream.state !== 'DISABLED'))
+const shouldAutoConnect = computed(() => ['CONNECTING', 'LIVE'].includes(props.stream?.state || 'OFFLINE'))
+
+async function waitIce(pc: RTCPeerConnection): Promise<void> {
+  if (pc.iceGatheringState === 'complete') return
+  await new Promise<void>((resolve) => {
+    const done = () => {
+      if (pc.iceGatheringState === 'complete') {
+        pc.removeEventListener('icegatheringstatechange', done)
+        resolve()
+      }
+    }
+    pc.addEventListener('icegatheringstatechange', done)
+    window.setTimeout(resolve, 3000)
+  })
+}
+
+async function disconnect(): Promise<void> {
+  const old = peer
+  peer = null
+  if (resourceUrl) {
+    void fetch(resourceUrl, { method: 'DELETE', credentials: 'same-origin' }).catch(() => undefined)
+    resourceUrl = ''
+  }
+  old?.close()
+  if (video.value) video.value.srcObject = null
+  state.value = props.stream?.state || 'OFFLINE'
+}
+
+async function connect(): Promise<void> {
+  await disconnect()
+  if (!canPlay.value || !props.stream) return
+  state.value = 'CONNECTING'
+  detail.value = ''
+  try {
+    const ticket = (await api.post('/media/tickets', { stream_id: props.stream.stream_id })).data
+    const pc = new RTCPeerConnection()
+    peer = pc
+    pc.addTransceiver('video', { direction: 'recvonly' })
+    pc.ontrack = (event) => {
+      if (video.value) video.value.srcObject = event.streams[0]
+      state.value = 'LIVE'
+    }
+    pc.onconnectionstatechange = () => {
+      if (['failed', 'disconnected'].includes(pc.connectionState)) state.value = 'ERROR'
+    }
+    const offer = await pc.createOffer()
+    await pc.setLocalDescription(offer)
+    await waitIce(pc)
+    const response = await fetch(ticket.playback_url, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/sdp', Authorization: `Bearer ${ticket.ticket}` },
+      body: pc.localDescription?.sdp,
+    })
+    if (!response.ok) throw new Error(`WHEP ${response.status}`)
+    const location = response.headers.get('Location')
+    if (location) resourceUrl = new URL(location, window.location.href).toString()
+    await pc.setRemoteDescription({ type: 'answer', sdp: await response.text() })
+  } catch (reason) {
+    state.value = 'ERROR'
+    detail.value = errorMessage(reason)
+  }
+}
+
+watch(
+  () => [props.stream?.stream_id, props.stream?.state],
+  () => {
+    if (shouldAutoConnect.value) void connect()
+    else void disconnect()
+  },
+)
+onUnmounted(() => void disconnect())
 </script>
 
 <template>
-  <article class="video-card">
+  <article class="video-card" :class="{ prominent }">
     <header>
       <span>{{ title }}</span
-      ><StateChip :value="props.stream?.state || 'OFFLINE'" />
+      ><StateChip :value="state" />
     </header>
-    <div class="video-placeholder">
-      <span class="video-glyph">{{ glyph }}</span>
-      <strong>{{ props.stream?.state === 'DISABLED' ? '通道已禁用' : '视频源未连接' }}</strong>
-      <small>MediaMTX · {{ props.stream?.codec || 'H.264 预留' }}</small>
+    <div class="video-stage">
+      <video v-show="state === 'LIVE'" ref="video" autoplay muted playsinline />
+      <div v-if="state !== 'LIVE'" class="video-placeholder">
+        <span class="video-glyph">{{ glyph }}</span>
+        <strong>{{
+          state === 'DISABLED'
+            ? '通道已禁用'
+            : state === 'CONNECTING'
+              ? '正在连接实时视频'
+              : state === 'ERROR'
+                ? '视频连接失败'
+                : '视频源未连接'
+        }}</strong>
+        <small>{{ detail || `MediaMTX · ${stream?.codec || 'H.264'}` }}</small>
+        <t-button v-if="canPlay && state !== 'CONNECTING'" size="small" variant="outline" @click="connect"
+          >连接视频</t-button
+        >
+      </div>
     </div>
   </article>
 </template>

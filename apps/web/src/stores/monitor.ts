@@ -16,6 +16,7 @@ const emptySnapshot = (): MonitorSnapshot => ({
   alarms: [],
   tasks: [],
   streams: [],
+  navigation_presets: [],
 })
 
 export const useMonitorStore = defineStore('monitor', () => {
@@ -30,7 +31,9 @@ export const useMonitorStore = defineStore('monitor', () => {
 
   const robot = computed(() => snapshot.value.robots.find((item) => item.vehicle_id === 'R001'))
   const activeAlarm = computed(() => snapshot.value.alarms[0])
-  const activeTask = computed(() => snapshot.value.tasks[0])
+  const activeTask = computed(() =>
+    snapshot.value.tasks.find((item) => ['CREATED', 'QUEUED', 'ACCEPTED', 'EXECUTING'].includes(item.status)),
+  )
 
   function replaceById<T extends { id?: string }>(rows: T[], value: T): void {
     const index = rows.findIndex((row) => row.id === value.id)

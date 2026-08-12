@@ -1,5 +1,13 @@
 # 变更日志
 
+## 当前主线
+
+- 将实时监控重构为低干扰工业 HMI，首页突出二维停车场地图、车顶视频、活动报警和四个主控制动作。
+- 新增 54 车位停车场、右侧传感器安装外参与 polygon 覆盖计算、五态数据质量显示。
+- 新增预设位置、巡检计划/安全调度、停止巡检静止确认、巡检报告（Web/PDF/Excel）和三种灭火处置业务。
+- 新增只读 ROS 原生兼容 Adapter、显式设备绑定、通道溯源及可配置 STALE/OFFLINE 阈值；Canonical MQTT 继续冻结为 Schema 1.2。
+- 修复 safety dispatcher 消费组缺失时线程退出且 readiness 假健康的问题，outbox 与 safety 子循环改为独立心跳。
+
 ## v2.0.0-integration-ready
 
 - 将 `docs/` 与 `integration/` 内全部文件名统一为中文，并同步更新生成器、测试、Manifest、文档链接与仓库策略引用。

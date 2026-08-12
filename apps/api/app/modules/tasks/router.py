@@ -40,6 +40,13 @@ class TaskInput(BaseModel):
     parameters: dict = Field(default_factory=dict)
 
 
+EXTINGUISH_MODES = {
+    "DEPLOY_BLANKET": "展开灭火帐",
+    "SPRAY_AGENT": "喷射灭火剂",
+    "DEPLOY_THEN_SPRAY": "先展开灭火帐，再喷射灭火剂",
+}
+
+
 def target_snapshot(
     db, robot: Robot, payload: TaskInput, task_type: str
 ) -> tuple[ParkingSlot, MapVersion, dict, list | None]:
@@ -86,6 +93,14 @@ def create_task(
     if cached:
         return cached.response_json
     robot = find_robot(db, payload.robot_id)
+    if task_type == "EXTINGUISH":
+        mode = payload.parameters.get("extinguish_mode")
+        if mode not in EXTINGUISH_MODES:
+            raise PlatformError(
+                "EXTINGUISH_MODE_REQUIRED",
+                "灭火任务必须明确选择处理方式",
+                details={"allowed": list(EXTINGUISH_MODES)},
+            )
     slot, version, pose, trajectory = target_snapshot(db, robot, payload, task_type)
     row = Task(
         task_code=task_code(),

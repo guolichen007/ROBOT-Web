@@ -27,6 +27,8 @@ from app.modules.commands.router import router as commands_router
 from app.modules.history.router import router as history_router
 from app.modules.maps.router import router as maps_router
 from app.modules.media.router import router as media_router
+from app.modules.operations.router import router as operations_router
+from app.modules.reports.router import router as reports_router
 from app.modules.robots.router import router as robots_router
 from app.modules.system.router import router as system_router
 from app.modules.tasks.router import router as tasks_router
@@ -97,6 +99,8 @@ for router in (
     history_router,
     admin_router,
     media_router,
+    operations_router,
+    reports_router,
 ):
     app.include_router(router)
 

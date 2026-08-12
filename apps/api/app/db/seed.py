@@ -14,10 +14,16 @@ from app.db.models import (
     InspectionPoint,
     Map,
     MapVersion,
+    NavigationPreset,
     ParkingSlot,
+    PatrolPlan,
+    PatrolPlanPoint,
     Permission,
     Robot,
     RobotCapability,
+    RobotDataChannel,
+    RobotIntegrationProfile,
+    RobotSensorProfile,
     Role,
     Site,
     StreamRegistry,
@@ -179,8 +185,8 @@ def seed() -> None:
                 "status": "PUBLISHED",
                 "checksum": "demo-map-v1",
                 "semantic_revision": 1,
-                "width_m": 30,
-                "height_m": 20,
+                "width_m": 48,
+                "height_m": 34,
                 "origin_x": 0,
                 "origin_y": 0,
                 "rotation_rad": 0,
@@ -193,10 +199,22 @@ def seed() -> None:
         if map_row.active_version_id != map_version.id:
             map_row.active_version_id = map_version.id
 
+        # Demo geometry follows the actual parking-garage topology: two horizontal
+        # groups at the north edge and four vertical banks below. The inspection
+        # route approaches the right bank while driving north, then turns west;
+        # therefore the robot's right-side sensor sees the adjacent parking spaces.
+        map_version.width_m = 48
+        map_version.height_m = 34
+        slot_geometry: list[tuple[float, float, float, float, float]] = []
+        for group_start in (2.5, 27.0):
+            for col in range(9):
+                slot_geometry.append((group_start + col * 2.15, 31.5, 1.95, 4.0, math.pi))
+        for x in (5.0, 17.0, 29.0, 43.0):
+            for row in range(9):
+                slot_geometry.append((x, 3.0 + row * 2.8, 4.0, 2.45, math.pi / 2))
+
         slots: list[ParkingSlot] = []
-        for index in range(12):
-            col, row = index % 6, index // 6
-            x, y = 3 + col * 4.4, 5 + row * 7.5
+        for index, (x, y, width, height, heading) in enumerate(slot_geometry):
             code = f"A-{index + 1:02d}"
             slot = _get_or_create(
                 db,
@@ -206,41 +224,72 @@ def seed() -> None:
                 defaults={
                     "polygon_json": {
                         "points": [
-                            {"x": x - 1.5, "y": y - 2.2},
-                            {"x": x + 1.5, "y": y - 2.2},
-                            {"x": x + 1.5, "y": y + 2.2},
-                            {"x": x - 1.5, "y": y + 2.2},
+                            {"x": x - width / 2, "y": y - height / 2},
+                            {"x": x + width / 2, "y": y - height / 2},
+                            {"x": x + width / 2, "y": y + height / 2},
+                            {"x": x - width / 2, "y": y + height / 2},
                         ]
                     },
-                    "center_pose_json": {"x": x, "y": y, "theta": math.pi / 2},
+                    "center_pose_json": {"x": x, "y": y, "theta": heading},
                     "enabled": True,
                 },
             )
+            slot.polygon_json = {
+                "points": [
+                    {"x": x - width / 2, "y": y - height / 2},
+                    {"x": x + width / 2, "y": y - height / 2},
+                    {"x": x + width / 2, "y": y + height / 2},
+                    {"x": x - width / 2, "y": y + height / 2},
+                ]
+            }
+            slot.center_pose_json = {"x": x, "y": y, "theta": heading}
             slots.append(slot)
-            _get_or_create(
+            inspection = _get_or_create(
                 db,
                 InspectionPoint,
                 map_version_id=map_version.id,
                 parking_slot_id=slot.id,
                 defaults={
-                    "pose_json": {"x": x - 1.9, "y": y, "theta": 0},
-                    "sensor_orientation_json": {"yaw": 0},
+                    "pose_json": {
+                        "x": x if index < 18 else x - 3.0,
+                        "y": y - 2.8 if index < 18 else y,
+                        "theta": math.pi if index < 18 else math.pi / 2,
+                    },
+                    "sensor_orientation_json": {"nominal_side": "RIGHT"},
                     "priority": 1,
                 },
             )
-            _get_or_create(
+            inspection.pose_json = {
+                "x": x if index < 18 else x - 3.0,
+                "y": y - 2.8 if index < 18 else y,
+                "theta": math.pi if index < 18 else math.pi / 2,
+            }
+            inspection.sensor_orientation_json = {"nominal_side": "RIGHT"}
+            extinguish = _get_or_create(
                 db,
                 ExtinguishPoint,
                 map_version_id=map_version.id,
                 parking_slot_id=slot.id,
                 defaults={
-                    "pose_json": {"x": x - 2.3, "y": y, "theta": 0},
+                    "pose_json": {
+                        "x": x if index < 18 else x - 3.2,
+                        "y": y - 3.0 if index < 18 else y,
+                        "theta": math.pi if index < 18 else math.pi / 2,
+                    },
                     "approach_json": {"distance_m": 0.5},
                     "nozzle_config_json": {"preset": "PROTOCOL_TODO"},
                 },
             )
+            extinguish.pose_json = {
+                "x": x if index < 18 else x - 3.2,
+                "y": y - 3.0 if index < 18 else y,
+                "theta": math.pi if index < 18 else math.pi / 2,
+            }
 
-        path = [{"x": 1 + i * 0.55, "y": 10 + math.sin(i / 5) * 5, "theta": 0} for i in range(50)]
+        path = [
+            *[{"x": 39.0, "y": 2.0 + index * 0.55, "theta": math.pi / 2} for index in range(49)],
+            *[{"x": 39.0 - index * 0.6, "y": 28.4, "theta": math.pi} for index in range(62)],
+        ]
         trajectory = _get_or_create(
             db,
             Trajectory,
@@ -248,6 +297,7 @@ def seed() -> None:
             code="DEMO_LOOP",
             defaults={"version": "1", "path_json": path, "enabled": True},
         )
+        trajectory.path_json = path
         robot = _get_or_create(
             db,
             Robot,
@@ -281,6 +331,141 @@ def seed() -> None:
                 "media_json": ["roof_rgb", "roof_thermal", "bottom_ir"],
             },
         )
+        _get_or_create(
+            db,
+            RobotIntegrationProfile,
+            robot_id=robot.id,
+            defaults={
+                "source_kind": "MOCK",
+                "upstream_protocol": "canonical-mqtt-1.2",
+                "control_contract_verified": True,
+                "ack_contract_verified": True,
+                "map_contract_verified": True,
+                "stale_seconds": 3,
+                "offline_seconds": 10,
+                "forward_only": True,
+                "reverse_precision_navigation": False,
+                "verified_at": datetime.now(UTC),
+            },
+        )
+        _get_or_create(
+            db,
+            RobotSensorProfile,
+            robot_id=robot.id,
+            channel="right_fire_detection",
+            defaults={
+                "support_state": "CONNECTED",
+                "nominal_side": "RIGHT",
+                "sensor_mount_x_m": 0.35,
+                "sensor_mount_y_m": -0.32,
+                "sensor_mount_yaw_rad": -math.pi / 2,
+                "coverage_range_m": 5.5,
+                "coverage_fov_rad": math.pi / 3,
+                "config_source": "DEMO_VERIFIED",
+                "verified_at": datetime.now(UTC),
+            },
+        )
+        for channel, state in {
+            "pose": "CONNECTED",
+            "odom": "CONNECTED",
+            "battery": "CONNECTED",
+            "heartbeat": "CONNECTED",
+            "smoke": "CONNECTED",
+            "top_ir": "CONNECTED",
+            "bottom_ir": "CONNECTED",
+            "estop": "CONNECTED",
+        }.items():
+            _get_or_create(
+                db,
+                RobotDataChannel,
+                robot_id=robot.id,
+                channel=channel,
+                defaults={
+                    "support_state": state,
+                    "quality": "GOOD",
+                    "source_kind": "MOCK",
+                    "last_received_at": datetime.now(UTC),
+                },
+            )
+        waiting = _get_or_create(
+            db,
+            NavigationPreset,
+            map_version_id=map_version.id,
+            code="WAITING_AREA",
+            defaults={
+                "name": "等待区",
+                "category": "WAITING_AREA",
+                "pose_json": {"x": 39.0, "y": 2.0, "theta": math.pi / 2},
+                "position_tolerance_m": 0.25,
+                "yaw_tolerance_rad": 0.18,
+                "allowed_approach_json": {"direction": "FORWARD_ONLY"},
+                "requires_reverse": False,
+                "is_default": True,
+                "enabled": True,
+                "semantic_revision": map_version.semantic_revision,
+            },
+        )
+        _ = waiting
+        for slot in slots:
+            inspection = db.scalar(
+                select(InspectionPoint).where(InspectionPoint.parking_slot_id == slot.id)
+            )
+            if inspection:
+                _get_or_create(
+                    db,
+                    NavigationPreset,
+                    map_version_id=map_version.id,
+                    code=f"INSPECT_{slot.code.replace('-', '_')}",
+                    defaults={
+                        "name": f"{slot.code} 巡检位",
+                        "category": "INSPECTION",
+                        "pose_json": inspection.pose_json,
+                        "position_tolerance_m": 0.2,
+                        "yaw_tolerance_rad": 0.15,
+                        "allowed_approach_json": {"direction": "FORWARD_ONLY"},
+                        "requires_reverse": False,
+                        "is_default": False,
+                        "enabled": True,
+                        "semantic_revision": map_version.semantic_revision,
+                    },
+                )
+        patrol_plan = _get_or_create(
+            db,
+            PatrolPlan,
+            code="DEMO_RIGHT_SIDE_PATROL",
+            defaults={
+                "name": "停车场右侧检测巡检",
+                "robot_id": robot.id,
+                "map_version_id": map_version.id,
+                "trajectory_id": trajectory.id,
+                "enabled": True,
+                "created_by": admin.id,
+            },
+        )
+        plan_presets = db.scalars(
+            select(NavigationPreset)
+            .where(
+                NavigationPreset.map_version_id == map_version.id,
+                NavigationPreset.category == "INSPECTION",
+            )
+            .order_by(NavigationPreset.code)
+            .limit(12)
+        ).all()
+        for sequence, preset in enumerate(plan_presets, 1):
+            _get_or_create(
+                db,
+                PatrolPlanPoint,
+                patrol_plan_id=patrol_plan.id,
+                sequence=sequence,
+                defaults={
+                    "navigation_preset_id": preset.id,
+                    "dwell_seconds": 3,
+                    "required_observations_json": [
+                        "right_fire_detection",
+                        "roof_rgb",
+                    ],
+                },
+            )
         for camera_type in ("roof_rgb", "roof_thermal", "bottom_ir"):
             _get_or_create(
                 db,

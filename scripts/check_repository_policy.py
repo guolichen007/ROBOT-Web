@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SKIP_PARTS = {".git", "node_modules", "dist", "backups", "artifacts", ".venv"}
 TEXT_SUFFIXES = {
     ".py",
     ".ts",
@@ -22,11 +22,17 @@ TEXT_SUFFIXES = {
 
 
 def files():
-    for path in ROOT.rglob("*"):
-        # Check path components before stat(): Windows cannot stat some npm
-        # shim symlinks, and ignored dependency trees are outside this policy.
-        if any(part in SKIP_PARTS for part in path.parts):
+    # Policy applies to the exact commit candidate: tracked files plus
+    # non-ignored untracked files. Local caches, virtualenvs, Playwright
+    # artifacts and backup data must never influence a release gate.
+    output = subprocess.check_output(
+        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+        cwd=ROOT,
+    ).decode("utf-8")
+    for relative in output.split("\0"):
+        if not relative:
             continue
+        path = ROOT / relative
         if path.is_file() and path.suffix.lower() in TEXT_SUFFIXES:
             yield path
 
