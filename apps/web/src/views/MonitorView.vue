@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import {
+  AlarmIcon,
+  ControlPlatformIcon,
+  HomeIcon,
+  PoweroffIcon,
+  StopCircleIcon,
+} from 'tdesign-icons-vue-next'
 import ManualControl from '@/components/ManualControl.vue'
 import MapCanvas from '@/components/MapCanvas.vue'
 import StateChip from '@/components/StateChip.vue'
@@ -8,28 +15,85 @@ import { api, errorMessage } from '@/lib/api'
 import { newUuid } from '@/lib/id'
 import { useAuthStore } from '@/stores/auth'
 import { useMonitorStore } from '@/stores/monitor'
-import type { Alarm, ParkingSlot } from '@/types'
+import type { Alarm, DataSupportState, DetectionCoverage, ParkingSlot, StopOperation } from '@/types'
 
 const auth = useAuthStore()
 const monitor = useMonitorStore()
 const selectedSlot = ref<ParkingSlot | null>(null)
 const selectedAlarm = ref<Alarm | null>(null)
+const extinguishMode = ref('DEPLOY_THEN_SPRAY')
 const notice = ref<{ message: string; tone: string } | null>(null)
 const working = ref(false)
+const manualOpen = ref(false)
+const videoTab = ref('roof_rgb')
+const coverage = ref<DetectionCoverage | null>(null)
+const stopOperation = ref<StopOperation | null>(null)
+let coverageTimer = 0
+let stopTimer = 0
+const STOP_OPERATION_STORAGE_KEY = 'firebot.stop-operation-id'
 
 const trajectory = computed(() => monitor.snapshot.trajectories[0]?.path_json || [])
 const streams = computed(() =>
   Object.fromEntries(monitor.snapshot.streams.map((item) => [item.camera_type, item])),
 )
-const alarms = computed(() => monitor.snapshot.alarms.slice(0, 5))
-const tasks = computed(() => monitor.snapshot.tasks.slice(0, 4))
+const alarms = computed(() => monitor.snapshot.alarms.slice(0, 6))
 const robot = computed(() => monitor.robot)
+const activeAlarm = computed(() => alarms.value[0])
+const controlEnabled = computed(() =>
+  Boolean(robot.value?.control_enabled && robot.value?.online_state === 'ONLINE'),
+)
+const controlReason = computed(
+  () =>
+    robot.value?.control_disabled_reason ||
+    (robot.value?.online_state !== 'ONLINE' ? '车辆不在线' : '控制合同尚未验证'),
+)
+const stopStateText = computed(
+  () =>
+    ({
+      STOP_REQUESTED: '正在停止巡检',
+      TASK_CANCEL_ACCEPTED: '巡检任务已取消，等待停止确认',
+      STOP_COMMAND_ACCEPTED: '停止命令已接受',
+      VERIFYING_STATIONARY: '正在用新鲜遥测确认车辆静止',
+      VEHICLE_STATIONARY_CONFIRMED: '车辆已停止',
+      UNCONFIRMED: '停止未确认',
+    })[stopOperation.value?.state || ''] || '',
+)
+
+const extinguishModes = [
+  { value: 'DEPLOY_BLANKET', title: '展开灭火帐', description: '展开并覆盖目标车辆' },
+  { value: 'SPRAY_AGENT', title: '喷射灭火剂', description: '对准目标执行药剂喷射' },
+  { value: 'DEPLOY_THEN_SPRAY', title: '帐幕后喷射', description: '先展开灭火帐，再喷射灭火剂' },
+]
 
 function toast(message: string, tone = ''): void {
   notice.value = { message, tone }
   window.setTimeout(() => {
     if (notice.value?.message === message) notice.value = null
   }, 4200)
+}
+
+function channelState(name: string): DataSupportState {
+  return robot.value?.data_channels?.[name]?.support_state || 'NOT_CONNECTED'
+}
+
+function closeAlarmDrawer(visible: boolean): void {
+  if (!visible) selectedAlarm.value = null
+}
+
+function valueOrState(value: number | null | undefined, channel: string, suffix = ''): string {
+  if (channelState(channel) !== 'CONNECTED' || value == null) {
+    return channelState(channel) === 'UNSUPPORTED' ? '当前车型不支持' : '未接入'
+  }
+  return `${value.toFixed(channel === 'smoke' ? 3 : 1)}${suffix}`
+}
+
+async function loadCoverage(): Promise<void> {
+  if (!robot.value) return
+  try {
+    coverage.value = (await api.get(`/robots/${robot.value.vehicle_id}/detection-coverage`)).data
+  } catch {
+    coverage.value = null
+  }
 }
 
 async function createManualAlarm(): Promise<void> {
@@ -50,9 +114,9 @@ async function createManualAlarm(): Promise<void> {
     )
     selectedAlarm.value = data
     await monitor.loadSnapshot()
-    toast(`${selectedSlot.value.code} 人工火情已创建，等待确认`, 'danger')
-  } catch (error) {
-    toast(errorMessage(error), 'danger')
+    toast(`${selectedSlot.value.code} 人工火情已创建`, 'danger')
+  } catch (reason) {
+    toast(errorMessage(reason), 'danger')
   } finally {
     working.value = false
   }
@@ -60,12 +124,11 @@ async function createManualAlarm(): Promise<void> {
 
 async function transition(alarm: Alarm, action: 'acknowledge' | 'confirm' | 'resolve'): Promise<void> {
   try {
-    const { data } = await api.post(`/alarms/${alarm.id}/${action}`)
-    selectedAlarm.value = data
+    selectedAlarm.value = (await api.post(`/alarms/${alarm.id}/${action}`)).data
     await monitor.loadSnapshot()
-    toast(`火情状态已更新：${action}`)
-  } catch (error) {
-    toast(errorMessage(error), 'danger')
+    toast('火情状态已更新')
+  } catch (reason) {
+    toast(errorMessage(reason), 'danger')
   }
 }
 
@@ -78,14 +141,122 @@ async function dispatch(alarm: Alarm): Promise<void> {
       {
         robot_id: robot.value.vehicle_id,
         trajectory_id: monitor.snapshot.trajectories[0]?.id,
-        parameters: { source: 'MONITOR' },
+        parameters: { source: 'MONITOR', extinguish_mode: extinguishMode.value },
       },
       { headers: { 'Idempotency-Key': newUuid() } },
     )
     await monitor.loadSnapshot()
-    toast('灭火任务已创建并进入可靠派发队列', 'ok')
-  } catch (error) {
-    toast(errorMessage(error), 'danger')
+    selectedAlarm.value = null
+    toast('灭火任务已创建，等待车端 ACK', 'ok')
+  } catch (reason) {
+    toast(errorMessage(reason), 'danger')
+  } finally {
+    working.value = false
+  }
+}
+
+async function startPatrol(): Promise<void> {
+  const target = selectedSlot.value || monitor.snapshot.parking_slots[0]
+  if (!robot.value || !target) return
+  working.value = true
+  try {
+    await api.post(
+      '/tasks/patrol',
+      {
+        robot_id: robot.value.vehicle_id,
+        target_parking_slot_id: target.id,
+        trajectory_id: monitor.snapshot.trajectories[0]?.id,
+        parameters: { source: 'OPERATIONS_HMI', patrol_scope: 'FULL_ROUTE' },
+      },
+      { headers: { 'Idempotency-Key': newUuid() } },
+    )
+    await monitor.loadSnapshot()
+    toast('巡检任务已创建，等待派发与车辆接受', 'ok')
+  } catch (reason) {
+    toast(errorMessage(reason), 'danger')
+  } finally {
+    working.value = false
+  }
+}
+
+async function pollStop(id: string): Promise<void> {
+  window.clearInterval(stopTimer)
+  stopTimer = window.setInterval(async () => {
+    try {
+      stopOperation.value = (await api.get(`/stop-operations/${id}`)).data
+      if (
+        ['VEHICLE_STATIONARY_CONFIRMED', 'FAILED', 'UNCONFIRMED'].includes(stopOperation.value?.state || '')
+      ) {
+        window.clearInterval(stopTimer)
+        sessionStorage.removeItem(STOP_OPERATION_STORAGE_KEY)
+      }
+    } catch {
+      window.clearInterval(stopTimer)
+    }
+  }, 500)
+}
+
+async function stopPatrol(): Promise<void> {
+  if (!robot.value) return
+  working.value = true
+  try {
+    stopOperation.value = (
+      await api.post(
+        `/robots/${robot.value.vehicle_id}/stop-patrol`,
+        {},
+        { headers: { 'Idempotency-Key': newUuid() } },
+      )
+    ).data
+    if (stopOperation.value) {
+      sessionStorage.setItem(STOP_OPERATION_STORAGE_KEY, stopOperation.value.id)
+      void pollStop(stopOperation.value.id)
+    }
+    toast('已同时请求取消巡检和停止运动；正在确认车辆静止', 'warn')
+  } catch (reason) {
+    toast(errorMessage(reason), 'danger')
+  } finally {
+    working.value = false
+  }
+}
+
+async function returnWaiting(): Promise<void> {
+  if (!robot.value) return
+  const preset = monitor.snapshot.navigation_presets?.find((item) => item.category === 'WAITING_AREA')
+  try {
+    await api.post(
+      `/robots/${robot.value.vehicle_id}/commands/return-dock`,
+      {
+        params: {
+          destination_kind: 'WAITING_AREA',
+          navigation_preset_id: preset?.id,
+          pose: preset?.pose_json,
+        },
+      },
+      { headers: { 'Idempotency-Key': newUuid() } },
+    )
+    toast('返回等待区已创建，等待车端 ACK', 'ok')
+  } catch (reason) {
+    toast(errorMessage(reason), 'danger')
+  }
+}
+
+async function emergencyStop(): Promise<void> {
+  if (!robot.value) return
+  working.value = true
+  try {
+    const { data } = await api.post(
+      `/robots/${robot.value.vehicle_id}/commands/emergency-stop`,
+      {},
+      { headers: { 'Idempotency-Key': newUuid() } },
+    )
+    toast(
+      data.lifecycle_status === 'PUBLISHED_UNCONFIRMED'
+        ? '软件急停未送达/未确认'
+        : '软件急停已发送，等待车端应用层 ACK',
+      'danger',
+    )
+  } catch (reason) {
+    toast(errorMessage(reason), 'danger')
   } finally {
     working.value = false
   }
@@ -93,67 +264,52 @@ async function dispatch(alarm: Alarm): Promise<void> {
 
 onMounted(() => {
   if (!monitor.snapshot.map_version) void monitor.start()
+  const pendingStop = sessionStorage.getItem(STOP_OPERATION_STORAGE_KEY)
+  if (pendingStop) {
+    void api
+      .get(`/stop-operations/${pendingStop}`)
+      .then(({ data }) => {
+        stopOperation.value = data
+        if (!['VEHICLE_STATIONARY_CONFIRMED', 'FAILED', 'UNCONFIRMED'].includes(data.state))
+          void pollStop(pendingStop)
+        else sessionStorage.removeItem(STOP_OPERATION_STORAGE_KEY)
+      })
+      .catch(() => sessionStorage.removeItem(STOP_OPERATION_STORAGE_KEY))
+  }
+  void loadCoverage()
+  coverageTimer = window.setInterval(() => void loadCoverage(), 1000)
+})
+onUnmounted(() => {
+  window.clearInterval(coverageTimer)
+  window.clearInterval(stopTimer)
 })
 </script>
 
 <template>
-  <div class="monitor-page">
-    <div class="page-title-row">
-      <div>
-        <span class="eyebrow">LIVE OPERATIONS</span>
-        <h1>态势监控</h1>
-      </div>
-      <div class="context-meta">
-        <span>{{ monitor.snapshot.site?.name || '站点加载中' }}</span>
-        <strong
-          >{{ monitor.snapshot.map?.code || '--' }} / V{{
-            monitor.snapshot.map_version?.version || '--'
-          }}</strong
-        >
-        <StateChip :value="monitor.snapshot.map_version?.status || 'UNKNOWN'" />
-      </div>
-    </div>
-
+  <div class="monitor-page industrial-hmi">
     <div v-if="notice" class="toast" :class="notice.tone">{{ notice.message }}</div>
-
-    <section class="kpi-grid">
-      <article>
-        <span>机器人状态</span
-        ><strong :class="`state-${(robot?.online_state || 'offline').toLowerCase()}`">{{
-          robot?.online_state || 'OFFLINE'
-        }}</strong
-        ><small>心跳阈值 3s / 10s</small>
-      </article>
-      <article>
-        <span>剩余电量</span><strong>{{ robot?.battery?.toFixed?.(1) ?? '--' }}<em>%</em></strong>
-        <div class="battery-bar"><i :style="{ width: `${robot?.battery || 0}%` }"></i></div>
-      </article>
-      <article>
-        <span>运行模式</span><strong>{{ robot?.mode || 'UNKNOWN' }}</strong
-        ><small>{{ robot?.estop_active ? '软件急停锁存' : '安全策略正常' }}</small>
-      </article>
-      <article>
-        <span>当前任务</span><strong>{{ monitor.activeTask?.type || '空闲' }}</strong
-        ><small>{{ monitor.activeTask?.phase || '等待调度' }}</small>
-      </article>
-      <article class="sensor-kpi">
-        <span>烟雾 / 红外</span><strong>{{ robot?.smoke?.toFixed?.(3) ?? '0.000' }}</strong
-        ><small
-          >{{ robot?.bottom_ir?.toFixed?.(1) ?? '--' }}° / {{ robot?.top_ir?.toFixed?.(1) ?? '--' }}°</small
-        >
-      </article>
+    <section v-if="activeAlarm" class="fire-banner" @click="selectedAlarm = activeAlarm">
+      <AlarmIcon /><strong>{{ activeAlarm.state === 'NEW' ? '主动发现火情' : '活动火情' }}</strong>
+      <span>{{ activeAlarm.event_code }}</span
+      ><span>{{ activeAlarm.fire_type }}</span
+      ><span>{{ activeAlarm.severity }}</span> <StateChip :value="activeAlarm.state" /><button>
+        查看并处置
+      </button>
     </section>
+    <section v-else class="normal-banner"><span>运行态势正常</span><small>当前无未关闭火情</small></section>
 
-    <div class="monitor-grid">
-      <section class="map-panel panel">
+    <div class="operations-grid">
+      <section class="panel map-panel">
         <div class="panel-heading">
           <div>
-            <span class="eyebrow">MAP / FRAME: MAP</span>
-            <h3>二维地图</h3>
+            <h2>二维停车场地图</h2>
+            <p>车位、规划路线、车辆位置与右侧检测覆盖</p>
           </div>
           <div class="map-state">
             <span>{{ robot?.x?.toFixed?.(2) ?? '--' }}, {{ robot?.y?.toFixed?.(2) ?? '--' }} m</span
-            ><span>θ {{ robot?.theta?.toFixed?.(2) ?? '--' }} rad</span>
+            ><span
+              >航向 {{ robot?.theta == null ? '--' : `${((robot.theta * 180) / Math.PI).toFixed(1)}°` }}</span
+            >
           </div>
         </div>
         <MapCanvas
@@ -164,127 +320,210 @@ onMounted(() => {
           :trajectory="trajectory"
           :robot="robot"
           :alarms="monitor.snapshot.alarms"
+          :coverage="coverage"
           :selected-slot-id="selectedSlot?.id"
           @slot-click="selectedSlot = $event"
         />
         <div v-if="selectedSlot" class="map-selection">
-          <div>
-            <span>已选择车位</span><strong>{{ selectedSlot.code }}</strong>
-          </div>
-          <button
+          <strong>{{ selectedSlot.code }}</strong
+          ><span>{{
+            coverage?.covered_parking_slot_ids.includes(selectedSlot.id)
+              ? '当前位于右侧检测覆盖内'
+              : '当前不在检测覆盖内'
+          }}</span
+          ><t-button
             v-if="auth.can('alarm.confirm')"
-            class="danger-outline"
-            :disabled="working"
+            theme="danger"
+            variant="outline"
+            :loading="working"
             @click="createManualAlarm"
-          >
-            创建人工火情
-          </button>
-          <button class="text-button" @click="selectedSlot = null">取消</button>
+            >人工上报火情</t-button
+          ><button @click="selectedSlot = null">取消选择</button>
         </div>
       </section>
 
-      <aside class="right-stack">
-        <ManualControl :robot="robot" @notice="toast" />
-        <section class="panel alarms-panel">
+      <aside class="situation-column">
+        <section class="panel primary-video">
+          <t-tabs v-model="videoTab" size="large">
+            <t-tab-panel value="roof_rgb" label="车顶实时相机"
+              ><VideoCard :stream="streams.roof_rgb" title="车顶 RGB" prominent
+            /></t-tab-panel>
+            <t-tab-panel value="roof_thermal" label="顶部热像"
+              ><VideoCard :stream="streams.roof_thermal" title="顶部热像" prominent
+            /></t-tab-panel>
+            <t-tab-panel value="bottom_ir" label="车底红外"
+              ><VideoCard :stream="streams.bottom_ir" title="车底红外" prominent
+            /></t-tab-panel>
+          </t-tabs>
+        </section>
+        <section class="sensor-strip panel">
+          <article>
+            <span>烟雾浓度</span><strong>{{ valueOrState(robot?.smoke, 'smoke') }}</strong
+            ><StateChip :value="channelState('smoke')" />
+          </article>
+          <article>
+            <span>顶部红外</span><strong>{{ valueOrState(robot?.top_ir, 'top_ir', '°C') }}</strong
+            ><StateChip :value="channelState('top_ir')" />
+          </article>
+          <article>
+            <span>车底红外</span><strong>{{ valueOrState(robot?.bottom_ir, 'bottom_ir', '°C') }}</strong
+            ><StateChip :value="channelState('bottom_ir')" />
+          </article>
+        </section>
+        <section class="panel active-alarm-list">
           <div class="panel-heading">
-            <div>
-              <span class="eyebrow">ALARM QUEUE</span>
-              <h3>活动火情</h3>
-            </div>
-            <RouterLink to="/alarms">全部</RouterLink>
+            <h3>活动报警</h3>
+            <RouterLink to="/alarms">全部记录</RouterLink>
           </div>
-          <div v-if="!alarms.length" class="empty-state"><span>✓</span><strong>当前无活动火情</strong></div>
-          <button v-for="alarm in alarms" :key="alarm.id" class="alarm-row" @click="selectedAlarm = alarm">
-            <span class="severity" :data-level="alarm.severity"></span>
-            <span
+          <div v-if="!alarms.length" class="quiet-state">当前无活动火情</div>
+          <button v-for="alarm in alarms" :key="alarm.id" @click="selectedAlarm = alarm">
+            <i :data-level="alarm.severity"></i
+            ><span
               ><strong>{{ alarm.event_code }}</strong
-              ><small>{{ alarm.fire_type }} · {{ alarm.detection_method }}</small></span
-            >
-            <StateChip :value="alarm.state" />
+              ><small
+                >{{ alarm.fire_type }} · {{ new Date(alarm.last_seen_at).toLocaleTimeString() }}</small
+              ></span
+            ><StateChip :value="alarm.state" />
           </button>
         </section>
       </aside>
     </div>
 
-    <section class="operations-row">
-      <div class="video-grid">
-        <VideoCard :stream="streams.roof_rgb" title="顶部 RGB" glyph="RGB" />
-        <VideoCard :stream="streams.roof_thermal" title="顶部热像" glyph="THM" />
-        <VideoCard :stream="streams.bottom_ir" title="底部红外" glyph="IR" />
+    <div
+      v-if="stopStateText"
+      class="stop-progress"
+      :class="stopOperation?.state === 'VEHICLE_STATIONARY_CONFIRMED' ? 'complete' : ''"
+    >
+      <StopCircleIcon /><strong>{{ stopStateText }}</strong
+      ><span
+        v-if="
+          stopOperation?.state === 'VERIFYING_STATIONARY' ||
+          stopOperation?.state === 'VEHICLE_STATIONARY_CONFIRMED'
+        "
+        >连续静止帧 {{ stopOperation.stationary_frames }}/5</span
+      >
+    </div>
+    <section class="command-dock panel">
+      <div class="command-context">
+        <strong>{{ monitor.activeTask?.type === 'PATROL' ? '巡检中' : robot?.mode || '空闲' }}</strong
+        ><span>{{ monitor.activeTask?.phase || '等待操作指令' }}</span
+        ><small v-if="!controlEnabled">控制不可用：{{ controlReason }}</small>
       </div>
-      <section class="panel task-panel">
-        <div class="panel-heading">
-          <div>
-            <span class="eyebrow">COMMAND / TASK</span>
-            <h3>执行状态</h3>
-          </div>
-          <RouterLink to="/tasks">任务中心</RouterLink>
-        </div>
-        <div v-if="!tasks.length" class="empty-state"><strong>无活动任务</strong></div>
-        <div v-for="task in tasks" :key="task.id" class="task-row">
-          <div>
-            <strong>{{ task.task_code }}</strong
-            ><small>{{ task.type }}</small>
-          </div>
-          <div class="task-progress"><i :style="{ width: `${task.progress}%` }"></i></div>
-          <div>
-            <StateChip :value="task.status" /><small>{{ task.phase }}</small>
-          </div>
-        </div>
-      </section>
+      <t-tooltip :content="controlReason" :disabled="controlEnabled"
+        ><span
+          ><t-button
+            size="large"
+            theme="success"
+            :disabled="working || !controlEnabled || !auth.can('patrol.create')"
+            @click="startPatrol"
+            ><template #icon><ControlPlatformIcon /></template>开始巡检</t-button
+          ></span
+        ></t-tooltip
+      >
+      <t-button
+        size="large"
+        theme="warning"
+        :disabled="working || !auth.can('robot.control.stop')"
+        @click="stopPatrol"
+        ><template #icon><StopCircleIcon /></template>停止巡检</t-button
+      >
+      <t-tooltip :content="controlReason" :disabled="controlEnabled"
+        ><span
+          ><t-button
+            size="large"
+            :disabled="working || !controlEnabled || !auth.can('robot.control.task')"
+            @click="returnWaiting"
+            ><template #icon><HomeIcon /></template>返回等待区</t-button
+          ></span
+        ></t-tooltip
+      >
+      <t-button
+        size="large"
+        theme="danger"
+        :disabled="working || !controlEnabled || !auth.can('robot.control.estop')"
+        @click="emergencyStop"
+        ><template #icon><PoweroffIcon /></template>软件紧急停止</t-button
+      >
+      <t-button
+        variant="outline"
+        :disabled="!controlEnabled || !auth.can('robot.control.manual')"
+        @click="manualOpen = true"
+        >手动控制</t-button
+      >
     </section>
 
-    <div v-if="selectedAlarm" class="modal-shade" @click.self="selectedAlarm = null">
-      <section class="modal-card">
-        <span class="eyebrow">FIRE EVENT</span>
-        <h2>{{ selectedAlarm.event_code }}</h2>
+    <t-drawer v-model:visible="manualOpen" header="手动控制（高级操作）" size="420px" :footer="false"
+      ><ManualControl :robot="robot" :show-safety="false" @notice="toast" /><t-alert
+        theme="warning"
+        title="安全提示"
+        message="手动脉冲 TTL 500 ms；松键、失焦或页面隐藏会发送 stop_motion 并释放租约。真实车辆最终安全仍由车端 watchdog 和物理急停保证。"
+    /></t-drawer>
+
+    <t-drawer
+      :visible="Boolean(selectedAlarm)"
+      header="火情确认与处置"
+      size="520px"
+      :footer="false"
+      @update:visible="closeAlarmDrawer"
+    >
+      <div v-if="selectedAlarm" class="fire-drawer">
+        <div class="fire-summary">
+          <AlarmIcon />
+          <div>
+            <strong>{{ selectedAlarm.event_code }}</strong
+            ><span>{{ selectedAlarm.fire_type }} · {{ selectedAlarm.severity }}</span>
+          </div>
+          <StateChip :value="selectedAlarm.state" />
+        </div>
         <dl>
           <div>
-            <dt>状态</dt>
-            <dd><StateChip :value="selectedAlarm.state" /></dd>
-          </div>
-          <div>
-            <dt>严重度</dt>
-            <dd>{{ selectedAlarm.severity }}</dd>
+            <dt>发现方式</dt>
+            <dd>{{ selectedAlarm.detection_method }}</dd>
           </div>
           <div>
             <dt>重复次数</dt>
             <dd>{{ selectedAlarm.occurrence_count }}</dd>
           </div>
         </dl>
-        <div class="modal-actions">
-          <button
+        <div class="fire-actions">
+          <t-button
             v-if="selectedAlarm.state === 'NEW' && auth.can('alarm.ack')"
-            class="secondary-button"
             @click="transition(selectedAlarm, 'acknowledge')"
-          >
-            确认收到
-          </button>
-          <button
+            >确认收到</t-button
+          ><t-button
             v-if="['NEW', 'ACKNOWLEDGED'].includes(selectedAlarm.state) && auth.can('alarm.confirm')"
-            class="primary-button"
+            theme="warning"
             @click="transition(selectedAlarm, 'confirm')"
+            >确认火情</t-button
           >
-            确认火情
-          </button>
-          <button
-            v-if="selectedAlarm.state === 'CONFIRMED' && auth.can('extinguish.create')"
-            class="primary-button"
-            :disabled="working"
-            @click="dispatch(selectedAlarm)"
-          >
-            创建灭火任务
-          </button>
-          <button
-            v-if="auth.can('alarm.resolve')"
-            class="secondary-button"
-            @click="transition(selectedAlarm, 'resolve')"
-          >
-            标记解决
-          </button>
         </div>
-        <button class="modal-close" aria-label="关闭" @click="selectedAlarm = null">×</button>
-      </section>
-    </div>
+        <section v-if="selectedAlarm.state === 'CONFIRMED'" class="extinguish-choice">
+          <h3>选择灭火处理方式</h3>
+          <label
+            v-for="mode in extinguishModes"
+            :key="mode.value"
+            :class="{ selected: extinguishMode === mode.value }"
+            ><input v-model="extinguishMode" type="radio" :value="mode.value" /><strong>{{
+              mode.title
+            }}</strong
+            ><small>{{ mode.description }}</small></label
+          ><t-button
+            block
+            theme="danger"
+            size="large"
+            :loading="working"
+            :disabled="!controlEnabled"
+            @click="dispatch(selectedAlarm)"
+            >创建灭火任务</t-button
+          >
+        </section>
+        <t-button
+          v-if="auth.can('alarm.resolve')"
+          variant="outline"
+          @click="transition(selectedAlarm, 'resolve')"
+          >标记已解决</t-button
+        >
+      </div>
+    </t-drawer>
   </div>
 </template>

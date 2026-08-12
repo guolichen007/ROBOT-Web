@@ -113,6 +113,19 @@ services:
       migrate: { condition: service_completed_successfully }
       mosquitto: { condition: service_healthy }
 
+  ros-compat-adapter:
+    <<: *python-service
+    command: ["python", "/workspace/services/ros-compat-adapter/main.py"]
+    environment:
+      <<: *test-environment
+      ROS_COMPAT_MODE: ${TEST_ROS_COMPAT_MODE:-false}
+      ROS_COMPAT_EXPECTED_EXTERNAL_ID: test-firebot
+      SINGLE_ROBOT_INTERNAL_ID: R001
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      mosquitto: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
   command-dispatcher:
     <<: *python-service
     command: ["python", "/workspace/services/command-dispatcher/main.py"]

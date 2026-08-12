@@ -231,7 +231,7 @@ class Robot(Base):
     current_map_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     current_mode: Mapped[str] = mapped_column(String(24), default="IDLE")
     current_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    battery: Mapped[float] = mapped_column(Float, default=0)
+    battery: Mapped[float | None] = mapped_column(Float, nullable=True)
     estop_active: Mapped[bool] = mapped_column(Boolean, default=False)
     boot_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -262,6 +262,85 @@ class RobotCapability(Base):
     sensors_json: Mapped[list[str]] = mapped_column(JsonType)
     media_json: Mapped[list[str]] = mapped_column(JsonType)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class RobotIntegrationProfile(Base):
+    """Platform-side integration facts. Never promotes an unverified vehicle to control-ready."""
+
+    __tablename__ = "robot_integration_profiles"
+    robot_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("robots.id", ondelete="CASCADE"), primary_key=True
+    )
+    source_kind: Mapped[str] = mapped_column(String(24), default="CANONICAL_MQTT")
+    upstream_protocol: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    control_contract_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    ack_contract_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    map_contract_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    read_only_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stale_seconds: Mapped[int] = mapped_column(Integer, default=3)
+    offline_seconds: Mapped[int] = mapped_column(Integer, default=10)
+    forward_only: Mapped[bool] = mapped_column(Boolean, default=True)
+    reverse_precision_navigation: Mapped[bool] = mapped_column(Boolean, default=False)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class RobotExternalAlias(Base):
+    __tablename__ = "robot_external_aliases"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    robot_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("robots.id", ondelete="CASCADE"), index=True
+    )
+    source_kind: Mapped[str] = mapped_column(String(24), default="ROS_NATIVE")
+    external_id: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    state: Mapped[str] = mapped_column(String(24), default="CONFIRMED")
+    confirmed_by: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=True
+    )
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class RobotDataChannel(Base):
+    __tablename__ = "robot_data_channels"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    robot_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("robots.id", ondelete="CASCADE"), index=True
+    )
+    channel: Mapped[str] = mapped_column(String(64))
+    support_state: Mapped[str] = mapped_column(String(24), default="NOT_CONNECTED")
+    quality: Mapped[str] = mapped_column(String(24), default="UNKNOWN")
+    source_kind: Mapped[str] = mapped_column(String(24), default="CANONICAL_MQTT")
+    last_source_timestamp: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_received_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    metadata_json: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict)
+    __table_args__ = (UniqueConstraint("robot_id", "channel", name="uq_robot_data_channel"),)
+
+
+class RobotSensorProfile(Base):
+    __tablename__ = "robot_sensor_profiles"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    robot_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("robots.id", ondelete="CASCADE"), index=True
+    )
+    channel: Mapped[str] = mapped_column(String(64))
+    support_state: Mapped[str] = mapped_column(String(24), default="NOT_CONNECTED")
+    nominal_side: Mapped[str] = mapped_column(String(16), default="RIGHT")
+    sensor_mount_x_m: Mapped[float] = mapped_column(Float, default=0)
+    sensor_mount_y_m: Mapped[float] = mapped_column(Float, default=0)
+    sensor_mount_yaw_rad: Mapped[float] = mapped_column(Float, default=-1.5707963267948966)
+    coverage_range_m: Mapped[float] = mapped_column(Float, default=5)
+    coverage_fov_rad: Mapped[float] = mapped_column(Float, default=1.0471975511965976)
+    config_source: Mapped[str] = mapped_column(String(32), default="PLATFORM_DEFAULT")
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    __table_args__ = (UniqueConstraint("robot_id", "channel", name="uq_robot_sensor_profile"),)
 
 
 class RobotConnectionLog(Base):
@@ -300,6 +379,98 @@ class ManualControlSession(Base):
     last_seq: Mapped[int] = mapped_column(Integer, default=0)
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     end_reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
+
+
+class NavigationPreset(Base):
+    __tablename__ = "navigation_presets"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    map_version_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("map_versions.id", ondelete="CASCADE"), index=True
+    )
+    code: Mapped[str] = mapped_column(String(64))
+    name: Mapped[str] = mapped_column(String(128))
+    category: Mapped[str] = mapped_column(String(32), default="INSPECTION")
+    pose_json: Mapped[dict[str, Any]] = mapped_column(JsonType)
+    position_tolerance_m: Mapped[float] = mapped_column(Float, default=0.2)
+    yaw_tolerance_rad: Mapped[float] = mapped_column(Float, default=0.15)
+    allowed_approach_json: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict)
+    requires_reverse: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    semantic_revision: Mapped[int] = mapped_column(Integer)
+    __table_args__ = (UniqueConstraint("map_version_id", "code", name="uq_navigation_preset_code"),)
+
+
+class PatrolPlan(Base):
+    __tablename__ = "patrol_plans"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    robot_id: Mapped[str] = mapped_column(String(36), ForeignKey("robots.id"), index=True)
+    map_version_id: Mapped[str] = mapped_column(String(36), ForeignKey("map_versions.id"))
+    trajectory_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("trajectories.id"), nullable=True
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class PatrolPlanPoint(Base):
+    __tablename__ = "patrol_plan_points"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    patrol_plan_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("patrol_plans.id", ondelete="CASCADE"), index=True
+    )
+    navigation_preset_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("navigation_presets.id")
+    )
+    sequence: Mapped[int] = mapped_column(Integer)
+    dwell_seconds: Mapped[int] = mapped_column(Integer, default=3)
+    required_observations_json: Mapped[list[str]] = mapped_column(JsonType, default=list)
+    __table_args__ = (
+        UniqueConstraint("patrol_plan_id", "sequence", name="uq_patrol_plan_point_sequence"),
+    )
+
+
+class PatrolSchedule(Base):
+    __tablename__ = "patrol_schedules"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    patrol_plan_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("patrol_plans.id", ondelete="CASCADE"), index=True
+    )
+    cron_expression: Mapped[str] = mapped_column(String(64))
+    timezone: Mapped[str] = mapped_column(String(64), default="Asia/Shanghai")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    misfire_policy: Mapped[str] = mapped_column(String(32), default="SKIP")
+    misfire_grace_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    overlap_policy: Mapped[str] = mapped_column(String(24), default="SKIP")
+    require_robot_online: Mapped[bool] = mapped_column(Boolean, default=True)
+    require_control_contract_verified: Mapped[bool] = mapped_column(Boolean, default=True)
+    require_map_contract_verified: Mapped[bool] = mapped_column(Boolean, default=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PatrolScheduleOccurrence(Base):
+    __tablename__ = "patrol_schedule_occurrences"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    schedule_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("patrol_schedules.id", ondelete="CASCADE"), index=True
+    )
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    state: Mapped[str] = mapped_column(String(24), default="PENDING")
+    reason_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    task_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("tasks.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    __table_args__ = (
+        UniqueConstraint("schedule_id", "scheduled_for", name="uq_patrol_schedule_occurrence"),
+    )
 
 
 class Task(Base):
@@ -347,6 +518,42 @@ class TaskEvent(Base):
     )
 
 
+class InspectionObservation(Base):
+    __tablename__ = "inspection_observations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    task_id: Mapped[str] = mapped_column(String(36), ForeignKey("tasks.id"), index=True)
+    robot_id: Mapped[str] = mapped_column(String(36), ForeignKey("robots.id"), index=True)
+    navigation_preset_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("navigation_presets.id"), nullable=True
+    )
+    parking_slot_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("parking_slots.id"), nullable=True
+    )
+    observation_type: Mapped[str] = mapped_column(String(64))
+    result: Mapped[str] = mapped_column(String(24), default="NORMAL")
+    value_json: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict)
+    data_state: Mapped[str] = mapped_column(String(24), default="CONNECTED")
+    source_timestamp: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    server_received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PatrolReport(Base):
+    __tablename__ = "patrol_reports"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    report_code: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    task_id: Mapped[str] = mapped_column(String(36), ForeignKey("tasks.id"), unique=True)
+    status: Mapped[str] = mapped_column(String(24), default="PENDING")
+    summary_json: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict)
+    html_object_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    pdf_object_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    xlsx_object_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    failure_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Command(Base):
     __tablename__ = "commands"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
@@ -368,6 +575,40 @@ class Command(Base):
     ack_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     ack_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     terminal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class StopOperation(Base):
+    __tablename__ = "stop_operations"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    robot_id: Mapped[str] = mapped_column(String(36), ForeignKey("robots.id"), index=True)
+    task_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("tasks.id"), nullable=True)
+    cancel_command_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("commands.command_id"), nullable=True
+    )
+    stop_command_id: Mapped[str] = mapped_column(String(64), ForeignKey("commands.command_id"))
+    state: Mapped[str] = mapped_column(String(40), default="STOP_REQUESTED", index=True)
+    stationary_frames: Mapped[int] = mapped_column(Integer, default=0)
+    linear_threshold: Mapped[float] = mapped_column(Float, default=0.02)
+    angular_threshold: Mapped[float] = mapped_column(Float, default=0.03)
+    telemetry_freshness_ms: Mapped[int] = mapped_column(Integer, default=1000)
+    requested_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    terminal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class RobotOperationEvent(Base):
+    __tablename__ = "robot_operation_events"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    robot_id: Mapped[str] = mapped_column(String(36), ForeignKey("robots.id"), index=True)
+    task_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("tasks.id"), nullable=True)
+    operation_type: Mapped[str] = mapped_column(String(64), index=True)
+    state: Mapped[str] = mapped_column(String(40))
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict)
+    source: Mapped[str] = mapped_column(String(24), default="PLATFORM")
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True
+    )
 
 
 class OutboxEvent(Base):
@@ -427,9 +668,9 @@ class TelemetrySample(Base):
     x: Mapped[float] = mapped_column(Float)
     y: Mapped[float] = mapped_column(Float)
     theta: Mapped[float] = mapped_column(Float)
-    linear_speed: Mapped[float] = mapped_column(Float, default=0)
-    angular_speed: Mapped[float] = mapped_column(Float, default=0)
-    battery: Mapped[float] = mapped_column(Float, default=0)
+    linear_speed: Mapped[float | None] = mapped_column(Float, nullable=True)
+    angular_speed: Mapped[float | None] = mapped_column(Float, nullable=True)
+    battery: Mapped[float | None] = mapped_column(Float, nullable=True)
     parking_slot_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     localization_status: Mapped[str] = mapped_column(String(32), default="UNKNOWN")
     map_version: Mapped[str] = mapped_column(String(32))
@@ -447,9 +688,9 @@ class SensorSample(Base):
     robot_id: Mapped[str] = mapped_column(String(36), ForeignKey("robots.id"), index=True)
     source_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     server_received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
-    smoke: Mapped[float] = mapped_column(Float)
-    bottom_ir: Mapped[float] = mapped_column(Float)
-    top_ir_max: Mapped[float] = mapped_column(Float)
+    smoke: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bottom_ir: Mapped[float | None] = mapped_column(Float, nullable=True)
+    top_ir_max: Mapped[float | None] = mapped_column(Float, nullable=True)
     payload_json: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict)
     boot_id: Mapped[str] = mapped_column(String(36))
     seq: Mapped[int] = mapped_column(Integer)

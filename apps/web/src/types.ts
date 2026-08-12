@@ -19,9 +19,9 @@ export interface RobotState {
   theta?: number
   linear?: number
   angular?: number
-  battery?: number
+  battery?: number | null
   mode?: string
-  estop_active?: boolean
+  estop_active?: boolean | null
   map_version?: string
   smoke?: number
   bottom_ir?: number
@@ -30,6 +30,43 @@ export interface RobotState {
   supported_commands?: string[]
   sensors?: string[]
   media?: string[]
+  control_enabled?: boolean
+  control_disabled_reason?: string | null
+  integration?: IntegrationProfile | null
+  data_channels?: Record<string, DataChannel>
+  sensor_profiles?: SensorProfile[]
+}
+
+export type DataSupportState = 'CONNECTED' | 'STALE' | 'NOT_CONNECTED' | 'ERROR' | 'UNSUPPORTED'
+
+export interface DataChannel {
+  channel: string
+  support_state: DataSupportState
+  quality: string
+  source_kind: string
+  last_received_at?: string | null
+}
+
+export interface IntegrationProfile {
+  source_kind: 'CANONICAL_MQTT' | 'ROS_COMPAT' | 'MOCK'
+  upstream_protocol?: string | null
+  control_contract_verified: boolean
+  ack_contract_verified: boolean
+  map_contract_verified: boolean
+  read_only_reason?: string | null
+  forward_only: boolean
+  reverse_precision_navigation: boolean
+}
+
+export interface SensorProfile {
+  channel: string
+  support_state: DataSupportState
+  nominal_side: string
+  sensor_mount_x_m: number
+  sensor_mount_y_m: number
+  sensor_mount_yaw_rad: number
+  coverage_range_m: number
+  coverage_fov_rad: number
 }
 
 export interface ParkingSlot {
@@ -84,11 +121,36 @@ export interface Task {
 }
 
 export interface StreamInfo {
+  stream_id: string
   id: string
   camera_type: string
   state: 'DISABLED' | 'OFFLINE' | 'CONNECTING' | 'LIVE' | 'ERROR'
   playback_url?: string
   codec?: string
+}
+
+export interface DetectionCoverage {
+  state: DataSupportState
+  polygon: Array<{ x: number; y: number }>
+  covered_parking_slot_ids: string[]
+  sensor_origin?: { x: number; y: number; yaw: number }
+}
+
+export interface NavigationPreset {
+  id: string
+  code: string
+  name: string
+  category: 'INSPECTION' | 'EXTINGUISH' | 'WAITING_AREA' | 'DOCK'
+  pose_json: { x: number; y: number; theta: number }
+  requires_reverse: boolean
+  enabled: boolean
+}
+
+export interface StopOperation {
+  id: string
+  state: string
+  stationary_frames: number
+  failure_reason?: string | null
 }
 
 export interface MonitorSnapshot {
@@ -104,6 +166,7 @@ export interface MonitorSnapshot {
   alarms: Alarm[]
   tasks: Task[]
   streams: StreamInfo[]
+  navigation_presets?: NavigationPreset[]
 }
 
 export interface RealtimeEvent {

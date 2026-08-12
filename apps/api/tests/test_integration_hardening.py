@@ -254,10 +254,19 @@ def test_media_ticket_authorization_expiry_binding_and_revocation() -> None:
             json={
                 "action": "read",
                 "path": stream["stream_id"],
-                "query": f"?token={ticket}",
+                "token": ticket,
             },
         )
         assert valid.status_code == 200
+        query_token = client.post(
+            "/api/v1/media/authorize",
+            json={
+                "action": "read",
+                "path": stream["stream_id"],
+                "query": f"?token={ticket}",
+            },
+        )
+        assert query_token.status_code == 401
         wrong = client.post(
             "/api/v1/media/authorize",
             json={"action": "read", "path": "another-stream", "token": ticket},

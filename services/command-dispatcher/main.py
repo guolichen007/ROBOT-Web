@@ -64,26 +64,41 @@ def manual_loop() -> None:
 
 
 def safety_loop() -> None:
-    try:
-        redis.xgroup_create("firebot:safety_commands", "dispatchers", id="0-0", mkstream=True)
-    except ResponseError as exc:
-        if "BUSYGROUP" not in str(exc):
-            raise
     while True:
-        claimed = redis.xautoclaim(
-            "firebot:safety_commands",
-            "dispatchers",
-            INSTANCE_ID,
-            min_idle_time=1000,
-            start_id="0-0",
-            count=10,
-        )
-        process_safety_events(claimed[1])
-        rows = redis.xreadgroup(
-            "dispatchers", INSTANCE_ID, {"firebot:safety_commands": ">"}, count=10, block=1000
-        )
-        for _, events in rows:
-            process_safety_events(events)
+        try:
+            try:
+                redis.xgroup_create(
+                    "firebot:safety_commands", "dispatchers", id="0-0", mkstream=True
+                )
+            except ResponseError as exc:
+                if "BUSYGROUP" not in str(exc):
+                    raise
+            redis.setex(
+                "service:command-dispatcher:safety-heartbeat",
+                5,
+                datetime.now(UTC).isoformat(),
+            )
+            claimed = redis.xautoclaim(
+                "firebot:safety_commands",
+                "dispatchers",
+                INSTANCE_ID,
+                min_idle_time=1000,
+                start_id="0-0",
+                count=10,
+            )
+            process_safety_events(claimed[1])
+            rows = redis.xreadgroup(
+                "dispatchers",
+                INSTANCE_ID,
+                {"firebot:safety_commands": ">"},
+                count=10,
+                block=1000,
+            )
+            for _, events in rows:
+                process_safety_events(events)
+        except Exception:
+            logger.exception("safety dispatcher loop failed; recreating consumer group")
+            time.sleep(1)
 
 
 def process_safety_events(events: list) -> None:
@@ -121,7 +136,9 @@ def process_safety_events(events: list) -> None:
 def outbox_loop() -> None:
     while True:
         try:
-            redis.setex("service:command-dispatcher:heartbeat", 5, datetime.now(UTC).isoformat())
+            redis.setex(
+                "service:command-dispatcher:outbox-heartbeat", 5, datetime.now(UTC).isoformat()
+            )
             with SessionLocal.begin() as db:
                 row = db.scalar(
                     select(OutboxEvent)

@@ -10,7 +10,14 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import PlatformError
 from app.core.events import get_redis
-from app.db.models import Command, OutboxEvent, Robot, RobotCapability, Task
+from app.db.models import (
+    Command,
+    OutboxEvent,
+    Robot,
+    RobotCapability,
+    RobotIntegrationProfile,
+    Task,
+)
 
 ACTIVE_TASK_STATES = {"CREATED", "QUEUED", "ACCEPTED", "EXECUTING"}
 
@@ -39,6 +46,25 @@ def assert_robot_can_execute(
         )
     if robot.estop_active and action not in {"emergency_stop", "reset_estop"}:
         raise PlatformError("ROBOT_ESTOP_ACTIVE", "软件急停已锁存")
+    integration = db.get(RobotIntegrationProfile, robot.id)
+    if integration and action not in {"emergency_stop", "stop_motion"}:
+        if not integration.control_contract_verified:
+            raise PlatformError(
+                "CONTROL_CONTRACT_NOT_VERIFIED",
+                integration.read_only_reason or "实车控制合同尚未验证，当前仅允许只读监控",
+                details={"source_kind": integration.source_kind, "action": action},
+            )
+        if action in {"patrol", "extinguish", "return_dock", "cancel_task"} and not (
+            integration.ack_contract_verified and integration.map_contract_verified
+        ):
+            raise PlatformError(
+                "INTEGRATION_CONTRACT_INCOMPLETE",
+                "ACK 或地图合同尚未验证，拒绝自动运动任务",
+                details={
+                    "ack_contract_verified": integration.ack_contract_verified,
+                    "map_contract_verified": integration.map_contract_verified,
+                },
+            )
     if action in {"patrol", "extinguish", "return_dock"} and get_redis().exists(
         f"manual:lease:{robot.id}"
     ):

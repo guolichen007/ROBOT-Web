@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { MapAdapter } from '@/lib/map-adapter'
-import type { Alarm, MapPoint, MapVersion, ParkingSlot, RobotState } from '@/types'
+import type { Alarm, DetectionCoverage, MapPoint, MapVersion, ParkingSlot, RobotState } from '@/types'
 
 const props = defineProps<{
   mapVersion: MapVersion | null
@@ -11,6 +11,7 @@ const props = defineProps<{
   trajectory: Array<{ x: number; y: number }>
   robot?: RobotState
   alarms: Alarm[]
+  coverage?: DetectionCoverage | null
   selectedSlotId?: string
 }>()
 const emit = defineEmits<{ slotClick: [slot: ParkingSlot] }>()
@@ -20,14 +21,7 @@ const zoomLevel = ref(1)
 let observer: ResizeObserver
 
 const geometry = computed(
-  () =>
-    props.mapVersion || {
-      width_m: 30,
-      height_m: 20,
-      origin_x: 0,
-      origin_y: 0,
-      rotation_rad: 0,
-    },
+  () => props.mapVersion || { width_m: 48, height_m: 34, origin_x: 0, origin_y: 0, rotation_rad: 0 },
 )
 const adapter = computed(() => {
   const result = new MapAdapter(geometry.value, size.value)
@@ -35,33 +29,26 @@ const adapter = computed(() => {
   return result
 })
 const point = (x: number, y: number) => adapter.value.worldToScreen({ x, y })
-const slotPoints = (slot: ParkingSlot) => {
-  const source = Array.isArray(slot.polygon_json) ? slot.polygon_json : slot.polygon_json.points
-  return source
+const polygonPoints = (points: Array<{ x: number; y: number }>) =>
+  points
     .map((item) => {
-      const p = point(item.x, item.y)
-      return `${p.x},${p.y}`
+      const value = point(item.x, item.y)
+      return `${value.x},${value.y}`
     })
     .join(' ')
-}
-const pathPoints = computed(() =>
-  props.trajectory
-    .map((item) => {
-      const p = point(item.x, item.y)
-      return `${p.x},${p.y}`
-    })
-    .join(' '),
-)
-const alarmSlots = computed(() => new Set(props.alarms.map((item) => item.parking_slot_id)))
+const slotPoints = (slot: ParkingSlot) =>
+  polygonPoints(Array.isArray(slot.polygon_json) ? slot.polygon_json : slot.polygon_json.points)
+const pathPoints = computed(() => polygonPoints(props.trajectory))
+const coveragePoints = computed(() => polygonPoints(props.coverage?.polygon || []))
+const alarmSlots = computed(() => new Map(props.alarms.map((item) => [item.parking_slot_id, item])))
+const coveredSlots = computed(() => new Set(props.coverage?.covered_parking_slot_ids || []))
 
 function updateSize(): void {
-  if (!frame.value) return
-  size.value = { width: frame.value.clientWidth, height: frame.value.clientHeight }
+  if (frame.value) size.value = { width: frame.value.clientWidth, height: frame.value.clientHeight }
 }
 function zoom(delta: number): void {
   zoomLevel.value = Math.min(3, Math.max(0.7, zoomLevel.value + (delta > 0 ? 0.2 : -0.2)))
 }
-
 watch(
   () => props.mapVersion,
   () => void nextTick(updateSize),
@@ -75,22 +62,15 @@ onUnmounted(() => observer?.disconnect())
 </script>
 
 <template>
-  <div ref="frame" class="map-canvas">
+  <div ref="frame" class="map-canvas operations-map">
     <svg :viewBox="`0 0 ${size.width} ${size.height}`" role="img" aria-label="停车场二维态势地图">
-      <defs>
-        <pattern id="grid" width="28" height="28" patternUnits="userSpaceOnUse">
-          <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#173342" stroke-width="0.7" />
-        </pattern>
-        <filter id="robotGlow">
-          <feGaussianBlur stdDeviation="4" result="blur" />
-          <feMerge>
-            <feMergeNode in="blur" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
-      </defs>
-      <rect width="100%" height="100%" fill="url(#grid)" />
-      <polyline v-if="pathPoints" :points="pathPoints" class="trajectory-line" />
+      <rect width="100%" height="100%" class="map-floor" />
+      <g class="lane-markings">
+        <line :x1="point(39, 1).x" :y1="point(39, 1).y" :x2="point(39, 28.5).x" :y2="point(39, 28.5).y" />
+        <line :x1="point(3, 28.5).x" :y1="point(3, 28.5).y" :x2="point(39, 28.5).x" :y2="point(39, 28.5).y" />
+      </g>
+      <polyline v-if="pathPoints" :points="pathPoints" class="trajectory-line planned" />
+      <polygon v-if="coveragePoints" :points="coveragePoints" class="detection-sector" />
       <g
         v-for="slot in slots"
         :key="slot.id"
@@ -100,11 +80,18 @@ onUnmounted(() => observer?.disconnect())
         :aria-label="`车位 ${slot.code}`"
         @click="emit('slotClick', slot)"
         @keydown.enter.prevent="emit('slotClick', slot)"
-        @keydown.space.prevent="emit('slotClick', slot)"
       >
         <polygon
           :points="slotPoints(slot)"
-          :class="['parking-slot', { alarm: alarmSlots.has(slot.id), selected: selectedSlotId === slot.id }]"
+          :class="[
+            'parking-slot',
+            {
+              alarm: alarmSlots.has(slot.id),
+              critical: alarmSlots.get(slot.id)?.severity === 'CRITICAL',
+              selected: selectedSlotId === slot.id,
+              covered: coveredSlots.has(slot.id),
+            },
+          ]"
         />
         <text
           :x="point(slot.center_pose_json.x, slot.center_pose_json.y).x"
@@ -118,25 +105,24 @@ onUnmounted(() => observer?.disconnect())
         :key="item.id"
         :cx="point(item.pose_json.x, item.pose_json.y).x"
         :cy="point(item.pose_json.x, item.pose_json.y).y"
-        r="3"
+        r="2.5"
         class="inspection-point"
       />
       <path
         v-for="item in extinguishPoints"
         :key="item.id"
         :transform="`translate(${point(item.pose_json.x, item.pose_json.y).x} ${point(item.pose_json.x, item.pose_json.y).y})`"
-        d="M0,-5 L5,4 L-5,4 Z"
+        d="M0,-4 L4,3 L-4,3 Z"
         class="extinguish-point"
       />
       <g
         v-if="robot?.x !== undefined && robot?.y !== undefined"
         :transform="`translate(${point(robot.x, robot.y).x} ${point(robot.x, robot.y).y}) rotate(${(-(robot.theta || 0) * 180) / Math.PI})`"
         class="robot-marker"
-        filter="url(#robotGlow)"
       >
-        <circle r="12" />
-        <path d="M 0 -11 L 6 5 L 0 2 L -6 5 Z" />
-        <text x="18" y="4">{{ robot.vehicle_id }}</text>
+        <rect x="-8" y="-12" width="16" height="24" rx="4" />
+        <path d="M0 -18 L6 -8 L0 -10 L-6 -8 Z" />
+        <text x="15" y="4">{{ robot.vehicle_id }}</text>
       </g>
     </svg>
     <div class="map-tools">
@@ -144,8 +130,8 @@ onUnmounted(() => observer?.disconnect())
       ><button aria-label="缩小" @click="zoom(-1)">−</button>
     </div>
     <div class="map-legend">
-      <span><i class="dot inspect"></i>巡检点</span><span><i class="triangle"></i>灭火点</span
-      ><span><i class="line"></i>轨迹</span>
+      <span><i class="legend-slot"></i>车位</span><span><i class="legend-robot"></i>车辆</span
+      ><span><i class="legend-sector"></i>右侧检测</span><span><i class="legend-fire"></i>火情</span>
     </div>
   </div>
 </template>

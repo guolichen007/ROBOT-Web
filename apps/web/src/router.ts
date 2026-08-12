@@ -14,6 +14,7 @@ const routes: RouteRecordRaw[] = [
   { path: '/maps', component: () => import('@/views/MapsView.vue'), meta: { permission: 'map.read' } },
   { path: '/parking', component: () => import('@/views/ParkingView.vue'), meta: { permission: 'map.read' } },
   { path: '/tasks', component: () => import('@/views/TasksView.vue'), meta: { permission: 'robot.read' } },
+  { path: '/patrol', component: () => import('@/views/PatrolView.vue'), meta: { permission: 'map.read' } },
   { path: '/alarms', component: () => import('@/views/AlarmsView.vue'), meta: { permission: 'alarm.read' } },
   {
     path: '/history',
