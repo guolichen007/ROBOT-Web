@@ -2,6 +2,8 @@
 
 ## v2.0.0-integration-ready
 
+- 将 `docs/` 与 `integration/` 内全部文件名统一为中文，并同步更新生成器、测试、Manifest、文档链接与仓库策略引用。
+- ROS2 对接 ZIP 内文件名同步中文化；协议字段、Topic、JSON/YAML/CSV 格式和 canonical Schema 内容保持兼容。
 - 冻结 Robot Integration Contract 1.2.0 / MQTT Schema 1.2。
 - 修复 PostgreSQL commit 与 Redis realtime event 顺序。
 - 平台命令改用 target_boot_id，加入 boot session 防回滚。

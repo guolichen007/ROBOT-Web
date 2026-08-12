@@ -1,6 +1,6 @@
 # MQTT 协议 1.2
 
-Robot Integration Contract=`1.2.0`，`schema_version=1.2`。canonical Schema：`packages/protocol-schemas/firebot-message-1.2.schema.json`。
+Robot Integration Contract=`1.2.0`，`schema_version=1.2`。canonical Schema：`packages/protocol-schemas/灭火机器人消息-1.2模式.json`。
 
 Vehicle envelope 必须含 schema_version、message_id、type、vehicle_id、boot_id、timestamp、seq。seq 在 `boot_id + topic` 内单调递增；平台记录 server_received_at 与 clock_skew_ms。
 

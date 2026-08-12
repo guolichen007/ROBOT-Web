@@ -28,7 +28,7 @@
 
 ## 3. 车端安全责任合同
 
-必须维护 `docs/VEHICLE_SAFETY_CONTRACT.md`。云平台不能承担网络失联后的最终运动安全闭环。未来真车必须保证 manual TTL 到期本地停车、断网不持续运动、过期命令不执行、相同 `command_id` 幂等、重启后旧命令不重放、软件急停接受后锁存、显式 reset、ACK accepted 代表应用层完成本地校验、硬件急停优先。平台显示 stop/e-stop 已发送不等于车辆已经停止。Mock 仅模拟这些合同，不代表真实 ROS2 已完成。
+必须维护 `docs/车辆安全责任合同.md`。云平台不能承担网络失联后的最终运动安全闭环。未来真车必须保证 manual TTL 到期本地停车、断网不持续运动、过期命令不执行、相同 `command_id` 幂等、重启后旧命令不重放、软件急停接受后锁存、显式 reset、ACK accepted 代表应用层完成本地校验、硬件急停优先。平台显示 stop/e-stop 已发送不等于车辆已经停止。Mock 仅模拟这些合同，不代表真实 ROS2 已完成。
 
 ## 4. P0 系统不变量
 
@@ -123,7 +123,7 @@ e-stop 打断软件运动；estop active 时禁止 patrol/extinguish/return_dock
 
 ## 17. Map Version/Coordinate Contract
 
-维护 `MAP_COORDINATE_CONTRACT.md`：`frame_id=map`、x/y 米、theta 弧度、零轴/正方向、world origin、rotation、resolution、pixel origin、screen y flip、world/screen 互换、checksum、version、semantic revision。数据库保存 world coordinates，MapAdapter 最后转换。任务派发前校验机器人地图与 published 目标一致，创建任务固化全部快照。
+维护 `地图坐标合同.md`：`frame_id=map`、x/y 米、theta 弧度、零轴/正方向、world origin、rotation、resolution、pixel origin、screen y flip、world/screen 互换、checksum、version、semantic revision。数据库保存 world coordinates，MapAdapter 最后转换。任务派发前校验机器人地图与 published 目标一致，创建任务固化全部快照。
 
 ## 18. Snapshot + WebSocket Delta
 
@@ -215,7 +215,7 @@ DEV 幂等创建 bootstrap admin、六角色、R001、Site `DEMO_PARKING`、Map 
 
 ## 40. 本轮不要求真实完成
 
-真实 ROS2、SLAM、Nav2、真车 manual/e-stop/灭火、真实 RTSP/热像、公网域名、正式 CA/TLS、第二台服务器安装、现场 ACL、正式 SLA、消防安全认证属于 NEXT PHASE；写入 `PROTOCOL_TODO.md` 或最终 NEXT INPUTS，不阻塞 Mock baseline，也不得伪造 PASS。
+真实 ROS2、SLAM、Nav2、真车 manual/e-stop/灭火、真实 RTSP/热像、公网域名、正式 CA/TLS、第二台服务器安装、现场 ACL、正式 SLA、消防安全认证属于 NEXT PHASE；写入 `协议待确认项.md` 或最终 NEXT INPUTS，不阻塞 Mock baseline，也不得伪造 PASS。
 
 ## 41. 开发优先级
 
@@ -223,7 +223,7 @@ P0-A Infrastructure；P0-B Identity；P0-C Realtime；P0-D Control Safety；P0-E
 
 ## 42. Codex 工作规则
 
-完整阅读本文件，维护 `docs/IMPLEMENTATION_TRACKER.md` 的 TODO/IN_PROGRESS/PASS/BLOCKED。不以文档、代码生成或 build 成功替代功能验收；未知实车参数使用 Mock + Adapter + TODO，不询问、不阻塞。只有 Git/SSH 权限、目录覆盖风险、Docker 人工授权、真实硬件已成为唯一剩余项或高风险不可逆动作时暂停。失败测试必须修复或真实 BLOCKED。
+完整阅读本文件，维护 `docs/实施跟踪表.md` 的 TODO/IN_PROGRESS/PASS/BLOCKED。不以文档、代码生成或 build 成功替代功能验收；未知实车参数使用 Mock + Adapter + TODO，不询问、不阻塞。只有 Git/SSH 权限、目录覆盖风险、Docker 人工授权、真实硬件已成为唯一剩余项或高风险不可逆动作时暂停。失败测试必须修复或真实 BLOCKED。
 
 ## 43. 最终 Git 验收
 
