@@ -51,11 +51,7 @@ def test_invalid_schema_vector_is_rejected() -> None:
 
 
 def test_duplicate_vector_keeps_identical_command_id_and_payload() -> None:
-    first = json.loads(
-        (HANDOFF / "test-vectors/重复命令_首次.json").read_text(encoding="utf-8")
-    )
-    retry = json.loads(
-        (HANDOFF / "test-vectors/重复命令_重试.json").read_text(encoding="utf-8")
-    )
+    first = json.loads((HANDOFF / "test-vectors/重复命令_首次.json").read_text(encoding="utf-8"))
+    retry = json.loads((HANDOFF / "test-vectors/重复命令_重试.json").read_text(encoding="utf-8"))
     assert first == retry
     validate_message(first)
