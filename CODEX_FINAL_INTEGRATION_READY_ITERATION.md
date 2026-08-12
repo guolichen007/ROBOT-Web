@@ -228,7 +228,7 @@ Codex 不能只修 FIX-01~12。
 
 先创建：
 
-`docs/DEEP_HARDENING_TRACKER.md`
+`docs/深度加固跟踪表.md`
 
 对整个仓库审查：
 - Python
@@ -398,14 +398,14 @@ phase 可扩展，未知 phase 不得使平台崩溃。
 
 ```text
 integration/ros2/
-├─ README_现场对接说明.md
-├─ ROBOT_INTEGRATION_MANIFEST.json
-├─ ROS2_MQTT接口合同.md
-├─ ROS2_字段字典.csv
-├─ ROS2_对接参数模板.yaml
-├─ ROS2_验收清单.md
-├─ MAP坐标系合同.md
-├─ VEHICLE安全责任合同.md
+├─ 现场对接说明.md
+├─ 机器人集成清单.json
+├─ ROS2与MQTT接口合同.md
+├─ ROS2字段字典.csv
+├─ ROS2对接参数模板.yaml
+├─ ROS2验收清单.md
+├─ 地图坐标系合同.md
+├─ 车辆安全责任合同.md
 ├─ examples/
 ├─ schemas/
 └─ test-vectors/
@@ -414,7 +414,7 @@ integration/ros2/
 examples 必须覆盖：
 availability、heartbeat、capabilities、location、status、sensor、fire_alert、task_status、manual_control、stop_motion、emergency_stop、reset_estop、patrol、extinguish、return_dock、cancel_task、ACK accepted/rejected/unsupported。
 
-`ROBOT_INTEGRATION_MANIFEST.json` 是 machine-readable 总合同，包含：
+`机器人集成清单.json` 是 machine-readable 总合同，包含：
 - contract/schema version
 - broker dev/server placeholder
 - identity
@@ -426,7 +426,7 @@ availability、heartbeat、capabilities、location、status、sensor、fire_aler
 - time rules
 - safety rules
 
-`ROS2_对接参数模板.yaml` 只让现场填真实值：
+`ROS2对接参数模板.yaml` 只让现场填真实值：
 
 ```yaml
 vehicle:
@@ -534,22 +534,22 @@ GitHub Actions 增加 integration-package artifact。
 新增/完善：
 
 ```text
-docs/README.md
-docs/ARCHITECTURE.md
-docs/GETTING_STARTED_WINDOWS.md
-docs/DEVELOPMENT.md
-docs/TESTING.md
-docs/SERVER_DEPLOYMENT_UBUNTU.md
-docs/OPERATIONS.md
-docs/TROUBLESHOOTING.md
-docs/DATABASE.md
-docs/SECURITY.md
-docs/BACKUP_RESTORE.md
-docs/MQTT_PROTOCOL.md
-docs/MAP_COORDINATE_CONTRACT.md
-docs/VEHICLE_SAFETY_CONTRACT.md
-docs/RELEASE_CHECKLIST.md
-docs/API_REFERENCE.md
+docs/文档索引.md
+docs/系统架构.md
+docs/Windows快速开始.md
+docs/开发指南.md
+docs/测试指南.md
+docs/Ubuntu服务器部署.md
+docs/运维指南.md
+docs/故障排查.md
+docs/数据库设计.md
+docs/安全指南.md
+docs/备份与恢复.md
+docs/MQTT协议.md
+docs/地图坐标合同.md
+docs/车辆安全责任合同.md
+docs/发布检查清单.md
+docs/API接口参考.md
 CONTRIBUTING.md
 CHANGELOG.md
 SECURITY.md
@@ -570,7 +570,7 @@ LICENSE：不得擅自选择 MIT/Apache/GPL。
 
 # 9. SERVER 文档必须能从空 Ubuntu 照着部署
 
-`docs/SERVER_DEPLOYMENT_UBUNTU.md` 至少写：
+`docs/Ubuntu服务器部署.md` 至少写：
 系统要求、Docker、clone、checkout tag、secrets、MQTT CA/server cert、password/ACL、env、preflight、compose up、migration、admin bootstrap、Nginx TLS、firewall、health、browser、robot MQTT test、backup、restart、update、rollback、logs、shutdown。
 
 命令必须可复制。
@@ -647,7 +647,7 @@ Compose：
 
 仅用于基本架构验证，不宣称正式容量 SLA。
 
-输出 `docs/SOAK_TEST_REPORT.md`。
+输出 `docs/稳定性测试报告.md`。
 
 ---
 
@@ -674,7 +674,7 @@ Compose：
 1. 读完整规格。
 2. 检查 current main / clean state。
 3. 创建 hardening branch。
-4. 建 `DEEP_HARDENING_TRACKER.md`。
+4. 建 `深度加固跟踪表.md`。
 5. repo-wide audit。
 6. 修 FIX-01~12 + audit 发现的问题。
 7. 升级并冻结 protocol 1.2。
@@ -827,7 +827,7 @@ OWNER_DECISIONS
 - tag `v2.0.0-integration-ready`。
 
 严禁开发 ROS2/SLAM/Nav2/底盘/传感器/灭火机构/车端 watchdog。
-现场未知项只填入 `ROS2_对接参数模板.yaml` 和 OWNER/NEXT INPUTS，不阻塞平台工程化。
+现场未知项只填入 `ROS2对接参数模板.yaml` 和 OWNER/NEXT INPUTS，不阻塞平台工程化。
 
 发现新的平台代码缺陷、小错误、文档矛盾或测试漏洞，本轮直接加入 tracker 修完，不得简单转成 KNOWN_LIMITATION。
 

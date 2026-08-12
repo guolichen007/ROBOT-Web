@@ -24,6 +24,6 @@ def test_unknown_schema_is_rejected() -> None:
 
 
 def test_command_retain_contract_is_documented() -> None:
-    protocol = ROOT / "docs/MQTT_PROTOCOL.md"
+    protocol = ROOT / "docs/MQTT协议.md"
     if protocol.exists():
         assert "retain=false" in protocol.read_text(encoding="utf-8")

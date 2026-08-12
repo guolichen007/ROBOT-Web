@@ -37,10 +37,10 @@ unpinned_actions: list[str] = []
 marker_allow = {
     "CODEX_MASTER_SPEC_FIREBOT_V2_BASELINE_FINAL.md",
     "CODEX_FINAL_INTEGRATION_READY_ITERATION.md",
-    "docs/DEEP_HARDENING_TRACKER.md",
-    "docs/PROTOCOL_TODO.md",
-    "integration/ros2/ROS2_对接参数模板.yaml",
-    "integration/ros2/README_现场对接说明.md",
+    "docs/深度加固跟踪表.md",
+    "docs/协议待确认项.md",
+    "integration/ros2/ROS2对接参数模板.yaml",
+    "integration/ros2/现场对接说明.md",
     # Policy/checking sources must mention the forbidden markers literally.
     "scripts/check_repository_policy.py",
     "scripts/server-preflight.ps1",
@@ -49,8 +49,8 @@ marker_allow = {
     # The handoff generator intentionally emits OWNER-supplied placeholders.
     "scripts/generate_ros2_handoff.py",
     # Contributor/release instructions document the zero-marker rule.
-    "docs/DEVELOPMENT.md",
-    "docs/RELEASE_CHECKLIST.md",
+    "docs/开发指南.md",
+    "docs/发布检查清单.md",
 }
 for path in files():
     relative = path.relative_to(ROOT).as_posix()

@@ -42,6 +42,28 @@ COMMANDS = {
     "cancel_task": (1, 10000),
 }
 
+EXAMPLE_FILENAMES = {
+    "availability.json": "在线状态.json",
+    "heartbeat.json": "心跳.json",
+    "capabilities.json": "能力声明.json",
+    "location.json": "位置.json",
+    "status.json": "机器人状态.json",
+    "sensor.json": "传感器.json",
+    "fire_alert.json": "火情报警.json",
+    "task_status.json": "任务状态.json",
+    "manual_control.json": "手动控制命令.json",
+    "stop_motion.json": "停止运动命令.json",
+    "emergency_stop.json": "软件急停命令.json",
+    "reset_estop.json": "复位急停命令.json",
+    "patrol.json": "巡检命令.json",
+    "extinguish.json": "灭火命令.json",
+    "return_dock.json": "回充命令.json",
+    "cancel_task.json": "取消任务命令.json",
+    "ack_accepted.json": "命令确认_已接受.json",
+    "ack_rejected.json": "命令确认_已拒绝.json",
+    "ack_unsupported.json": "命令确认_不支持.json",
+}
+
 
 def vehicle(message_type: str, seq: int, **extra) -> dict:
     return {
@@ -215,7 +237,7 @@ def manifest() -> dict:
                 "qos": qos,
                 "retain": retain,
                 "nominal": nominal,
-                "schema": "schemas/firebot-message-1.2.schema.json",
+                "schema": "schemas/灭火机器人消息-1.2模式.json",
             }
             for name, (direction, qos, retain, nominal) in TOPICS.items()
         ],
@@ -257,38 +279,40 @@ def manifest() -> dict:
 
 
 def generate_source() -> None:
-    (SOURCE / "examples").mkdir(parents=True, exist_ok=True)
-    (SOURCE / "schemas").mkdir(parents=True, exist_ok=True)
-    (SOURCE / "test-vectors").mkdir(parents=True, exist_ok=True)
-    shutil.copy2(SCHEMA, SOURCE / "schemas/firebot-message-1.2.schema.json")
-    write_json(SOURCE / "ROBOT_INTEGRATION_MANIFEST.json", manifest())
+    for directory_name in ("examples", "schemas", "test-vectors"):
+        directory = SOURCE / directory_name
+        if directory.exists():
+            shutil.rmtree(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(SCHEMA, SOURCE / "schemas/灭火机器人消息-1.2模式.json")
+    write_json(SOURCE / "机器人集成清单.json", manifest())
     for name, payload in examples().items():
-        write_json(SOURCE / "examples" / name, payload)
+        write_json(SOURCE / "examples" / EXAMPLE_FILENAMES[name], payload)
     expired = command("stop_motion", 90)
     expired["expires_at"] = (NOW - timedelta(seconds=1)).isoformat().replace("+00:00", "Z")
-    write_json(SOURCE / "test-vectors/expired_command.json", expired)
+    write_json(SOURCE / "test-vectors/过期命令.json", expired)
     wrong_boot = command("patrol", 91)
     wrong_boot["target_boot_id"] = "99999999-9999-4999-8999-999999999999"
-    write_json(SOURCE / "test-vectors/wrong_target_boot.json", wrong_boot)
+    write_json(SOURCE / "test-vectors/错误目标启动标识.json", wrong_boot)
     duplicate = command("extinguish", 92)
-    write_json(SOURCE / "test-vectors/duplicate_command_first.json", duplicate)
-    write_json(SOURCE / "test-vectors/duplicate_command_retry.json", duplicate)
+    write_json(SOURCE / "test-vectors/重复命令_首次.json", duplicate)
+    write_json(SOURCE / "test-vectors/重复命令_重试.json", duplicate)
     invalid = vehicle("heartbeat", 99, uptime_seconds=1)
     invalid["schema_version"] = "9.9"
-    write_json(SOURCE / "test-vectors/invalid_schema.json", invalid)
+    write_json(SOURCE / "test-vectors/无效协议版本.json", invalid)
 
-    readme = """# ROS2 现场对接交付包\n\n本包冻结 `contract_version=1.2.0`、`schema_version=1.2`。它只定义 MQTT + Media Protocol，不包含任何 ROS2 节点、SLAM、Nav2、驱动、底盘、执行机构或车端 watchdog 实现。\n\n现场严格按验收清单 Gate 顺序推进；未知 ROS topic、速度、量程、地图、视频和网络值只填写参数模板，平台不会代替现场猜测。\n\n机器可读总合同见 `ROBOT_INTEGRATION_MANIFEST.json`，canonical JSON Schema 见 `schemas/`，所有命令与上报示例见 `examples/`。\n"""
-    (SOURCE / "README_现场对接说明.md").write_text(readme, encoding="utf-8", newline="\n")
+    readme = """# ROS2 现场对接交付包\n\n本包冻结 `contract_version=1.2.0`、`schema_version=1.2`。它只定义 MQTT + Media Protocol，不包含任何 ROS2 节点、SLAM、Nav2、驱动、底盘、执行机构或车端 watchdog 实现。\n\n现场严格按验收清单 Gate 顺序推进；未知 ROS topic、速度、量程、地图、视频和网络值只填写参数模板，平台不会代替现场猜测。\n\n机器可读总合同见 `机器人集成清单.json`，canonical JSON Schema 见 `schemas/`，所有命令与上报示例见 `examples/`。\n"""
+    (SOURCE / "现场对接说明.md").write_text(readme, encoding="utf-8", newline="\n")
     contract = """# ROS2 MQTT 接口合同 1.2.0\n\n- Vehicle 消息携带 `boot_id`；平台命令只携带 `target_boot_id`。\n- 非 emergency-stop 命令没有当前 boot session 时必须拒绝。software e-stop 可以使用 `target_boot_id=null`，但 UI 必须等待 ACK。\n- `command_id` 端到端幂等；所有 command `retain=false`。\n- manual_control QoS0、TTL 500ms；stop/e-stop/业务命令 QoS1。\n- ACK 仅允许 accepted/rejected/unsupported；accepted 表示车端应用层校验通过并接受执行。\n- task_status 仅允许 accepted/executing/completed/failed/cancelled；未知 phase 必须安全透传。\n- TTL 使用车端本地 monotonic receive time，不依赖源 UTC 时钟。\n"""
-    (SOURCE / "ROS2_MQTT接口合同.md").write_text(contract, encoding="utf-8", newline="\n")
+    (SOURCE / "ROS2与MQTT接口合同.md").write_text(contract, encoding="utf-8", newline="\n")
     map_contract = """# MAP 坐标系合同\n\n`frame_id=map`；x/y 单位米；theta 单位弧度；theta=0 指向 +X；正方向逆时针。location 必须携带 site_code、map_code、map_version、map_checksum。数据库与 MQTT 保存世界坐标，像素转换仅由 Web MapAdapter 完成。\n"""
-    (SOURCE / "MAP坐标系合同.md").write_text(map_contract, encoding="utf-8", newline="\n")
+    (SOURCE / "地图坐标系合同.md").write_text(map_contract, encoding="utf-8", newline="\n")
     safety = """# VEHICLE 安全责任合同\n\n云平台不承担网络失联后的最终运动安全闭环。车端必须实现 manual 500ms TTL watchdog、断网停止、过期命令拒绝、command_id 幂等、旧 boot 防重放、software e-stop 锁存与显式 reset；硬件急停始终优先。平台显示“已发送”不等于车辆已经停止。\n"""
-    (SOURCE / "VEHICLE安全责任合同.md").write_text(safety, encoding="utf-8", newline="\n")
+    (SOURCE / "车辆安全责任合同.md").write_text(safety, encoding="utf-8", newline="\n")
     checklist = """# ROS2 首次接入验收清单\n\n- [ ] Gate 1 Broker/TLS/identity\n- [ ] Gate 2 availability/heartbeat/capabilities\n- [ ] Gate 3 location/map/version/checksum/x/y/theta\n- [ ] Gate 4 status/sensor/time sync\n- [ ] Gate 5 command_id/ACK/idempotency\n- [ ] Gate 6 stop_motion（安全区域）\n- [ ] Gate 7 低速 manual + 500ms TTL + 断网停止\n- [ ] Gate 8 software e-stop latch/reset\n- [ ] Gate 9 patrol/Nav\n- [ ] Gate 10 fire alert\n- [ ] Gate 11 extinguish task（不启用真实机构）\n- [ ] Gate 12 最后才开放真实灭火执行机构\n\n前一 Gate 未签字通过，下一 Gate 不启用。\n"""
-    (SOURCE / "ROS2_验收清单.md").write_text(checklist, encoding="utf-8", newline="\n")
+    (SOURCE / "ROS2验收清单.md").write_text(checklist, encoding="utf-8", newline="\n")
     params = """vehicle:\n  vehicle_id: TODO\n  site_code: TODO\n  map_code: TODO\n  map_version: TODO\n  map_checksum: TODO\n\nmqtt:\n  host: TODO\n  port: 8883\n  tls: true\n  username: TODO\n  ca_file: TODO\n\nframes:\n  map: map\n  base: base_link\n\nmotion:\n  max_linear_x_mps: TODO\n  max_angular_z_radps: TODO\n\nros_mapping:\n  localization_source: TODO\n  battery_source: TODO\n  smoke_source: TODO\n  bottom_ir_source: TODO\n  top_ir_source: TODO\n  command_target: TODO\n  estop_target: TODO\n\nvideo:\n  roof_rgb: TODO\n  roof_thermal: TODO\n  bottom_ir: TODO\n\ntime_sync:\n  method: TODO_NTP_CHRONY_PTP\n"""
-    (SOURCE / "ROS2_对接参数模板.yaml").write_text(params, encoding="utf-8", newline="\n")
+    (SOURCE / "ROS2对接参数模板.yaml").write_text(params, encoding="utf-8", newline="\n")
 
     fields = [
         ("VehicleEnvelope", "schema_version", "string", "required", "1.2"),
@@ -312,7 +336,7 @@ def generate_source() -> None:
             "accepted/executing/completed/failed/cancelled",
         ),
     ]
-    with (SOURCE / "ROS2_字段字典.csv").open("w", encoding="utf-8-sig", newline="") as handle:
+    with (SOURCE / "ROS2字段字典.csv").open("w", encoding="utf-8-sig", newline="") as handle:
         writer = csv.writer(handle, lineterminator="\n")
         writer.writerow(["消息", "字段", "类型", "必填", "说明"])
         writer.writerows(fields)

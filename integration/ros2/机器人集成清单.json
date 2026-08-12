@@ -26,7 +26,7 @@
       "qos": 1,
       "retain": true,
       "nominal": "connect/LWT",
-      "schema": "schemas/firebot-message-1.2.schema.json"
+      "schema": "schemas/灭火机器人消息-1.2模式.json"
     },
     {
       "topic": "robot/{vehicle_id}/heartbeat",
@@ -34,7 +34,7 @@
       "qos": 0,
       "retain": false,
       "nominal": "1Hz",
-      "schema": "schemas/firebot-message-1.2.schema.json"
+      "schema": "schemas/灭火机器人消息-1.2模式.json"
     },
     {
       "topic": "robot/{vehicle_id}/capabilities",
@@ -42,7 +42,7 @@
       "qos": 1,
       "retain": true,
       "nominal": "boot/config",
-      "schema": "schemas/firebot-message-1.2.schema.json"
+      "schema": "schemas/灭火机器人消息-1.2模式.json"
     },
     {
       "topic": "robot/{vehicle_id}/location",
@@ -50,7 +50,7 @@
       "qos": 0,
       "retain": false,
       "nominal": "5-10Hz; recommended 10Hz",
-      "schema": "schemas/firebot-message-1.2.schema.json"
+      "schema": "schemas/灭火机器人消息-1.2模式.json"
     },
     {
       "topic": "robot/{vehicle_id}/status",
@@ -58,7 +58,7 @@
       "qos": 1,
       "retain": false,
       "nominal": "1Hz",
-      "schema": "schemas/firebot-message-1.2.schema.json"
+      "schema": "schemas/灭火机器人消息-1.2模式.json"
     },
     {
       "topic": "robot/{vehicle_id}/sensor",
@@ -66,7 +66,7 @@
       "qos": 0,
       "retain": false,
       "nominal": "1-2Hz",
-      "schema": "schemas/firebot-message-1.2.schema.json"
+      "schema": "schemas/灭火机器人消息-1.2模式.json"
     },
     {
       "topic": "robot/{vehicle_id}/alarm",
@@ -74,7 +74,7 @@
       "qos": 1,
       "retain": false,
       "nominal": "event",
-      "schema": "schemas/firebot-message-1.2.schema.json"
+      "schema": "schemas/灭火机器人消息-1.2模式.json"
     },
     {
       "topic": "robot/{vehicle_id}/task_status",
@@ -82,7 +82,7 @@
       "qos": 1,
       "retain": false,
       "nominal": "event/progress",
-      "schema": "schemas/firebot-message-1.2.schema.json"
+      "schema": "schemas/灭火机器人消息-1.2模式.json"
     },
     {
       "topic": "robot/{vehicle_id}/command",
@@ -90,7 +90,7 @@
       "qos": 1,
       "retain": false,
       "nominal": "event; manual QoS0",
-      "schema": "schemas/firebot-message-1.2.schema.json"
+      "schema": "schemas/灭火机器人消息-1.2模式.json"
     },
     {
       "topic": "robot/{vehicle_id}/command_ack",
@@ -98,7 +98,7 @@
       "qos": 1,
       "retain": false,
       "nominal": "event",
-      "schema": "schemas/firebot-message-1.2.schema.json"
+      "schema": "schemas/灭火机器人消息-1.2模式.json"
     }
   ],
   "commands": [
