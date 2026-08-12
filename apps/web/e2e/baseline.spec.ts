@@ -5,7 +5,10 @@ const password = configuredPassword || 'Firebot-Dev-2026!'
 const changedPassword = process.env.E2E_CHANGED_PASSWORD || 'Firebot-E2E-Changed-2026!'
 
 async function workingPassword(request: APIRequestContext): Promise<{ value: string; mustChange: boolean }> {
-  const candidates = configuredPassword ? [configuredPassword] : [changedPassword, password]
+  // The first test rotates the bootstrap credential. Every later test in the
+  // same isolated profile must therefore try the changed password first even
+  // when CI explicitly supplied E2E_ADMIN_PASSWORD.
+  const candidates = [...new Set([changedPassword, configuredPassword, password].filter(Boolean))]
   for (const candidate of candidates) {
     const response = await request.post('/api/v1/auth/login', {
       data: { username: 'admin', password: candidate },
@@ -27,7 +30,8 @@ async function login(page: Page, request: APIRequestContext): Promise<void> {
     await page.getByLabel('新密码', { exact: true }).fill(changedPassword)
     await page.getByLabel('确认新密码').fill(changedPassword)
     await page.getByRole('button', { name: '修改并重新登录' }).click()
-    await page.getByLabel('密码').fill(changedPassword)
+    await expect(page).toHaveURL(/\/login$/)
+    await page.getByLabel('密码', { exact: true }).fill(changedPassword)
     await page.getByRole('button', { name: '进入平台' }).click()
   }
   await expect(page.getByRole('heading', { name: '二维停车场地图' })).toBeVisible()

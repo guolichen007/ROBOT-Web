@@ -150,6 +150,16 @@ jobs:
       - if: always()
         run: docker compose -f compose.test.yml --profile full logs --no-color > e2e-compose.log
       - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: e2e-diagnostics
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            e2e-compose.log
+            apps/web/playwright-report/
+            apps/web/test-results/
+      - if: always()
         run: docker compose -f compose.test.yml --profile full down --volumes
 
   security:
