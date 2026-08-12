@@ -5,7 +5,7 @@ import { newUuid } from '@/lib/id'
 import { useAuthStore } from '@/stores/auth'
 import type { RobotState } from '@/types'
 
-const props = defineProps<{ robot?: RobotState }>()
+const props = withDefaults(defineProps<{ robot?: RobotState; showSafety?: boolean }>(), { showSafety: true })
 const emit = defineEmits<{ notice: [message: string, tone?: string] }>()
 const auth = useAuthStore()
 const lease = ref<{ lease_id: string; control_session_id: string; expires_at: string } | null>(null)
@@ -17,7 +17,11 @@ let pointerHeld = false
 
 const supports = (command: string): boolean => Boolean(props.robot?.supported_commands?.includes(command))
 const available = computed(
-  () => props.robot?.online_state === 'ONLINE' && !props.robot.estop_active && supports('manual_control'),
+  () =>
+    props.robot?.online_state === 'ONLINE' &&
+    !props.robot.estop_active &&
+    props.robot.control_enabled !== false &&
+    supports('manual_control'),
 )
 
 async function acquire(): Promise<boolean> {
@@ -265,7 +269,7 @@ onUnmounted(() => {
       </button>
     </div>
     <p class="safety-note">150 ms 脉冲 · TTL 500 ms · 松键/失焦自动停止；最终安全保障为车端 TTL watchdog</p>
-    <div class="estop-row">
+    <div v-if="showSafety" class="estop-row">
       <button
         v-if="!robot?.estop_active"
         class="estop-button"

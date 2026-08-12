@@ -1,5 +1,6 @@
 user platform
 topic readwrite robot/+/+
+topic readwrite _platform/compat/+/+
 
 user R001
 topic write robot/R001/location

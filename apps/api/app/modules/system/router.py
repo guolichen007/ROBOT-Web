@@ -27,9 +27,13 @@ from app.db.models import (
     InspectionPoint,
     Map,
     MapVersion,
+    NavigationPreset,
     ParkingSlot,
     Robot,
     RobotCapability,
+    RobotDataChannel,
+    RobotIntegrationProfile,
+    RobotSensorProfile,
     Site,
     StreamRegistry,
     Task,
@@ -87,7 +91,7 @@ def readiness_payload(db: DbSession) -> dict:
         else None
     )
     checks["mqtt_ingress"] = {"ok": bool(mqtt_heartbeat), "last_heartbeat": mqtt_heartbeat}
-    for service_name in ("command-dispatcher", "task-worker"):
+    for service_name in ("ros-compat-adapter", "task-worker"):
         heartbeat = (
             get_redis().get(f"service:{service_name}:heartbeat")
             if checks.get("redis", {}).get("ok")
@@ -97,6 +101,21 @@ def readiness_payload(db: DbSession) -> dict:
             "ok": bool(heartbeat),
             "last_heartbeat": heartbeat,
         }
+    dispatcher_outbox = (
+        get_redis().get("service:command-dispatcher:outbox-heartbeat")
+        if checks.get("redis", {}).get("ok")
+        else None
+    )
+    dispatcher_safety = (
+        get_redis().get("service:command-dispatcher:safety-heartbeat")
+        if checks.get("redis", {}).get("ok")
+        else None
+    )
+    checks["command_dispatcher"] = {
+        "ok": bool(dispatcher_outbox and dispatcher_safety),
+        "outbox_heartbeat": dispatcher_outbox,
+        "safety_heartbeat": dispatcher_safety,
+    }
     mqtt_ok, mqtt_error = bounded_tcp_probe(settings.mqtt_host, settings.mqtt_port)
     checks["mqtt_broker"] = (
         {"ok": True, "endpoint": f"{settings.mqtt_host}:{settings.mqtt_port}"}
@@ -171,9 +190,34 @@ def monitor_snapshot(
         raw = get_redis().get(f"robot:{robot.vehicle_id}:latest")
         state = json.loads(raw) if raw else serialize_model(robot)
         capability = db.get(RobotCapability, robot.id)
+        integration = db.get(RobotIntegrationProfile, robot.id)
         state["supported_commands"] = capability.supported_commands_json if capability else []
         state["sensors"] = capability.sensors_json if capability else []
         state["media"] = capability.media_json if capability else []
+        state["integration"] = serialize_model(integration) if integration else None
+        state["control_enabled"] = bool(
+            integration
+            and integration.control_contract_verified
+            and integration.ack_contract_verified
+            and integration.map_contract_verified
+        )
+        state["control_disabled_reason"] = (
+            None
+            if state["control_enabled"]
+            else (integration.read_only_reason if integration else "未建立集成配置")
+        )
+        state["data_channels"] = {
+            row.channel: serialize_model(row)
+            for row in db.scalars(
+                select(RobotDataChannel).where(RobotDataChannel.robot_id == robot.id)
+            ).all()
+        }
+        state["sensor_profiles"] = [
+            serialize_model(row)
+            for row in db.scalars(
+                select(RobotSensorProfile).where(RobotSensorProfile.robot_id == robot.id)
+            ).all()
+        ]
         latest.append(state)
     alarms = db.scalars(
         select(FireEvent)
@@ -203,6 +247,7 @@ def monitor_snapshot(
         "inspection_points": version_rows(InspectionPoint),
         "extinguish_points": version_rows(ExtinguishPoint),
         "trajectories": version_rows(Trajectory),
+        "navigation_presets": version_rows(NavigationPreset),
         "robots": latest,
         "alarms": [serialize_model(x) for x in alarms],
         "tasks": [serialize_model(x) for x in tasks],

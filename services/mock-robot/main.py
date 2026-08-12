@@ -42,7 +42,7 @@ class MockRobot:
         self.map_checksum = os.getenv("MOCK_MAP_CHECKSUM", "demo-map-v1")
         self.boot_id = str(uuid4())
         self.seq = 0
-        self.x, self.y, self.theta = 2.0, 10.0, 0.0
+        self.x, self.y, self.theta = 39.0, 2.0, math.pi / 2
         self.linear = 0.0
         self.angular = 0.0
         self.battery = 96.0
@@ -76,6 +76,11 @@ class MockRobot:
         self.publish_count = 0
         self.rebooted = False
         self.offline_sent = False
+        self.patrol_route = [
+            *[(39.0, 2.0 + index * 0.55) for index in range(49)],
+            *[(39.0 - index * 0.6, 28.4) for index in range(62)],
+        ]
+        self.route_index = 0
         self.client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
             client_id=f"mock-{self.vehicle_id}-{self.boot_id[:8]}",
@@ -206,6 +211,9 @@ class MockRobot:
                 if command["cmd"] == "patrol"
                 else "RETURN_DOCK"
             )
+        params = command.get("params", {})
+        preset_navigation = params.get("mission_kind") == "NAVIGATE_TO_PRESET"
+        target_pose = params.get("target_pose", {}) if preset_navigation else {}
         emitted = [self.task_status(task_id, "accepted", "ACCEPTED", 0)]
         for progress in (10, 25, 45, 65, 85):
             if self.stop_event.wait(0.6):
@@ -213,12 +221,38 @@ class MockRobot:
             with self.lock:
                 if self.estop or self.active_task_id != task_id:
                     return
-                self.linear = 0.18
-                self.angular = 0.08 * math.sin(progress)
+                if command["cmd"] == "patrol" and (
+                    preset_navigation or self.route_index < len(self.patrol_route)
+                ):
+                    target_x, target_y = (
+                        (float(target_pose["x"]), float(target_pose["y"]))
+                        if preset_navigation
+                        else self.patrol_route[self.route_index]
+                    )
+                    desired = math.atan2(target_y - self.y, target_x - self.x)
+                    delta = math.atan2(
+                        math.sin(desired - self.theta), math.cos(desired - self.theta)
+                    )
+                    self.angular = max(-0.6, min(0.6, delta * 1.8))
+                    self.linear = 0.24 if abs(delta) < 0.4 else 0.08
+                    if (
+                        not preset_navigation
+                        and math.hypot(target_x - self.x, target_y - self.y) < 0.45
+                    ):
+                        self.route_index = (self.route_index + 1) % len(self.patrol_route)
+                else:
+                    self.linear = 0.18
+                    self.angular = 0.08 * math.sin(progress)
             emitted.append(self.task_status(task_id, "executing", "NAVIGATING", progress))
         if command["cmd"] == "extinguish":
             emitted.append(self.task_status(task_id, "executing", "EXTINGUISHING", 95))
             time.sleep(0.8)
+        if preset_navigation:
+            with self.lock:
+                self.x = float(target_pose["x"])
+                self.y = float(target_pose["y"])
+                self.theta = float(target_pose.get("theta", self.theta))
+                self.linear = self.angular = 0
         emitted.append(self.task_status(task_id, "completed", "COMPLETED", 100))
         with self.lock:
             self.active_task_id = None
@@ -333,8 +367,8 @@ class MockRobot:
                     self.linear = self.angular = 0
                     self.mode = "IDLE"
                 self.theta += self.angular * dt
-                self.x = max(0.5, min(29.5, self.x + math.cos(self.theta) * self.linear * dt))
-                self.y = max(0.5, min(19.5, self.y + math.sin(self.theta) * self.linear * dt))
+                self.x = max(0.5, min(47.5, self.x + math.cos(self.theta) * self.linear * dt))
+                self.y = max(0.5, min(33.5, self.y + math.sin(self.theta) * self.linear * dt))
                 self.battery = max(5, self.battery - 0.0003)
                 location = self.message(
                     "location",
@@ -347,7 +381,7 @@ class MockRobot:
                     map_version=self.map_version,
                     map_checksum=self.map_checksum,
                     frame_id="map",
-                    parking_slot_code=f"A-{max(1, min(12, int(self.x / 2.5) + 1)):02d}",
+                    parking_slot_code=f"A-{max(1, min(54, int(self.y / 2.8) + 19)):02d}",
                     localization_status="OK",
                 )
             self.publish("location", location, 0, allow_loss=True)

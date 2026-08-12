@@ -34,6 +34,8 @@ from app.db.models import (
     RobotBootSession,
     RobotCapability,
     RobotConnectionLog,
+    RobotDataChannel,
+    RobotIntegrationProfile,
     SensorSample,
     Task,
     TaskEvent,
@@ -224,10 +226,10 @@ def handle_location(db, robot: Robot, msg: dict, source_ts: datetime, received: 
             "x": pose["x"],
             "y": pose["y"],
             "theta": pose["theta"],
-            "linear": msg.get("linear_speed", 0),
-            "angular": msg.get("angular_speed", 0),
-            "linear_speed": msg.get("linear_speed", 0),
-            "angular_speed": msg.get("angular_speed", 0),
+            "linear": msg.get("linear_speed"),
+            "angular": msg.get("angular_speed"),
+            "linear_speed": msg.get("linear_speed"),
+            "angular_speed": msg.get("angular_speed"),
             "battery": msg.get("battery", robot.battery),
             "site_code": msg["site_code"],
             "map_code": msg["map_code"],
@@ -242,7 +244,8 @@ def handle_location(db, robot: Robot, msg: dict, source_ts: datetime, received: 
         }
     )
     queue_redis_set(db, f"robot:{robot.vehicle_id}:latest", json.dumps(latest, ensure_ascii=False))
-    robot.battery = float(msg.get("battery", robot.battery))
+    if msg.get("battery") is not None:
+        robot.battery = float(msg["battery"])
     robot.current_map_version = msg["map_version"]
     reported_map = db.scalar(
         select(Map).where(Map.site_id == robot.site_id, Map.code == msg["map_code"])
@@ -257,8 +260,8 @@ def handle_location(db, robot: Robot, msg: dict, source_ts: datetime, received: 
                 x=pose["x"],
                 y=pose["y"],
                 theta=pose["theta"],
-                linear_speed=msg.get("linear_speed", 0),
-                angular_speed=msg.get("angular_speed", 0),
+                linear_speed=msg.get("linear_speed"),
+                angular_speed=msg.get("angular_speed"),
                 battery=msg.get("battery", robot.battery),
                 localization_status=msg.get("localization_status", "UNKNOWN"),
                 map_version=msg["map_version"],
@@ -315,6 +318,75 @@ def handle_sensor(db, robot: Robot, msg: dict, source_ts: datetime, received: da
     )
     queue_redis_set(db, f"robot:{robot.vehicle_id}:latest", json.dumps(latest, ensure_ascii=False))
     queue_event(db, "vehicle.sensor", latest)
+
+
+def process_internal_compat(topic: str, payload: bytes, received: datetime) -> bool:
+    expected = topic.rsplit("/", 1)[-1]
+    if not topic.startswith("_platform/compat/") or expected not in {
+        "compat_status",
+        "compat_battery",
+        "compat_odom",
+    }:
+        return False
+    try:
+        msg = json.loads(payload.decode("utf-8"))
+        if msg.get("internal_contract") != "ros-compat-v1":
+            raise ValueError("unknown internal contract")
+        vehicle_id = msg["vehicle_id"]
+        source_ts = parse_time(msg["timestamp"])
+    except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+        mqtt_invalid_total.labels(reason="invalid_internal_compat").inc()
+        return True
+    with SessionLocal.begin() as db:
+        robot = robot_for(db, vehicle_id)
+        if not robot:
+            mqtt_invalid_total.labels(reason="unknown_vehicle").inc()
+            return True
+        profile = db.get(RobotIntegrationProfile, robot.id)
+        if not profile:
+            profile = RobotIntegrationProfile(robot_id=robot.id)
+            db.add(profile)
+        profile.source_kind = "ROS_COMPAT"
+        profile.upstream_protocol = "ros-native-compat"
+        profile.control_contract_verified = False
+        profile.ack_contract_verified = False
+        profile.map_contract_verified = False
+        profile.read_only_reason = "ROS 原生上行已接入；command/ACK 与地图合同尚未现场验证"
+        profile.stale_seconds = settings.ros_compat_stale_seconds
+        profile.offline_seconds = settings.ros_compat_offline_seconds
+        raw = redis.get(f"robot:{vehicle_id}:latest")
+        latest = json.loads(raw) if raw else {"vehicle_id": vehicle_id, "robot_id": robot.id}
+        channel_name = expected.removeprefix("compat_")
+        if expected == "compat_status":
+            robot.current_mode = str(msg["mode"])
+            latest["mode"] = robot.current_mode
+        elif expected == "compat_battery":
+            robot.battery = float(msg["battery"])
+            latest["battery"] = robot.battery
+        else:
+            latest["linear"] = msg.get("linear_speed")
+            latest["angular"] = msg.get("angular_speed")
+            latest["linear_speed"] = msg.get("linear_speed")
+            latest["angular_speed"] = msg.get("angular_speed")
+        latest["server_received_at"] = received.isoformat()
+        latest["source_timestamp"] = source_ts.isoformat()
+        queue_redis_set(db, f"robot:{vehicle_id}:latest", json.dumps(latest, ensure_ascii=False))
+        channel = db.scalar(
+            select(RobotDataChannel).where(
+                RobotDataChannel.robot_id == robot.id,
+                RobotDataChannel.channel == channel_name,
+            )
+        )
+        if not channel:
+            channel = RobotDataChannel(robot_id=robot.id, channel=channel_name)
+            db.add(channel)
+        channel.support_state = "CONNECTED"
+        channel.quality = "GOOD"
+        channel.source_kind = "ROS_COMPAT"
+        channel.last_source_timestamp = source_ts
+        channel.last_received_at = received
+        queue_event(db, f"vehicle.{channel_name}", latest)
+    return True
 
 
 def handle_alarm(db, robot: Robot, msg: dict, received: datetime) -> None:
@@ -432,14 +504,27 @@ def handle_task_status(db, robot: Robot, msg: dict, received: datetime) -> None:
         "failed": "FAILED",
         "cancelled": "CANCELLED",
     }[msg["status"]]
-    task.status = internal_status
-    task.phase = msg["phase"]
-    task.progress = msg["progress"]
+    reported_completed = internal_status == "SUCCEEDED"
+    verify_navigation = task.type == "NAVIGATE_TO_PRESET" and reported_completed
+    if verify_navigation:
+        # A vehicle-reported completion is not proof of final pose. The worker
+        # requires fresh, well-localized telemetry for consecutive frames.
+        task.status = "EXECUTING"
+        task.phase = "VERIFYING_FINAL_POSE"
+        task.progress = min(float(msg["progress"]), 99.0)
+        parameters = dict(task.parameters_json or {})
+        parameters["vehicle_completed_reported_at"] = received.isoformat()
+        parameters["pose_verification_frames"] = 0
+        task.parameters_json = parameters
+    else:
+        task.status = internal_status
+        task.phase = msg["phase"]
+        task.progress = msg["progress"]
     if internal_status == "ACCEPTED":
         task.accepted_at = received
     if internal_status == "EXECUTING" and not task.started_at:
         task.started_at = received
-    if internal_status in {"SUCCEEDED", "FAILED", "CANCELLED"}:
+    if internal_status in {"SUCCEEDED", "FAILED", "CANCELLED"} and not verify_navigation:
         task.completed_at = received
     task.failure_code = msg.get("failure_code")
     task.failure_message = msg.get("failure_message")
@@ -452,8 +537,16 @@ def handle_task_status(db, robot: Robot, msg: dict, received: datetime) -> None:
             payload_json=msg,
         )
     )
+    # task_status advances the initiating business command only. A later
+    # stop_motion/cancel_task sharing task_id has its own ACK lifecycle and
+    # must never be overwritten with the task terminal status.
     command = db.scalar(
-        select(Command).where(Command.task_id == task.id).order_by(Command.issued_at.desc())
+        select(Command)
+        .where(
+            Command.task_id == task.id,
+            Command.cmd.in_({"patrol", "extinguish", "return_dock"}),
+        )
+        .order_by(Command.issued_at.desc())
     )
     if command:
         command.lifecycle_status = "EXECUTING" if task.status == "EXECUTING" else task.status
@@ -479,6 +572,8 @@ def process(topic: str, payload: bytes) -> None:
         mqtt_payload_rejected_total.labels(reason="payload_too_large").inc()
         increment_mqtt_metric("invalid:payload_too_large")
         return
+    if process_internal_compat(topic, payload, received):
+        return
     try:
         msg = json.loads(payload.decode("utf-8"))
         if json_depth(msg) > settings.max_json_depth:
@@ -496,6 +591,7 @@ def process(topic: str, payload: bytes) -> None:
         logger.warning("invalid MQTT payload")
         return
     expected = topic.rsplit("/", 1)[-1]
+    source_kind = "ROS_COMPAT" if topic.startswith("_platform/compat/") else "CANONICAL_MQTT"
     if msg["type"] != expected:
         mqtt_invalid_total.labels(reason="topic_type_mismatch").inc()
         increment_mqtt_metric("invalid:topic_type_mismatch")
@@ -534,6 +630,47 @@ def process(topic: str, payload: bytes) -> None:
                 mqtt_invalid_total.labels(reason="ended_or_unknown_boot").inc()
             else:
                 accepted = True
+                # The payload stays canonical schema 1.2; provenance is carried by
+                # the broker namespace and recorded platform-side, not invented as
+                # an extra vehicle field.
+                from app.db.models import RobotDataChannel, RobotIntegrationProfile
+
+                profile = db.get(RobotIntegrationProfile, robot.id)
+                if source_kind == "ROS_COMPAT" and (
+                    not profile or profile.source_kind != source_kind
+                ):
+                    if not profile:
+                        profile = RobotIntegrationProfile(robot_id=robot.id)
+                        db.add(profile)
+                    profile.source_kind = "ROS_COMPAT"
+                    profile.upstream_protocol = "ros-native-compat"
+                    profile.control_contract_verified = False
+                    profile.ack_contract_verified = False
+                    profile.map_contract_verified = False
+                    profile.read_only_reason = (
+                        "ROS 原生上行已接入；command/ACK 与地图合同尚未现场验证"
+                    )
+                    profile.stale_seconds = settings.ros_compat_stale_seconds
+                    profile.offline_seconds = settings.ros_compat_offline_seconds
+                channel_name = (
+                    "pose"
+                    if source_kind == "ROS_COMPAT" and msg["type"] == "location"
+                    else msg["type"]
+                )
+                channel = db.scalar(
+                    select(RobotDataChannel).where(
+                        RobotDataChannel.robot_id == robot.id,
+                        RobotDataChannel.channel == channel_name,
+                    )
+                )
+                if not channel:
+                    channel = RobotDataChannel(robot_id=robot.id, channel=channel_name)
+                    db.add(channel)
+                channel.support_state = "CONNECTED"
+                channel.quality = "GOOD"
+                channel.source_kind = source_kind
+                channel.last_source_timestamp = source_ts
+                channel.last_received_at = received
                 if msg["type"] == "availability" and msg["state"] == "offline":
                     update_online(db, robot, "OFFLINE", msg, msg.get("reason"))
                     queue_redis_delete(db, f"heartbeat:{robot.vehicle_id}")
@@ -591,6 +728,9 @@ def on_connect(client, userdata, flags, reason_code, properties):
         "command_ack",
     ):
         client.subscribe(f"robot/+/{topic}", qos=1)
+        client.subscribe(f"_platform/compat/+/{topic}", qos=1)
+    for topic in ("compat_status", "compat_battery", "compat_odom"):
+        client.subscribe(f"_platform/compat/+/{topic}", qos=1)
     logger.info("MQTT ingress connected")
 
 

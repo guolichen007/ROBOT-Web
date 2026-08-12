@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     mqtt_location_rate_limit_per_second: int = 30
     robot_stale_seconds: int = 3
     robot_offline_seconds: int = 10
+    ros_compat_stale_seconds: int = 8
+    ros_compat_offline_seconds: int = 15
     login_failure_limit: int = 5
     login_lock_seconds: int = 300
     upload_max_bytes: int = 10 * 1024 * 1024

@@ -49,6 +49,14 @@ def stable_baseline() -> None:
         robot.estop_active = False
         robot.current_map_id = active_map.id
         robot.current_map_version = version.version
+        from app.db.models import RobotIntegrationProfile
+
+        integration = db.get(RobotIntegrationProfile, robot.id)
+        if integration:
+            integration.control_contract_verified = True
+            integration.ack_contract_verified = True
+            integration.map_contract_verified = True
+            integration.read_only_reason = None
         db.execute(
             update(Task)
             .where(Task.status.in_({"CREATED", "QUEUED", "ACCEPTED", "EXECUTING"}))

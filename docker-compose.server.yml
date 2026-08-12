@@ -147,6 +147,19 @@ services:
       timeout: 5s
       retries: 12
 
+  ros-compat-adapter:
+    <<: *python-service
+    command: ["python", "/workspace/services/ros-compat-adapter/main.py"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      mosquitto: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "from app.core.events import get_redis; raise SystemExit(0 if get_redis().get('service:ros-compat-adapter:heartbeat') else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   command-dispatcher:
     <<: *python-service
     command: ["python", "/workspace/services/command-dispatcher/main.py"]
@@ -154,7 +167,7 @@ services:
       migrate: { condition: service_completed_successfully }
       mosquitto: { condition: service_healthy }
     healthcheck:
-      test: ["CMD", "python", "-c", "from app.core.events import get_redis; raise SystemExit(0 if get_redis().get('service:command-dispatcher:heartbeat') else 1)"]
+      test: ["CMD", "python", "-c", "from app.core.events import get_redis; r=get_redis(); raise SystemExit(0 if r.get('service:command-dispatcher:outbox-heartbeat') and r.get('service:command-dispatcher:safety-heartbeat') else 1)"]
       interval: 10s
       timeout: 5s
       retries: 12

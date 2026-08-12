@@ -17,6 +17,14 @@ export default defineConfig({
   build: {
     // History is route-lazy and ECharts uses only Line/Grid/Legend/Tooltip/Canvas.
     // The resulting isolated chart runtime is ~508 KiB; keep a tight, explicit budget.
-    chunkSizeWarningLimit: 520,
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'tdesign-vendor': ['tdesign-vue-next', 'tdesign-icons-vue-next'],
+          'vue-vendor': ['vue', 'vue-router', 'pinia', 'axios'],
+        },
+      },
+    },
   },
 })

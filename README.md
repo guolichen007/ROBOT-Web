@@ -37,7 +37,9 @@ flowchart LR
   INGRESS --> PG
   INGRESS --> REDIS
   MOCK["Mock R001"] <-->|"Schema 1.2"| MQTT
-  ROS2["现场 ROS2 Adapter"] -.->|"同一 MQTT 合同"| MQTT
+  ROSNATIVE["首台车 ROS 原生上行"] -.-> COMPAT["只读 Compatibility Adapter"]
+  COMPAT -.->|"规范化上行"| MQTT
+  ROS2["完整现场 ROS2 Adapter"] -.->|"Schema 1.2"| MQTT
 ```
 
 详细说明见 [架构文档](docs/系统架构.md)。
@@ -53,6 +55,8 @@ flowchart LR
 | Site/Map Version/车位/点位/轨迹 | 完成 |
 | 自动/人工火情、去重、灭火任务 | 完成 |
 | Media ticket 与 MediaMTX HTTP 鉴权 | 完成 |
+| 工业 HMI、预设点、巡检计划与三格式报告 | 完成 |
+| ROS 原生上行只读兼容与显式设备绑定 | 完成 |
 | 真实 ROS2、真车、真实视频 | 现场输入待接 |
 
 ## 6. 技术栈
@@ -152,6 +156,8 @@ SERVER 公网默认只开放 80（跳转）、443（HTTPS/WSS/WebRTC gateway）�
 ## 20. 文档索引
 
 统一入口：[docs/文档索引.md](docs/文档索引.md)。API、数据库、运维、安全、协议、坐标、车辆安全合同和发布检查均从该索引进入。
+
+本轮工业中控、右侧检测、巡检计划/报告和首台真车只读兼容说明见 [工业中控与巡检升级说明.md](docs/工业中控与巡检升级说明.md)、[巡检与预设位置接口.md](docs/巡检与预设位置接口.md) 与 [ROS原生兼容接入说明.md](docs/ROS原生兼容接入说明.md)。Canonical MQTT 继续冻结为 1.2，不因平台页面或业务能力增加而升级协议。
 
 ## 21. Git 与贡献流程
 

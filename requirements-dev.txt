@@ -3,3 +3,4 @@ mypy==1.17.1
 pytest==8.4.1
 pytest-cov==6.2.1
 ruff==0.12.9
+types-croniter==6.2.2.20260518

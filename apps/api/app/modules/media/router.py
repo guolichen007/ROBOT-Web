@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from urllib.parse import parse_qs
 from uuid import uuid4
 
 import jwt
@@ -109,7 +108,8 @@ def media_ticket(
         "stream_id": stream.stream_id,
         "robot_id": stream.robot_id,
         "camera": stream.camera_type,
-        "playback_url": f"/media/{stream.stream_id}/whep?token={token}",
+        "playback_url": f"/media/{stream.stream_id}/whep",
+        "authorization_scheme": "Bearer",
     }
 
 
@@ -124,8 +124,10 @@ def authorize_media(payload: MediaAuthRequest, db: DbSession) -> dict:
         return {"authorized": True, "action": payload.action, "stream_id": stream.stream_id}
     if payload.action not in {"read", "playback"}:
         raise PlatformError("PERMISSION_DENIED", "媒体动作未授权", status_code=403)
-    token = payload.token or parse_qs(payload.query.lstrip("?")).get("token", [""])[0]
-    claims = decode_media_ticket(token)
+    # Browser playback tickets are accepted only through the Authorization
+    # header propagated by MediaMTX. URL query tokens leak through history,
+    # reverse-proxy access logs and referrers and are intentionally unsupported.
+    claims = decode_media_ticket(payload.token)
     user = db.get(User, claims["sub"])
     if not user or user.status != "ACTIVE" or "robot.read" not in load_permissions(db, user.id):
         raise PlatformError("PERMISSION_DENIED", "媒体票据所属用户已无查看权限", status_code=403)
