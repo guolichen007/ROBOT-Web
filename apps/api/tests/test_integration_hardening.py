@@ -17,12 +17,29 @@ from app.core.events import get_redis, queue_event, queue_redis_set
 from app.core.logging import JsonFormatter
 from app.core.security import hash_password, verify_password
 from app.db.migration import escape_alembic_url
-from app.db.models import Map, MapVersion, Robot, RobotBootSession, Site, User
+from app.db.models import (
+    Command,
+    Map,
+    MapVersion,
+    PatrolPlan,
+    PatrolSchedule,
+    PatrolScheduleOccurrence,
+    Robot,
+    RobotBootSession,
+    RobotCapability,
+    RobotDataChannel,
+    RobotIntegrationProfile,
+    RobotMotionProfile,
+    Site,
+    StopOperation,
+    Task,
+    User,
+)
 from app.db.partitions import default_partition_counts, partition_name
 from app.db.session import SessionLocal
 from app.main import app
 from fastapi.testclient import TestClient
-from sqlalchemy import select, text
+from sqlalchemy import select, text, update
 from sqlalchemy.exc import IntegrityError
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -79,8 +96,42 @@ def stable_hardening_baseline() -> None:
         admin.must_change_password = False
         robot.online_state = "ONLINE"
         robot.boot_id = BOOT_A
+        robot.estop_active = False
         robot.current_map_id = active_map.id
         robot.current_map_version = version.version
+        integration = db.get(RobotIntegrationProfile, robot.id)
+        if integration:
+            integration.source_kind = "MOCK"
+            integration.control_contract_verified = True
+            integration.ack_contract_verified = True
+            integration.map_contract_verified = True
+            integration.bidirectional_bridge_verified = True
+            integration.command_path_verified = True
+            integration.cmd_vel_arbitration_verified = True
+        capability = db.get(RobotCapability, robot.id)
+        if capability:
+            capability.supported_commands_json = [
+                "manual_control",
+                "stop_motion",
+                "emergency_stop",
+                "reset_estop",
+                "return_dock",
+                "patrol",
+                "extinguish",
+                "cancel_task",
+            ]
+        motion = db.get(RobotMotionProfile, robot.id)
+        if motion:
+            motion.manual_watchdog_verified = True
+            motion.max_manual_forward_mps = 0.22
+            motion.max_manual_reverse_mps = 0.16
+            motion.max_manual_angular_radps = 0.65
+            motion.reverse_allowed = True
+        db.execute(
+            update(Task)
+            .where(Task.status.in_({"CREATED", "QUEUED", "ACCEPTED", "EXECUTING"}))
+            .values(status="SUCCEEDED", phase="TEST_CLEANUP", completed_at=datetime.now(UTC))
+        )
 
 
 def login(client: TestClient) -> str:
@@ -315,3 +366,244 @@ def test_media_publish_requires_registered_path_and_secret() -> None:
             },
         )
         assert unknown.status_code == 403
+
+
+def _task_for_stop(db, *, robot: Robot, user: User, version: MapVersion) -> Task:
+    task = Task(
+        task_code=f"STOP-TEST-{uuid4()}",
+        robot_id=robot.id,
+        type="PATROL",
+        status="EXECUTING",
+        phase="PATROL_RUNNING",
+        progress=20,
+        target_pose_snapshot_json={"x": 1, "y": 1, "theta": 0},
+        map_id_snapshot=version.map_id,
+        map_version_snapshot=version.version,
+        semantic_revision_snapshot=version.semantic_revision,
+        parameters_json={},
+        created_by=user.id,
+    )
+    db.add(task)
+    db.flush()
+    return task
+
+
+def _command_for_stop(
+    db,
+    *,
+    robot: Robot,
+    user: User,
+    cmd: str,
+    task: Task | None,
+    ack_status: str | None,
+) -> Command:
+    now = datetime.now(UTC)
+    row = Command(
+        command_id=f"C-{uuid4()}",
+        correlation_id=str(uuid4()),
+        robot_id=robot.id,
+        task_id=task.id if task else None,
+        cmd=cmd,
+        priority=99,
+        payload_json={"cmd": cmd},
+        lifecycle_status="ACK_ACCEPTED" if ack_status else "PUBLISHED",
+        issued_by=user.id,
+        issued_at=now,
+        expires_at=now + timedelta(minutes=1),
+        published_at=now,
+        ack_status=ack_status,
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def test_stop_operation_keeps_physical_stop_separate_from_cancel_timeout() -> None:
+    worker = load_service("firebot_stop_split_test", "services/task-worker/main.py")
+    now = datetime.now(UTC)
+    with SessionLocal.begin() as db:
+        robot = db.scalar(select(Robot).where(Robot.vehicle_id == "R001"))
+        user = db.scalar(select(User).where(User.username == "admin"))
+        active_map = db.scalar(select(Map).where(Map.active_version_id.is_not(None)))
+        assert robot and user and active_map and active_map.active_version_id
+        version = db.get(MapVersion, active_map.active_version_id)
+        assert version
+        task = _task_for_stop(db, robot=robot, user=user, version=version)
+        stop = _command_for_stop(
+            db, robot=robot, user=user, cmd="stop_motion", task=task, ack_status="accepted"
+        )
+        cancel = _command_for_stop(
+            db, robot=robot, user=user, cmd="cancel_task", task=task, ack_status="accepted"
+        )
+        operation = StopOperation(
+            robot_id=robot.id,
+            task_id=task.id,
+            stop_command_id=stop.command_id,
+            cancel_command_id=cancel.command_id,
+            state="STATIONARY_CONFIRMED_CANCEL_PENDING",
+            motion_stop_state="STATIONARY_CONFIRMED",
+            mission_cancel_state="ACK_ACCEPTED",
+            requested_by=user.id,
+            stop_ack_deadline_at=now + timedelta(seconds=5),
+            cancel_deadline_at=now - timedelta(milliseconds=1),
+            stationary_verify_deadline_at=now + timedelta(seconds=5),
+        )
+        db.add(operation)
+        db.flush()
+        operation_id = operation.id
+    with SessionLocal.begin() as db:
+        worker.reconcile_stop_operations(db, now)
+    with SessionLocal() as db:
+        operation = db.get(StopOperation, operation_id)
+        assert operation
+        assert operation.motion_stop_state == "STATIONARY_CONFIRMED"
+        assert operation.mission_cancel_state == "UNCONFIRMED"
+        assert operation.state == "UNCONFIRMED"
+        assert operation.failure_reason == "TASK_CANCEL_TIMEOUT"
+
+
+def test_stop_operation_stale_telemetry_terminates_unconfirmed() -> None:
+    worker = load_service("firebot_stop_stale_test", "services/task-worker/main.py")
+    now = datetime.now(UTC)
+    with SessionLocal.begin() as db:
+        robot = db.scalar(select(Robot).where(Robot.vehicle_id == "R001"))
+        user = db.scalar(select(User).where(User.username == "admin"))
+        assert robot and user
+        stop = _command_for_stop(
+            db, robot=robot, user=user, cmd="stop_motion", task=None, ack_status="accepted"
+        )
+        operation = StopOperation(
+            robot_id=robot.id,
+            stop_command_id=stop.command_id,
+            state="VERIFYING_STATIONARY",
+            motion_stop_state="VERIFYING_STATIONARY",
+            mission_cancel_state="NOT_REQUIRED",
+            requested_by=user.id,
+            stop_ack_deadline_at=now + timedelta(seconds=5),
+            stationary_verify_deadline_at=now - timedelta(milliseconds=1),
+        )
+        db.add(operation)
+        db.flush()
+        operation_id = operation.id
+        vehicle_id = robot.vehicle_id
+    get_redis().set(
+        f"robot:{vehicle_id}:latest",
+        json.dumps(
+            {
+                "server_received_at": (now - timedelta(seconds=5)).isoformat(),
+                "linear_x": 0,
+                "linear_y": 0,
+                "angular_z": 0,
+            }
+        ),
+    )
+    with SessionLocal.begin() as db:
+        worker.reconcile_stop_operations(db, now)
+    with SessionLocal() as db:
+        operation = db.get(StopOperation, operation_id)
+        assert operation
+        assert operation.state == "UNCONFIRMED"
+        assert operation.failure_reason == "TELEMETRY_STALE"
+
+
+def test_stop_operation_ack_deadline_terminates_unconfirmed() -> None:
+    worker = load_service("firebot_stop_ack_timeout_test", "services/task-worker/main.py")
+    now = datetime.now(UTC)
+    with SessionLocal.begin() as db:
+        robot = db.scalar(select(Robot).where(Robot.vehicle_id == "R001"))
+        user = db.scalar(select(User).where(User.username == "admin"))
+        assert robot and user
+        stop = _command_for_stop(
+            db, robot=robot, user=user, cmd="stop_motion", task=None, ack_status=None
+        )
+        operation = StopOperation(
+            robot_id=robot.id,
+            stop_command_id=stop.command_id,
+            state="STOP_REQUESTED",
+            motion_stop_state="WAITING_ACK",
+            mission_cancel_state="NOT_REQUIRED",
+            requested_by=user.id,
+            stop_ack_deadline_at=now - timedelta(milliseconds=1),
+            stationary_verify_deadline_at=now + timedelta(seconds=5),
+        )
+        db.add(operation)
+        db.flush()
+        operation_id = operation.id
+    with SessionLocal.begin() as db:
+        worker.reconcile_stop_operations(db, now)
+    with SessionLocal() as db:
+        operation = db.get(StopOperation, operation_id)
+        assert operation and operation.state == "UNCONFIRMED"
+        assert operation.failure_reason == "STOP_ACK_TIMEOUT"
+
+
+def test_expired_queued_patrol_occurrence_is_never_dispatched() -> None:
+    worker = load_service("firebot_queue_expiry_test", "services/task-worker/main.py")
+    now = datetime.now(UTC)
+    with SessionLocal.begin() as db:
+        plan = db.scalar(select(PatrolPlan).where(PatrolPlan.enabled.is_(True)))
+        user = db.scalar(select(User).where(User.username == "admin"))
+        assert plan and user
+        schedule = PatrolSchedule(
+            patrol_plan_id=plan.id,
+            cron_expression="0 9 * * *",
+            enabled=True,
+            overlap_policy="QUEUE",
+            queue_expiry_seconds=1,
+            created_by=user.id,
+        )
+        db.add(schedule)
+        db.flush()
+        occurrence = PatrolScheduleOccurrence(
+            schedule_id=schedule.id,
+            scheduled_for=now - timedelta(minutes=1),
+            state="QUEUED",
+        )
+        db.add(occurrence)
+        db.flush()
+        occurrence_id = occurrence.id
+    with SessionLocal.begin() as db:
+        occurrence = db.get(PatrolScheduleOccurrence, occurrence_id)
+        assert occurrence
+        assert worker._dispatch_schedule_occurrence(db, occurrence) is False
+    with SessionLocal() as db:
+        occurrence = db.get(PatrolScheduleOccurrence, occurrence_id)
+        assert occurrence and occurrence.state == "SKIPPED"
+        assert occurrence.reason_code == "QUEUE_WINDOW_EXPIRED"
+
+
+def test_ros1_internal_status_removes_stale_estop_and_marks_missing_channels() -> None:
+    ingress = load_service("firebot_ros1_unknown_safety_test", "services/mqtt-ingress/main.py")
+    now = datetime.now(UTC)
+    with SessionLocal() as db:
+        robot = db.scalar(select(Robot).where(Robot.vehicle_id == "R001"))
+        assert robot
+        robot_id = robot.id
+    get_redis().set(
+        "robot:R001:latest",
+        json.dumps({"vehicle_id": "R001", "estop_active": False}),
+    )
+    payload = {
+        "internal_contract": "ros-compat-v1",
+        "vehicle_id": "R001",
+        "timestamp": now.isoformat(),
+        "mode": "IDLE",
+        "ros_control_mode": 3,
+    }
+    assert ingress.process_internal_compat(
+        "_platform/compat/R001/compat_status", json.dumps(payload).encode(), now
+    )
+    latest = json.loads(get_redis().get("robot:R001:latest"))
+    assert "estop_active" not in latest
+    with SessionLocal() as db:
+        robot = db.get(Robot, robot_id)
+        estop = db.scalar(
+            select(RobotDataChannel).where(
+                RobotDataChannel.robot_id == robot_id,
+                RobotDataChannel.channel == "estop",
+            )
+        )
+        capability = db.get(RobotCapability, robot_id)
+        assert robot and robot.estop_active is None
+        assert estop and estop.support_state == "UNSUPPORTED"
+        assert capability and capability.supported_commands_json == []

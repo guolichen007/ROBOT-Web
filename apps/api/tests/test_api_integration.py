@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
@@ -15,12 +16,16 @@ from app.db.models import (
     OutboxEvent,
     ParkingSlot,
     Robot,
+    RobotCapability,
+    RobotIntegrationProfile,
+    RobotMotionProfile,
     Task,
     User,
 )
 from app.db.session import SessionLocal
 from app.main import app
 from fastapi.testclient import TestClient
+from openpyxl import load_workbook
 from sqlalchemy import select, update
 from starlette.websockets import WebSocketDisconnect
 
@@ -49,14 +54,35 @@ def stable_baseline() -> None:
         robot.estop_active = False
         robot.current_map_id = active_map.id
         robot.current_map_version = version.version
-        from app.db.models import RobotIntegrationProfile
-
         integration = db.get(RobotIntegrationProfile, robot.id)
         if integration:
+            integration.source_kind = "MOCK"
             integration.control_contract_verified = True
             integration.ack_contract_verified = True
             integration.map_contract_verified = True
+            integration.bidirectional_bridge_verified = True
+            integration.command_path_verified = True
+            integration.cmd_vel_arbitration_verified = True
             integration.read_only_reason = None
+        capability = db.get(RobotCapability, robot.id)
+        if capability:
+            capability.supported_commands_json = [
+                "manual_control",
+                "stop_motion",
+                "emergency_stop",
+                "reset_estop",
+                "return_dock",
+                "patrol",
+                "extinguish",
+                "cancel_task",
+            ]
+        motion = db.get(RobotMotionProfile, robot.id)
+        if motion:
+            motion.manual_watchdog_verified = True
+            motion.max_manual_forward_mps = 0.22
+            motion.max_manual_reverse_mps = 0.16
+            motion.max_manual_angular_radps = 0.65
+            motion.reverse_allowed = True
         db.execute(
             update(Task)
             .where(Task.status.in_({"CREATED", "QUEUED", "ACCEPTED", "EXECUTING"}))
@@ -94,6 +120,13 @@ def target() -> tuple[Robot, ParkingSlot, MapVersion]:
         db.expunge(slot)
         db.expunge(version)
         return robot, slot, version
+
+
+def admin_id() -> str:
+    with SessionLocal() as db:
+        admin = db.scalar(select(User).where(User.username == "admin"))
+        assert admin
+        return admin.id
 
 
 def test_refresh_rotation_reuse_revokes_family(client: TestClient) -> None:
@@ -154,6 +187,53 @@ def test_manual_lease_mutex_sequence_and_release(client: TestClient) -> None:
 
     released = client.delete("/api/v1/robots/R001/manual-lease", headers=auth(token))
     assert released.status_code == 204
+
+
+def test_manual_command_is_clamped_by_server_motion_profile(client: TestClient) -> None:
+    token = login(client)
+    lease = client.post(
+        "/api/v1/robots/R001/manual-lease",
+        json={"control_session_id": str(uuid4())},
+        headers=auth(token),
+    )
+    assert lease.status_code == 201
+    held = lease.json()
+    command = client.post(
+        "/api/v1/robots/R001/commands/manual",
+        json={
+            "lease_id": held["lease_id"],
+            "control_session_id": held["control_session_id"],
+            "seq": 1,
+            "linear": 0.4,
+            "angular": 1.0,
+        },
+        headers=auth(token),
+    )
+    assert command.status_code == 200
+    assert command.json()["clamped"] is True
+    assert command.json()["applied"] == {"linear": 0.22, "angular": 0.65}
+    client.delete("/api/v1/robots/R001/manual-lease", headers=auth(token))
+
+
+def test_stale_pose_never_draws_detection_coverage(client: TestClient) -> None:
+    token = login(client)
+    get_redis().set(
+        "robot:R001:latest",
+        json.dumps(
+            {
+                "x": 10,
+                "y": 10,
+                "theta": 0,
+                "localization_status": "GOOD",
+                "server_received_at": "2020-01-01T00:00:00+00:00",
+            }
+        ),
+    )
+    response = client.get("/api/v1/robots/R001/detection-coverage", headers=auth(token))
+    assert response.status_code == 200
+    assert response.json()["state"] == "STALE"
+    assert response.json()["polygon"] == []
+    assert response.json()["covered_parking_slot_ids"] == []
 
 
 def test_manual_lease_blocks_autonomous_task(client: TestClient) -> None:
@@ -233,6 +313,50 @@ def test_task_idempotency_outbox_and_map_mismatch(client: TestClient) -> None:
     assert mismatch.status_code == 409
     assert mismatch.json()["error"]["code"] == "MAP_VERSION_MISMATCH"
     assert mismatch.json()["error"]["details"]["robot_map_version"] == "MISMATCH"
+
+
+def test_report_download_requires_bearer_and_returns_real_pdf_xlsx(
+    client: TestClient, tmp_path
+) -> None:
+    token = login(client)
+    robot, slot, version = target()
+    task = Task(
+        task_code=f"REPORT-{uuid4()}",
+        robot_id=robot.id,
+        type="PATROL",
+        status="SUCCEEDED",
+        phase="COMPLETED",
+        progress=100,
+        target_parking_slot_id=slot.id,
+        target_pose_snapshot_json=slot.center_pose_json,
+        map_id_snapshot=version.map_id,
+        map_version_snapshot=version.version,
+        semantic_revision_snapshot=version.semantic_revision,
+        trajectory_snapshot_json=[],
+        parameters_json={"source": "TEST"},
+        created_by=admin_id(),
+        started_at=datetime.now(UTC),
+        completed_at=datetime.now(UTC),
+    )
+    with SessionLocal.begin() as db:
+        db.add(task)
+    generated = client.post(f"/api/v1/patrol-reports/tasks/{task.id}", headers=auth(token))
+    assert generated.status_code == 201, generated.text
+    report = generated.json()
+    assert report["pdf_asset_id"] and report["xlsx_asset_id"]
+    for format_name in ("pdf", "xlsx"):
+        unauthenticated = client.get(
+            f"/api/v1/patrol-reports/{report['id']}/download/{format_name}"
+        )
+        assert unauthenticated.status_code == 401
+    pdf = client.get(f"/api/v1/patrol-reports/{report['id']}/download/pdf", headers=auth(token))
+    assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF-")
+    xlsx = client.get(f"/api/v1/patrol-reports/{report['id']}/download/xlsx", headers=auth(token))
+    assert xlsx.status_code == 200 and xlsx.content.startswith(b"PK")
+    xlsx_path = tmp_path / "report.xlsx"
+    xlsx_path.write_bytes(xlsx.content)
+    workbook = load_workbook(xlsx_path, read_only=True)
+    assert {"巡检汇总", "观测明细", "任务时间线"}.issubset(workbook.sheetnames)
 
 
 def test_manual_alarm_idempotency_lifecycle_and_audit(client: TestClient) -> None:

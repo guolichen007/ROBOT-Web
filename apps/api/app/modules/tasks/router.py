@@ -21,6 +21,7 @@ from app.db.models import (
     FireEvent,
     MapVersion,
     ParkingSlot,
+    PatrolPlan,
     Robot,
     Task,
     TaskEvent,
@@ -28,6 +29,7 @@ from app.db.models import (
 )
 from app.modules.commands.service import create_durable_command, task_code
 from app.modules.robots.router import find_robot
+from app.modules.tasks.patrol import build_patrol_task
 
 router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
 
@@ -37,6 +39,12 @@ class TaskInput(BaseModel):
     target_parking_slot_id: str
     trajectory_id: str | None = None
     fire_event_id: str | None = None
+    parameters: dict = Field(default_factory=dict)
+
+
+class PatrolPlanTaskInput(BaseModel):
+    robot_id: str
+    patrol_plan_id: str
     parameters: dict = Field(default_factory=dict)
 
 
@@ -199,15 +207,102 @@ def patrol(
     auth: AuthContext = Depends(require_permission("patrol.create")),
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ) -> dict:
-    return create_task(
-        task_type="PATROL",
-        permission="patrol.create",
-        payload=payload,
+    endpoint = "/tasks/patrol"
+    body = payload.model_dump()
+    cached = lookup(
+        db,
+        actor_id=auth.user.id,
+        endpoint=endpoint,
         key=idempotency_key,
-        request=request,
-        db=db,
-        auth=auth,
+        payload=body,
     )
+    if cached:
+        return cached.response_json
+    robot = find_robot(db, payload.robot_id)
+    plan = db.scalar(
+        select(PatrolPlan)
+        .where(PatrolPlan.robot_id == robot.id, PatrolPlan.enabled.is_(True))
+        .order_by(PatrolPlan.code)
+    )
+    if not plan:
+        raise PlatformError("PATROL_PLAN_INVALID", "当前机器人没有启用的巡检计划")
+    task, command_id = build_patrol_task(
+        db,
+        plan=plan,
+        robot=robot,
+        actor_id=auth.user.id,
+        source=str(payload.parameters.get("source", "EXTERNAL_API")),
+    )
+    response = {**serialize_model(task), "command_id": command_id}
+    store(
+        db,
+        actor_id=auth.user.id,
+        endpoint=endpoint,
+        key=idempotency_key,
+        payload=body,
+        response=response,
+    )
+    write_audit(
+        db,
+        action="TASK_PATROL_CREATE",
+        resource_type="TASK",
+        user_id=auth.user.id,
+        robot_id=robot.id,
+        resource_id=task.id,
+        after=response,
+        **request_meta(request),
+    )
+    db.commit()
+    append_event("task.created", response)
+    return response
+
+
+@router.post("/patrol-plan", status_code=201)
+def patrol_plan_task(
+    payload: PatrolPlanTaskInput,
+    request: Request,
+    db: DbSession,
+    auth: AuthContext = Depends(require_permission("patrol.create")),
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+) -> dict:
+    endpoint = "/tasks/patrol-plan"
+    body = payload.model_dump()
+    cached = lookup(db, actor_id=auth.user.id, endpoint=endpoint, key=idempotency_key, payload=body)
+    if cached:
+        return cached.response_json
+    robot = find_robot(db, payload.robot_id)
+    plan = db.get(PatrolPlan, payload.patrol_plan_id)
+    if not plan or plan.robot_id != robot.id:
+        raise PlatformError("PATROL_PLAN_INVALID", "巡检计划不存在或不属于当前机器人")
+    task, command_id = build_patrol_task(
+        db,
+        plan=plan,
+        robot=robot,
+        actor_id=auth.user.id,
+        source=str(payload.parameters.get("source", "OPERATIONS_HMI")),
+    )
+    response = {**serialize_model(task), "command_id": command_id}
+    store(
+        db,
+        actor_id=auth.user.id,
+        endpoint=endpoint,
+        key=idempotency_key,
+        payload=body,
+        response=response,
+    )
+    write_audit(
+        db,
+        action="TASK_PATROL_CREATE",
+        resource_type="TASK",
+        user_id=auth.user.id,
+        robot_id=robot.id,
+        resource_id=task.id,
+        after=response,
+        **request_meta(request),
+    )
+    db.commit()
+    append_event("task.created", response)
+    return response
 
 
 @router.post("/extinguish", status_code=201)

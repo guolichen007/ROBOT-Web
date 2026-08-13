@@ -18,6 +18,7 @@ from app.db.models import (
     RobotIntegrationProfile,
     Task,
 )
+from app.modules.commands.readiness import ROS_COMPAT_DOWNLINK_IMPLEMENTED, robot_readiness
 
 ACTIVE_TASK_STATES = {"CREATED", "QUEUED", "ACCEPTED", "EXECUTING"}
 
@@ -47,7 +48,33 @@ def assert_robot_can_execute(
     if robot.estop_active and action not in {"emergency_stop", "reset_estop"}:
         raise PlatformError("ROBOT_ESTOP_ACTIVE", "软件急停已锁存")
     integration = db.get(RobotIntegrationProfile, robot.id)
-    if integration and action not in {"emergency_stop", "stop_motion"}:
+    if (
+        integration
+        and integration.source_kind == "ROS_COMPAT"
+        and not all(
+            (
+                ROS_COMPAT_DOWNLINK_IMPLEMENTED,
+                integration.bidirectional_bridge_verified,
+                integration.command_path_verified,
+                integration.cmd_vel_arbitration_verified,
+                integration.ros_control_mode == 3,
+            )
+        )
+    ):
+        raise PlatformError(
+            "ROS_COMPAT_READ_ONLY",
+            integration.read_only_reason or "ROS1 兼容链路的下行、仲裁或 control_mode 尚未验证",
+            details={
+                "source_kind": integration.source_kind,
+                "action": action,
+                "bidirectional_bridge_verified": integration.bidirectional_bridge_verified,
+                "command_path_verified": integration.command_path_verified,
+                "cmd_vel_arbitration_verified": integration.cmd_vel_arbitration_verified,
+                "ros_control_mode": integration.ros_control_mode,
+            },
+        )
+    readiness = robot_readiness(db, robot)
+    if integration:
         if not integration.control_contract_verified:
             raise PlatformError(
                 "CONTROL_CONTRACT_NOT_VERIFIED",
@@ -64,6 +91,30 @@ def assert_robot_can_execute(
                     "ack_contract_verified": integration.ack_contract_verified,
                     "map_contract_verified": integration.map_contract_verified,
                 },
+            )
+        if (
+            action in {"emergency_stop", "stop_motion", "reset_estop"}
+            and robot.online_state == "ONLINE"
+            and not readiness["safety_command_ready"].get(action, False)
+        ):
+            raise PlatformError(
+                "SAFETY_COMMAND_NOT_READY",
+                "安全命令链路或对应车辆能力尚未验证",
+                details={"action": action, "reasons": readiness["readiness_reasons"]},
+            )
+        if action == "manual_control" and not readiness["manual_control_ready"]:
+            raise PlatformError(
+                "MANUAL_CONTROL_NOT_READY",
+                "手动控制链路、500ms watchdog 或运动参数尚未验证",
+                details={"reasons": readiness["readiness_reasons"]},
+            )
+        if action in {"patrol", "extinguish", "return_dock", "cancel_task"} and not readiness[
+            "autonomous_task_ready"
+        ].get(action, False):
+            raise PlatformError(
+                "AUTONOMOUS_TASK_NOT_READY",
+                "自动任务链路、地图或对应车辆能力尚未验证",
+                details={"action": action, "reasons": readiness["readiness_reasons"]},
             )
     if action in {"patrol", "extinguish", "return_dock"} and get_redis().exists(
         f"manual:lease:{robot.id}"

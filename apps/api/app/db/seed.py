@@ -23,6 +23,7 @@ from app.db.models import (
     RobotCapability,
     RobotDataChannel,
     RobotIntegrationProfile,
+    RobotMotionProfile,
     RobotSensorProfile,
     Role,
     Site,
@@ -46,6 +47,7 @@ PERMISSIONS = {
     "robot.control.force_release": "强制释放租约",
     "robot.control.task": "机器人任务控制",
     "patrol.create": "创建巡检任务",
+    "patrol.report.read": "查看和下载巡检报告",
     "extinguish.create": "创建灭火任务",
     "alarm.read": "查看报警",
     "alarm.ack": "确认报警",
@@ -70,6 +72,7 @@ ROLE_GRANTS = {
         "robot.control.estop",
         "robot.control.task",
         "patrol.create",
+        "patrol.report.read",
         "extinguish.create",
         "alarm.read",
         "alarm.ack",
@@ -86,12 +89,13 @@ ROLE_GRANTS = {
         "robot.control.estop",
         "robot.control.reset_estop",
         "patrol.create",
+        "patrol.report.read",
         "alarm.read",
         "alarm.ack",
         "map.read",
     ],
-    "viewer": ["robot.read", "alarm.read", "map.read"],
-    "auditor": ["robot.read", "alarm.read", "map.read", "audit.read"],
+    "viewer": ["robot.read", "alarm.read", "map.read", "patrol.report.read"],
+    "auditor": ["robot.read", "alarm.read", "map.read", "audit.read", "patrol.report.read"],
 }
 
 
@@ -331,6 +335,11 @@ def seed() -> None:
                 "media_json": ["roof_rgb", "roof_thermal", "bottom_ir"],
             },
         )
+        integration = db.get(RobotIntegrationProfile, robot.id)
+        if integration and integration.source_kind == "MOCK":
+            integration.bidirectional_bridge_verified = True
+            integration.command_path_verified = True
+            integration.cmd_vel_arbitration_verified = True
         _get_or_create(
             db,
             RobotIntegrationProfile,
@@ -341,11 +350,34 @@ def seed() -> None:
                 "control_contract_verified": True,
                 "ack_contract_verified": True,
                 "map_contract_verified": True,
+                "bidirectional_bridge_verified": True,
+                "command_path_verified": True,
+                "cmd_vel_arbitration_verified": True,
                 "stale_seconds": 3,
                 "offline_seconds": 10,
                 "forward_only": True,
                 "reverse_precision_navigation": False,
                 "verified_at": datetime.now(UTC),
+            },
+        )
+        motion_profile = db.get(RobotMotionProfile, robot.id)
+        if motion_profile:
+            motion_profile.max_manual_forward_mps = 0.22
+            motion_profile.max_manual_reverse_mps = 0.16
+            motion_profile.max_manual_angular_radps = 0.65
+            motion_profile.manual_watchdog_verified = True
+            motion_profile.reverse_allowed = True
+        _get_or_create(
+            db,
+            RobotMotionProfile,
+            robot_id=robot.id,
+            defaults={
+                "max_manual_forward_mps": 0.22,
+                "max_manual_reverse_mps": 0.16,
+                "max_manual_angular_radps": 0.65,
+                "manual_watchdog_verified": True,
+                "reverse_allowed": True,
+                "reverse_precision_verified": False,
             },
         )
         _get_or_create(

@@ -17,9 +17,7 @@ from app.db.models import (
     Command,
     ManualControlSession,
     MapVersion,
-    NavigationPreset,
     PatrolPlan,
-    PatrolPlanPoint,
     PatrolSchedule,
     PatrolScheduleOccurrence,
     Robot,
@@ -28,7 +26,6 @@ from app.db.models import (
     StopOperation,
     Task,
     TaskEvent,
-    Trajectory,
 )
 from app.db.partitions import (
     default_partition_counts,
@@ -36,7 +33,8 @@ from app.db.partitions import (
     ensure_month_partitions,
 )
 from app.db.session import SessionLocal
-from app.modules.commands.service import create_durable_command, task_code
+from app.modules.commands.readiness import robot_readiness
+from app.modules.tasks.patrol import build_patrol_task
 from croniter import croniter
 from sqlalchemy import delete, select
 
@@ -53,6 +51,40 @@ def next_schedule_run(schedule: PatrolSchedule, base: datetime) -> datetime:
     return (
         croniter(schedule.cron_expression, base.astimezone(zone)).get_next(datetime).astimezone(UTC)
     )
+
+
+def stationary_observation(
+    latest: dict,
+    now: datetime,
+    *,
+    freshness_ms: int,
+    linear_threshold: float,
+    angular_threshold: float,
+) -> tuple[bool, bool]:
+    """Return (fresh, stationary) using full planar mecanum velocity."""
+
+    received_raw = latest.get("server_received_at")
+    try:
+        received = datetime.fromisoformat(received_raw) if received_raw else None
+        fresh = bool(received and (now - received).total_seconds() * 1000 <= freshness_ms)
+    except (TypeError, ValueError):
+        fresh = False
+    linear_x = latest.get("linear_x")
+    linear_y = latest.get("linear_y")
+    planar_speed = latest.get("planar_speed")
+    if planar_speed is None and linear_x is not None:
+        planar_speed = hypot(float(linear_x), float(linear_y or 0))
+    if planar_speed is None:
+        planar_speed = latest.get("linear")
+    angular = latest.get("angular_z", latest.get("angular"))
+    stationary = bool(
+        fresh
+        and planar_speed is not None
+        and angular is not None
+        and abs(float(planar_speed)) < linear_threshold
+        and abs(float(angular)) < angular_threshold
+    )
+    return fresh, stationary
 
 
 def reconcile_robot_states(db, now: datetime) -> None:
@@ -138,57 +170,89 @@ def reconcile_stop_operations(db, now: datetime) -> None:
             else None
         )
         task = db.get(Task, operation.task_id) if operation.task_id else None
-        if stop and stop.lifecycle_status in {"PUBLISHED_UNCONFIRMED", "FAILED", "EXPIRED"}:
+        if stop and stop.ack_status == "accepted":
+            operation.motion_stop_state = (
+                "STATIONARY_CONFIRMED"
+                if operation.motion_stop_state == "STATIONARY_CONFIRMED"
+                else "VERIFYING_STATIONARY"
+            )
+        elif stop and stop.lifecycle_status in {"PUBLISHED_UNCONFIRMED", "FAILED", "EXPIRED"}:
+            operation.motion_stop_state = "UNCONFIRMED"
             operation.state = "UNCONFIRMED"
-            operation.failure_reason = stop.ack_reason or stop.lifecycle_status
+            operation.failure_reason = stop.ack_reason or "STOP_ACK_TIMEOUT"
             operation.terminal_at = now
-        elif stop and stop.ack_status == "accepted":
-            # ACK is the authoritative safety-command fact. Older deployments
-            # may have had lifecycle_status overwritten by a shared task update;
-            # accepting by ACK also lets those persisted operations recover.
-            operation.state = "STOP_COMMAND_ACCEPTED"
-            if not cancel or (task and task.status == "CANCELLED"):
-                operation.state = "VERIFYING_STATIONARY"
-        elif cancel and cancel.lifecycle_status == "ACK_ACCEPTED":
-            operation.state = "TASK_CANCEL_ACCEPTED"
+        elif now >= operation.stop_ack_deadline_at:
+            operation.motion_stop_state = "UNCONFIRMED"
+            operation.state = "UNCONFIRMED"
+            operation.failure_reason = "STOP_ACK_TIMEOUT"
+            operation.terminal_at = now
 
-        if operation.state != "VERIFYING_STATIONARY":
+        if operation.mission_cancel_state != "NOT_REQUIRED":
+            if task and task.status == "CANCELLED":
+                operation.mission_cancel_state = "CANCELLED_CONFIRMED"
+            elif cancel and cancel.ack_status == "accepted":
+                operation.mission_cancel_state = "ACK_ACCEPTED"
+            if (
+                operation.mission_cancel_state != "CANCELLED_CONFIRMED"
+                and operation.cancel_deadline_at
+                and now >= operation.cancel_deadline_at
+            ):
+                operation.mission_cancel_state = "UNCONFIRMED"
+                operation.state = "UNCONFIRMED"
+                operation.failure_reason = "TASK_CANCEL_TIMEOUT"
+                operation.terminal_at = now
+
+        if operation.terminal_at:
             queue_event(db, "operation.stop.updated", serialize_model(operation))
             continue
+        if operation.motion_stop_state == "STATIONARY_CONFIRMED":
+            if operation.mission_cancel_state in {"NOT_REQUIRED", "CANCELLED_CONFIRMED"}:
+                operation.state = "VEHICLE_STATIONARY_CONFIRMED"
+                operation.terminal_at = now
+            else:
+                operation.state = "STATIONARY_CONFIRMED_CANCEL_PENDING"
+            queue_event(db, "operation.stop.updated", serialize_model(operation))
+            continue
+        if operation.motion_stop_state != "VERIFYING_STATIONARY":
+            operation.state = "STOP_REQUESTED"
+            queue_event(db, "operation.stop.updated", serialize_model(operation))
+            continue
+        operation.state = "VERIFYING_STATIONARY"
         robot = db.get(Robot, operation.robot_id)
         raw = redis.get(f"robot:{robot.vehicle_id}:latest") if robot else None
         latest = json.loads(raw) if raw else {}
-        received_raw = latest.get("server_received_at")
-        try:
-            received = datetime.fromisoformat(received_raw) if received_raw else None
-            fresh = bool(
-                received
-                and (now - received).total_seconds() * 1000 <= operation.telemetry_freshness_ms
-            )
-        except (TypeError, ValueError):
-            fresh = False
-        linear = latest.get("linear")
-        angular = latest.get("angular")
-        stationary = (
-            fresh
-            and linear is not None
-            and angular is not None
-            and abs(float(linear)) < operation.linear_threshold
-            and abs(float(angular)) < operation.angular_threshold
+        fresh, stationary = stationary_observation(
+            latest,
+            now,
+            freshness_ms=operation.telemetry_freshness_ms,
+            linear_threshold=operation.linear_threshold,
+            angular_threshold=operation.angular_threshold,
         )
         operation.stationary_frames = operation.stationary_frames + 1 if stationary else 0
         if operation.stationary_frames >= 5:
-            operation.state = "VEHICLE_STATIONARY_CONFIRMED"
-            operation.terminal_at = now
+            operation.motion_stop_state = "STATIONARY_CONFIRMED"
+            if operation.mission_cancel_state in {"NOT_REQUIRED", "CANCELLED_CONFIRMED"}:
+                operation.state = "VEHICLE_STATIONARY_CONFIRMED"
+                operation.terminal_at = now
+            else:
+                operation.state = "STATIONARY_CONFIRMED_CANCEL_PENDING"
             db.add(
                 RobotOperationEvent(
                     robot_id=operation.robot_id,
                     task_id=operation.task_id,
                     operation_type="STOP_PATROL",
-                    state=operation.state,
-                    payload_json={"stationary_frames": operation.stationary_frames},
+                    state=operation.motion_stop_state,
+                    payload_json={
+                        "stationary_frames": operation.stationary_frames,
+                        "mission_cancel_state": operation.mission_cancel_state,
+                    },
                 )
             )
+        elif now >= operation.stationary_verify_deadline_at:
+            operation.motion_stop_state = "UNCONFIRMED"
+            operation.state = "UNCONFIRMED"
+            operation.failure_reason = "TELEMETRY_STALE" if not fresh else "VELOCITY_NOT_ZERO"
+            operation.terminal_at = now
         queue_event(db, "operation.stop.updated", serialize_model(operation))
 
 
@@ -223,7 +287,12 @@ def reconcile_navigation_verification(db, now: datetime) -> None:
             reported = task.created_at
             fresh = False
         pose = task.target_pose_snapshot_json or {}
-        localization_ok = latest.get("localization_status") in {"OK", "GOOD", "VALID"}
+        localization_ok = latest.get("localization_status") in {
+            "OK",
+            "GOOD",
+            "VALID",
+            "VALID_SOURCE",
+        }
         values_present = all(latest.get(key) is not None for key in ("x", "y", "theta"))
         within = False
         if values_present:
@@ -294,6 +363,14 @@ def _dispatch_schedule_occurrence(db, occurrence: PatrolScheduleOccurrence) -> b
         occurrence.state = "REJECTED"
         occurrence.reason_code = "CONFIGURATION_INVALID"
         return False
+    if (
+        occurrence.state == "QUEUED"
+        and (datetime.now(UTC) - occurrence.scheduled_for).total_seconds()
+        > schedule.queue_expiry_seconds
+    ):
+        occurrence.state = "SKIPPED"
+        occurrence.reason_code = "QUEUE_WINDOW_EXPIRED"
+        return False
     integration = db.get(RobotIntegrationProfile, robot.id)
     if schedule.require_robot_online and robot.online_state != "ONLINE":
         occurrence.state = "SKIPPED"
@@ -311,6 +388,10 @@ def _dispatch_schedule_occurrence(db, occurrence: PatrolScheduleOccurrence) -> b
         occurrence.state = "SKIPPED"
         occurrence.reason_code = "MAP_CONTRACT_NOT_VERIFIED"
         return False
+    if not robot_readiness(db, robot)["autonomous_task_ready"]["patrol"]:
+        occurrence.state = "SKIPPED"
+        occurrence.reason_code = "AUTONOMOUS_TASK_NOT_READY"
+        return False
     if robot.current_map_id != version.map_id or robot.current_map_version != version.version:
         occurrence.state = "SKIPPED"
         occurrence.reason_code = "MAP_VERSION_MISMATCH"
@@ -326,77 +407,24 @@ def _dispatch_schedule_occurrence(db, occurrence: PatrolScheduleOccurrence) -> b
             occurrence.state = "REJECTED" if schedule.overlap_policy == "REJECT" else "SKIPPED"
             occurrence.reason_code = "ACTIVE_TASK_OVERLAP"
         return False
-    points = db.scalars(
-        select(PatrolPlanPoint)
-        .where(PatrolPlanPoint.patrol_plan_id == plan.id)
-        .order_by(PatrolPlanPoint.sequence)
-    ).all()
-    if not points:
+    try:
+        task, command_id = build_patrol_task(
+            db,
+            plan=plan,
+            robot=robot,
+            actor_id=schedule.created_by,
+            source="SCHEDULER",
+            schedule_id=schedule.id,
+            occurrence_id=occurrence.id,
+        )
+    except Exception as exc:
         occurrence.state = "REJECTED"
-        occurrence.reason_code = "PLAN_HAS_NO_POINTS"
+        occurrence.reason_code = getattr(exc, "code", "PATROL_BUILD_FAILED")
         return False
-    presets = [db.get(NavigationPreset, point.navigation_preset_id) for point in points]
-    if any(preset is None or not preset.enabled for preset in presets):
-        occurrence.state = "REJECTED"
-        occurrence.reason_code = "PRESET_INVALID"
-        return False
-    trajectory = db.get(Trajectory, plan.trajectory_id) if plan.trajectory_id else None
-    first = presets[0]
-    assert first is not None
-    task = Task(
-        task_code=task_code(),
-        robot_id=robot.id,
-        type="PATROL",
-        status="CREATED",
-        phase="SCHEDULE_TRIGGERED",
-        progress=0,
-        target_pose_snapshot_json=first.pose_json,
-        map_id_snapshot=version.map_id,
-        map_version_snapshot=version.version,
-        semantic_revision_snapshot=version.semantic_revision,
-        trajectory_snapshot_json=trajectory.path_json if trajectory else None,
-        parameters_json={
-            "patrol_plan_id": plan.id,
-            "schedule_id": schedule.id,
-            "occurrence_id": occurrence.id,
-            "points": [
-                {
-                    "navigation_preset_id": preset.id,
-                    "pose": preset.pose_json,
-                    "dwell_seconds": point.dwell_seconds,
-                    "required_observations": point.required_observations_json,
-                }
-                for point, preset in zip(points, presets, strict=True)
-                if preset is not None
-            ],
-        },
-        created_by=schedule.created_by,
-    )
-    db.add(task)
-    db.flush()
-    db.add(TaskEvent(task_id=task.id, status="CREATED", phase="SCHEDULE_TRIGGERED", progress=0))
-    command = create_durable_command(
-        db,
-        robot=robot,
-        operator_id=schedule.created_by,
-        cmd="patrol",
-        task_id=task.id,
-        params={
-            "task_id": task.id,
-            "patrol_plan_id": plan.id,
-            "map_id": version.map_id,
-            "map_version": version.version,
-            "semantic_revision": version.semantic_revision,
-            "trajectory": trajectory.path_json if trajectory else None,
-            "points": task.parameters_json["points"],
-        },
-    )
-    task.status = "QUEUED"
-    task.phase = "COMMAND_QUEUED"
     occurrence.state = "DISPATCHED"
     occurrence.reason_code = None
     occurrence.task_id = task.id
-    queue_event(db, "task.created", {**serialize_model(task), "command_id": command.command_id})
+    queue_event(db, "task.created", {**serialize_model(task), "command_id": command_id})
     return True
 
 

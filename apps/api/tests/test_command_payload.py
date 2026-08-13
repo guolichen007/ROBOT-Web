@@ -25,3 +25,5 @@ def test_manual_command_ttl_and_identity() -> None:
     assert payload["lease_id"] == "lease-id"
     assert payload["seq"] == 9
     assert payload["cmd"] == "manual_control"
+    assert payload["params"] == {"linear_x": 0.1, "angular_z": 0}
+    assert "linear_y" not in payload["params"]

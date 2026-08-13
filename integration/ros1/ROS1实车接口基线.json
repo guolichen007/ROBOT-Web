@@ -1,0 +1,47 @@
+{
+  "baseline_version": "1.0",
+  "discovery_kind": "STATIC_SOURCE_ANALYSIS",
+  "captured_at": "2026-08-13T09:56:00+08:00",
+  "runtime_verification": "REQUIRED",
+  "platform_contract": "1.2.0",
+  "schema_version": "1.2",
+  "vehicle": {
+    "os": "Ubuntu 20.04.6 LTS",
+    "ros": "ROS1 Noetic",
+    "navigation": ["AMCL", "move_base", "TEB"],
+    "chassis": "MECANUM",
+    "vehicle_id": "OWNER_INPUT_REQUIRED"
+  },
+  "interfaces": {
+    "global_pose": {"topic": "/amcl_pose", "type": "geometry_msgs/PoseWithCovarianceStamped", "frame": "map"},
+    "odom": {"topic": "/odom", "type": "nav_msgs/Odometry", "fields": ["vx", "vy", "wz"], "nominal_hz": 50},
+    "status": {"topic": "/robot_status", "type": "igk_robot/RobotStatus", "nominal_hz": 10},
+    "navigation": {"kind": "move_base_msgs/MoveBaseAction", "diagnostic_only_until_correlation": true},
+    "motion": {"topic": "/cmd_vel", "type": "geometry_msgs/Twist", "required_control_mode": 3, "chassis_watchdog_ms": 3000, "cmd_vel_mux": "NONE"}
+  },
+  "not_available": [
+    "software_estop",
+    "estop_state",
+    "reset_estop",
+    "extinguish_actuator",
+    "roof_rgb",
+    "roof_thermal",
+    "bottom_ir_video",
+    "fire_detection_ros_node"
+  ],
+  "map": {
+    "yaml": "smartcar_description/map/mymap.yaml",
+    "image": "mymap.pgm",
+    "resolution_m_per_pixel": 0.05,
+    "origin": [-7.126112, -11.984083, 0.0],
+    "version": "OWNER_INPUT_REQUIRED",
+    "checksum": "OWNER_INPUT_REQUIRED"
+  },
+  "gates": {
+    "read_only": true,
+    "command_path_verified": false,
+    "cmd_vel_arbitration_verified": false,
+    "local_500ms_watchdog_verified": false,
+    "ready_for_motion_test": false
+  }
+}

@@ -13,6 +13,7 @@ import StateChip from '@/components/StateChip.vue'
 import VideoCard from '@/components/VideoCard.vue'
 import { api, errorMessage } from '@/lib/api'
 import { newUuid } from '@/lib/id'
+import { compareOperationalAlarms, operationalSituation } from '@/lib/operations'
 import { useAuthStore } from '@/stores/auth'
 import { useMonitorStore } from '@/stores/monitor'
 import type { Alarm, DataSupportState, DetectionCoverage, ParkingSlot, StopOperation } from '@/types'
@@ -36,17 +37,30 @@ const trajectory = computed(() => monitor.snapshot.trajectories[0]?.path_json ||
 const streams = computed(() =>
   Object.fromEntries(monitor.snapshot.streams.map((item) => [item.camera_type, item])),
 )
-const alarms = computed(() => monitor.snapshot.alarms.slice(0, 6))
+const alarms = computed(() => [...monitor.snapshot.alarms].sort(compareOperationalAlarms).slice(0, 6))
 const robot = computed(() => monitor.robot)
 const activeAlarm = computed(() => alarms.value[0])
-const controlEnabled = computed(() =>
-  Boolean(robot.value?.control_enabled && robot.value?.online_state === 'ONLINE'),
-)
+const autonomousReady = computed(() => Boolean(robot.value?.autonomous_task_ready?.patrol))
+const stopReady = computed(() => Boolean(robot.value?.safety_command_ready?.stop_motion))
+const estopReady = computed(() => Boolean(robot.value?.safety_command_ready?.emergency_stop))
+const manualReady = computed(() => Boolean(robot.value?.manual_control_ready))
+const controlEnabled = autonomousReady
 const controlReason = computed(
   () =>
+    robot.value?.readiness_reasons?.join('、') ||
     robot.value?.control_disabled_reason ||
     (robot.value?.online_state !== 'ONLINE' ? '车辆不在线' : '控制合同尚未验证'),
 )
+const situationState = computed(() => {
+  return operationalSituation({
+    criticalFire: activeAlarm.value?.severity === 'CRITICAL',
+    websocketConnected: monitor.connected,
+    onlineState: robot.value?.online_state,
+    localizationStatus: robot.value?.localization_status,
+    estopActive: robot.value?.estop_active,
+    estopSupport: channelState('estop'),
+  })
+})
 const stopStateText = computed(
   () =>
     ({
@@ -54,6 +68,7 @@ const stopStateText = computed(
       TASK_CANCEL_ACCEPTED: '巡检任务已取消，等待停止确认',
       STOP_COMMAND_ACCEPTED: '停止命令已接受',
       VERIFYING_STATIONARY: '正在用新鲜遥测确认车辆静止',
+      STATIONARY_CONFIRMED_CANCEL_PENDING: '车辆已静止，任务取消未确认',
       VEHICLE_STATIONARY_CONFIRMED: '车辆已停止',
       UNCONFIRMED: '停止未确认',
     })[stopOperation.value?.state || ''] || '',
@@ -156,16 +171,21 @@ async function dispatch(alarm: Alarm): Promise<void> {
 }
 
 async function startPatrol(): Promise<void> {
-  const target = selectedSlot.value || monitor.snapshot.parking_slots[0]
-  if (!robot.value || !target) return
+  if (!robot.value) return
   working.value = true
   try {
+    const plans = (await api.get('/patrol-plans')).data as Array<{
+      id: string
+      robot_id: string
+      enabled: boolean
+    }>
+    const plan = plans.find((item) => item.robot_id === robot.value?.id && item.enabled)
+    if (!plan) throw new Error('当前车辆没有可执行的巡检计划')
     await api.post(
-      '/tasks/patrol',
+      '/tasks/patrol-plan',
       {
         robot_id: robot.value.vehicle_id,
-        target_parking_slot_id: target.id,
-        trajectory_id: monitor.snapshot.trajectories[0]?.id,
+        patrol_plan_id: plan.id,
         parameters: { source: 'OPERATIONS_HMI', patrol_scope: 'FULL_ROUTE' },
       },
       { headers: { 'Idempotency-Key': newUuid() } },
@@ -296,7 +316,16 @@ onUnmounted(() => {
         查看并处置
       </button>
     </section>
-    <section v-else class="normal-banner"><span>运行态势正常</span><small>当前无未关闭火情</small></section>
+    <section v-else class="normal-banner" :data-state="situationState">
+      <span>{{
+        situationState === 'NORMAL'
+          ? '运行态势正常'
+          : situationState === 'OFFLINE_UNKNOWN'
+            ? '车辆离线或实时链路中断，无法确认现场态势'
+            : '系统降级，现场态势待确认'
+      }}</span>
+      <small>{{ situationState }}</small>
+    </section>
 
     <div class="operations-grid">
       <section class="panel map-panel">
@@ -423,7 +452,7 @@ onUnmounted(() => {
       <t-button
         size="large"
         theme="warning"
-        :disabled="working || !auth.can('robot.control.stop')"
+        :disabled="working || !stopReady || !auth.can('robot.control.stop')"
         @click="stopPatrol"
         ><template #icon><StopCircleIcon /></template>停止巡检</t-button
       >
@@ -440,15 +469,18 @@ onUnmounted(() => {
       <t-button
         size="large"
         theme="danger"
-        :disabled="working || !controlEnabled || !auth.can('robot.control.estop')"
+        :disabled="working || !estopReady || !auth.can('robot.control.estop')"
         @click="emergencyStop"
         ><template #icon><PoweroffIcon /></template>软件紧急停止</t-button
       >
       <t-button
         variant="outline"
-        :disabled="!controlEnabled || !auth.can('robot.control.manual')"
+        :disabled="!manualReady || !auth.can('robot.control.manual')"
         @click="manualOpen = true"
         >手动控制</t-button
+      >
+      <small v-if="robot?.integration?.source_kind === 'ROS_COMPAT' && !estopReady" class="safety-unavailable"
+        >车辆未提供软件急停接口</small
       >
     </section>
 

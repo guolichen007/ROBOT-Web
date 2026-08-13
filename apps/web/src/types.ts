@@ -19,6 +19,10 @@ export interface RobotState {
   theta?: number
   linear?: number
   angular?: number
+  linear_x?: number
+  linear_y?: number
+  angular_z?: number
+  planar_speed?: number
   battery?: number | null
   mode?: string
   estop_active?: boolean | null
@@ -27,10 +31,17 @@ export interface RobotState {
   bottom_ir?: number
   top_ir?: number
   server_received_at?: string
+  localization_status?: string
   supported_commands?: string[]
   sensors?: string[]
   media?: string[]
   control_enabled?: boolean
+  monitor_ready?: boolean
+  safety_command_ready?: Record<string, boolean>
+  manual_control_ready?: boolean
+  autonomous_task_ready?: Record<string, boolean>
+  readiness_reasons?: string[]
+  motion_profile?: MotionProfile | null
   control_disabled_reason?: string | null
   integration?: IntegrationProfile | null
   data_channels?: Record<string, DataChannel>
@@ -53,9 +64,22 @@ export interface IntegrationProfile {
   control_contract_verified: boolean
   ack_contract_verified: boolean
   map_contract_verified: boolean
+  bidirectional_bridge_verified: boolean
+  command_path_verified: boolean
+  cmd_vel_arbitration_verified: boolean
+  ros_control_mode?: number | null
   read_only_reason?: string | null
   forward_only: boolean
   reverse_precision_navigation: boolean
+}
+
+export interface MotionProfile {
+  max_manual_forward_mps: number | null
+  max_manual_reverse_mps: number | null
+  max_manual_angular_radps: number | null
+  manual_watchdog_verified: boolean
+  reverse_allowed: boolean
+  reverse_precision_verified: boolean
 }
 
 export interface SensorProfile {
@@ -151,6 +175,8 @@ export interface StopOperation {
   state: string
   stationary_frames: number
   failure_reason?: string | null
+  motion_stop_state: string
+  mission_cancel_state: string
 }
 
 export interface MonitorSnapshot {

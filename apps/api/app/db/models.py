@@ -232,7 +232,7 @@ class Robot(Base):
     current_mode: Mapped[str] = mapped_column(String(24), default="IDLE")
     current_task_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     battery: Mapped[float | None] = mapped_column(Float, nullable=True)
-    estop_active: Mapped[bool] = mapped_column(Boolean, default=False)
+    estop_active: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
     boot_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -276,12 +276,34 @@ class RobotIntegrationProfile(Base):
     control_contract_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     ack_contract_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     map_contract_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    bidirectional_bridge_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    command_path_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    cmd_vel_arbitration_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    ros_control_mode: Mapped[int | None] = mapped_column(Integer, nullable=True)
     read_only_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     stale_seconds: Mapped[int] = mapped_column(Integer, default=3)
     offline_seconds: Mapped[int] = mapped_column(Integer, default=10)
     forward_only: Mapped[bool] = mapped_column(Boolean, default=True)
     reverse_precision_navigation: Mapped[bool] = mapped_column(Boolean, default=False)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
+class RobotMotionProfile(Base):
+    """Server-side motion envelope; unknown real-vehicle values never inherit demo limits."""
+
+    __tablename__ = "robot_motion_profiles"
+    robot_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("robots.id", ondelete="CASCADE"), primary_key=True
+    )
+    max_manual_forward_mps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_manual_reverse_mps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_manual_angular_radps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    manual_watchdog_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    reverse_allowed: Mapped[bool] = mapped_column(Boolean, default=False)
+    reverse_precision_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
     )
@@ -322,6 +344,22 @@ class RobotDataChannel(Base):
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     metadata_json: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict)
     __table_args__ = (UniqueConstraint("robot_id", "channel", name="uq_robot_data_channel"),)
+
+
+class RobotNavigationDiagnostic(Base):
+    __tablename__ = "robot_navigation_diagnostics"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    robot_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("robots.id", ondelete="CASCADE"), index=True
+    )
+    external_goal_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    diagnostic_type: Mapped[str] = mapped_column(String(24))
+    status: Mapped[str] = mapped_column(String(64))
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict)
+    source_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    server_received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, index=True
+    )
 
 
 class RobotSensorProfile(Base):
@@ -448,6 +486,7 @@ class PatrolSchedule(Base):
     misfire_policy: Mapped[str] = mapped_column(String(32), default="SKIP")
     misfire_grace_seconds: Mapped[int] = mapped_column(Integer, default=0)
     overlap_policy: Mapped[str] = mapped_column(String(24), default="SKIP")
+    queue_expiry_seconds: Mapped[int] = mapped_column(Integer, default=300)
     require_robot_online: Mapped[bool] = mapped_column(Boolean, default=True)
     require_control_contract_verified: Mapped[bool] = mapped_column(Boolean, default=True)
     require_map_contract_verified: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -549,6 +588,15 @@ class PatrolReport(Base):
     html_object_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     pdf_object_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     xlsx_object_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    html_asset_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("assets.id"), nullable=True
+    )
+    pdf_asset_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("assets.id"), nullable=True
+    )
+    xlsx_asset_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("assets.id"), nullable=True
+    )
     failure_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -587,12 +635,19 @@ class StopOperation(Base):
     )
     stop_command_id: Mapped[str] = mapped_column(String(64), ForeignKey("commands.command_id"))
     state: Mapped[str] = mapped_column(String(40), default="STOP_REQUESTED", index=True)
+    motion_stop_state: Mapped[str] = mapped_column(String(40), default="WAITING_ACK")
+    mission_cancel_state: Mapped[str] = mapped_column(String(40), default="NOT_REQUIRED")
     stationary_frames: Mapped[int] = mapped_column(Integer, default=0)
     linear_threshold: Mapped[float] = mapped_column(Float, default=0.02)
     angular_threshold: Mapped[float] = mapped_column(Float, default=0.03)
     telemetry_freshness_ms: Mapped[int] = mapped_column(Integer, default=1000)
     requested_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    stop_ack_deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    cancel_deadline_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    stationary_verify_deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     terminal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 

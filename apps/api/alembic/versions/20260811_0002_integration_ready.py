@@ -75,9 +75,8 @@ def _migrate_parent(parent: str) -> None:
 
 
 def upgrade() -> None:
-    # The legacy baseline migration calls current ``Base.metadata.create_all``.
-    # Therefore a clean install may already contain this table, while an
-    # in-place upgrade from the released baseline will not. Support both paths.
+    # Support both a clean installation and an in-place upgrade from the
+    # released baseline without consulting mutable application metadata.
     if not sa.inspect(op.get_bind()).has_table("robot_boot_sessions"):
         op.create_table(
             "robot_boot_sessions",

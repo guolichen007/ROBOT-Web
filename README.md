@@ -50,7 +50,7 @@ flowchart LR
 | --- | --- |
 | 登录、refresh rotation、RBAC、审计 | 完成 |
 | 实时位置、状态、传感器、Snapshot/Delta | 完成 |
-| Manual Lease、TTL、stop、software e-stop | 完成 |
+| Manual Lease、TTL、stop、software e-stop | 平台/Mock 完成；首台 ROS1 真车下行未实现 |
 | Transactional Outbox、ACK、任务状态 | 完成 |
 | Site/Map Version/车位/点位/轨迹 | 完成 |
 | 自动/人工火情、去重、灭火任务 | 完成 |
@@ -136,6 +136,8 @@ Mock R001 是独立 MQTT client，遵循与未来真车完全相同的 Schema 1.
 ```
 
 输出 `dist/firebot-ros2-integration-1.2.0.zip` 与 `.sha256`。平台不会猜测现场 ROS topic、速度、量程、地图或视频地址。
+
+首台实车是 ROS1 Noetic。当前只读兼容接口、麦克纳姆 `vy` 安全处理、AMCL/odom 边界、缺失急停能力、`cmd_vel` 仲裁阻塞项及运行态清单见 [ROS1 Noetic 实车只读兼容接入说明](docs/ROS原生兼容接入说明.md) 和 [integration/ros1](integration/ros1/ROS1运行态只读验收清单.md)。该路径不会升级 Canonical 1.2，也不会在本轮实现车端下行。
 
 ## 16. 服务器部署
 

@@ -1,0 +1,49 @@
+platform:
+  contract_version: "1.2.0"
+  schema_version: "1.2"
+  internal_vehicle_id: "R001"
+
+vehicle:
+  external_id: "OWNER_INPUT_REQUIRED"
+  physical_front_matches_urdf_positive_x: "OWNER_INPUT_REQUIRED"
+  actual_boot_launch: "OWNER_INPUT_REQUIRED"
+  runtime_control_mode: "OWNER_INPUT_REQUIRED"
+  management_ip: "OWNER_INPUT_REQUIRED"
+
+map_contract:
+  site_code: "OWNER_INPUT_REQUIRED"
+  map_code: "mymap"
+  map_version: "OWNER_INPUT_REQUIRED"
+  map_checksum_sha256: "OWNER_INPUT_REQUIRED"
+  yaml_path: "smartcar_description/map/mymap.yaml"
+  image_path: "mymap.pgm"
+  resolution_m_per_pixel: 0.05
+  origin: [-7.126112, -11.984083, 0.0]
+
+mqtt_compat:
+  enabled: true
+  read_only: true
+  expected_external_id: "OWNER_INPUT_REQUIRED"
+  topics:
+    - "robot/{external_id}/status"
+    - "robot/{external_id}/battery"
+    - "robot/{external_id}/pose"
+    - "robot/{external_id}/odom"
+    - "robot/{external_id}/heartbeat"
+  optional_diagnostics:
+    - "robot/{external_id}/nav/status"
+    - "robot/{external_id}/nav/result"
+
+unsupported:
+  software_estop: true
+  reset_estop: true
+  extinguish: true
+  video: true
+  smoke_ros_topic: true
+
+command_gates:
+  ros_compat_downlink_implemented: false
+  command_path_verified: false
+  cmd_vel_arbitration_verified: false
+  local_manual_watchdog_500ms_verified: false
+  allow_manual_lateral_motion: false

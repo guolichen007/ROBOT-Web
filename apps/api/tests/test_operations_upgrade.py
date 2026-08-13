@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from datetime import UTC, datetime
 from math import pi
 from pathlib import Path
@@ -9,7 +10,15 @@ from types import ModuleType
 import pytest
 from app.core.config import Settings
 from app.core.errors import PlatformError
-from app.db.models import ParkingSlot, Robot, RobotIntegrationProfile, RobotSensorProfile
+from app.db.models import (
+    ParkingSlot,
+    Robot,
+    RobotCapability,
+    RobotIntegrationProfile,
+    RobotMotionProfile,
+    RobotSensorProfile,
+)
+from app.modules.commands.readiness import robot_readiness
 from app.modules.commands.service import assert_robot_can_execute
 from app.modules.operations.router import calculate_detection_coverage, next_schedule_run
 
@@ -103,9 +112,13 @@ def test_unverified_ros_compat_is_read_only() -> None:
                 return RobotIntegrationProfile(
                     robot_id=str(key),
                     source_kind="ROS_COMPAT",
-                    control_contract_verified=False,
-                    ack_contract_verified=False,
-                    map_contract_verified=False,
+                    control_contract_verified=True,
+                    ack_contract_verified=True,
+                    map_contract_verified=True,
+                    bidirectional_bridge_verified=False,
+                    command_path_verified=True,
+                    cmd_vel_arbitration_verified=True,
+                    ros_control_mode=3,
                     read_only_reason="现场控制合同未验证",
                 )
             return None
@@ -119,9 +132,167 @@ def test_unverified_ros_compat_is_read_only() -> None:
         online_state="ONLINE",
         estop_active=False,
     )
-    with pytest.raises(PlatformError) as raised:
-        assert_robot_can_execute(FakeDb(), robot, "patrol")  # type: ignore[arg-type]
-    assert raised.value.code == "CONTROL_CONTRACT_NOT_VERIFIED"
+    for action in (
+        "manual_control",
+        "stop_motion",
+        "emergency_stop",
+        "patrol",
+        "return_dock",
+        "extinguish",
+    ):
+        with pytest.raises(PlatformError) as raised:
+            assert_robot_can_execute(FakeDb(), robot, action)  # type: ignore[arg-type]
+        assert raised.value.code == "ROS_COMPAT_READ_ONLY"
+
+
+def test_readiness_is_per_operation_and_safety_does_not_require_map() -> None:
+    robot = Robot(
+        id="robot-id",
+        vehicle_id="R001",
+        site_id="site",
+        name="R001",
+        enabled=True,
+        online_state="ONLINE",
+        estop_active=False,
+    )
+    integration = RobotIntegrationProfile(
+        robot_id=robot.id,
+        source_kind="CANONICAL_MQTT",
+        control_contract_verified=True,
+        ack_contract_verified=True,
+        map_contract_verified=False,
+    )
+    capability = RobotCapability(
+        robot_id=robot.id,
+        protocol_version="1.2.0",
+        supported_commands_json=["stop_motion", "emergency_stop", "patrol"],
+        sensors_json=[],
+        media_json=[],
+    )
+
+    class FakeDb:
+        def get(self, model, _key):
+            return {
+                RobotIntegrationProfile: integration,
+                RobotCapability: capability,
+                RobotMotionProfile: None,
+            }.get(model)
+
+    readiness = robot_readiness(FakeDb(), robot)  # type: ignore[arg-type]
+    assert readiness["safety_command_ready"]["stop_motion"] is True
+    assert readiness["safety_command_ready"]["emergency_stop"] is True
+    assert readiness["autonomous_task_ready"]["patrol"] is False
+    assert readiness["control_enabled"] is False
+
+
+def test_ros1_actual_payload_mapping_preserves_mecanum_and_unknown_safety(monkeypatch) -> None:
+    monkeypatch.setenv("ROS_COMPAT_MODE", "true")
+    module = load_service("ros1_actual_mapping", "services/ros-compat-adapter/main.py")
+    adapter = module.Adapter()
+    monkeypatch.setattr(
+        adapter, "map_facts", lambda: ("DEMO_PARKING", "parking_v1", "1", "checksum")
+    )
+    pose = adapter.normalize(
+        "pose",
+        {
+            "ts": 1_700_000_000,
+            "frame_id": "map",
+            "x": 1.2,
+            "y": 2.3,
+            "yaw": 0.4,
+            "cov_xx": 0.01,
+            "cov_yy": 0.02,
+            "cov_yawyaw": 0.03,
+        },
+    )[0][1]
+    odom = adapter.normalize("odom", {"ts": 1_700_000_001, "vx": 0, "vy": 0.25, "wz": 0})[0][1]
+    assert pose["position"] == {"x": 1.2, "y": 2.3, "theta": 0.4}
+    assert pose["localization_status"] == "VALID_SOURCE"
+    assert adapter.latest["amcl_covariance"] == {
+        "cov_xx": 0.01,
+        "cov_yy": 0.02,
+        "cov_yawyaw": 0.03,
+    }
+    assert odom["linear_x"] == 0
+    assert odom["linear_y"] == 0.25
+    assert odom["planar_speed"] == pytest.approx(0.25)
+    assert adapter.latest["x"] == 1.2  # odom pose never replaces AMCL global pose
+    assert "estop_active" not in pose
+
+
+def test_ros1_status_battery_and_nav_remain_truthful_diagnostics(monkeypatch) -> None:
+    monkeypatch.setenv("ROS_COMPAT_MODE", "true")
+    module = load_service("ros1_status_mapping", "services/ros-compat-adapter/main.py")
+    adapter = module.Adapter()
+    manual = adapter.normalize("status", {"ts": 1_700_000_000, "control_mode": 1})[0][1]
+    ros = adapter.normalize("status", {"ts": 1_700_000_001, "control_mode": 3})[0][1]
+    battery = adapter.normalize(
+        "battery",
+        {
+            "ts": 1_700_000_002,
+            "battery_percentage": 105,
+            "battery_voltage": 51.2,
+            "battery_temperature": 31.5,
+        },
+    )[0][1]
+    nav_kind, nav = adapter.normalize(
+        "nav_result", {"ts": 1_700_000_003, "goal_id": "native-1", "status": "SUCCEEDED"}
+    )[0]
+    assert manual["mode"] == "MANUAL" and manual["ros_control_mode"] == 1
+    assert ros["mode"] == "IDLE" and ros["ros_control_mode"] == 3
+    assert battery["battery"] == 100
+    assert battery["diagnostics"]["battery_voltage"] == 51.2
+    assert nav_kind == "compat_nav_result"
+    assert nav["external_goal_id"] == "native-1"
+    assert "task_id" not in nav and "command_id" not in nav
+
+
+def test_mecanum_lateral_motion_cannot_be_confirmed_stationary() -> None:
+    worker = load_service("task_worker_mecanum", "services/task-worker/main.py")
+    now = datetime.now(UTC)
+    fresh, stationary = worker.stationary_observation(
+        {
+            "server_received_at": now.isoformat(),
+            "linear_x": 0,
+            "linear_y": 0.25,
+            "angular_z": 0,
+        },
+        now,
+        freshness_ms=1000,
+        linear_threshold=0.02,
+        angular_threshold=0.03,
+    )
+    assert fresh is True
+    assert stationary is False
+
+
+def test_submitted_ros1_interface_baseline_matches_platform_adapter() -> None:
+    baseline = json.loads((ROOT / "integration/ros1/ROS1实车接口基线.json").read_text("utf-8"))
+    assert baseline["platform_contract"] == "1.2.0"
+    assert baseline["schema_version"] == "1.2"
+    assert baseline["vehicle"]["chassis"] == "MECANUM"
+    assert baseline["interfaces"]["global_pose"]["topic"] == "/amcl_pose"
+    assert baseline["interfaces"]["odom"]["fields"] == ["vx", "vy", "wz"]
+    assert baseline["interfaces"]["motion"]["cmd_vel_mux"] == "NONE"
+    assert baseline["interfaces"]["motion"]["chassis_watchdog_ms"] == 3000
+    assert baseline["gates"]["read_only"] is True
+    assert baseline["gates"]["ready_for_motion_test"] is False
+
+
+def test_ros1_handoff_examples_are_accepted_without_protocol_upgrade(monkeypatch) -> None:
+    monkeypatch.setenv("ROS_COMPAT_MODE", "true")
+    module = load_service("ros1_handoff_examples", "services/ros-compat-adapter/main.py")
+    adapter = module.Adapter()
+    monkeypatch.setattr(adapter, "map_facts", lambda: ("DEMO", "mymap", "1", "checksum"))
+    handoff = json.loads((ROOT / "integration/ros1/ROS1上行MQTT接口示例.json").read_text("utf-8"))
+    for example in handoff["examples"]:
+        parts = example["topic"].split("/")
+        suffix = f"nav_{parts[-1]}" if len(parts) == 4 else parts[-1]
+        normalized = adapter.normalize(suffix, example["payload"])
+        assert normalized, example["topic"]
+        for kind, payload in normalized:
+            if not kind.startswith("compat_"):
+                assert payload["schema_version"] == "1.2"
 
 
 def test_patrol_schedule_uses_declared_timezone_and_next_occurrence() -> None:

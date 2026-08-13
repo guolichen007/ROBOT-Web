@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import re
 import threading
@@ -60,12 +61,14 @@ class Adapter:
             return
         for suffix in ("status", "battery", "pose", "odom", "heartbeat"):
             client.subscribe(f"robot/+/{suffix}", qos=1)
+        client.subscribe("robot/+/nav/status", qos=1)
+        client.subscribe("robot/+/nav/result", qos=1)
         logger.info("ROS compatibility adapter connected in read-only normalization mode")
 
     @staticmethod
     def external_id(topic: str) -> str | None:
         parts = topic.split("/")
-        return parts[1] if len(parts) == 3 and parts[0] == "robot" else None
+        return parts[1] if len(parts) in {3, 4} and parts[0] == "robot" else None
 
     def binding(self, external_id: str) -> bool:
         if EXPECTED_EXTERNAL_ID and external_id != EXPECTED_EXTERNAL_ID:
@@ -170,6 +173,12 @@ class Adapter:
                 raise ValueError("pose requires x, y and yaw/theta")
             self.latest.update({"x": float(x), "y": float(y), "theta": float(yaw)})
             site, map_code, version, checksum = self.map_facts()
+            frame_id = str(payload.get("frame_id", "map"))
+            if frame_id != "map":
+                raise ValueError("AMCL global pose requires frame_id=map")
+            covariance = payload.get("covariance") or {
+                key: payload[key] for key in ("cov_xx", "cov_yy", "cov_yawyaw") if key in payload
+            }
             message = {
                 **self.base("location", source_time),
                 "position": {"x": float(x), "y": float(y), "theta": float(yaw)},
@@ -177,23 +186,36 @@ class Adapter:
                 "map_code": map_code,
                 "map_version": version,
                 "map_checksum": checksum,
-                "frame_id": "map",
-                "localization_status": str(payload.get("localization_status", "UNVERIFIED")),
+                "frame_id": frame_id,
+                "localization_status": str(payload.get("localization_status", "VALID_SOURCE")),
             }
-            if "linear_speed" in self.latest:
-                message["linear_speed"] = self.latest["linear_speed"]
-            if "angular_speed" in self.latest:
-                message["angular_speed"] = self.latest["angular_speed"]
+            if covariance:
+                self.latest["amcl_covariance"] = covariance
+            if "planar_speed" in self.latest:
+                message["linear_speed"] = self.latest["planar_speed"]
+            if "angular_z" in self.latest:
+                message["angular_speed"] = self.latest["angular_z"]
             if "battery" in self.latest:
                 message["battery"] = self.latest["battery"]
             return [("location", message)]
         if suffix == "odom":
-            linear = payload.get("vx", payload.get("linear_speed"))
-            angular = payload.get("wz", payload.get("angular_speed"))
-            if linear is not None:
-                self.latest["linear_speed"] = float(linear)
-            if angular is not None:
-                self.latest["angular_speed"] = float(angular)
+            linear_x = payload.get("vx", payload.get("linear_x", payload.get("linear_speed")))
+            linear_y = payload.get("vy", payload.get("linear_y", 0.0))
+            angular_z = payload.get("wz", payload.get("angular_z", payload.get("angular_speed")))
+            if linear_x is None or angular_z is None:
+                raise ValueError("odom requires vx/linear_x and wz/angular_z")
+            linear_x = float(linear_x)
+            linear_y = float(linear_y)
+            angular_z = float(angular_z)
+            planar_speed = math.hypot(linear_x, linear_y)
+            self.latest.update(
+                {
+                    "linear_x": linear_x,
+                    "linear_y": linear_y,
+                    "angular_z": angular_z,
+                    "planar_speed": planar_speed,
+                }
+            )
             return [
                 (
                     "compat_odom",
@@ -201,16 +223,32 @@ class Adapter:
                         "internal_contract": "ros-compat-v1",
                         "vehicle_id": INTERNAL_ID,
                         "timestamp": source_time.isoformat(),
-                        "linear_speed": self.latest.get("linear_speed"),
-                        "angular_speed": self.latest.get("angular_speed"),
+                        "linear_x": linear_x,
+                        "linear_y": linear_y,
+                        "angular_z": angular_z,
+                        "planar_speed": planar_speed,
                     },
                 )
             ]
         if suffix == "battery":
-            value = payload.get("percentage", payload.get("battery"))
+            value = payload.get(
+                "battery_percentage", payload.get("percentage", payload.get("battery"))
+            )
             if value is None:
                 raise ValueError("battery requires percentage")
             self.latest["battery"] = min(100.0, max(0.0, float(value)))
+            diagnostics = {
+                key: payload[key]
+                for key in (
+                    "battery_voltage",
+                    "battery_current",
+                    "battery_temperature",
+                    "battery_capacity",
+                    "battery_charge_state",
+                    "battery_cycle_count",
+                )
+                if key in payload
+            }
             return [
                 (
                     "compat_battery",
@@ -219,17 +257,25 @@ class Adapter:
                         "vehicle_id": INTERNAL_ID,
                         "timestamp": source_time.isoformat(),
                         "battery": self.latest["battery"],
+                        "diagnostics": diagnostics,
                     },
                 )
             ]
         if suffix == "status":
-            raw = str(payload.get("control_mode_str", payload.get("mode", "IDLE"))).upper()
-            mode = "MANUAL" if raw in {"MANUAL", "1"} else "IDLE"
+            raw_value = payload.get(
+                "control_mode",
+                payload.get("control_mode_str", payload.get("mode")),
+            )
+            raw = str(raw_value if raw_value is not None else "UNKNOWN").upper()
+            control_mode = int(raw) if raw.isdigit() else ({"MANUAL": 1, "ROS": 3}.get(raw))
+            # ROS control mode is a transport/controller fact, not a Firebot patrol state.
+            mode = "MANUAL" if control_mode == 1 else "IDLE"
             message = {
                 "internal_contract": "ros-compat-v1",
                 "vehicle_id": INTERNAL_ID,
                 "timestamp": source_time.isoformat(),
                 "mode": mode,
+                "ros_control_mode": control_mode,
             }
             return [("compat_status", message)]
         if suffix == "heartbeat":
@@ -241,6 +287,23 @@ class Adapter:
                         "uptime_seconds": max(
                             0.0, float(payload.get("uptime_sec", payload.get("uptime_seconds", 0)))
                         ),
+                    },
+                )
+            ]
+        if suffix in {"nav_status", "nav_result"}:
+            # Native move_base diagnostics have no Firebot task/command correlation.
+            # They are intentionally kept diagnostic-only and never translated into
+            # canonical task_status.
+            return [
+                (
+                    f"compat_{suffix}",
+                    {
+                        "internal_contract": "ros-compat-v1",
+                        "vehicle_id": INTERNAL_ID,
+                        "timestamp": source_time.isoformat(),
+                        "external_goal_id": payload.get("goal_id"),
+                        "status": str(payload.get("status", payload.get("state", "UNKNOWN"))),
+                        "payload": payload,
                     },
                 )
             ]
@@ -269,7 +332,8 @@ class Adapter:
         self.capture_raw(message.topic, message.payload)
         if not self.binding(external_id):
             return
-        suffix = message.topic.rsplit("/", 1)[-1]
+        parts = message.topic.split("/")
+        suffix = f"nav_{parts[-1]}" if len(parts) == 4 and parts[-2] == "nav" else parts[-1]
         try:
             messages = self.normalize(suffix, payload)
             for kind, normalized in messages:

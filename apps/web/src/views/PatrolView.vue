@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { api, errorMessage } from '@/lib/api'
+import { api, downloadAuthenticated, errorMessage } from '@/lib/api'
 
 interface PatrolPlan {
   id: string
@@ -65,6 +65,17 @@ async function navigate(preset: NavigationPreset): Promise<void> {
   }
 }
 
+async function download(report: Record<string, any>, format: 'pdf' | 'xlsx'): Promise<void> {
+  try {
+    await downloadAuthenticated(
+      `/patrol-reports/${report.id}/download/${format}`,
+      `${report.report_code}.${format}`,
+    )
+  } catch (reason) {
+    error.value = errorMessage(reason)
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -107,8 +118,8 @@ onMounted(load)
             ><small>{{ report.status }} · {{ report.generated_at || '等待生成' }}</small>
           </div>
           <div class="inline-actions" v-if="report.status === 'READY'">
-            <a :href="`/api/v1/patrol-reports/${report.id}/download/pdf`">PDF</a>
-            <a :href="`/api/v1/patrol-reports/${report.id}/download/xlsx`">Excel</a>
+            <button type="button" @click="download(report, 'pdf')">PDF</button>
+            <button type="button" @click="download(report, 'xlsx')">Excel</button>
           </div>
         </div>
       </article>

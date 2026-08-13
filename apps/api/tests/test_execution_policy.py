@@ -17,6 +17,16 @@ class FakeSession:
         return None
 
 
+class FakeRedis:
+    def exists(self, _key):
+        return False
+
+
+@pytest.fixture(autouse=True)
+def fake_redis(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("app.modules.commands.service.get_redis", lambda: FakeRedis())
+
+
 def robot(**overrides) -> Robot:
     values = {
         "id": "robot-id",

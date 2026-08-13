@@ -7,7 +7,7 @@ import time
 
 from fastapi import APIRouter, Depends
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-from sqlalchemy import func, select, text
+from sqlalchemy import case, func, select, text
 from starlette.responses import JSONResponse, Response
 
 from app.core.config import get_settings
@@ -39,6 +39,7 @@ from app.db.models import (
     Task,
     Trajectory,
 )
+from app.modules.commands.readiness import robot_readiness
 
 router = APIRouter(tags=["system"])
 
@@ -189,18 +190,32 @@ def monitor_snapshot(
     for robot in robots:
         raw = get_redis().get(f"robot:{robot.vehicle_id}:latest")
         state = json.loads(raw) if raw else serialize_model(robot)
+        # Redis latest is an intentionally compact realtime projection.  The
+        # monitor contract still needs stable database identity and display
+        # fields, including when the snapshot was assembled from that cache.
+        state.update(
+            {
+                "id": robot.id,
+                "robot_id": robot.id,
+                "vehicle_id": robot.vehicle_id,
+                "name": robot.name,
+                "model": robot.model,
+            }
+        )
         capability = db.get(RobotCapability, robot.id)
         integration = db.get(RobotIntegrationProfile, robot.id)
         state["supported_commands"] = capability.supported_commands_json if capability else []
         state["sensors"] = capability.sensors_json if capability else []
         state["media"] = capability.media_json if capability else []
         state["integration"] = serialize_model(integration) if integration else None
-        state["control_enabled"] = bool(
+        readiness = robot_readiness(db, robot)
+        state.update(readiness)
+        if (
             integration
-            and integration.control_contract_verified
-            and integration.ack_contract_verified
-            and integration.map_contract_verified
-        )
+            and integration.source_kind == "ROS_COMPAT"
+            and not (integration.bidirectional_bridge_verified)
+        ):
+            state["supported_commands"] = []
         state["control_disabled_reason"] = (
             None
             if state["control_enabled"]
@@ -219,10 +234,23 @@ def monitor_snapshot(
             ).all()
         ]
         latest.append(state)
+    severity_order = case(
+        (FireEvent.severity == "CRITICAL", 4),
+        (FireEvent.severity == "HIGH", 3),
+        (FireEvent.severity == "MEDIUM", 2),
+        (FireEvent.severity == "LOW", 1),
+        else_=0,
+    )
+    state_order = case(
+        (FireEvent.state == "NEW", 4),
+        (FireEvent.state == "ACKNOWLEDGED", 3),
+        (FireEvent.state == "CONFIRMED", 2),
+        else_=1,
+    )
     alarms = db.scalars(
         select(FireEvent)
         .where(FireEvent.state.not_in({"RESOLVED", "CLOSED", "DISMISSED"}))
-        .order_by(FireEvent.last_seen_at.desc())
+        .order_by(severity_order.desc(), state_order.desc(), FireEvent.last_seen_at.desc())
     ).all()
     tasks = db.scalars(
         select(Task)

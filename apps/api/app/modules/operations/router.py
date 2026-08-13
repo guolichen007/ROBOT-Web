@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import math
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -28,6 +28,7 @@ from app.db.models import (
     RobotDataChannel,
     RobotExternalAlias,
     RobotIntegrationProfile,
+    RobotMotionProfile,
     RobotOperationEvent,
     RobotSensorProfile,
     StopOperation,
@@ -35,6 +36,7 @@ from app.db.models import (
     TaskEvent,
     Trajectory,
 )
+from app.modules.commands.readiness import robot_readiness
 from app.modules.commands.service import (
     build_command_payload,
     create_durable_command,
@@ -81,11 +83,24 @@ class IntegrationInput(BaseModel):
     control_contract_verified: bool = False
     ack_contract_verified: bool = False
     map_contract_verified: bool = False
+    bidirectional_bridge_verified: bool = False
+    command_path_verified: bool = False
+    cmd_vel_arbitration_verified: bool = False
+    ros_control_mode: int | None = Field(default=None, ge=0, le=255)
     read_only_reason: str | None = None
     stale_seconds: int = Field(default=3, ge=2, le=120)
     offline_seconds: int = Field(default=10, ge=3, le=600)
     forward_only: bool = True
     reverse_precision_navigation: bool = False
+
+
+class MotionProfileInput(BaseModel):
+    max_manual_forward_mps: float | None = Field(default=None, gt=0, le=2)
+    max_manual_reverse_mps: float | None = Field(default=None, gt=0, le=2)
+    max_manual_angular_radps: float | None = Field(default=None, gt=0, le=3)
+    manual_watchdog_verified: bool = False
+    reverse_allowed: bool = False
+    reverse_precision_verified: bool = False
 
 
 class AliasInput(BaseModel):
@@ -122,6 +137,7 @@ class ScheduleInput(BaseModel):
     misfire_policy: str = Field(default="SKIP", pattern=r"^(SKIP|RUN_IF_WITHIN_WINDOW)$")
     misfire_grace_seconds: int = Field(default=0, ge=0, le=86400)
     overlap_policy: str = Field(default="SKIP", pattern=r"^(SKIP|QUEUE|REJECT)$")
+    queue_expiry_seconds: int = Field(default=300, ge=1, le=86400)
     require_robot_online: bool = True
     require_control_contract_verified: bool = True
     require_map_contract_verified: bool = True
@@ -452,8 +468,30 @@ def detection_coverage(
         }
     raw = get_redis().get(f"robot:{robot.vehicle_id}:latest")
     latest = json.loads(raw) if raw else {}
-    if not all(key in latest for key in ("x", "y", "theta")):
-        return {"state": "STALE", "polygon": [], "covered_parking_slot_ids": []}
+    received_raw = latest.get("server_received_at")
+    try:
+        received = datetime.fromisoformat(received_raw) if received_raw else None
+        pose_fresh = bool(received and (datetime.now(UTC) - received).total_seconds() <= 2)
+    except (TypeError, ValueError):
+        pose_fresh = False
+    localization_ok = latest.get("localization_status") in {
+        "OK",
+        "GOOD",
+        "VALID",
+        "VALID_SOURCE",
+    }
+    if (
+        robot.online_state != "ONLINE"
+        or not pose_fresh
+        or not localization_ok
+        or not all(key in latest for key in ("x", "y", "theta"))
+    ):
+        return {
+            "state": "STALE",
+            "polygon": [],
+            "covered_parking_slot_ids": [],
+            "reason": "ROBOT_OR_LOCALIZATION_NOT_FRESH",
+        }
     slots = db.scalars(
         select(ParkingSlot).where(
             ParkingSlot.map_version_id.in_(
@@ -480,12 +518,7 @@ def integration_status(
     ).all()
     return {
         "profile": serialize_model(profile) if profile else None,
-        "control_enabled": bool(
-            profile
-            and profile.control_contract_verified
-            and profile.ack_contract_verified
-            and profile.map_contract_verified
-        ),
+        **robot_readiness(db, robot),
         "disabled_reason": None
         if profile and profile.control_contract_verified
         else (profile.read_only_reason if profile else "未建立集成配置"),
@@ -517,6 +550,11 @@ def update_integration(
         )
         else None
     )
+    if values["source_kind"] == "ROS_COMPAT" and not values["bidirectional_bridge_verified"]:
+        values["read_only_reason"] = (
+            values["read_only_reason"]
+            or "ROS1 兼容链路仅完成只读上行；下行 bridge、仲裁与 watchdog 尚未验证"
+        )
     if row:
         for key, value in values.items():
             setattr(row, key, value)
@@ -528,6 +566,61 @@ def update_integration(
         db,
         action="ROBOT_INTEGRATION_UPDATE",
         resource_type="ROBOT_INTEGRATION_PROFILE",
+        user_id=auth.user.id,
+        robot_id=robot.id,
+        resource_id=robot.id,
+        before=before,
+        after=serialize_model(row),
+        **request_meta(request),
+    )
+    db.commit()
+    return serialize_model(row)
+
+
+@router.get("/robots/{robot_id}/motion-profile")
+def motion_profile(
+    robot_id: str,
+    db: DbSession,
+    _: AuthContext = Depends(require_permission("robot.read")),
+) -> dict | None:
+    robot = find_robot(db, robot_id)
+    row = db.get(RobotMotionProfile, robot.id)
+    return serialize_model(row) if row else None
+
+
+@router.put("/robots/{robot_id}/motion-profile")
+def update_motion_profile(
+    robot_id: str,
+    payload: MotionProfileInput,
+    request: Request,
+    db: DbSession,
+    auth: AuthContext = Depends(require_permission("settings.manage")),
+) -> dict:
+    robot = find_robot(db, robot_id)
+    row = db.get(RobotMotionProfile, robot.id)
+    before = serialize_model(row) if row else None
+    values = payload.model_dump()
+    if payload.manual_watchdog_verified and (
+        payload.max_manual_forward_mps is None or payload.max_manual_angular_radps is None
+    ):
+        raise PlatformError(
+            "MOTION_PROFILE_INCOMPLETE",
+            "验证 manual watchdog 前必须提供前进与角速度上限",
+        )
+    if payload.reverse_allowed and payload.max_manual_reverse_mps is None:
+        raise PlatformError("MOTION_PROFILE_INCOMPLETE", "允许倒车时必须提供倒车速度上限")
+    if row:
+        for key, value in values.items():
+            setattr(row, key, value)
+        row.updated_at = datetime.now(UTC)
+    else:
+        row = RobotMotionProfile(robot_id=robot.id, **values)
+        db.add(row)
+    db.flush()
+    write_audit(
+        db,
+        action="ROBOT_MOTION_PROFILE_UPDATE",
+        resource_type="ROBOT_MOTION_PROFILE",
         user_id=auth.user.id,
         robot_id=robot.id,
         resource_id=robot.id,
@@ -740,7 +833,12 @@ def stop_patrol(
         cancel_command_id=cancel.command_id if cancel else None,
         stop_command_id=stop.command_id,
         state="STOP_REQUESTED",
+        motion_stop_state="WAITING_ACK",
+        mission_cancel_state="WAITING_ACK" if cancel else "NOT_REQUIRED",
         requested_by=auth.user.id,
+        stop_ack_deadline_at=datetime.now(UTC) + timedelta(seconds=5),
+        cancel_deadline_at=(datetime.now(UTC) + timedelta(seconds=10)) if cancel else None,
+        stationary_verify_deadline_at=datetime.now(UTC) + timedelta(seconds=15),
     )
     db.add(operation)
     db.add(

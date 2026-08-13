@@ -20,7 +20,7 @@ from app.core.errors import PlatformError
 from app.core.events import append_event, get_redis, queue_redis_delete
 from app.core.idempotency import lookup, store
 from app.core.serialization import serialize_model
-from app.db.models import Command, Robot
+from app.db.models import Command, Robot, RobotMotionProfile
 from app.modules.commands.service import (
     assert_robot_can_execute,
     build_command_payload,
@@ -53,6 +53,26 @@ def manual(
 ) -> dict:
     robot = find_robot(db, robot_id)
     assert_robot_can_execute(db, robot, "manual_control")
+    profile = db.get(RobotMotionProfile, robot.id)
+    if (
+        not profile
+        or profile.max_manual_forward_mps is None
+        or profile.max_manual_angular_radps is None
+        or not profile.manual_watchdog_verified
+    ):
+        raise PlatformError(
+            "MANUAL_MOTION_PROFILE_NOT_VERIFIED",
+            "真实运动参数与 500ms watchdog 尚未验证",
+        )
+    max_reverse = profile.max_manual_reverse_mps if profile.reverse_allowed else 0.0
+    clamped_linear = min(
+        profile.max_manual_forward_mps,
+        max(-float(max_reverse or 0.0), payload.linear),
+    )
+    clamped_angular = max(
+        -profile.max_manual_angular_radps,
+        min(profile.max_manual_angular_radps, payload.angular),
+    )
     redis = get_redis()
     lease = active_lease(redis, robot)
     if not lease or lease["lease_id"] != payload.lease_id or lease["user_id"] != auth.user.id:
@@ -66,7 +86,7 @@ def manual(
         robot=robot,
         operator_id=auth.user.id,
         cmd="manual_control",
-        params={"linear_x": payload.linear, "angular_z": payload.angular},
+        params={"linear_x": clamped_linear, "angular_z": clamped_angular},
         ttl_ms=500,
         priority=80,
         lease_id=payload.lease_id,
@@ -76,7 +96,13 @@ def manual(
     redis.setex(f"manual:lastseq:{payload.lease_id}", 30, payload.seq)
     redis.expire(f"manual:lease:{robot.id}", get_settings().manual_lease_ttl_seconds)
     redis.publish("firebot:manual_commands", json.dumps(command, ensure_ascii=False))
-    return {"accepted": True, "expires_at": command["expires_at"], "seq": payload.seq}
+    return {
+        "accepted": True,
+        "expires_at": command["expires_at"],
+        "seq": payload.seq,
+        "applied": {"linear": clamped_linear, "angular": clamped_angular},
+        "clamped": clamped_linear != payload.linear or clamped_angular != payload.angular,
+    }
 
 
 def safety_command(

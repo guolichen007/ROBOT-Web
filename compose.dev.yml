@@ -101,6 +101,10 @@ services:
   ros-compat-adapter:
     <<: *python-service
     command: ["python", "/workspace/services/ros-compat-adapter/main.py"]
+    environment:
+      ROS_COMPAT_MODE: ${ROS_COMPAT_MODE:-false}
+      ROS_COMPAT_EXPECTED_EXTERNAL_ID: ${ROS_COMPAT_EXPECTED_EXTERNAL_ID:-}
+      SINGLE_ROBOT_INTERNAL_ID: ${SINGLE_ROBOT_INTERNAL_ID:-R001}
     depends_on:
       migrate: { condition: service_completed_successfully }
       mosquitto: { condition: service_healthy }

@@ -40,6 +40,7 @@ def files():
 latest_hits: list[str] = []
 marker_hits: list[str] = []
 unpinned_actions: list[str] = []
+migration_metadata_hits: list[str] = []
 marker_allow = {
     "CODEX_MASTER_SPEC_FIREBOT_V2_BASELINE_FINAL.md",
     "CODEX_FINAL_INTEGRATION_READY_ITERATION.md",
@@ -70,10 +71,16 @@ for path in files():
             match = re.search(r"uses:\s*([^\s#]+)@([^\s#]+)", line)
             if match and not re.fullmatch(r"[0-9a-f]{40}", match.group(2)):
                 unpinned_actions.append(f"{relative}:{line_no}:{match.group(0)}")
+    if relative.startswith("apps/api/alembic/versions/") and re.search(
+        r"(?:from\s+app\.db\.models\s+import\s+Base|Base\.metadata\.(?:create_all|drop_all))",
+        text,
+    ):
+        migration_metadata_hits.append(relative)
 
-if latest_hits or marker_hits or unpinned_actions:
+if latest_hits or marker_hits or unpinned_actions or migration_metadata_hits:
     raise SystemExit(
         "repository policy failed "
-        f"latest={latest_hits} markers={marker_hits} unpinned={unpinned_actions}"
+        f"latest={latest_hits} markers={marker_hits} unpinned={unpinned_actions} "
+        f"migration_metadata={migration_metadata_hits}"
     )
 print("repository policy OK: no latest, no production markers, actions pinned")

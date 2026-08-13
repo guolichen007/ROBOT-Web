@@ -178,3 +178,39 @@ test('stop patrol waits for task cancellation, stop ACK and five fresh stationar
   await expect(page.getByText('车辆已停止')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByText(/连续静止帧 5\/5/)).toBeVisible()
 })
+
+test('patrol report PDF and Excel use authenticated browser downloads', async ({ page, request }) => {
+  await forceRelease(request)
+  await waitForRobotIdle(request)
+  await login(page, request)
+  const accessToken = await token(request)
+  let tasksResponse = await request.get('/api/v1/tasks?limit=100', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  let tasks = (await tasksResponse.json()) as Array<{ id: string; type: string; status: string }>
+  let task = tasks.find((item) => item.type === 'PATROL' && item.status === 'SUCCEEDED')
+  if (!task) {
+    await page.getByRole('button', { name: '开始巡检' }).click()
+    await waitForRobotIdle(request)
+    tasksResponse = await request.get('/api/v1/tasks?limit=100', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+    tasks = await tasksResponse.json()
+    task = tasks.find((item) => item.type === 'PATROL' && item.status === 'SUCCEEDED')
+  }
+  expect(task).toBeTruthy()
+  const generated = await request.post(`/api/v1/patrol-reports/tasks/${task!.id}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  expect(generated.ok()).toBeTruthy()
+  const report = (await generated.json()) as { report_code: string }
+  await page.goto('/patrol')
+  const row = page.locator('.business-list-row').filter({ hasText: report.report_code })
+  await expect(row).toBeVisible()
+  const pdfDownload = page.waitForEvent('download')
+  await row.getByRole('button', { name: 'PDF' }).click()
+  expect((await pdfDownload).suggestedFilename()).toBe(`${report.report_code}.pdf`)
+  const excelDownload = page.waitForEvent('download')
+  await row.getByRole('button', { name: 'Excel' }).click()
+  expect((await excelDownload).suggestedFilename()).toBe(`${report.report_code}.xlsx`)
+})

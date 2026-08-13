@@ -20,7 +20,7 @@ const available = computed(
   () =>
     props.robot?.online_state === 'ONLINE' &&
     !props.robot.estop_active &&
-    props.robot.control_enabled !== false &&
+    props.robot.manual_control_ready === true &&
     supports('manual_control'),
 )
 
@@ -48,12 +48,16 @@ async function acquire(): Promise<boolean> {
 }
 
 function vector(direction: string): { linear: number; angular: number } {
+  const profile = props.robot?.motion_profile
+  const forward = profile?.max_manual_forward_mps ?? 0
+  const reverse = profile?.reverse_allowed ? (profile.max_manual_reverse_mps ?? 0) : 0
+  const angular = profile?.max_manual_angular_radps ?? 0
   return (
     {
-      forward: { linear: 0.22, angular: 0 },
-      backward: { linear: -0.16, angular: 0 },
-      left: { linear: 0, angular: 0.65 },
-      right: { linear: 0, angular: -0.65 },
+      forward: { linear: forward, angular: 0 },
+      backward: { linear: -reverse, angular: 0 },
+      left: { linear: 0, angular },
+      right: { linear: 0, angular: -angular },
     }[direction] || { linear: 0, angular: 0 }
   )
 }

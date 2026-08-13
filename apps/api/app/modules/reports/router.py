@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import html
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,7 +13,7 @@ from app.core.config import get_settings
 from app.core.dependencies import AuthContext, DbSession, require_permission
 from app.core.errors import PlatformError
 from app.core.serialization import serialize_model
-from app.db.models import InspectionObservation, PatrolReport, Robot, Task, TaskEvent
+from app.db.models import Asset, InspectionObservation, PatrolReport, Robot, Task, TaskEvent
 
 router = APIRouter(prefix="/api/v1/patrol-reports", tags=["patrol-reports"])
 
@@ -33,7 +34,7 @@ def safe_file(name: str) -> Path:
 
 @router.get("")
 def list_reports(
-    db: DbSession, _: AuthContext = Depends(require_permission("robot.read"))
+    db: DbSession, _: AuthContext = Depends(require_permission("patrol.report.read"))
 ) -> list[dict]:
     return [
         serialize_model(row)
@@ -45,7 +46,7 @@ def list_reports(
 def generate_report(
     task_id: str,
     db: DbSession,
-    _: AuthContext = Depends(require_permission("robot.read")),
+    auth: AuthContext = Depends(require_permission("patrol.report.read")),
 ) -> dict:
     from openpyxl import Workbook
     from reportlab.lib import colors
@@ -189,6 +190,27 @@ def generate_report(
     for event in events:
         timeline.append([event.status, event.phase, event.progress, event.created_at.isoformat()])
     workbook.save(safe_file(xlsx_name))
+    for format_name, object_name, mime_type in (
+        ("html", html_name, "text/html; charset=utf-8"),
+        ("pdf", pdf_name, "application/pdf"),
+        (
+            "xlsx",
+            xlsx_name,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ),
+    ):
+        path = safe_file(object_name)
+        asset = Asset(
+            object_name=f"private/patrol-reports/{object_name}",
+            original_filename=object_name,
+            mime_type=mime_type,
+            size_bytes=path.stat().st_size,
+            sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+            created_by=auth.user.id,
+        )
+        db.add(asset)
+        db.flush()
+        setattr(row, f"{format_name}_asset_id", asset.id)
     row.status = "READY"
     row.summary_json = summary
     row.html_object_name = html_name
@@ -204,7 +226,7 @@ def download_report(
     report_id: str,
     format_name: str,
     db: DbSession,
-    _: AuthContext = Depends(require_permission("robot.read")),
+    _: AuthContext = Depends(require_permission("patrol.report.read")),
 ) -> FileResponse:
     row = db.get(PatrolReport, report_id)
     if not row or row.status != "READY":

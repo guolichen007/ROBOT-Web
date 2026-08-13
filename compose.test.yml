@@ -15,6 +15,7 @@ x-test-environment: &test-environment
   MEDIA_PUBLISH_TOKEN: test-media-publisher-token-2026
   MEDIA_TICKET_SECONDS: "2"
   ALLOWED_ORIGINS: http://localhost:18080,http://127.0.0.1:18080,http://host.docker.internal:18080
+  ASSET_ROOT: /tmp/firebot-test-assets
 
 x-python-service: &python-service
   build:
