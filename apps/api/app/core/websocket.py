@@ -15,6 +15,8 @@ from app.db.models import Command, ManualControlSession, Robot
 from app.db.session import SessionLocal
 from app.modules.commands.service import build_command_payload, enqueue_safety_command
 
+STREAM_BLOCK_MS = 1_000
+
 
 def stream_tuple(value: str) -> tuple[int, int]:
     left, right = value.split("-", 1)
@@ -108,7 +110,12 @@ async def monitor_socket(websocket: WebSocket, ticket: str, after: str = "0-0") 
     cursor = after
     try:
         while True:
-            rows = await asyncio.to_thread(redis.xread, {EVENT_STREAM: cursor}, 100, 5000)
+            # The shared Redis client has a two-second socket timeout. Keep the
+            # blocking read below that limit so an idle event stream emits a
+            # heartbeat instead of looking like a broken WebSocket.
+            rows = await asyncio.to_thread(
+                redis.xread, {EVENT_STREAM: cursor}, 100, STREAM_BLOCK_MS
+            )
             if not rows:
                 await websocket.send_json({"event_type": "heartbeat", "stream_id": cursor})
                 continue

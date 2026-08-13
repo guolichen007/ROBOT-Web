@@ -383,6 +383,9 @@ def test_manual_alarm_idempotency_lifecycle_and_audit(client: TestClient) -> Non
     assert replay.status_code == 201 and replay.json()["id"] == created.json()["id"]
     alarm_id = created.json()["id"]
     assert created.json()["state"] == "NEW"
+    timeline = client.get(f"/api/v1/alarms/{alarm_id}/timeline", headers=auth(token))
+    assert timeline.status_code == 200
+    assert [(item["source_type"], item["state"]) for item in timeline.json()] == [("ALARM", "NEW")]
     for action, state in (
         ("acknowledge", "ACKNOWLEDGED"),
         ("confirm", "CONFIRMED"),

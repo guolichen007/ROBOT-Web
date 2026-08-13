@@ -29,4 +29,14 @@ describe('MapAdapter', () => {
     expect(result.x).toBeCloseTo(12, 6)
     expect(result.y).toBeCloseTo(15, 6)
   })
+
+  it('keeps pan and zoom until explicitly reset', () => {
+    adapter.setZoom(1.8)
+    adapter.panBy(30, -12)
+    expect(adapter.getZoom()).toBe(1.8)
+    expect(adapter.getPan()).toEqual({ x: 30, y: -12 })
+    adapter.reset()
+    expect(adapter.getZoom()).toBe(1)
+    expect(adapter.getPan()).toEqual({ x: 0, y: 0 })
+  })
 })

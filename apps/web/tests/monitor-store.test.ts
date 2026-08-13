@@ -37,4 +37,15 @@ describe('monitor realtime state', () => {
     expect(store.snapshot.alarms).toHaveLength(1)
     expect(store.snapshot.alarms[0].state).toBe('ACKNOWLEDGED')
   })
+
+  it('does not hardcode R001 when a different robot becomes active', () => {
+    const store = useMonitorStore()
+    store.applyEvent({
+      stream_id: '174-0',
+      event_type: 'vehicle.location',
+      data: { id: 'robot-2', vehicle_id: 'FIRE-02', x: 7, y: 9 },
+    })
+    expect(store.activeRobotId).toBe('FIRE-02')
+    expect(store.robot?.vehicle_id).toBe('FIRE-02')
+  })
 })

@@ -5,8 +5,14 @@ import type { StreamInfo } from '@/types'
 import StateChip from './StateChip.vue'
 
 const props = withDefaults(
-  defineProps<{ stream?: StreamInfo; title: string; glyph?: string; prominent?: boolean }>(),
-  { glyph: 'RGB', prominent: false },
+  defineProps<{
+    stream?: StreamInfo
+    title: string
+    glyph?: string
+    prominent?: boolean
+    active?: boolean
+  }>(),
+  { glyph: 'RGB', prominent: false, active: true },
 )
 const video = ref<HTMLVideoElement>()
 const state = ref<'DISABLED' | 'OFFLINE' | 'CONNECTING' | 'LIVE' | 'ERROR'>(props.stream?.state || 'OFFLINE')
@@ -15,7 +21,9 @@ let peer: RTCPeerConnection | null = null
 let resourceUrl = ''
 
 const canPlay = computed(() => Boolean(props.stream?.stream_id && props.stream.state !== 'DISABLED'))
-const shouldAutoConnect = computed(() => ['CONNECTING', 'LIVE'].includes(props.stream?.state || 'OFFLINE'))
+const shouldAutoConnect = computed(
+  () => props.active && ['CONNECTING', 'LIVE'].includes(props.stream?.state || 'OFFLINE'),
+)
 
 async function waitIce(pc: RTCPeerConnection): Promise<void> {
   if (pc.iceGatheringState === 'complete') return
@@ -55,9 +63,10 @@ async function connect(): Promise<void> {
     pc.addTransceiver('video', { direction: 'recvonly' })
     pc.ontrack = (event) => {
       if (video.value) video.value.srcObject = event.streams[0]
-      state.value = 'LIVE'
+      if (pc.connectionState === 'connected') state.value = 'LIVE'
     }
     pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'connected' && video.value?.srcObject) state.value = 'LIVE'
       if (['failed', 'disconnected'].includes(pc.connectionState)) state.value = 'ERROR'
     }
     const offer = await pc.createOffer()
@@ -80,7 +89,7 @@ async function connect(): Promise<void> {
 }
 
 watch(
-  () => [props.stream?.stream_id, props.stream?.state],
+  () => [props.stream?.stream_id, props.stream?.state, props.active],
   () => {
     if (shouldAutoConnect.value) void connect()
     else void disconnect()

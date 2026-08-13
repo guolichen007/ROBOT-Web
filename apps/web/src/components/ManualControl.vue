@@ -37,7 +37,7 @@ async function acquire(): Promise<boolean> {
         control_session_id: newUuid(),
       })
     ).data
-    emit('notice', '已获得 R001 手动控制租约', 'ok')
+    emit('notice', `已获得 ${props.robot?.vehicle_id || '当前车辆'} 手动控制租约`, 'ok')
     return true
   } catch (error) {
     emit('notice', errorMessage(error), 'danger')

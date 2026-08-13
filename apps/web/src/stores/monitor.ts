@@ -21,6 +21,7 @@ const emptySnapshot = (): MonitorSnapshot => ({
 
 export const useMonitorStore = defineStore('monitor', () => {
   const snapshot = ref<MonitorSnapshot>(emptySnapshot())
+  const activeRobotId = ref<string | null>(null)
   const connected = ref(false)
   const resyncing = ref(false)
   const lastStreamId = ref('0-0')
@@ -28,8 +29,13 @@ export const useMonitorStore = defineStore('monitor', () => {
   let reconnectTimer = 0
   let reconnectAttempt = 0
   let connecting = false
+  let starting: Promise<void> | null = null
 
-  const robot = computed(() => snapshot.value.robots.find((item) => item.vehicle_id === 'R001'))
+  const robot = computed(() =>
+    snapshot.value.robots.find(
+      (item) => item.id === activeRobotId.value || item.vehicle_id === activeRobotId.value,
+    ),
+  )
   const activeAlarm = computed(() => snapshot.value.alarms[0])
   const activeTask = computed(() =>
     snapshot.value.tasks.find((item) => ['CREATED', 'QUEUED', 'ACCEPTED', 'EXECUTING'].includes(item.status)),
@@ -48,7 +54,10 @@ export const useMonitorStore = defineStore('monitor', () => {
       const vehicleId = String(event.data.vehicle_id || '')
       const index = snapshot.value.robots.findIndex((item) => item.vehicle_id === vehicleId)
       if (index >= 0) snapshot.value.robots[index] = { ...snapshot.value.robots[index], ...event.data }
-      else snapshot.value.robots.push(event.data as RobotState)
+      else {
+        snapshot.value.robots.push(event.data as RobotState)
+        if (!activeRobotId.value) activeRobotId.value = vehicleId
+      }
     } else if (event.event_type.startsWith('alarm.')) {
       replaceById(snapshot.value.alarms, event.data as Alarm)
     } else if (event.event_type.startsWith('task.')) {
@@ -60,6 +69,11 @@ export const useMonitorStore = defineStore('monitor', () => {
     resyncing.value = true
     try {
       snapshot.value = (await api.get('/monitor/snapshot')).data
+      const ids = [...snapshot.value.robots]
+        .filter((item) => item.enabled !== false)
+        .sort((left, right) => left.vehicle_id.localeCompare(right.vehicle_id))
+        .map((item) => item.id || item.vehicle_id)
+      if (!activeRobotId.value || !ids.includes(activeRobotId.value)) activeRobotId.value = ids[0] || null
       lastStreamId.value = snapshot.value.snapshot_watermark
     } finally {
       resyncing.value = false
@@ -124,12 +138,20 @@ export const useMonitorStore = defineStore('monitor', () => {
   }
 
   async function start(): Promise<void> {
-    await loadSnapshot()
-    await connect()
+    if (!starting) {
+      starting = (async () => {
+        await loadSnapshot()
+        await connect()
+      })().finally(() => {
+        starting = null
+      })
+    }
+    await starting
   }
 
   return {
     snapshot,
+    activeRobotId,
     robot,
     activeAlarm,
     activeTask,

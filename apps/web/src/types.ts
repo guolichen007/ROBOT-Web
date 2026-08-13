@@ -13,6 +13,7 @@ export interface RobotState {
   id?: string
   vehicle_id: string
   name?: string
+  enabled?: boolean
   online_state?: OnlineState
   x?: number
   y?: number
@@ -131,6 +132,16 @@ export interface Alarm {
   occurrence_count: number
   detection_method: string
   last_seen_at: string
+  first_seen_at?: string
+  confidence?: number | null
+  ack_at?: string | null
+  confirmed_at?: string | null
+  assigned_task_id?: string | null
+  resolved_at?: string | null
+  source_position_json?: Record<string, unknown>
+  sensor_snapshot_json?: Record<string, unknown>
+  media_snapshot_json?: Record<string, unknown>
+  note?: string | null
 }
 
 export interface Task {
@@ -168,6 +179,17 @@ export interface NavigationPreset {
   pose_json: { x: number; y: number; theta: number }
   requires_reverse: boolean
   enabled: boolean
+  parking_slot_id?: string | null
+}
+
+export interface AlarmTimelineItem {
+  occurred_at: string
+  source_type: 'ALARM' | 'TASK' | 'COMMAND' | 'OPERATION'
+  state: string
+  label: string
+  task_id?: string
+  command_id?: string
+  correlation_id?: string
 }
 
 export interface StopOperation {

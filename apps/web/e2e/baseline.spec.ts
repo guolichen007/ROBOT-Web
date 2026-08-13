@@ -75,7 +75,7 @@ test('industrial operations home prioritizes map, roof camera and four controls'
   request,
 }) => {
   await login(page, request)
-  await expect(page.getByText('车顶实时相机')).toBeVisible()
+  await expect(page.getByText('车顶实时相机').first()).toBeVisible()
   for (const name of ['开始巡检', '停止巡检', '返回等待区', '软件紧急停止']) {
     await expect(page.getByRole('button', { name })).toBeVisible()
   }
@@ -105,12 +105,12 @@ test('A-12 manual fire uses explicit three-mode extinguish drawer', async ({ pag
   await page.getByRole('button', { name: '车位 A-12' }).click()
   await page.getByRole('button', { name: '人工上报火情' }).click()
   await expect(page.getByText(/A-12 人工火情已创建/)).toBeVisible()
+  await page.getByRole('button', { name: '确认收到' }).click()
   await page.getByRole('button', { name: '确认火情' }).click()
-  await expect(page.getByText('选择灭火处理方式')).toBeVisible()
   await expect(page.getByText('展开灭火帐', { exact: true })).toBeVisible()
   await expect(page.getByText('喷射灭火剂', { exact: true })).toBeVisible()
-  await expect(page.getByText('帐幕后喷射', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '创建灭火任务' }).click()
+  await expect(page.getByText('灭火帐 + 喷射', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '确认派发' }).click()
   await expect(page.getByText(/灭火任务已创建/)).toBeVisible()
   await waitForRobotIdle(request)
 })

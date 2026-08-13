@@ -33,6 +33,16 @@ export class MapAdapter {
   setZoom(zoom: number): void {
     this.zoom = Math.min(4, Math.max(0.6, zoom))
   }
+  getZoom(): number {
+    return this.zoom
+  }
+  getPan(): Point {
+    return { ...this.pan }
+  }
+  centerOn(point: Point): void {
+    const screen = this.worldToScreen(point)
+    this.panBy(this.viewport.width / 2 - screen.x, this.viewport.height / 2 - screen.y)
+  }
   panBy(dx: number, dy: number): void {
     this.pan = { x: this.pan.x + dx, y: this.pan.y + dy }
   }

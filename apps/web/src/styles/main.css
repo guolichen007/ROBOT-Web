@@ -14,6 +14,17 @@
   --red: #dc4b45;
   --blue: #4f8fbe;
   --mono: 'Cascadia Code', 'SFMono-Regular', Consolas, monospace;
+  --hmi-bg-canvas: #171a1d;
+  --hmi-bg-panel: #22272b;
+  --hmi-bg-raised: #2a3035;
+  --hmi-text-primary: #edf0f2;
+  --hmi-text-secondary: #a5afb5;
+  --hmi-border: #424a50;
+  --hmi-accent-selection: #5c91b8;
+  --hmi-state-normal: #6e8b77;
+  --hmi-state-degraded: #c28b43;
+  --hmi-state-critical: #d84b45;
+  --hmi-state-disabled: #687178;
 }
 
 * {
@@ -26,7 +37,7 @@ body,
   margin: 0;
 }
 body {
-  min-width: 1180px;
+  min-width: 0;
   background: var(--bg);
 }
 button,
@@ -1895,6 +1906,448 @@ tbody tr:hover {
   }
   .command-dock .t-button {
     font-size: 13px;
+  }
+}
+
+/* Commercial operations HMI V2 */
+.commercial-hmi {
+  height: 100%;
+  display: grid;
+  grid-template-rows: 48px 72px minmax(0, 1fr) auto minmax(236px, auto);
+  gap: 8px;
+  color: var(--hmi-text-primary);
+}
+.situation-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 0 16px;
+  background: var(--hmi-bg-panel);
+  border: 1px solid var(--hmi-border);
+  border-left: 4px solid var(--hmi-state-normal);
+  border-radius: 5px;
+}
+.situation-banner svg {
+  width: 21px;
+  height: 21px;
+  color: var(--hmi-state-normal);
+}
+.situation-banner span {
+  color: var(--hmi-text-secondary);
+}
+.situation-banner.critical {
+  border-left-color: var(--hmi-state-critical);
+  background: #302222;
+}
+.situation-banner.critical svg {
+  color: var(--hmi-state-critical);
+}
+.situation-banner button {
+  margin-left: auto;
+  border: 1px solid #88403c;
+  background: #6e2d2a;
+  padding: 7px 14px;
+  border-radius: 4px;
+}
+.situation-banner.degraded {
+  border-left-color: var(--hmi-state-degraded);
+}
+.risk-ribbon {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  background: var(--hmi-bg-panel);
+  border: 1px solid var(--hmi-border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.risk-ribbon article {
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  padding: 9px 14px;
+  border-right: 1px solid var(--hmi-border);
+}
+.risk-ribbon article:last-child {
+  border-right: 0;
+}
+.risk-ribbon span,
+.risk-ribbon small {
+  font-size: 12px;
+  color: var(--hmi-text-secondary);
+}
+.risk-ribbon strong {
+  font-size: 17px;
+}
+.risk-ribbon article[data-state='STALE'],
+.risk-ribbon article[data-state='ERROR'] {
+  border-top: 3px solid var(--hmi-state-degraded);
+}
+.hmi-core {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 63fr) minmax(350px, 37fr);
+  gap: 8px;
+}
+.operations-map-panel {
+  position: relative;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 46px minmax(280px, 1fr) auto;
+  overflow: hidden;
+}
+.operations-map-panel > header,
+.secondary-alarms > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--hmi-border);
+}
+.operations-map-panel > header div {
+  display: grid;
+}
+.operations-map-panel > header h2 {
+  margin: 0;
+  font: inherit;
+  font-weight: 700;
+}
+.operations-map-panel > header span,
+.operations-map-panel > header small {
+  font-size: 12px;
+  color: var(--hmi-text-secondary);
+}
+.hmi-side {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(220px, 1.6fr) minmax(120px, 1fr);
+  gap: 8px;
+}
+.video-surveillance {
+  min-height: 0;
+  overflow: hidden;
+}
+.video-surveillance .t-tabs,
+.video-surveillance .t-tabs__content,
+.video-surveillance .t-tab-panel {
+  height: 100%;
+}
+.video-surveillance .t-tabs__content {
+  padding: 0;
+}
+.secondary-alarms {
+  min-height: 0;
+  overflow: auto;
+}
+.secondary-alarms > header {
+  height: 40px;
+}
+.secondary-alarms button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 6px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  text-align: left;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid #343b40;
+  background: transparent;
+}
+.secondary-alarms button.active {
+  background: #303941;
+}
+.secondary-alarms button i {
+  width: 5px;
+  height: 28px;
+  background: var(--hmi-state-degraded);
+}
+.secondary-alarms button i[data-level='CRITICAL'] {
+  background: var(--hmi-state-critical);
+}
+.secondary-alarms button span {
+  display: grid;
+}
+.secondary-alarms small,
+.secondary-alarms time {
+  color: var(--hmi-text-secondary);
+  font-size: 11px;
+}
+.map-selection-bar {
+  position: absolute;
+  z-index: 6;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) minmax(180px, 1fr) auto auto auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 62px;
+  padding: 8px 12px;
+  border: 1px solid var(--hmi-border);
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 24%);
+  background: var(--hmi-bg-raised);
+}
+.map-selection-bar > div {
+  display: grid;
+  gap: 3px;
+}
+.map-selection-bar span,
+.map-selection-bar small {
+  font-size: 12px;
+  color: var(--hmi-text-secondary);
+}
+.map-selection-bar small {
+  color: #ddb06f;
+}
+.map-tools {
+  grid-template-columns: 38px 38px;
+}
+.map-tools button {
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+}
+.map-tools button.active {
+  border-color: var(--hmi-accent-selection);
+  background: #334957;
+}
+.parking-slot.disabled {
+  opacity: 0.4;
+  stroke-dasharray: 4 3;
+}
+.parking-slot.target {
+  stroke: #d2a452;
+  stroke-width: 2.5;
+}
+.map-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  gap: 5px;
+  color: var(--hmi-text-secondary);
+  background: var(--hmi-bg-canvas);
+}
+.hmi-bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(540px, 0.9fr);
+  gap: 8px;
+}
+.operations-command-dock {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) repeat(3, auto) minmax(210px, auto);
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+}
+.operations-command-dock > div {
+  display: grid;
+}
+.operations-command-dock > div span {
+  color: var(--hmi-text-secondary);
+  font-size: 12px;
+  max-width: 310px;
+}
+.hold-estop {
+  height: 54px;
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  place-content: center;
+  border: 1px solid #8f3d39;
+  border-radius: 5px;
+  background: #542522;
+}
+.hold-estop > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: #913a35;
+  pointer-events: none;
+}
+.hold-estop strong,
+.hold-estop small {
+  position: relative;
+}
+.hold-estop small {
+  font-size: 10px;
+  color: #e5b8b5;
+}
+.primary-alarm-panel {
+  min-height: 228px;
+  overflow: hidden;
+}
+.primary-alarm-grid {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr;
+}
+.alarm-actions-column,
+.alarm-detail-column {
+  padding: 12px;
+}
+.alarm-actions-column {
+  border-right: 1px solid var(--hmi-border);
+}
+.alarm-actions-column > header {
+  display: grid;
+  gap: 2px;
+}
+.alarm-actions-column > header span,
+.alarm-actions-column > header small {
+  color: var(--hmi-text-secondary);
+  font-size: 12px;
+}
+.alarm-lifecycle {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0;
+}
+.extinguish-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+}
+.extinguish-actions > button {
+  display: grid;
+  gap: 4px;
+  min-height: 66px;
+  padding: 8px;
+  border: 1px solid var(--hmi-border);
+  border-radius: 4px;
+  background: var(--hmi-bg-raised);
+  text-align: left;
+}
+.extinguish-actions > button.selected {
+  border-color: var(--hmi-accent-selection);
+  background: #2d3f4b;
+}
+.extinguish-actions span {
+  font-size: 11px;
+  color: var(--hmi-text-secondary);
+}
+.dispatch-summary {
+  grid-column: 1/-1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.alarm-detail-column dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 0;
+}
+.alarm-detail-column dl div {
+  padding: 7px;
+  background: var(--hmi-bg-raised);
+}
+.alarm-detail-column dt {
+  font-size: 11px;
+  color: var(--hmi-text-secondary);
+}
+.alarm-detail-column dd {
+  margin: 3px 0 0;
+}
+.operation-timeline h4 {
+  margin: 10px 0 6px;
+}
+.operation-timeline ol {
+  max-height: 100px;
+  overflow: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.operation-timeline li {
+  display: grid;
+  grid-template-columns: 65px 1fr;
+  gap: 5px;
+  padding: 4px 0;
+  border-bottom: 1px solid #343b40;
+  font-size: 11px;
+}
+.operation-timeline small {
+  grid-column: 2;
+  color: var(--hmi-text-secondary);
+}
+.alarm-empty {
+  min-height: 228px;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  color: var(--hmi-text-secondary);
+}
+.alarm-empty strong {
+  font-size: 17px;
+  color: var(--hmi-text-primary);
+}
+.stop-operation-state {
+  padding: 7px 12px;
+  border: 1px solid #72572e;
+  background: #332b1f;
+  color: #d6b276;
+  border-radius: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+@media (max-width: 1599px) {
+  .monitor-shell .page {
+    height: auto;
+    min-height: calc(100vh - 58px);
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  .commercial-hmi {
+    height: auto;
+    min-height: 100%;
+    grid-template-rows: auto;
+  }
+  .hmi-core {
+    min-height: 520px;
+  }
+  .hmi-bottom {
+    grid-template-columns: 1fr;
+  }
+  .primary-alarm-panel {
+    min-height: 260px;
+  }
+}
+@media (max-width: 1100px) {
+  .hmi-core {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+  .operations-map-panel {
+    min-height: 560px;
+  }
+  .hmi-side {
+    grid-template-rows: 360px 260px;
+  }
+  .risk-ribbon {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .map-selection-bar {
+    grid-template-columns: 1fr 1fr;
+  }
+  .operations-command-dock {
+    grid-template-columns: 1fr 1fr;
+  }
+  .primary-alarm-grid {
+    grid-template-columns: 1fr;
+  }
+  .alarm-actions-column {
+    border-right: 0;
+    border-bottom: 1px solid var(--hmi-border);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .parking-slot.alarm.critical {
+    animation: none !important;
   }
 }
 @media (max-width: 1280px) {

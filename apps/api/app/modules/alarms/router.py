@@ -20,7 +20,15 @@ from app.core.errors import PlatformError
 from app.core.events import append_event
 from app.core.idempotency import lookup, store
 from app.core.serialization import serialize_model
-from app.db.models import FireEvent, MapVersion, ParkingSlot
+from app.db.models import (
+    Command,
+    FireEvent,
+    MapVersion,
+    ParkingSlot,
+    RobotOperationEvent,
+    Task,
+    TaskEvent,
+)
 from app.modules.tasks.router import TaskInput, create_task
 
 router = APIRouter(prefix="/api/v1/alarms", tags=["alarms"])
@@ -57,6 +65,97 @@ def alarm_detail(alarm_id: str, db: DbSession, auth: CurrentAuth) -> dict:
     if not row:
         raise HTTPException(404, "火情不存在")
     return serialize_model(row)
+
+
+@router.get("/{alarm_id}/timeline")
+def alarm_timeline(alarm_id: str, db: DbSession, auth: CurrentAuth) -> list[dict]:
+    alarm = db.get(FireEvent, alarm_id)
+    if not alarm:
+        raise HTTPException(404, "火情不存在")
+    items: list[dict] = []
+
+    def add(occurred_at, source_type, state, label, **ids) -> None:
+        if occurred_at:
+            items.append(
+                {
+                    "occurred_at": occurred_at,
+                    "source_type": source_type,
+                    "state": state,
+                    "label": label,
+                    **ids,
+                }
+            )
+
+    add(alarm.first_seen_at, "ALARM", "NEW", "发现火情")
+    add(alarm.ack_at, "ALARM", "ACKNOWLEDGED", "操作员已确认收到")
+    add(alarm.confirmed_at, "ALARM", "CONFIRMED", "火情已确认")
+    add(alarm.resolved_at, "ALARM", "RESOLVED", "火情已解决")
+    tasks = db.scalars(select(Task).where(Task.fire_event_id == alarm.id)).all()
+    for task in tasks:
+        add(task.created_at, "TASK", "CREATED", "已创建灭火任务", task_id=task.id)
+        for event in db.scalars(
+            select(TaskEvent).where(TaskEvent.task_id == task.id).order_by(TaskEvent.created_at)
+        ).all():
+            add(
+                event.created_at,
+                "TASK",
+                event.status,
+                event.phase,
+                task_id=task.id,
+            )
+        for command in db.scalars(
+            select(Command).where(Command.task_id == task.id).order_by(Command.issued_at)
+        ).all():
+            add(
+                command.issued_at,
+                "COMMAND",
+                "CREATED",
+                f"已创建 {command.cmd} 命令",
+                task_id=task.id,
+                command_id=command.command_id,
+                correlation_id=command.correlation_id,
+            )
+            add(
+                command.published_at,
+                "COMMAND",
+                "PUBLISHED",
+                "命令已发布到车辆通道",
+                task_id=task.id,
+                command_id=command.command_id,
+                correlation_id=command.correlation_id,
+            )
+            add(
+                command.ack_at,
+                "COMMAND",
+                f"ACK_{str(command.ack_status or 'UNKNOWN').upper()}",
+                f"车端 ACK：{command.ack_status or '未知'}",
+                task_id=task.id,
+                command_id=command.command_id,
+                correlation_id=command.correlation_id,
+            )
+            add(
+                command.terminal_at,
+                "COMMAND",
+                command.lifecycle_status,
+                f"命令终态：{command.lifecycle_status}",
+                task_id=task.id,
+                command_id=command.command_id,
+                correlation_id=command.correlation_id,
+            )
+        for operation in db.scalars(
+            select(RobotOperationEvent)
+            .where(RobotOperationEvent.task_id == task.id)
+            .order_by(RobotOperationEvent.occurred_at)
+        ).all():
+            add(
+                operation.occurred_at,
+                "OPERATION",
+                operation.state,
+                operation.operation_type,
+                task_id=task.id,
+            )
+    items.sort(key=lambda item: item["occurred_at"])
+    return items
 
 
 @router.post("/manual", status_code=201)

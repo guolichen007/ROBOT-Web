@@ -15,11 +15,13 @@ import {
 } from 'tdesign-icons-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useMonitorStore } from '@/stores/monitor'
+import { useSystemClock } from '@/composables/useSystemClock'
 
 const auth = useAuthStore()
 const monitor = useMonitorStore()
 const route = useRoute()
 const router = useRouter()
+const { now } = useSystemClock()
 
 const nav = [
   { group: '运行', path: '/monitor', label: '实时监控', icon: DashboardIcon, permission: 'robot.read' },
@@ -41,7 +43,7 @@ const compact = computed(() => route.path === '/monitor')
 const robot = computed(() => monitor.robot)
 const clock = computed(() =>
   new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'medium', hour12: false }).format(
-    new Date(),
+    now.value,
   ),
 )
 
@@ -90,8 +92,8 @@ async function logout(): Promise<void> {
             >{{ monitor.connected ? '链路正常' : '正在重连' }}</span
           >
           <span class="status-item"
-            ><i :class="robot?.online_state === 'ONLINE' ? 'ok' : 'warn'"></i>R001
-            {{ robot?.online_state || 'OFFLINE' }}</span
+            ><i :class="robot?.online_state === 'ONLINE' ? 'ok' : 'warn'"></i
+            >{{ robot?.vehicle_id || 'NO ROBOT' }} {{ robot?.online_state || 'OFFLINE' }}</span
           >
           <span>电池 {{ robot?.battery == null ? '--' : `${robot.battery.toFixed(0)}%` }}</span>
           <span>任务 {{ monitor.activeTask?.type || '空闲' }}</span>
