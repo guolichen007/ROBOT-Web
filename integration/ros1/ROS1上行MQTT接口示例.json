@@ -1,15 +1,24 @@
 {
   "contract": "ROS1 native read-only compatibility input",
   "platform_contract": "1.2.0",
-  "schema_version": "1.2",
+  "canonical_schema_version": "1.2",
+  "compat_schema_version": "1.1",
   "external_id_placeholder": "firerobot-01",
+  "common": {
+    "external_id": "firerobot-01",
+    "bridge_boot_id": "00000000-0000-4000-8000-000000000101",
+    "seq_scope": "bridge_boot_id + topic",
+    "ts": "UTC ISO-8601 or Unix seconds"
+  },
   "examples": [
-    {"topic": "robot/firerobot-01/pose", "qos": 1, "retain": false, "payload": {"ts": 1786593600.125, "frame_id": "map", "x": 1.2, "y": 2.3, "yaw": 0.4, "cov_xx": 0.01, "cov_yy": 0.02, "cov_yawyaw": 0.03}},
-    {"topic": "robot/firerobot-01/odom", "qos": 0, "retain": false, "payload": {"ts": 1786593600.145, "vx": 0.0, "vy": 0.25, "wz": 0.0}},
-    {"topic": "robot/firerobot-01/status", "qos": 1, "retain": false, "payload": {"ts": 1786593600.15, "control_mode": 3}},
-    {"topic": "robot/firerobot-01/battery", "qos": 1, "retain": false, "payload": {"ts": 1786593600.15, "battery_percentage": 87.5, "battery_voltage": 51.2, "battery_current": -2.4, "battery_temperature": 31.5, "battery_capacity": 100.0, "battery_charge_state": 0, "battery_cycle_count": 42}},
-    {"topic": "robot/firerobot-01/heartbeat", "qos": 0, "retain": false, "payload": {"ts": 1786593601.0, "uptime_sec": 3600.5}},
-    {"topic": "robot/firerobot-01/nav/status", "qos": 1, "retain": false, "diagnostic_only": true, "payload": {"ts": 1786593601.1, "goal_id": "move-base-goal-1", "status": "ACTIVE"}},
-    {"topic": "robot/firerobot-01/nav/result", "qos": 1, "retain": false, "diagnostic_only": true, "payload": {"ts": 1786593612.0, "goal_id": "move-base-goal-1", "status": "SUCCEEDED"}}
+    {"topic":"robot/firerobot-01/availability","qos":1,"retain":true,"payload":{"compat_schema_version":"1.1","external_id":"firerobot-01","bridge_boot_id":"00000000-0000-4000-8000-000000000101","seq":1,"ts":1786593600.0,"state":"online"}},
+    {"topic":"robot/firerobot-01/map","qos":1,"retain":true,"payload":{"compat_schema_version":"1.1","external_id":"firerobot-01","bridge_boot_id":"00000000-0000-4000-8000-000000000101","seq":1,"ts":1786593600.0,"site_code":"SITE-01","map_code":"parking_v1","map_version":"1","map_checksum":"sha256-owner-value"}},
+    {"topic":"robot/firerobot-01/pose","qos":1,"retain":false,"payload":{"compat_schema_version":"1.1","external_id":"firerobot-01","bridge_boot_id":"00000000-0000-4000-8000-000000000101","seq":1,"ts":1786593600.125,"frame_id":"map","x":1.2,"y":2.3,"yaw":0.4,"cov_xx":0.01,"cov_yy":0.02,"cov_yawyaw":0.03}},
+    {"topic":"robot/firerobot-01/odom","qos":0,"retain":false,"payload":{"compat_schema_version":"1.1","external_id":"firerobot-01","bridge_boot_id":"00000000-0000-4000-8000-000000000101","seq":1,"ts":1786593600.145,"vx":0.0,"vy":0.25,"wz":0.0}},
+    {"topic":"robot/firerobot-01/status","qos":1,"retain":false,"payload":{"compat_schema_version":"1.1","external_id":"firerobot-01","bridge_boot_id":"00000000-0000-4000-8000-000000000101","seq":1,"ts":1786593600.15,"control_mode":3}},
+    {"topic":"robot/firerobot-01/battery","qos":1,"retain":false,"payload":{"compat_schema_version":"1.1","external_id":"firerobot-01","bridge_boot_id":"00000000-0000-4000-8000-000000000101","seq":1,"ts":1786593600.15,"battery_percentage":87.5,"battery_voltage":51.2,"battery_current":-2.4,"battery_temperature":31.5}},
+    {"topic":"robot/firerobot-01/heartbeat","qos":0,"retain":false,"payload":{"compat_schema_version":"1.1","external_id":"firerobot-01","bridge_boot_id":"00000000-0000-4000-8000-000000000101","seq":1,"ts":1786593601.0,"uptime_sec":3600.5}},
+    {"topic":"robot/firerobot-01/nav/status","qos":1,"retain":false,"diagnostic_only":true,"payload":{"compat_schema_version":"1.1","external_id":"firerobot-01","bridge_boot_id":"00000000-0000-4000-8000-000000000101","seq":1,"ts":1786593601.1,"goal_id":"move-base-goal-1","status":"ACTIVE"}},
+    {"topic":"robot/firerobot-01/nav/result","qos":1,"retain":false,"diagnostic_only":true,"payload":{"compat_schema_version":"1.1","external_id":"firerobot-01","bridge_boot_id":"00000000-0000-4000-8000-000000000101","seq":1,"ts":1786593612.0,"goal_id":"move-base-goal-1","status":"SUCCEEDED"}}
   ]
 }

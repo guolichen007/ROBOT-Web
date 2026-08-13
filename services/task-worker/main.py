@@ -64,9 +64,16 @@ def stationary_observation(
     """Return (fresh, stationary) using full planar mecanum velocity."""
 
     received_raw = latest.get("server_received_at")
+    source_raw = latest.get("source_timestamp")
     try:
         received = datetime.fromisoformat(received_raw) if received_raw else None
-        fresh = bool(received and (now - received).total_seconds() * 1000 <= freshness_ms)
+        source = datetime.fromisoformat(source_raw) if source_raw else None
+        fresh = bool(
+            received
+            and source
+            and (now - received).total_seconds() * 1000 <= freshness_ms
+            and (now - source).total_seconds() * 1000 <= freshness_ms
+        )
     except (TypeError, ValueError):
         fresh = False
     linear_x = latest.get("linear_x")
@@ -159,7 +166,9 @@ def expire_sessions_and_commands(db, now: datetime) -> None:
 def reconcile_stop_operations(db, now: datetime) -> None:
     operations = db.scalars(
         select(StopOperation).where(
-            StopOperation.state.not_in({"VEHICLE_STATIONARY_CONFIRMED", "FAILED", "UNCONFIRMED"})
+            StopOperation.state.not_in(
+                {"VEHICLE_STATIONARY_CONFIRMED", "PARTIAL_UNCONFIRMED", "FAILED", "UNCONFIRMED"}
+            )
         )
     ).all()
     for operation in operations:
@@ -178,14 +187,10 @@ def reconcile_stop_operations(db, now: datetime) -> None:
             )
         elif stop and stop.lifecycle_status in {"PUBLISHED_UNCONFIRMED", "FAILED", "EXPIRED"}:
             operation.motion_stop_state = "UNCONFIRMED"
-            operation.state = "UNCONFIRMED"
             operation.failure_reason = stop.ack_reason or "STOP_ACK_TIMEOUT"
-            operation.terminal_at = now
         elif now >= operation.stop_ack_deadline_at:
             operation.motion_stop_state = "UNCONFIRMED"
-            operation.state = "UNCONFIRMED"
             operation.failure_reason = "STOP_ACK_TIMEOUT"
-            operation.terminal_at = now
 
         if operation.mission_cancel_state != "NOT_REQUIRED":
             if task and task.status == "CANCELLED":
@@ -198,16 +203,25 @@ def reconcile_stop_operations(db, now: datetime) -> None:
                 and now >= operation.cancel_deadline_at
             ):
                 operation.mission_cancel_state = "UNCONFIRMED"
-                operation.state = "UNCONFIRMED"
                 operation.failure_reason = "TASK_CANCEL_TIMEOUT"
-                operation.terminal_at = now
 
-        if operation.terminal_at:
+        cancel_terminal = operation.mission_cancel_state in {
+            "NOT_REQUIRED",
+            "UNAVAILABLE",
+            "CANCELLED_CONFIRMED",
+            "UNCONFIRMED",
+        }
+        if operation.motion_stop_state == "UNCONFIRMED" and cancel_terminal:
+            operation.state = "UNCONFIRMED"
+            operation.terminal_at = now
             queue_event(db, "operation.stop.updated", serialize_model(operation))
             continue
         if operation.motion_stop_state == "STATIONARY_CONFIRMED":
             if operation.mission_cancel_state in {"NOT_REQUIRED", "CANCELLED_CONFIRMED"}:
                 operation.state = "VEHICLE_STATIONARY_CONFIRMED"
+                operation.terminal_at = now
+            elif operation.mission_cancel_state in {"UNAVAILABLE", "UNCONFIRMED"}:
+                operation.state = "PARTIAL_UNCONFIRMED"
                 operation.terminal_at = now
             else:
                 operation.state = "STATIONARY_CONFIRMED_CANCEL_PENDING"
@@ -233,6 +247,9 @@ def reconcile_stop_operations(db, now: datetime) -> None:
             operation.motion_stop_state = "STATIONARY_CONFIRMED"
             if operation.mission_cancel_state in {"NOT_REQUIRED", "CANCELLED_CONFIRMED"}:
                 operation.state = "VEHICLE_STATIONARY_CONFIRMED"
+                operation.terminal_at = now
+            elif operation.mission_cancel_state in {"UNAVAILABLE", "UNCONFIRMED"}:
+                operation.state = "PARTIAL_UNCONFIRMED"
                 operation.terminal_at = now
             else:
                 operation.state = "STATIONARY_CONFIRMED_CANCEL_PENDING"

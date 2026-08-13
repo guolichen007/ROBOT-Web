@@ -48,6 +48,12 @@ def assert_robot_can_execute(
     if robot.estop_active and action not in {"emergency_stop", "reset_estop"}:
         raise PlatformError("ROBOT_ESTOP_ACTIVE", "软件急停已锁存")
     integration = db.get(RobotIntegrationProfile, robot.id)
+    if not integration:
+        raise PlatformError(
+            "INTEGRATION_PROFILE_MISSING",
+            "机器人尚未建立可信集成档案，拒绝执行车辆命令",
+            details={"action": action},
+        )
     if (
         integration
         and integration.source_kind == "ROS_COMPAT"
@@ -72,6 +78,13 @@ def assert_robot_can_execute(
                 "cmd_vel_arbitration_verified": integration.cmd_vel_arbitration_verified,
                 "ros_control_mode": integration.ros_control_mode,
             },
+        )
+    capability = db.get(RobotCapability, robot.id)
+    if not capability:
+        raise PlatformError(
+            "CAPABILITY_DECLARATION_MISSING",
+            "机器人尚未提供可信能力声明，拒绝执行车辆命令",
+            details={"action": action},
         )
     readiness = robot_readiness(db, robot)
     if integration:
@@ -120,8 +133,7 @@ def assert_robot_can_execute(
         f"manual:lease:{robot.id}"
     ):
         raise PlatformError("MANUAL_LEASE_CONFLICT", "机器人已有有效手动控制租约，请先显式释放")
-    capability = db.get(RobotCapability, robot.id)
-    if capability and action not in capability.supported_commands_json:
+    if action not in capability.supported_commands_json:
         raise PlatformError(
             "ROBOT_CAPABILITY_UNSUPPORTED",
             f"机器人能力声明不支持 {action}",
@@ -234,6 +246,54 @@ def create_durable_command(
         )
     )
     return command
+
+
+def create_safety_command(
+    db: Session,
+    *,
+    robot: Robot,
+    operator_id: str,
+    cmd: str,
+    params: dict[str, Any] | None = None,
+    task_id: str | None = None,
+    ttl_ms: int = 3000,
+    priority: int = 95,
+) -> tuple[Command, dict[str, Any]]:
+    """Authorize and persist a safety command without publishing it.
+
+    Publishing is deliberately performed only after the caller commits the
+    database transaction, so an authorization or commit failure has zero
+    broker/Redis side effects.
+    """
+
+    assert_robot_can_execute(db, robot, cmd, ignore_task_id=task_id)
+    payload = build_command_payload(
+        robot=robot,
+        operator_id=operator_id,
+        cmd=cmd,
+        params=params or {},
+        ttl_ms=ttl_ms,
+        priority=priority,
+        task_id=task_id,
+    )
+    deliverable = robot.online_state not in {"STALE", "OFFLINE"}
+    command = Command(
+        command_id=payload["command_id"],
+        correlation_id=payload["correlation_id"],
+        robot_id=robot.id,
+        task_id=task_id,
+        cmd=cmd,
+        priority=priority,
+        payload_json=payload,
+        lifecycle_status="CREATED" if deliverable else "PUBLISHED_UNCONFIRMED",
+        ack_reason=None if deliverable else "OFFLINE_NOT_DELIVERED",
+        issued_by=operator_id,
+        issued_at=datetime.fromisoformat(payload["issued_at"]),
+        expires_at=datetime.fromisoformat(payload["expires_at"]),
+    )
+    db.add(command)
+    db.flush()
+    return command, payload
 
 
 def enqueue_safety_command(payload: dict[str, Any]) -> str:

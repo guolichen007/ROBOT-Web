@@ -29,6 +29,7 @@ from app.db.models import (
     FireEvent,
     ManualControlSession,
     Map,
+    MapVersion,
     ParkingSlot,
     Robot,
     RobotBootSession,
@@ -222,6 +223,7 @@ def handle_location(
     received: datetime,
     *,
     estop_unknown: bool = False,
+    map_contract_verified: bool = True,
 ) -> None:
     latest_raw = redis.get(f"robot:{robot.vehicle_id}:latest")
     latest = json.loads(latest_raw) if latest_raw else {}
@@ -230,15 +232,25 @@ def handle_location(
         # stale Mock/canonical false value after the source is switched.
         latest.pop("estop_active", None)
     pose = msg["position"]
+    pose_projection = (
+        {
+            "position": msg["position"],
+            "x": pose["x"],
+            "y": pose["y"],
+            "theta": pose["theta"],
+        }
+        if map_contract_verified
+        else {"diagnostic_pose": msg["position"]}
+    )
+    if not map_contract_verified:
+        for key in ("position", "x", "y", "theta"):
+            latest.pop(key, None)
     latest.update(
         {
             "vehicle_id": robot.vehicle_id,
             "robot_id": robot.id,
             "online_state": robot.online_state,
-            "position": msg["position"],
-            "x": pose["x"],
-            "y": pose["y"],
-            "theta": pose["theta"],
+            **pose_projection,
             "linear": msg.get("linear_speed"),
             "angular": msg.get("angular_speed"),
             "linear_speed": msg.get("linear_speed"),
@@ -249,7 +261,12 @@ def handle_location(
             "map_version": msg["map_version"],
             "frame_id": msg["frame_id"],
             "parking_slot_code": msg.get("parking_slot_code"),
-            "localization_status": msg.get("localization_status", "UNKNOWN"),
+            "localization_status": (
+                msg.get("localization_status", "UNKNOWN")
+                if map_contract_verified
+                else "DEGRADED_MAP_UNVERIFIED"
+            ),
+            "map_contract_verified": map_contract_verified,
             "boot_id": msg["boot_id"],
             "seq": msg["seq"],
             "source_timestamp": source_ts.isoformat(),
@@ -336,6 +353,8 @@ def handle_sensor(db, robot: Robot, msg: dict, source_ts: datetime, received: da
 def process_internal_compat(topic: str, payload: bytes, received: datetime) -> bool:
     expected = topic.rsplit("/", 1)[-1]
     if not topic.startswith("_platform/compat/") or expected not in {
+        "compat_availability",
+        "compat_map",
         "compat_status",
         "compat_battery",
         "compat_odom",
@@ -352,6 +371,40 @@ def process_internal_compat(topic: str, payload: bytes, received: datetime) -> b
     except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
         mqtt_invalid_total.labels(reason="invalid_internal_compat").inc()
         return True
+    if expected == "compat_odom":
+        # 50 Hz fast path: Redis latest + a bounded 10 Hz replayable delta.
+        # SQL integration/capability/channel facts are refreshed separately.
+        raw = redis.get(f"robot:{vehicle_id}:latest")
+        latest = json.loads(raw) if raw else {"vehicle_id": vehicle_id}
+        latest.update(
+            {
+                "linear": msg.get("planar_speed"),
+                "angular": msg.get("angular_z"),
+                "linear_x": msg.get("linear_x"),
+                "linear_y": msg.get("linear_y"),
+                "angular_z": msg.get("angular_z"),
+                "planar_speed": msg.get("planar_speed"),
+                "linear_speed": msg.get("planar_speed"),
+                "angular_speed": msg.get("angular_z"),
+                "source_timestamp": source_ts.isoformat(),
+                "server_received_at": received.isoformat(),
+                "bridge_boot_id": msg.get("bridge_boot_id"),
+                "seq": msg.get("seq"),
+            }
+        )
+        redis.set(f"robot:{vehicle_id}:latest", json.dumps(latest, ensure_ascii=False))
+        interval_ms = max(1, int(1000 / settings.ros_compat_ws_max_hz))
+        if redis.set(f"ros_compat:ws_gate:{vehicle_id}", "1", px=interval_ms, nx=True):
+            from app.core.events import append_event
+
+            append_event("vehicle.odom", latest)
+        if not redis.set(
+            f"ros_compat:metadata_gate:{vehicle_id}:odom",
+            "1",
+            ex=settings.ros_compat_metadata_refresh_seconds,
+            nx=True,
+        ):
+            return True
     with SessionLocal.begin() as db:
         robot = robot_for(db, vehicle_id)
         if not robot:
@@ -365,13 +418,25 @@ def process_internal_compat(topic: str, payload: bytes, received: datetime) -> b
         profile.upstream_protocol = "ros-native-compat"
         profile.control_contract_verified = False
         profile.ack_contract_verified = False
-        profile.map_contract_verified = False
+        if expected != "compat_map":
+            profile.map_contract_verified = False
         profile.bidirectional_bridge_verified = False
         profile.command_path_verified = False
         profile.cmd_vel_arbitration_verified = False
         profile.read_only_reason = "ROS 原生上行已接入；command/ACK 与地图合同尚未现场验证"
         profile.stale_seconds = settings.ros_compat_stale_seconds
         profile.offline_seconds = settings.ros_compat_offline_seconds
+        profile.external_id = msg.get("external_id", profile.external_id)
+        profile.bridge_boot_id = msg.get("bridge_boot_id", profile.bridge_boot_id)
+        profile.last_source_timestamp = source_ts
+        profile.last_received_at = received
+        sequence_state = dict(profile.compat_sequence_state_json or {})
+        sequence_state[expected.removeprefix("compat_")] = {
+            "bridge_boot_id": msg.get("bridge_boot_id"),
+            "seq": msg.get("seq"),
+            "source_timestamp": source_ts.isoformat(),
+        }
+        profile.compat_sequence_state_json = sequence_state
         raw = redis.get(f"robot:{vehicle_id}:latest")
         robot.estop_active = None
         latest = json.loads(raw) if raw else {"vehicle_id": vehicle_id, "robot_id": robot.id}
@@ -392,7 +457,38 @@ def process_internal_compat(topic: str, payload: bytes, received: datetime) -> b
         capability.media_json = []
         capability.received_at = received
         channel_name = expected.removeprefix("compat_")
-        if expected == "compat_status":
+        if expected == "compat_availability":
+            state = str(msg["state"]).lower()
+            profile.availability_state = state
+            accept_boot_session(
+                db,
+                robot,
+                {"boot_id": msg["bridge_boot_id"], "type": "availability"},
+                received,
+            )
+            robot.online_state = "ONLINE" if state == "online" else "OFFLINE"
+            robot.last_seen_at = received
+            latest["online_state"] = robot.online_state
+        elif expected == "compat_map":
+            profile.reported_site_code = msg["site_code"]
+            profile.reported_map_code = msg["map_code"]
+            profile.reported_map_version = msg["map_version"]
+            profile.reported_map_checksum = msg["map_checksum"]
+            map_row = db.scalar(
+                select(Map).where(Map.site_id == robot.site_id, Map.code == msg["map_code"])
+            )
+            version = (
+                db.get(MapVersion, map_row.active_version_id)
+                if map_row and map_row.active_version_id
+                else None
+            )
+            profile.map_contract_verified = bool(
+                version
+                and version.version == msg["map_version"]
+                and version.checksum == msg["map_checksum"]
+            )
+            latest["map_contract_verified"] = profile.map_contract_verified
+        elif expected == "compat_status":
             robot.current_mode = str(msg["mode"])
             latest["mode"] = robot.current_mode
             profile.ros_control_mode = msg.get("ros_control_mode")
@@ -448,9 +544,6 @@ def process_internal_compat(topic: str, payload: bytes, received: datetime) -> b
             }
         for unsupported_channel in (
             "estop",
-            "smoke",
-            "top_ir",
-            "bottom_ir",
             "roof_rgb",
             "roof_thermal",
             "bottom_ir_video",
@@ -467,6 +560,19 @@ def process_internal_compat(topic: str, payload: bytes, received: datetime) -> b
             unsupported.support_state = "UNSUPPORTED"
             unsupported.quality = "NOT_AVAILABLE"
             unsupported.source_kind = "ROS_COMPAT"
+        for unknown_channel in ("smoke", "top_ir", "bottom_ir"):
+            unknown = db.scalar(
+                select(RobotDataChannel).where(
+                    RobotDataChannel.robot_id == robot.id,
+                    RobotDataChannel.channel == unknown_channel,
+                )
+            )
+            if not unknown:
+                unknown = RobotDataChannel(robot_id=robot.id, channel=unknown_channel)
+                db.add(unknown)
+            unknown.support_state = "NOT_CONNECTED"
+            unknown.quality = "NOT_AVAILABLE"
+            unknown.source_kind = "ROS_COMPAT"
         queue_event(db, f"vehicle.{channel_name}", latest)
     return True
 
@@ -792,6 +898,9 @@ def process(topic: str, payload: bytes) -> None:
                         source_ts,
                         received,
                         estop_unknown=source_kind == "ROS_COMPAT",
+                        map_contract_verified=(
+                            profile.map_contract_verified if source_kind == "ROS_COMPAT" else True
+                        ),
                     ),
                     "status": lambda: handle_status(db, robot, msg),
                     "sensor": lambda: handle_sensor(db, robot, msg, source_ts, received),

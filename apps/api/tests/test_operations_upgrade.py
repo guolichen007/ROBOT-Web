@@ -253,6 +253,7 @@ def test_mecanum_lateral_motion_cannot_be_confirmed_stationary() -> None:
     fresh, stationary = worker.stationary_observation(
         {
             "server_received_at": now.isoformat(),
+            "source_timestamp": now.isoformat(),
             "linear_x": 0,
             "linear_y": 0.25,
             "angular_z": 0,
@@ -288,7 +289,18 @@ def test_ros1_handoff_examples_are_accepted_without_protocol_upgrade(monkeypatch
     for example in handoff["examples"]:
         parts = example["topic"].split("/")
         suffix = f"nav_{parts[-1]}" if len(parts) == 4 else parts[-1]
-        normalized = adapter.normalize(suffix, example["payload"])
+        source = example["payload"]["ts"]
+        received = (
+            datetime.fromtimestamp(source, UTC)
+            if isinstance(source, int | float)
+            else datetime.fromisoformat(source.replace("Z", "+00:00")).astimezone(UTC)
+        )
+        normalized = adapter.normalize(
+            suffix,
+            example["payload"],
+            external_id="firerobot-01",
+            received=received,
+        )
         assert normalized, example["topic"]
         for kind, payload in normalized:
             if not kind.startswith("compat_"):
@@ -316,3 +328,72 @@ def test_ros_compat_freshness_thresholds_are_deployment_configurable(monkeypatch
     configured = Settings(_env_file=None)
     assert configured.ros_compat_stale_seconds == 9
     assert configured.ros_compat_offline_seconds == 21
+
+
+def compat_payload(adapter, *, seq: int, ts: datetime, **values):
+    return {
+        "compat_schema_version": "1.1",
+        "external_id": "firerobot-01",
+        "bridge_boot_id": adapter.boot_id,
+        "seq": seq,
+        "ts": ts.isoformat(),
+        **values,
+    }
+
+
+def test_ros_compat_rejects_missing_stale_future_and_out_of_order_envelopes() -> None:
+    module = load_service("ros_compat_envelope", "services/ros-compat-adapter/main.py")
+    adapter = module.Adapter()
+    now = datetime.now(UTC)
+    with pytest.raises(ValueError, match="compat_schema_version"):
+        adapter.normalize("odom", {"vx": 0, "wz": 0}, external_id="firerobot-01", received=now)
+    stale = compat_payload(
+        adapter,
+        seq=1,
+        ts=now.replace(year=now.year - 1),
+        vx=0,
+        wz=0,
+    )
+    with pytest.raises(ValueError, match="stale"):
+        adapter.normalize("odom", stale, external_id="firerobot-01", received=now)
+    future = compat_payload(
+        adapter,
+        seq=1,
+        ts=datetime.fromtimestamp(now.timestamp() + 10, UTC),
+        vx=0,
+        wz=0,
+    )
+    with pytest.raises(ValueError, match="future"):
+        adapter.normalize("odom", future, external_id="firerobot-01", received=now)
+    accepted = compat_payload(adapter, seq=1, ts=now, vx=0, wz=0)
+    adapter.normalize("odom", accepted, external_id="firerobot-01", received=now)
+    with pytest.raises(ValueError, match="out-of-order"):
+        adapter.normalize("odom", accepted, external_id="firerobot-01", received=now)
+
+
+def test_ros_compat_boot_change_allows_sequence_reset_and_requires_vehicle_map() -> None:
+    module = load_service("ros_compat_boot_map", "services/ros-compat-adapter/main.py")
+    adapter = module.Adapter()
+    now = datetime.now(UTC)
+    first = compat_payload(adapter, seq=8, ts=now, vx=0, wz=0)
+    adapter.normalize("odom", first, external_id="firerobot-01", received=now)
+    adapter.boot_id = "00000000-0000-4000-8000-000000000099"
+    reset = compat_payload(adapter, seq=0, ts=now, vx=0, wz=0)
+    adapter.normalize("odom", reset, external_id="firerobot-01", received=now)
+    pose = compat_payload(adapter, seq=1, ts=now, frame_id="map", x=1, y=2, yaw=0)
+    location = adapter.normalize("pose", pose, external_id="firerobot-01", received=now)[0][1]
+    assert location["map_code"] == "UNVERIFIED"
+    assert location["localization_status"] == "DEGRADED_MAP_UNVERIFIED"
+    reported = compat_payload(
+        adapter,
+        seq=1,
+        ts=now,
+        site_code="SITE-01",
+        map_code="parking_v1",
+        map_version="1",
+        map_checksum="abc123",
+    )
+    adapter.normalize("map", reported, external_id="firerobot-01", received=now)
+    pose["seq"] = 2
+    location = adapter.normalize("pose", pose, external_id="firerobot-01", received=now)[0][1]
+    assert location["map_code"] == "parking_v1"

@@ -449,6 +449,7 @@ def seed() -> None:
                     map_version_id=map_version.id,
                     code=f"INSPECT_{slot.code.replace('-', '_')}",
                     defaults={
+                        "parking_slot_id": slot.id,
                         "name": f"{slot.code} 巡检位",
                         "category": "INSPECTION",
                         "pose_json": inspection.pose_json,

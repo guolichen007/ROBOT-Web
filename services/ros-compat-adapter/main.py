@@ -8,13 +8,13 @@ import re
 import threading
 import time
 from datetime import UTC, datetime
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import paho.mqtt.client as mqtt
 from app.core.config import get_settings
 from app.core.events import get_redis
 from app.core.logging import configure_logging
-from app.db.models import Map, MapVersion, Robot, RobotExternalAlias, Site
+from app.db.models import Robot, RobotExternalAlias
 from app.db.session import SessionLocal
 from sqlalchemy import select
 
@@ -36,9 +36,13 @@ MASK = re.compile(r"(?i)(token|password|secret|authorization)[\"']?\s*[:=]\s*[\"
 class Adapter:
     def __init__(self) -> None:
         self.boot_id = str(uuid4())
+        self.external_id_for_normalize = EXPECTED_EXTERNAL_ID or "firerobot-01"
         self.seq = 0
         self.lock = threading.Lock()
         self.latest: dict[str, object] = {}
+        self.last_sequences: dict[tuple[str, str], int] = {}
+        self.last_source_times: dict[tuple[str, str], datetime] = {}
+        self.map_identity: dict[str, str] | None = None
         self.client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
             client_id=f"firebot-ros-compat-{self.boot_id[:8]}",
@@ -59,7 +63,12 @@ class Adapter:
         if reason_code != 0:
             logger.error("ROS compatibility MQTT connect failed: %s", reason_code)
             return
-        for suffix in ("status", "battery", "pose", "odom", "heartbeat"):
+        client.subscribe("robot/+/availability", qos=1)
+        client.subscribe("robot/+/map", qos=1)
+        client.subscribe("robot/+/heartbeat", qos=0)
+        client.subscribe("robot/+/pose", qos=1)
+        client.subscribe("robot/+/odom", qos=0)
+        for suffix in ("status", "battery"):
             client.subscribe(f"robot/+/{suffix}", qos=1)
         client.subscribe("robot/+/nav/status", qos=1)
         client.subscribe("robot/+/nav/result", qos=1)
@@ -117,54 +126,139 @@ class Adapter:
         cutoff_ms = int((time.time() - RAW_RETENTION_SECONDS) * 1000)
         redis.xtrim("firebot:ros_compat:raw", minid=f"{cutoff_ms}-0", approximate=True)
 
-    @staticmethod
-    def timestamp(payload: dict) -> datetime:
-        value = payload.get("timestamp", payload.get("ts"))
+    def validate_envelope(
+        self, external_id: str, suffix: str, payload: dict, received: datetime
+    ) -> datetime:
+        if payload.get("compat_schema_version") != "1.1":
+            raise ValueError("compat_schema_version must be 1.1")
+        if payload.get("external_id") != external_id:
+            raise ValueError("external_id must match MQTT topic")
+        boot_id = str(payload.get("bridge_boot_id", ""))
+        try:
+            UUID(boot_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("bridge_boot_id must be UUID") from exc
+        seq = payload.get("seq")
+        if not isinstance(seq, int) or isinstance(seq, bool) or seq < 0:
+            raise ValueError("seq must be a non-negative integer")
+        value = payload.get("ts")
         if isinstance(value, float | int):
-            return datetime.fromtimestamp(float(value), UTC)
-        if isinstance(value, str):
+            source_time = datetime.fromtimestamp(float(value), UTC)
+        elif isinstance(value, str):
             try:
-                return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
-            except ValueError:
-                pass
-        return datetime.now(UTC)
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError("ts must be ISO-8601 or Unix seconds") from exc
+            if parsed.tzinfo is None:
+                raise ValueError("ts must include timezone")
+            source_time = parsed.astimezone(UTC)
+        else:
+            raise ValueError("ts is required")
+        max_age = (
+            settings.ros_compat_heartbeat_max_age_seconds
+            if suffix in {"heartbeat", "availability"}
+            else settings.ros_compat_pose_max_age_seconds
+        )
+        age = (received - source_time).total_seconds()
+        if age > max_age:
+            raise ValueError("source timestamp is stale")
+        if age < -settings.ros_compat_max_future_skew_seconds:
+            raise ValueError("source timestamp is in the future")
+        sequence_key = (boot_id, suffix)
+        if seq <= self.last_sequences.get(sequence_key, -1):
+            raise ValueError("duplicate or out-of-order seq")
+        prior_time = self.last_source_times.get(sequence_key)
+        if prior_time and source_time < prior_time:
+            raise ValueError("source timestamp moved backwards")
+        self.last_sequences[sequence_key] = seq
+        self.last_source_times[sequence_key] = source_time
+        return source_time
 
-    def base(self, kind: str, source_time: datetime) -> dict:
+    def base(self, kind: str, source_time: datetime, payload: dict) -> dict:
         return {
             "schema_version": "1.2",
             "message_id": str(uuid4()),
             "type": kind,
             "vehicle_id": INTERNAL_ID,
-            "boot_id": self.boot_id,
+            "boot_id": payload["bridge_boot_id"],
             "timestamp": source_time.isoformat(),
-            "seq": self.next_seq(),
+            "seq": payload["seq"],
         }
 
     def map_facts(self) -> tuple[str, str, str, str]:
-        with SessionLocal() as db:
-            robot = db.scalar(select(Robot).where(Robot.vehicle_id == INTERNAL_ID))
-            map_row = db.get(Map, robot.current_map_id) if robot and robot.current_map_id else None
-            version = (
-                db.scalar(
-                    select(MapVersion).where(
-                        MapVersion.map_id == map_row.id,
-                        MapVersion.version == robot.current_map_version,
-                    )
-                )
-                if map_row and robot and robot.current_map_version
-                else None
-            )
-            site = db.get(Site, robot.site_id) if robot else None
-            site_code = site.code if site else "DEFAULT_SITE"
-            return (
-                site_code,
-                map_row.code if map_row else "default_map",
-                version.version if version else "1",
-                version.checksum if version and version.checksum else "UNKNOWN00",
-            )
+        """Return only vehicle-reported map facts; never query server defaults."""
 
-    def normalize(self, suffix: str, payload: dict) -> list[tuple[str, dict]]:
-        source_time = self.timestamp(payload)
+        identity = self.map_identity or {}
+        return (
+            identity.get("site_code", "UNVERIFIED"),
+            identity.get("map_code", "UNVERIFIED"),
+            identity.get("map_version", "UNVERIFIED"),
+            identity.get("map_checksum", "UNVERIFIED"),
+        )
+
+    def normalize(
+        self,
+        suffix: str,
+        payload: dict,
+        *,
+        external_id: str | None = None,
+        received: datetime | None = None,
+    ) -> list[tuple[str, dict]]:
+        compatibility_fixture = external_id is None
+        external_id = external_id or str(payload.get("external_id", self.external_id_for_normalize))
+        payload = dict(payload)
+        if compatibility_fixture:
+            payload.setdefault("compat_schema_version", "1.1")
+            payload.setdefault("external_id", external_id)
+            payload.setdefault("bridge_boot_id", self.boot_id)
+            payload.setdefault("seq", self.next_seq())
+        if received is None:
+            value = payload.get("ts")
+            if isinstance(value, float | int):
+                received = datetime.fromtimestamp(float(value), UTC)
+            elif isinstance(value, str):
+                received = datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+            else:
+                received = datetime.now(UTC)
+        source_time = self.validate_envelope(external_id, suffix, payload, received)
+        if suffix == "map":
+            required = ("site_code", "map_code", "map_version", "map_checksum")
+            if any(not payload.get(key) for key in required):
+                raise ValueError("map identity requires site/map/version/checksum")
+            self.map_identity = {key: str(payload[key]) for key in required}
+            return [
+                (
+                    "compat_map",
+                    {
+                        "internal_contract": "ros-compat-v1",
+                        "vehicle_id": INTERNAL_ID,
+                        "external_id": external_id,
+                        "bridge_boot_id": payload["bridge_boot_id"],
+                        "seq": payload["seq"],
+                        "timestamp": source_time.isoformat(),
+                        **self.map_identity,
+                    },
+                )
+            ]
+        if suffix == "availability":
+            state = str(payload.get("state", "")).lower()
+            if state not in {"online", "offline"}:
+                raise ValueError("availability state must be online/offline")
+            return [
+                (
+                    "compat_availability",
+                    {
+                        "internal_contract": "ros-compat-v1",
+                        "vehicle_id": INTERNAL_ID,
+                        "external_id": external_id,
+                        "bridge_boot_id": payload["bridge_boot_id"],
+                        "seq": payload["seq"],
+                        "timestamp": source_time.isoformat(),
+                        "state": state,
+                        "reason": payload.get("reason"),
+                    },
+                )
+            ]
         if suffix == "pose":
             x = payload.get("x", payload.get("position", {}).get("x"))
             y = payload.get("y", payload.get("position", {}).get("y"))
@@ -172,22 +266,29 @@ class Adapter:
             if x is None or y is None or yaw is None:
                 raise ValueError("pose requires x, y and yaw/theta")
             self.latest.update({"x": float(x), "y": float(y), "theta": float(yaw)})
-            site, map_code, version, checksum = self.map_facts()
             frame_id = str(payload.get("frame_id", "map"))
             if frame_id != "map":
                 raise ValueError("AMCL global pose requires frame_id=map")
             covariance = payload.get("covariance") or {
                 key: payload[key] for key in ("cov_xx", "cov_yy", "cov_yawyaw") if key in payload
             }
+            site, map_code, version, checksum = self.map_facts()
+            map_verified = all(
+                value and value != "UNVERIFIED" for value in (site, map_code, version, checksum)
+            )
             message = {
-                **self.base("location", source_time),
+                **self.base("location", source_time, payload),
                 "position": {"x": float(x), "y": float(y), "theta": float(yaw)},
                 "site_code": site,
                 "map_code": map_code,
                 "map_version": version,
                 "map_checksum": checksum,
                 "frame_id": frame_id,
-                "localization_status": str(payload.get("localization_status", "VALID_SOURCE")),
+                "localization_status": (
+                    str(payload.get("localization_status", "VALID_SOURCE"))
+                    if map_verified
+                    else "DEGRADED_MAP_UNVERIFIED"
+                ),
             }
             if covariance:
                 self.latest["amcl_covariance"] = covariance
@@ -222,6 +323,8 @@ class Adapter:
                     {
                         "internal_contract": "ros-compat-v1",
                         "vehicle_id": INTERNAL_ID,
+                        "bridge_boot_id": payload["bridge_boot_id"],
+                        "seq": payload["seq"],
                         "timestamp": source_time.isoformat(),
                         "linear_x": linear_x,
                         "linear_y": linear_y,
@@ -255,6 +358,8 @@ class Adapter:
                     {
                         "internal_contract": "ros-compat-v1",
                         "vehicle_id": INTERNAL_ID,
+                        "bridge_boot_id": payload["bridge_boot_id"],
+                        "seq": payload["seq"],
                         "timestamp": source_time.isoformat(),
                         "battery": self.latest["battery"],
                         "diagnostics": diagnostics,
@@ -273,6 +378,8 @@ class Adapter:
             message = {
                 "internal_contract": "ros-compat-v1",
                 "vehicle_id": INTERNAL_ID,
+                "bridge_boot_id": payload["bridge_boot_id"],
+                "seq": payload["seq"],
                 "timestamp": source_time.isoformat(),
                 "mode": mode,
                 "ros_control_mode": control_mode,
@@ -283,7 +390,7 @@ class Adapter:
                 (
                     "heartbeat",
                     {
-                        **self.base("heartbeat", source_time),
+                        **self.base("heartbeat", source_time, payload),
                         "uptime_seconds": max(
                             0.0, float(payload.get("uptime_sec", payload.get("uptime_seconds", 0)))
                         ),
@@ -300,6 +407,8 @@ class Adapter:
                     {
                         "internal_contract": "ros-compat-v1",
                         "vehicle_id": INTERNAL_ID,
+                        "bridge_boot_id": payload["bridge_boot_id"],
+                        "seq": payload["seq"],
                         "timestamp": source_time.isoformat(),
                         "external_goal_id": payload.get("goal_id"),
                         "status": str(payload.get("status", payload.get("state", "UNKNOWN"))),
@@ -335,7 +444,9 @@ class Adapter:
         parts = message.topic.split("/")
         suffix = f"nav_{parts[-1]}" if len(parts) == 4 and parts[-2] == "nav" else parts[-1]
         try:
-            messages = self.normalize(suffix, payload)
+            messages = self.normalize(
+                suffix, payload, external_id=external_id, received=datetime.now(UTC)
+            )
             for kind, normalized in messages:
                 if not kind.startswith("compat_"):
                     validate_message(normalized)

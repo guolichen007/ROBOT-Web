@@ -147,6 +147,54 @@ def bearer(token: str, **extra: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}", **extra}
 
 
+def test_stop_patrol_ros_compat_has_zero_side_effects_with_and_without_task() -> None:
+    with TestClient(app) as client:
+        token = login(client)
+        for active_task in (False, True):
+            with SessionLocal.begin() as db:
+                robot = db.scalar(select(Robot).where(Robot.vehicle_id == "R001"))
+                profile = db.get(RobotIntegrationProfile, robot.id) if robot else None
+                assert robot and profile
+                profile.source_kind = "ROS_COMPAT"
+                profile.bidirectional_bridge_verified = False
+                if active_task:
+                    admin = db.scalar(select(User).where(User.username == "admin"))
+                    assert admin
+                    task = Task(
+                        task_code=f"ROS-STOP-{uuid4()}",
+                        robot_id=robot.id,
+                        type="PATROL",
+                        status="EXECUTING",
+                        phase="EXECUTING",
+                        progress=20,
+                        target_pose_snapshot_json={},
+                        map_id_snapshot=robot.current_map_id or "map",
+                        map_version_snapshot=robot.current_map_version or "1",
+                        semantic_revision_snapshot=1,
+                        parameters_json={},
+                        created_by=admin.id,
+                    )
+                    db.add(task)
+            before_commands = 0
+            with SessionLocal() as db:
+                before_commands = len(db.scalars(select(Command)).all())
+            response = client.post(
+                "/api/v1/robots/R001/stop-patrol",
+                headers=bearer(token, **{"Idempotency-Key": str(uuid4())}),
+            )
+            assert response.status_code == 409
+            assert response.json()["error"]["code"] == "ROS_COMPAT_READ_ONLY"
+            with SessionLocal() as db:
+                assert len(db.scalars(select(Command)).all()) == before_commands
+            assert get_redis().xlen("firebot:safety_commands") == 0
+            with SessionLocal.begin() as db:
+                db.execute(
+                    update(Task)
+                    .where(Task.status.in_({"CREATED", "QUEUED", "ACCEPTED", "EXECUTING"}))
+                    .values(status="SUCCEEDED", phase="TEST_CLEANUP")
+                )
+
+
 def test_commit_failure_does_not_publish_realtime_success(monkeypatch: pytest.MonkeyPatch) -> None:
     published: list[tuple[str, dict]] = []
     monkeypatch.setattr(
@@ -458,7 +506,7 @@ def test_stop_operation_keeps_physical_stop_separate_from_cancel_timeout() -> No
         assert operation
         assert operation.motion_stop_state == "STATIONARY_CONFIRMED"
         assert operation.mission_cancel_state == "UNCONFIRMED"
-        assert operation.state == "UNCONFIRMED"
+        assert operation.state == "PARTIAL_UNCONFIRMED"
         assert operation.failure_reason == "TASK_CANCEL_TIMEOUT"
 
 

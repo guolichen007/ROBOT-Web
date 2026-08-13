@@ -45,11 +45,12 @@ def main() -> None:
             engine = create_engine(url)
             with engine.connect() as connection:
                 revision = connection.scalar(text("SELECT version_num FROM alembic_version"))
-                assert revision == "20260813_0004", (name, revision)
+                assert revision == "20260813_0005", (name, revision)
                 for table in (
                     "robot_motion_profiles",
                     "robot_navigation_diagnostics",
                     "stop_operations",
+                    "navigation_presets",
                 ):
                     exists = connection.scalar(
                         text("SELECT to_regclass(:table_name)"), {"table_name": table}

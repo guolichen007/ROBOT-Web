@@ -38,8 +38,8 @@ from app.db.models import (
 )
 from app.modules.commands.readiness import robot_readiness
 from app.modules.commands.service import (
-    build_command_payload,
     create_durable_command,
+    create_safety_command,
     enqueue_safety_command,
     task_code,
 )
@@ -50,6 +50,7 @@ router = APIRouter(prefix="/api/v1", tags=["operations"])
 
 class PresetInput(BaseModel):
     map_version_id: str
+    parking_slot_id: str | None = None
     code: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
     name: str
     category: str = Field(pattern=r"^(INSPECTION|EXTINGUISH|WAITING_AREA|DOCK)$")
@@ -791,42 +792,37 @@ def stop_patrol(
             Task.status.in_({"CREATED", "QUEUED", "ACCEPTED", "EXECUTING"}),
         )
     )
-    cancel = None
-    if active:
-        cancel = create_durable_command(
-            db,
-            robot=robot,
-            operator_id=auth.user.id,
-            cmd="cancel_task",
-            task_id=active.id,
-            params={"task_id": active.id, "reason": "OPERATOR_STOP_PATROL"},
-            priority=96,
-        )
-        active.phase = "STOP_REQUESTED"
-    stop_payload = build_command_payload(
+    # Safety stop is authorized independently and first. A missing map
+    # contract is therefore never allowed to block a verified stop path.
+    stop, stop_payload = create_safety_command(
+        db,
         robot=robot,
         operator_id=auth.user.id,
         cmd="stop_motion",
         params={"reason": "STOP_PATROL"},
+        task_id=active.id if active else None,
         ttl_ms=3000,
         priority=99,
     )
-    stop = Command(
-        command_id=stop_payload["command_id"],
-        correlation_id=stop_payload["correlation_id"],
-        robot_id=robot.id,
-        task_id=active.id if active else None,
-        cmd="stop_motion",
-        priority=99,
-        payload_json=stop_payload,
-        lifecycle_status="CREATED" if robot.online_state == "ONLINE" else "PUBLISHED_UNCONFIRMED",
-        ack_reason=None if robot.online_state == "ONLINE" else "OFFLINE_NOT_DELIVERED",
-        issued_by=auth.user.id,
-        issued_at=datetime.fromisoformat(stop_payload["issued_at"]),
-        expires_at=datetime.fromisoformat(stop_payload["expires_at"]),
-    )
-    db.add(stop)
-    db.flush()
+    cancel = None
+    mission_cancel_state = "NOT_REQUIRED"
+    if active:
+        try:
+            cancel = create_durable_command(
+                db,
+                robot=robot,
+                operator_id=auth.user.id,
+                cmd="cancel_task",
+                task_id=active.id,
+                params={"task_id": active.id, "reason": "OPERATOR_STOP_PATROL"},
+                priority=96,
+            )
+            active.phase = "STOP_REQUESTED"
+            mission_cancel_state = "WAITING_ACK"
+        except PlatformError:
+            # A mission-cancel limitation never suppresses an independently
+            # authorized motion stop. The operation records that partial truth.
+            mission_cancel_state = "UNAVAILABLE"
     operation = StopOperation(
         robot_id=robot.id,
         task_id=active.id if active else None,
@@ -834,7 +830,7 @@ def stop_patrol(
         stop_command_id=stop.command_id,
         state="STOP_REQUESTED",
         motion_stop_state="WAITING_ACK",
-        mission_cancel_state="WAITING_ACK" if cancel else "NOT_REQUIRED",
+        mission_cancel_state=mission_cancel_state,
         requested_by=auth.user.id,
         stop_ack_deadline_at=datetime.now(UTC) + timedelta(seconds=5),
         cancel_deadline_at=(datetime.now(UTC) + timedelta(seconds=10)) if cancel else None,

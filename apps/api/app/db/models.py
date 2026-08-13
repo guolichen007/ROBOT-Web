@@ -273,6 +273,20 @@ class RobotIntegrationProfile(Base):
     )
     source_kind: Mapped[str] = mapped_column(String(24), default="CANONICAL_MQTT")
     upstream_protocol: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    external_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    bridge_boot_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    availability_state: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    reported_site_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reported_map_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reported_map_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    reported_map_checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    last_source_timestamp: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_received_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    compat_sequence_state_json: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict)
     control_contract_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     ack_contract_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     map_contract_verified: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -425,6 +439,9 @@ class NavigationPreset(Base):
     map_version_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("map_versions.id", ondelete="CASCADE"), index=True
     )
+    parking_slot_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("parking_slots.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     code: Mapped[str] = mapped_column(String(64))
     name: Mapped[str] = mapped_column(String(128))
     category: Mapped[str] = mapped_column(String(32), default="INSPECTION")
@@ -436,7 +453,15 @@ class NavigationPreset(Base):
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     semantic_revision: Mapped[int] = mapped_column(Integer)
-    __table_args__ = (UniqueConstraint("map_version_id", "code", name="uq_navigation_preset_code"),)
+    __table_args__ = (
+        UniqueConstraint("map_version_id", "code", name="uq_navigation_preset_code"),
+        UniqueConstraint(
+            "map_version_id",
+            "parking_slot_id",
+            "category",
+            name="uq_navigation_preset_slot_category",
+        ),
+    )
 
 
 class PatrolPlan(Base):

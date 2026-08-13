@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, Request
 from pydantic import BaseModel, Field
@@ -25,6 +24,7 @@ from app.modules.commands.service import (
     assert_robot_can_execute,
     build_command_payload,
     create_durable_command,
+    create_safety_command,
     enqueue_safety_command,
 )
 from app.modules.robots.router import active_lease, end_lease, find_robot
@@ -128,31 +128,15 @@ def safety_command(
     )
     if cached:
         return cached.response_json
-    command_payload = build_command_payload(
+    row, command_payload = create_safety_command(
+        db,
         robot=robot,
         operator_id=auth.user.id,
         cmd=cmd,
-        params={},
         ttl_ms=ttl_ms,
         priority=priority,
     )
-    row = Command(
-        command_id=command_payload["command_id"],
-        correlation_id=command_payload["correlation_id"],
-        robot_id=robot.id,
-        cmd=cmd,
-        priority=priority,
-        payload_json=command_payload,
-        lifecycle_status="CREATED",
-        issued_by=auth.user.id,
-        issued_at=datetime.fromisoformat(command_payload["issued_at"]),
-        expires_at=datetime.fromisoformat(command_payload["expires_at"]),
-    )
-    db.add(row)
     should_enqueue = robot.online_state not in {"STALE", "OFFLINE"}
-    if not should_enqueue:
-        row.lifecycle_status = "PUBLISHED_UNCONFIRMED"
-        row.ack_reason = "OFFLINE_NOT_DELIVERED"
     if cmd == "emergency_stop":
         lease = active_lease(get_redis(), robot)
         if lease:

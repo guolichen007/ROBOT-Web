@@ -49,6 +49,7 @@ jobs:
       - run: ruff check apps/api services scripts
       - run: ruff format --check apps/api services scripts
       - run: mypy apps/api/app services/protocol.py
+      - run: python scripts/check_migration_manifest.py
       - run: |
           for file in services/*/main.py; do
             mypy --follow-imports=skip "$file"

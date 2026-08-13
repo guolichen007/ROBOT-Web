@@ -78,6 +78,7 @@ def robot_readiness(db: Session, robot: Robot) -> dict[str, Any]:
         and ros_command_path_ready
         and motion_envelope_ready
         and _supports(capability, "manual_control")
+        and safety["stop_motion"]
         and robot.estop_active is False
     )
     autonomous = {
@@ -117,6 +118,10 @@ def robot_readiness(db: Session, robot: Robot) -> dict[str, Any]:
             reasons.append("CONTROL_MODE_NOT_ROS")
     if not motion_envelope_ready:
         reasons.append("MANUAL_MOTION_PROFILE_NOT_VERIFIED")
+    if not capability:
+        reasons.append("CAPABILITY_DECLARATION_MISSING")
+    if not safety["stop_motion"]:
+        reasons.append("STOP_MOTION_NOT_READY")
     if robot.estop_active:
         reasons.append("ROBOT_ESTOP_ACTIVE")
     unsupported = [

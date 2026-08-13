@@ -2,18 +2,58 @@ from types import SimpleNamespace
 
 import pytest
 from app.core.errors import PlatformError
-from app.db.models import Robot
+from app.db.models import (
+    Robot,
+    RobotCapability,
+    RobotIntegrationProfile,
+    RobotMotionProfile,
+)
 from app.modules.commands.service import assert_robot_can_execute
 
 
 class FakeSession:
-    def __init__(self, active_task=None) -> None:
+    def __init__(self, active_task=None, *, integration=True, capability=True) -> None:
         self.active_task = active_task
+        self.integration = integration
+        self.capability = capability
 
     def scalar(self, _query):
         return self.active_task
 
-    def get(self, _model, _identity):
+    def get(self, model, identity):
+        if model is RobotIntegrationProfile and self.integration:
+            return RobotIntegrationProfile(
+                robot_id=identity,
+                source_kind="CANONICAL_MQTT",
+                control_contract_verified=True,
+                ack_contract_verified=True,
+                map_contract_verified=True,
+            )
+        if model is RobotCapability and self.capability:
+            return RobotCapability(
+                robot_id=identity,
+                protocol_version="1.2.0",
+                supported_commands_json=[
+                    "manual_control",
+                    "stop_motion",
+                    "emergency_stop",
+                    "reset_estop",
+                    "patrol",
+                    "extinguish",
+                    "return_dock",
+                    "cancel_task",
+                ],
+                sensors_json=[],
+                media_json=[],
+            )
+        if model is RobotMotionProfile:
+            return RobotMotionProfile(
+                robot_id=identity,
+                max_manual_forward_mps=0.2,
+                max_manual_reverse_mps=0.1,
+                max_manual_angular_radps=0.5,
+                manual_watchdog_verified=True,
+            )
         return None
 
 
@@ -71,3 +111,15 @@ def test_active_extinguish_blocks_return_dock() -> None:
     with pytest.raises(PlatformError) as exc:
         assert_robot_can_execute(FakeSession(active), robot(), "return_dock")
     assert exc.value.code == "ACTIVE_TASK_CONFLICT"
+
+
+def test_missing_integration_profile_fails_closed() -> None:
+    with pytest.raises(PlatformError) as exc:
+        assert_robot_can_execute(FakeSession(integration=False), robot(), "stop_motion")
+    assert exc.value.code == "INTEGRATION_PROFILE_MISSING"
+
+
+def test_missing_capability_declaration_fails_closed() -> None:
+    with pytest.raises(PlatformError) as exc:
+        assert_robot_can_execute(FakeSession(capability=False), robot(), "stop_motion")
+    assert exc.value.code == "CAPABILITY_DECLARATION_MISSING"

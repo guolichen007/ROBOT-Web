@@ -21,10 +21,18 @@ map_contract:
   origin: [-7.126112, -11.984083, 0.0]
 
 mqtt_compat:
+  compat_schema_version: "1.1"
   enabled: true
   read_only: true
   expected_external_id: "OWNER_INPUT_REQUIRED"
+  bridge_boot_id: "GENERATE_ON_MQTT_BRIDGE_PROCESS_START"
+  sequence_scope: "bridge_boot_id + topic"
+  pose_odom_max_age_seconds: 2
+  heartbeat_availability_max_age_seconds: 8
+  max_future_skew_seconds: 2
   topics:
+    - "robot/{external_id}/availability"
+    - "robot/{external_id}/map"
     - "robot/{external_id}/status"
     - "robot/{external_id}/battery"
     - "robot/{external_id}/pose"

@@ -29,7 +29,7 @@ stationary = planar_speed < linear_threshold
 
 ```text
 ROS1 Noetic 现场 mqtt_bridge
-  → robot/{external_id}/pose|odom|status|battery|heartbeat
+  → robot/{external_id}/availability|map|pose|odom|status|battery|heartbeat
   → ros-compat-adapter
   → _platform/compat/R001/*
   → mqtt-ingress
@@ -73,7 +73,10 @@ priority: SAFETY STOP > MANUAL > NAVIGATION
 
 | Topic | 主要字段 | 处理 |
 |---|---|---|
-| `robot/{id}/pose` | `x,y,yaw,frame_id,cov_xx,cov_yy,cov_yawyaw,ts` | AMCL 全局位置 |
+| 全部 | `compat_schema_version=1.1,external_id,bridge_boot_id,seq,ts` | 车端原生兼容信封；缺失或过期立即拒绝 |
+| `robot/{id}/availability` | `state,ts` | QoS1 retained；LWT 为 offline |
+| `robot/{id}/map` | `site_code,map_code,map_version,map_checksum,ts` | QoS1 retained；由车辆独立报告 |
+| `robot/{id}/pose` | `x,y,yaw,frame_id,cov_xx,cov_yy,cov_yawyaw,ts` | AMCL 全局位置；无有效地图合同只保留诊断，不画 marker |
 | `robot/{id}/odom` | `vx,vy,wz,ts` | 平面速度与静止安全 |
 | `robot/{id}/status` | `control_mode,ts` | 单独保存 ROS control mode；1=MANUAL，3=ROS |
 | `robot/{id}/battery` | `battery_percentage` 及 voltage/current/temperature/capacity 等 | 百分比映射 0..100，其余作为诊断 |
@@ -93,6 +96,9 @@ ROS_COMPAT_EXPECTED_EXTERNAL_ID=firerobot-01
 SINGLE_ROBOT_INTERNAL_ID=R001
 ROS_COMPAT_STALE_SECONDS=8
 ROS_COMPAT_OFFLINE_SECONDS=15
+ROS_COMPAT_POSE_MAX_AGE_SECONDS=2
+ROS_COMPAT_HEARTBEAT_MAX_AGE_SECONDS=8
+ROS_COMPAT_MAX_FUTURE_SKEW_SECONDS=2
 ```
 
 未知 ID 先查看 `GET /api/v1/integration/ros-native/discoveries`，核对后调用 `POST /api/v1/integration/ros-native/aliases`。DEV 的 Mock 和 ROS_COMPAT 不应同时占用 R001 boot 会话；只读验收使用独立 profile/时段。
