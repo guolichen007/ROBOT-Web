@@ -28,15 +28,15 @@ onMounted(async () => {
   chart.setOption({
     backgroundColor: 'transparent',
     grid: { left: 42, right: 18, top: 28, bottom: 32 },
-    tooltip: { trigger: 'axis' },
-    legend: { textStyle: { color: '#8ca5b4' } },
+    tooltip: { trigger: 'axis', backgroundColor: '#fff', borderColor: '#dee6f2', textStyle: { color: '#1f3254' } },
+    legend: { textStyle: { color: '#5f6f89' } },
     xAxis: {
       type: 'category',
       data: telemetry.value.map((item) => new Date(item.server_received_at).toLocaleTimeString()),
-      axisLabel: { color: '#698492' },
-      axisLine: { lineStyle: { color: '#23404d' } },
+      axisLabel: { color: '#5f6f89' },
+      axisLine: { lineStyle: { color: '#cbd6e4' } },
     },
-    yAxis: { type: 'value', axisLabel: { color: '#698492' }, splitLine: { lineStyle: { color: '#17313d' } } },
+    yAxis: { type: 'value', axisLabel: { color: '#5f6f89' }, splitLine: { lineStyle: { color: '#edf1f6' } } },
     series: [
       {
         name: 'X / m',
@@ -44,8 +44,8 @@ onMounted(async () => {
         showSymbol: false,
         smooth: true,
         data: telemetry.value.map((item) => item.x),
-        lineStyle: { color: '#27d4b1' },
-        areaStyle: { color: 'rgba(39,212,177,.08)' },
+        lineStyle: { color: '#146cff' },
+        areaStyle: { color: 'rgba(20,108,255,.10)' },
       },
       {
         name: 'Y / m',
@@ -53,7 +53,7 @@ onMounted(async () => {
         showSymbol: false,
         smooth: true,
         data: telemetry.value.map((item) => item.y),
-        lineStyle: { color: '#e2a84a' },
+        lineStyle: { color: '#16a465' },
       },
     ],
   })
