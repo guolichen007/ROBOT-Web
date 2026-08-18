@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { LocationIcon, ZoomInIcon, ZoomOutIcon } from 'tdesign-icons-vue-next'
 import { MapAdapter } from '@/lib/map-adapter'
 import type { Alarm, DetectionCoverage, MapPoint, MapVersion, ParkingSlot, RobotState } from '@/types'
+import fireMarkerUrl from '@/assets/yd/map/fire_marker.svg'
 
 const props = defineProps<{
   mapVersion: MapVersion | null
@@ -44,6 +45,21 @@ const slotPoints = (slot: ParkingSlot) =>
 const pathPoints = computed(() => polygonPoints(props.trajectory))
 const coveragePoints = computed(() => polygonPoints(props.coverage?.polygon || []))
 const alarmSlots = computed(() => new Map(props.alarms.map((item) => [item.parking_slot_id, item])))
+const fireMarkers = computed(() =>
+  props.alarms
+    .map((alarm) => {
+      const src = alarm.source_position_json as { x?: number; y?: number } | undefined
+      let pos: { x: number; y: number } | null = null
+      if (src && typeof src.x === 'number' && typeof src.y === 'number') pos = { x: src.x, y: src.y }
+      else if (alarm.parking_slot_id) {
+        const slot = props.slots.find((item) => item.id === alarm.parking_slot_id)
+        if (slot) pos = slot.center_pose_json
+      }
+      return { alarm, pos }
+    })
+    .filter((item): item is { alarm: Alarm; pos: { x: number; y: number } } => Boolean(item.pos)),
+)
+const hasActiveFire = computed(() => fireMarkers.value.length > 0)
 
 function updateSize(): void {
   if (!frame.value) return
@@ -68,9 +84,6 @@ function toggleFollow(): void {
   }
 }
 function pointerDown(event: PointerEvent): void {
-  // Interactive map objects own their pointer sequence. Capturing it on the
-  // viewport would retarget the subsequent click and silently drop slot/tool
-  // actions in a real Chromium pointer sequence.
   if (event.target instanceof Element && event.target.closest('button, [role="button"]')) return
   drag = { x: event.clientX, y: event.clientY }
   ;(event.currentTarget as Element).setPointerCapture(event.pointerId)
@@ -122,7 +135,12 @@ onUnmounted(() => observer?.disconnect())
     <svg :viewBox="`0 0 ${size.width} ${size.height}`" role="img" aria-label="停车场二维态势地图">
       <rect width="100%" height="100%" class="map-floor" />
       <polyline v-if="trajectory.length" :points="pathPoints" class="trajectory-line planned" />
-      <polygon v-if="coveragePoints" :points="coveragePoints" class="detection-sector" />
+      <polygon
+        v-if="coveragePoints"
+        :points="coveragePoints"
+        class="detection-sector"
+        :class="{ danger: hasActiveFire }"
+      />
       <g
         v-for="slot in slots"
         :key="slot.id"
@@ -169,6 +187,22 @@ onUnmounted(() => observer?.disconnect())
         class="extinguish-point"
       />
       <g
+        v-for="marker in fireMarkers"
+        :key="marker.alarm.id"
+        :transform="`translate(${point(marker.pos.x, marker.pos.y).x} ${point(marker.pos.x, marker.pos.y).y})`"
+        class="fire-marker"
+      >
+        <circle r="20" />
+        <image
+          :href="fireMarkerUrl"
+          :x="-18"
+          :y="-18"
+          width="36"
+          height="36"
+          alt="火情位置"
+        />
+      </g>
+      <g
         v-if="robot?.x != null && robot?.y != null"
         :transform="`translate(${point(robot.x, robot.y).x} ${point(robot.x, robot.y).y}) rotate(${(-(robot.theta || 0) * 180) / Math.PI})`"
         class="robot-marker"
@@ -185,6 +219,12 @@ onUnmounted(() => observer?.disconnect())
       <button :class="{ active: followRobot }" aria-label="跟随车辆" @click.stop="toggleFollow">
         <LocationIcon />
       </button>
+    </div>
+    <div class="map-legend">
+      <span><i class="legend-dash"></i>巡检路线</span>
+      <span><i class="legend-robot"></i>机器人位置</span>
+      <span><i class="legend-sector"></i>检测范围</span>
+      <span v-if="hasActiveFire"><i class="legend-fire"></i>火情位置</span>
     </div>
     <div v-if="!mapVersion" class="map-empty">
       <strong>暂无有效地图</strong><span>未绘制任何演示道路或停车场几何</span>

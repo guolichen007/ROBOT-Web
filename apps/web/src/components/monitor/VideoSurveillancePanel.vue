@@ -8,25 +8,19 @@ const byType = computed(() => Object.fromEntries(props.streams.map((item) => [it
 </script>
 <template>
   <section class="panel video-surveillance">
-    <t-tabs v-model="active"
-      ><t-tab-panel value="roof_rgb" label="车顶实时相机"
-        ><VideoCard
-          title="车顶实时相机"
-          :stream="byType.roof_rgb"
-          :active="active === 'roof_rgb'"
-          prominent /></t-tab-panel
-      ><t-tab-panel value="roof_thermal" label="顶部热像"
-        ><VideoCard
-          title="顶部热像"
-          :stream="byType.roof_thermal"
-          :active="active === 'roof_thermal'"
-          prominent /></t-tab-panel
-      ><t-tab-panel value="bottom_ir" label="底部红外"
-        ><VideoCard
-          title="底部红外"
-          :stream="byType.bottom_ir"
-          :active="active === 'bottom_ir'"
-          prominent /></t-tab-panel
-    ></t-tabs>
+    <header class="video-surveillance-head">
+      <span>实时视频</span>
+    </header>
+    <t-tabs v-model="active">
+      <t-tab-panel value="roof_rgb" label="车顶实时相机">
+        <VideoCard title="车顶实时相机" :stream="byType.roof_rgb" :active="active === 'roof_rgb'" prominent />
+      </t-tab-panel>
+      <t-tab-panel value="roof_thermal" label="顶部热像">
+        <VideoCard title="顶部热像" :stream="byType.roof_thermal" :active="active === 'roof_thermal'" prominent />
+      </t-tab-panel>
+      <t-tab-panel value="bottom_ir" label="底部红外">
+        <VideoCard title="底部红外" :stream="byType.bottom_ir" :active="active === 'bottom_ir'" prominent />
+      </t-tab-panel>
+    </t-tabs>
   </section>
 </template>

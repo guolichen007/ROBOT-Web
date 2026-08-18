@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import MapCanvas from '@/components/MapCanvas.vue'
 import ManualControl from '@/components/ManualControl.vue'
@@ -43,6 +43,7 @@ const selectedPreset = computed(() =>
 )
 const activeTask = computed(() => monitor.activeTask)
 const trajectory = computed(() => monitor.snapshot.trajectories[0]?.path_json || [])
+const roofStream = computed(() => monitor.snapshot.streams.find((item) => item.camera_type === 'roof_rgb'))
 const stopReady = computed(() => Boolean(robot.value?.safety_command_ready?.stop_motion))
 const estopReady = computed(() => Boolean(robot.value?.safety_command_ready?.emergency_stop))
 const autonomousReady = computed(() => Boolean(robot.value?.autonomous_task_ready?.patrol))
@@ -88,6 +89,14 @@ const extinguishReason = computed(() => {
   return ''
 })
 const targetSlotId = computed(() => activeTask.value?.target_parking_slot_id)
+
+const patrolOnline = computed(() => robot.value?.online_state === 'ONLINE')
+const patrolStatus = computed(() =>
+  activeTask.value ? '巡检执行中' : patrolOnline.value ? '待命' : '未接入',
+)
+const patrolMode = computed(() => activeTask.value?.type || '—')
+const patrolProgress = computed(() => activeTask.value?.progress ?? 0)
+const patrolCode = computed(() => activeTask.value?.task_code || '—')
 
 function toast(value: string) {
   notice.value = value
@@ -269,23 +278,18 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main class="commercial-hmi">
+  <main class="yd-monitor-view" :class="{ 'is-alarm': Boolean(primaryAlarm) }">
     <div v-if="notice" class="toast">{{ notice }}</div>
     <SituationBanner
       :state="situation"
       :alarm="primaryAlarm"
       @select="primaryAlarmId = primaryAlarm?.id || null"
     />
-    <RiskTelemetryRibbon
-      :robot="robot"
-      :freshness="freshness"
-      :stream="monitor.snapshot.streams.find((item) => item.camera_type === 'roof_rgb')"
-    />
-    <section class="hmi-core">
+    <section class="yd-monitor-core">
       <section class="panel operations-map-panel">
         <header>
           <div>
-            <h2>二维停车场地图</h2>
+            <h2>停车场巡检地图</h2>
             <span
               >{{ monitor.snapshot.site?.name || '未配置场站' }} · 地图
               {{ monitor.snapshot.map_version?.version || '--' }}</span
@@ -305,7 +309,8 @@ onUnmounted(() => {
           :selected-slot-id="selectedSlotId || undefined"
           :target-slot-id="targetSlotId"
           @slot-click="selectedSlotId = $event.id"
-        /><MapSelectionBar
+        />
+        <MapSelectionBar
           v-if="selectedSlot"
           :parking-slot="selectedSlot"
           :preset="selectedPreset"
@@ -317,24 +322,53 @@ onUnmounted(() => {
           @alarm="createManualAlarm"
         />
       </section>
-      <aside class="hmi-side">
+      <aside class="yd-monitor-side" :class="{ 'is-alarm': Boolean(primaryAlarm) }">
         <VideoSurveillancePanel :streams="monitor.snapshot.streams" />
-        <section class="panel secondary-alarms">
-          <header>
-            <strong>活动报警</strong><span>{{ activeAlarms.length }}</span>
-          </header>
-          <button
-            v-for="alarm in activeAlarms"
-            :key="alarm.id"
-            :class="{ active: primaryAlarmId === alarm.id }"
-            @click="primaryAlarmId = alarm.id"
-          >
-            <i :data-level="alarm.severity"></i
-            ><span
-              >{{ alarm.event_code }}<small>{{ alarm.fire_type }} · {{ alarm.state }}</small></span
-            ><time>{{ new Date(alarm.last_seen_at).toLocaleTimeString('zh-CN', { hour12: false }) }}</time>
-          </button>
-          <div v-if="!activeAlarms.length" class="quiet-state">暂无活动报警</div>
+        <RiskTelemetryRibbon :robot="robot" :freshness="freshness" :stream="roofStream" />
+        <template v-if="primaryAlarm">
+          <PrimaryAlarmPanel
+            :alarm="primaryAlarm"
+            :timeline="timeline"
+            :mode="extinguishMode"
+            :disabled-reason="extinguishReason"
+            :permissions="{
+              ack: auth.can('alarm.ack'),
+              confirm: auth.can('alarm.confirm'),
+              resolve: auth.can('alarm.resolve'),
+            }"
+            @transition="transition"
+            @update:mode="extinguishMode = $event"
+            @dispatch="dispatch"
+          />
+          <section class="panel secondary-alarms">
+            <header>
+              <strong>其他事件</strong><span>{{ Math.max(0, activeAlarms.length - 1) }}</span>
+            </header>
+            <button
+              v-for="alarm in activeAlarms.filter((item) => item.id !== primaryAlarmId)"
+              :key="alarm.id"
+              :class="{ active: primaryAlarmId === alarm.id }"
+              @click="primaryAlarmId = alarm.id"
+            >
+              <i :data-level="alarm.severity"></i
+              ><span
+                >{{ alarm.event_code }}<small>{{ alarm.fire_type }} · {{ alarm.state }}</small></span
+              ><time>{{ new Date(alarm.last_seen_at).toLocaleTimeString('zh-CN', { hour12: false }) }}</time>
+            </button>
+            <div v-if="activeAlarms.length <= 1" class="quiet-state">暂无其他活动事件</div>
+          </section>
+        </template>
+        <section v-else class="panel yd-patrol-card">
+          <div class="patrol-state">
+            <span class="ptitle">巡检状态</span>
+            <strong>{{ patrolStatus }}</strong>
+            <span>{{ activeTask ? `任务进行中 · ${patrolCode}` : '设备运行良好' }}</span>
+          </div>
+          <div class="yd-patrol-meta">
+            <div><span>巡检模式</span><br /><b>{{ patrolMode }}</b></div>
+            <div><span>任务进度</span><br /><b>{{ patrolProgress }}%</b></div>
+          </div>
+          <div class="score-ring">{{ patrolProgress }}%</div>
         </section>
       </aside>
     </section>
@@ -348,7 +382,7 @@ onUnmounted(() => {
         >停止结果未完全确认</strong
       >
     </section>
-    <section class="hmi-bottom">
+    <section class="yd-command-dock">
       <OperationsCommandDock
         :disabled="working || !autonomousReady"
         :stop-disabled="working || !stopReady"
@@ -360,19 +394,6 @@ onUnmounted(() => {
         @home="home"
         @estop="estop"
         @manual="manualOpen = true"
-      /><PrimaryAlarmPanel
-        :alarm="primaryAlarm"
-        :timeline="timeline"
-        :mode="extinguishMode"
-        :disabled-reason="extinguishReason"
-        :permissions="{
-          ack: auth.can('alarm.ack'),
-          confirm: auth.can('alarm.confirm'),
-          resolve: auth.can('alarm.resolve'),
-        }"
-        @transition="transition"
-        @update:mode="extinguishMode = $event"
-        @dispatch="dispatch"
       />
     </section>
     <t-drawer v-model:visible="manualOpen" header="手动控制（高级操作）" size="420px" :footer="false">

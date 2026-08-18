@@ -33,11 +33,14 @@ const items = () => [
 ]
 </script>
 <template>
-  <section class="risk-ribbon">
-    <article v-for="item in items()" :key="item.label" :data-state="item.state">
-      <span>{{ item.label }}</span
-      ><strong>{{ item.value }}</strong
-      ><small>{{ item.state }}</small>
-    </article>
+  <section class="panel risk-ribbon">
+    <div class="risk-ribbon-head"><span>环境与设备状态</span></div>
+    <div class="risk-ribbon-grid">
+      <article v-for="item in items()" :key="item.label" :data-state="item.state">
+        <span>{{ item.label }}</span>
+        <strong>{{ item.value }}</strong>
+        <small>{{ item.state }}</small>
+      </article>
+    </div>
   </section>
 </template>

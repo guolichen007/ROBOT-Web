@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { api, errorMessage } from '@/lib/api'
+import { useSystemClock } from '@/composables/useSystemClock'
 import type { StreamInfo } from '@/types'
 import StateChip from './StateChip.vue'
 
@@ -17,6 +18,7 @@ const props = withDefaults(
 const video = ref<HTMLVideoElement>()
 const state = ref<'DISABLED' | 'OFFLINE' | 'CONNECTING' | 'LIVE' | 'ERROR'>(props.stream?.state || 'OFFLINE')
 const detail = ref('')
+const { now } = useSystemClock()
 let peer: RTCPeerConnection | null = null
 let resourceUrl = ''
 
@@ -106,6 +108,10 @@ onUnmounted(() => void disconnect())
     </header>
     <div class="video-stage">
       <video v-show="state === 'LIVE'" ref="video" autoplay muted playsinline />
+      <div v-if="state === 'LIVE'" class="video-time">
+        {{ new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'medium', hour12: false }).format(now) }}
+      </div>
+      <div v-if="state === 'LIVE'" class="video-live-tag">LIVE</div>
       <div v-if="state !== 'LIVE'" class="video-placeholder">
         <span class="video-glyph">{{ glyph }}</span>
         <strong>{{
