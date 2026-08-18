@@ -1,0 +1,100 @@
+/* ============================================================================
+ * base.css — reset, typography, shared primitive behaviour
+ * ==========================================================================*/
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  min-width: 0;
+}
+
+body {
+  min-width: 0;
+  background: var(--yd-bg);
+  color: var(--yd-text);
+  font-family: var(--yd-font);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin: 0;
+}
+
+ul,
+ol,
+dl,
+dd {
+  margin: 0;
+  padding: 0;
+}
+
+::selection {
+  background: var(--yd-primary-soft);
+  color: var(--yd-primary);
+}
+
+/* slim, unobtrusive scrollbars for the light console */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #c6d2e4 transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #c6d2e4;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* long ids / checksums / mono tokens must never blow up a cell */
+.mono,
+[data-mono] {
+  font-family: var(--yd-mono);
+  letter-spacing: 0.01em;
+}

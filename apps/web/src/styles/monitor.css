@@ -1,0 +1,848 @@
+/* ============================================================================
+ * monitor.css — light operations dashboard: map / right rail / command dock
+ * ==========================================================================*/
+
+.yd-monitor-view {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  gap: 10px;
+  overflow: hidden;
+}
+
+/* ---------------- Fire banner (alarm only) ---------------- */
+.situation-banner {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 0 16px;
+  border: 1px solid var(--yd-danger-border);
+  border-radius: var(--yd-radius-sm);
+  background: linear-gradient(90deg, #fff3f2, #fff8f7);
+  color: #eb3c35;
+  font-size: 14px;
+}
+.situation-banner svg {
+  width: 22px;
+  height: 22px;
+  color: var(--yd-danger);
+  flex: 0 0 auto;
+}
+.situation-banner strong {
+  font-weight: 700;
+}
+.situation-banner span {
+  color: var(--yd-text-2);
+  font-size: 13px;
+}
+.situation-banner button {
+  margin-left: auto;
+  border: 0;
+  background: #e54540;
+  color: #fff;
+  border-radius: 5px;
+  height: 32px;
+  padding: 0 20px;
+  font-size: 13px;
+}
+
+/* ---------------- Core: map + right rail ---------------- */
+.yd-monitor-core {
+  min-height: 0;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.58fr) minmax(390px, 0.92fr);
+  gap: 10px;
+}
+.yd-monitor-core > * {
+  min-width: 0;
+  min-height: 0;
+}
+
+/* map panel */
+.operations-map-panel {
+  position: relative;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 54px minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+.operations-map-panel > header,
+.secondary-alarms > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--yd-border-soft);
+}
+.operations-map-panel > header div {
+  display: grid;
+  min-width: 0;
+}
+.operations-map-panel > header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--yd-text);
+}
+.operations-map-panel > header span,
+.operations-map-panel > header small {
+  font-size: 12px;
+  color: var(--yd-text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* map canvas (light) */
+.operations-map {
+  min-height: 0;
+  height: 100%;
+  background: #fff;
+}
+.operations-map svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.map-floor {
+  fill: #fbfcfe;
+}
+.parking-slot {
+  fill: #f0f3f7;
+  stroke: #dbe3ee;
+  stroke-width: 1.1;
+  cursor: pointer;
+  transition: fill 0.12s, stroke 0.12s;
+}
+.slot-group:hover .parking-slot,
+.parking-slot.selected {
+  fill: var(--yd-primary-soft);
+  stroke: var(--yd-primary);
+  stroke-width: 2;
+}
+.parking-slot.disabled {
+  opacity: 0.4;
+  stroke-dasharray: 4 3;
+}
+.parking-slot.target {
+  stroke: var(--yd-warning);
+  stroke-width: 2.5;
+}
+.parking-slot.alarm {
+  fill: #fff4f3;
+  stroke: #f2a9a5;
+  stroke-width: 2;
+}
+.parking-slot.alarm.critical {
+  animation: alarmPulse 1.5s 4;
+}
+.slot-group text {
+  fill: #566983;
+  font-size: 11px;
+  text-anchor: middle;
+  pointer-events: none;
+}
+.inspection-point {
+  fill: var(--yd-primary);
+}
+.extinguish-point {
+  fill: var(--yd-warning);
+}
+.trajectory-line {
+  fill: none;
+  stroke: #2f7cff;
+  stroke-width: 2.2;
+  stroke-dasharray: 8 6;
+  opacity: 0.85;
+}
+.detection-sector {
+  fill: rgba(47, 124, 255, 0.16);
+  stroke: #6ea4ff;
+  stroke-width: 1.2;
+}
+.detection-sector.danger {
+  fill: rgba(255, 91, 91, 0.18);
+  stroke: #f25656;
+}
+.robot-marker rect {
+  fill: #f8fbff;
+  stroke: #4787b5;
+  stroke-width: 3;
+}
+.robot-marker path {
+  fill: #4d94c4;
+}
+.robot-marker text {
+  fill: #fff;
+  font: 600 11px var(--yd-mono);
+  paint-order: stroke;
+  stroke: #2f6ea8;
+  stroke-width: 3px;
+}
+.fire-marker {
+  pointer-events: none;
+}
+.fire-marker circle {
+  fill: var(--yd-danger-soft);
+  stroke: #f24848;
+  stroke-width: 2.5;
+}
+.fire-marker path {
+  fill: #f24848;
+}
+.map-tools {
+  position: absolute;
+  right: 13px;
+  top: 14px;
+  display: grid;
+  gap: 0;
+  border: 1px solid var(--yd-border-strong);
+  border-radius: 7px;
+  background: #fff;
+  overflow: hidden;
+  box-shadow: var(--yd-shadow-sm);
+}
+.map-tools button {
+  width: 37px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-bottom: 1px solid var(--yd-border-soft);
+  color: #27466f;
+  font-size: 16px;
+  background: #fff;
+}
+.map-tools button:last-child {
+  border-bottom: 0;
+}
+.map-tools button:hover,
+.map-tools button.active {
+  color: var(--yd-primary);
+  background: var(--yd-primary-soft);
+}
+.map-legend {
+  position: absolute;
+  left: 20px;
+  bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid var(--yd-border);
+  border-radius: 6px;
+  color: var(--yd-text-2);
+  font-size: 12px;
+  box-shadow: var(--yd-shadow-sm);
+  z-index: 6;
+}
+.map-legend span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.legend-dash {
+  width: 30px;
+  border-top: 2px dashed #2f7cff;
+}
+.legend-robot {
+  width: 20px;
+  height: 14px;
+  border: 2px solid #4787b5;
+  border-radius: 4px;
+  background: #f8fbff;
+}
+.legend-sector {
+  width: 26px;
+  height: 18px;
+  background: rgba(47, 124, 255, 0.3);
+  clip-path: polygon(0 50%, 100% 0, 100% 100%);
+}
+.legend-fire {
+  width: 14px;
+  height: 14px;
+  background: #f24848;
+  clip-path: polygon(50% 0, 65% 35%, 100% 45%, 72% 62%, 82% 100%, 50% 72%, 18% 100%, 28% 62%, 0 45%, 35% 35%);
+}
+.map-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  gap: 6px;
+  color: var(--yd-text-3);
+  background: #fbfcfe;
+}
+.map-empty strong {
+  color: var(--yd-text-2);
+}
+
+.map-selection-bar {
+  position: absolute;
+  z-index: 6;
+  right: 12px;
+  bottom: 12px;
+  left: 12px;
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(170px, 1fr) auto auto auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 60px;
+  padding: 8px 12px;
+  border: 1px solid var(--yd-border-strong);
+  border-radius: var(--yd-radius-sm);
+  box-shadow: var(--yd-shadow-md);
+  background: rgba(255, 255, 255, 0.97);
+}
+.map-selection-bar > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.map-selection-bar strong {
+  color: var(--yd-text);
+  font-size: 14px;
+}
+.map-selection-bar span,
+.map-selection-bar small {
+  font-size: 12px;
+  color: var(--yd-text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.map-selection-bar small {
+  color: #b26a0a;
+}
+
+/* ---------------- Right rail ---------------- */
+.yd-monitor-side {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(250px, 1.5fr) auto minmax(150px, 0.7fr);
+  gap: 10px;
+}
+.yd-monitor-side.is-alarm {
+  grid-template-rows: minmax(200px, 1.15fr) auto minmax(0, 1fr) auto;
+}
+.yd-monitor-side > * {
+  min-width: 0;
+  min-height: 0;
+}
+
+.video-surveillance {
+  min-height: 0;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: 44px minmax(0, 1fr);
+}
+.video-surveillance-head {
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--yd-text);
+  border-bottom: 1px solid var(--yd-border-soft);
+}
+.video-surveillance .t-tabs {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.video-surveillance .t-tabs__content,
+.video-surveillance .t-tab-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.video-surveillance .t-tabs__content {
+  padding: 0;
+  min-height: 0;
+}
+.video-surveillance .t-tabs__header {
+  padding: 0 12px;
+  flex: 0 0 auto;
+}
+.video-card {
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: #fff;
+  border: 0;
+}
+.video-card > header {
+  display: none;
+}
+.video-stage {
+  position: relative;
+  min-height: 0;
+  height: 100%;
+  border-radius: var(--yd-radius-sm);
+  overflow: hidden;
+  background: #13171d;
+  margin: 0 12px 12px;
+}
+.video-stage video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.video-placeholder {
+  height: 100%;
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #8a97ab;
+  background: #13171d;
+}
+.video-placeholder strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.video-placeholder small {
+  font-size: 11px;
+  color: #5f6f89;
+}
+.video-glyph {
+  width: 56px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #3a4a5f;
+  border-radius: 6px;
+  font-family: var(--yd-mono);
+  font-size: 13px;
+  color: #8ea3c0;
+}
+.video-live-tag {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  color: #fff;
+  background: rgba(20, 26, 31, 0.72);
+  border-radius: 12px;
+  padding: 4px 9px;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.video-live-tag:before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22b15e;
+}
+.video-time {
+  position: absolute;
+  left: 12px;
+  top: 10px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.45);
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+/* environment / device status card (RiskTelemetryRibbon restyle) */
+.risk-ribbon {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+}
+.risk-ribbon-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--yd-text);
+}
+.risk-ribbon-head a {
+  color: var(--yd-primary);
+  font-size: 12px;
+  font-weight: 400;
+}
+.risk-ribbon-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.risk-ribbon article {
+  min-height: 64px;
+  border: 1px solid var(--yd-border);
+  border-radius: var(--yd-radius-sm);
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  padding: 8px 11px;
+}
+.risk-ribbon article span {
+  font-size: 11px;
+  color: var(--yd-text-3);
+}
+.risk-ribbon article strong {
+  font-size: 14px;
+  color: var(--yd-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.risk-ribbon article small {
+  font-size: 10px;
+  color: var(--yd-text-3);
+}
+.risk-ribbon article[data-state='STALE'],
+.risk-ribbon article[data-state='ERROR'],
+.risk-ribbon article[data-state='NOT_CONNECTED'] {
+  border-color: #f0cd96;
+  background: #fffdf7;
+}
+
+/* patrol status card */
+.yd-patrol-card {
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr 96px;
+  align-items: center;
+  padding: 14px 18px;
+  gap: 10px;
+}
+.yd-patrol-card .ptitle {
+  font-size: 13px;
+  color: var(--yd-text-2);
+}
+.yd-patrol-card strong {
+  display: block;
+  font-size: 21px;
+  color: #15985a;
+  margin: 10px 0 5px;
+}
+.yd-patrol-card span {
+  font-size: 12px;
+  color: var(--yd-text-3);
+}
+.yd-patrol-meta {
+  border-left: 1px solid var(--yd-border-soft);
+  padding-left: 20px;
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--yd-text-2);
+}
+.yd-patrol-meta span {
+  color: var(--yd-text-3);
+}
+.score-ring {
+  width: 78px;
+  height: 78px;
+  border: 7px solid var(--yd-primary);
+  border-left-color: #d6e6ff;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 19px;
+  font-weight: 700;
+  color: #17365e;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+/* secondary alarms / other events */
+.secondary-alarms {
+  min-height: 0;
+  overflow: auto;
+}
+.secondary-alarms > header {
+  height: 42px;
+  padding: 0 14px;
+}
+.secondary-alarms > header strong {
+  font-size: 14px;
+}
+.secondary-alarms > header span {
+  color: var(--yd-text-3);
+  font-size: 12px;
+}
+.secondary-alarms button {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 6px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  text-align: left;
+  padding: 8px 13px;
+  border: 0;
+  border-bottom: 1px solid var(--yd-border-soft);
+  background: transparent;
+  color: var(--yd-text);
+}
+.secondary-alarms button:hover {
+  background: #f6f9fe;
+}
+.secondary-alarms button.active {
+  background: var(--yd-primary-soft);
+}
+.secondary-alarms button i {
+  width: 5px;
+  height: 26px;
+  border-radius: 2px;
+  background: var(--yd-warning);
+}
+.secondary-alarms button i[data-level='CRITICAL'],
+.secondary-alarms button i[data-level='HIGH'] {
+  background: var(--yd-danger);
+}
+.secondary-alarms button span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.secondary-alarms button span > * {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.secondary-alarms small,
+.secondary-alarms time {
+  color: var(--yd-text-3);
+  font-size: 11px;
+}
+
+/* ---------------- Stop operation state ---------------- */
+.stop-operation-state {
+  padding: 8px 14px;
+  border: 1px solid #f0cd96;
+  background: var(--yd-warning-soft);
+  color: #a8620c;
+  border-radius: var(--yd-radius-sm);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  font-size: 12px;
+}
+.stop-operation-state strong {
+  font-weight: 700;
+}
+
+/* ---------------- Bottom command dock ---------------- */
+.yd-command-dock {
+  min-height: 92px;
+  display: grid;
+  align-items: stretch;
+}
+.operations-command-dock {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) repeat(4, minmax(0, 1fr)) minmax(190px, 1.15fr);
+  align-items: stretch;
+  gap: 12px;
+  padding: 12px 14px;
+}
+.operations-command-dock > div:first-child {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding-right: 6px;
+}
+.operations-command-dock > div:first-child strong {
+  color: var(--yd-text);
+  font-size: 15px;
+}
+.operations-command-dock > div:first-child span {
+  color: var(--yd-text-3);
+  font-size: 12px;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.operations-command-dock .t-button {
+  height: 100%;
+  min-height: 52px;
+  font-size: 15px;
+  border-radius: var(--yd-radius-sm);
+}
+.operations-command-dock .t-button--variant-base.t-button--theme-primary {
+  background: linear-gradient(90deg, #287dff, #0d61f4);
+  box-shadow: 0 8px 18px rgba(23, 109, 255, 0.22);
+}
+.hold-estop {
+  height: 100%;
+  min-height: 52px;
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  place-content: center;
+  gap: 2px;
+  border: 1px solid var(--yd-danger-border);
+  border-radius: var(--yd-radius-sm);
+  background: #fff;
+  color: var(--yd-danger);
+}
+.hold-estop > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: rgba(237, 63, 63, 0.18);
+  pointer-events: none;
+}
+.hold-estop strong,
+.hold-estop small {
+  position: relative;
+}
+.hold-estop strong {
+  font-size: 14px;
+}
+.hold-estop small {
+  font-size: 10px;
+  color: #d98585;
+}
+
+/* ---------------- Primary alarm panel (right rail) ---------------- */
+.primary-alarm-panel {
+  min-height: 0;
+  overflow: hidden;
+}
+.primary-alarm-grid {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0;
+  overflow: auto;
+  padding: 12px;
+}
+.alarm-actions-column,
+.alarm-detail-column {
+  padding: 0;
+}
+.alarm-actions-column > header {
+  display: grid;
+  gap: 3px;
+  margin-bottom: 10px;
+}
+.alarm-actions-column > header strong {
+  font-size: 15px;
+  color: var(--yd-danger);
+}
+.alarm-actions-column > header span,
+.alarm-actions-column > header small {
+  color: var(--yd-text-3);
+  font-size: 12px;
+}
+.alarm-lifecycle {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0 12px;
+  flex-wrap: wrap;
+}
+.extinguish-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.extinguish-actions > button {
+  display: grid;
+  gap: 4px;
+  min-height: 62px;
+  padding: 8px;
+  border: 1px solid var(--yd-border-strong);
+  border-radius: var(--yd-radius-sm);
+  background: #fff;
+  text-align: left;
+  color: var(--yd-text);
+}
+.extinguish-actions > button.selected {
+  border-color: var(--yd-primary);
+  background: var(--yd-primary-soft);
+}
+.extinguish-actions > button strong {
+  font-size: 13px;
+  color: var(--yd-text);
+}
+.extinguish-actions > button span {
+  font-size: 11px;
+  color: var(--yd-text-3);
+}
+.dispatch-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+}
+.dispatch-summary > span {
+  font-size: 12px;
+  color: var(--yd-text-2);
+}
+.alarm-detail-column dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 12px 0;
+}
+.alarm-detail-column dl div {
+  padding: 8px 10px;
+  background: var(--yd-surface-soft);
+  border: 1px solid var(--yd-border-soft);
+  border-radius: 6px;
+}
+.alarm-detail-column dt {
+  font-size: 11px;
+  color: var(--yd-text-3);
+}
+.alarm-detail-column dd {
+  margin: 3px 0 0;
+  font-size: 13px;
+  color: var(--yd-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.operation-timeline h4 {
+  margin: 10px 0 6px;
+  font-size: 13px;
+  color: var(--yd-text);
+}
+.operation-timeline ol {
+  max-height: 110px;
+  overflow: auto;
+  list-style: none;
+}
+.operation-timeline li {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: 5px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--yd-border-soft);
+  font-size: 11px;
+  color: var(--yd-text-2);
+}
+.operation-timeline li time {
+  color: var(--yd-text-3);
+}
+.operation-timeline small {
+  grid-column: 2;
+  color: var(--yd-text-3);
+}
+.alarm-empty {
+  min-height: 150px;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  color: var(--yd-text-3);
+}
+.alarm-empty strong {
+  font-size: 15px;
+  color: var(--yd-text-2);
+}

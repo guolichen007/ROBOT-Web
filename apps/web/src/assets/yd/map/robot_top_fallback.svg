@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 180" role="img" aria-label="巡检机器人俯视图">
+  <defs>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="5" stdDeviation="5" flood-color="#1D3D68" flood-opacity=".25"/></filter>
+  </defs>
+  <g filter="url(#shadow)">
+    <rect x="34" y="10" width="52" height="34" rx="12" fill="#F8FBFF" stroke="#90A6BF" stroke-width="3"/>
+    <rect x="45" y="2" width="30" height="16" rx="6" fill="#1F2D3B"/>
+    <rect x="49" y="5" width="10" height="7" rx="2" fill="#74C6FF"/>
+    <rect x="62" y="5" width="10" height="7" rx="2" fill="#74C6FF"/>
+    <rect x="24" y="37" width="72" height="102" rx="26" fill="#F8FBFF" stroke="#859AB1" stroke-width="3"/>
+    <path d="M33 55h54l6 28-9 43H36l-9-43z" fill="#EEF4FA"/>
+    <rect x="42" y="61" width="36" height="10" rx="5" fill="#0B67F7"/>
+    <rect x="40" y="99" width="40" height="8" rx="4" fill="#1A6FF5" opacity=".85"/>
+    <rect x="13" y="60" width="16" height="56" rx="8" fill="#283847"/>
+    <rect x="91" y="60" width="16" height="56" rx="8" fill="#283847"/>
+    <circle cx="22" cy="132" r="13" fill="#273746"/>
+    <circle cx="98" cy="132" r="13" fill="#273746"/>
+    <circle cx="22" cy="132" r="6" fill="#71859A"/>
+    <circle cx="98" cy="132" r="6" fill="#71859A"/>
+    <rect x="40" y="129" width="40" height="16" rx="7" fill="#DCE7F1"/>
+  </g>
+</svg>

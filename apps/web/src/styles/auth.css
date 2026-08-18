@@ -1,0 +1,301 @@
+/* ============================================================================
+ * auth.css — 友道智造 login + change-password light auth shell
+ * ==========================================================================*/
+
+.yd-auth {
+  position: relative;
+  width: 100vw;
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(420px, 0.75fr);
+  background:
+    radial-gradient(circle at 12% 9%, rgba(79, 143, 255, 0.1), transparent 17%),
+    linear-gradient(135deg, #fbfdff 0%, #f6f9ff 58%, #f1f6ff 100%);
+  overflow: hidden;
+}
+
+/* ---------------- Left brand / hero ---------------- */
+.yd-auth-left {
+  position: relative;
+  overflow: hidden;
+  padding: 42px 45px;
+  display: flex;
+  flex-direction: column;
+}
+.yd-brand-logo {
+  width: 172px;
+  height: auto;
+  display: block;
+  position: relative;
+  z-index: 3;
+}
+.yd-hero {
+  position: relative;
+  z-index: 3;
+  margin-top: 64px;
+  margin-left: 132px;
+}
+.yd-hero h1 {
+  font-size: clamp(40px, 3.4vw, 56px);
+  line-height: 1.08;
+  margin: 0 0 16px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #0a3477;
+}
+.yd-hero-sub {
+  font-size: clamp(18px, 1.6vw, 26px);
+  letter-spacing: 0.22em;
+  color: #496388;
+  margin: 0;
+  white-space: nowrap;
+}
+.yd-hero-rule {
+  width: min(575px, 100%);
+  height: 1px;
+  background: #cfdaeb;
+  margin: 32px 0 26px;
+  position: relative;
+}
+.yd-hero-rule:before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: -1px;
+  width: 29px;
+  height: 3px;
+  background: var(--yd-primary);
+}
+.yd-features {
+  display: flex;
+  gap: 44px;
+  flex-wrap: wrap;
+}
+.yd-feature {
+  display: grid;
+  grid-template-columns: 38px auto;
+  gap: 12px;
+  align-items: center;
+  min-width: 155px;
+}
+.yd-feature img {
+  width: 36px;
+  height: 36px;
+}
+.yd-feature strong {
+  display: block;
+  color: #24446f;
+  font-size: 15px;
+}
+.yd-feature span {
+  display: block;
+  margin-top: 5px;
+  color: #7b8da7;
+  font-size: 12px;
+}
+.yd-auth-scene {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 52%;
+  background: url('@/assets/yd/auth/login_lower_factory_robot_scene.jpg') left bottom / cover
+    no-repeat;
+  z-index: 1;
+}
+.yd-auth-scene:after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, #f8fbff 0%, rgba(248, 251, 255, 0.1) 26%, transparent 60%);
+}
+
+/* ---------------- Right card ---------------- */
+.yd-auth-right {
+  position: relative;
+  z-index: 2;
+  padding: 88px 44px 0 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.yd-auth-card {
+  width: min(540px, 100%);
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #e8edf5;
+  border-radius: 16px;
+  box-shadow: 0 14px 35px rgba(31, 68, 120, 0.11);
+  padding: 56px 48px 40px;
+}
+.yd-auth-head {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  margin-bottom: 34px;
+}
+.yd-auth-head-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  background: #f2f6fc;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+.yd-auth-head-icon img {
+  width: 42px;
+  height: 42px;
+}
+.yd-auth-head h2 {
+  font-size: 26px;
+  margin: 0 0 6px;
+  color: #18325f;
+}
+.yd-auth-head p {
+  margin: 0;
+  color: #7c8ba6;
+  font-size: 13px;
+}
+.yd-field {
+  margin: 0 0 22px;
+}
+.yd-field label {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 0 9px;
+  color: #33486a;
+}
+.yd-input-shell {
+  height: 48px;
+  border: 1px solid #d9e1ec;
+  background: #fff;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 0 15px;
+  color: #b3becd;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.yd-input-shell:focus-within {
+  border-color: var(--yd-primary);
+  box-shadow: 0 0 0 3px var(--yd-primary-soft);
+}
+.yd-input-shell svg {
+  width: 19px;
+  height: 19px;
+  stroke: #aab7ca;
+  flex: 0 0 auto;
+}
+.yd-input-shell input {
+  border: 0;
+  outline: 0;
+  flex: 1;
+  height: 100%;
+  color: #40506a;
+  background: transparent;
+  font-size: 14px;
+}
+.yd-login-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: -2px 0 26px;
+  color: #5d6b82;
+  font-size: 13px;
+}
+.yd-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.yd-remember input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--yd-primary);
+}
+.yd-auth-error {
+  padding: 10px 12px;
+  margin: 0 0 14px;
+  color: #c22a24;
+  background: var(--yd-danger-soft);
+  border: 1px solid var(--yd-danger-border);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.yd-login-btn {
+  width: 100%;
+  height: 54px;
+  border: 0;
+  border-radius: 8px;
+  background: linear-gradient(90deg, #297cff, #0c5ff4);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 700;
+  box-shadow: 0 8px 18px rgba(23, 109, 255, 0.22);
+}
+.yd-login-btn:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+.yd-first-login {
+  margin: 20px 0 0;
+  text-align: center;
+  color: #7d8ba2;
+  font-size: 12px;
+}
+.yd-security-strip {
+  width: min(540px, 100%);
+  min-height: 84px;
+  margin-top: 18px;
+  border: 1px solid #e3eaf4;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: var(--yd-shadow-sm);
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 0 30px;
+  position: relative;
+  overflow: hidden;
+}
+.yd-security-strip > img:first-child {
+  width: 30px;
+  height: 30px;
+}
+.yd-security-strip strong {
+  display: block;
+  font-size: 14px;
+  color: #1e3a68;
+}
+.yd-security-strip span {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #7d8ba1;
+}
+.yd-security-watermark {
+  position: absolute;
+  right: 24px;
+  opacity: 0.06;
+  width: 68px !important;
+  height: 68px;
+}
+.yd-auth-footer {
+  position: absolute;
+  bottom: 20px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  color: #7f8da4;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  z-index: 4;
+}
+
+/* change-password: reuse card, drop the industrial scene */
+.yd-auth--password .yd-auth-scene {
+  display: none;
+}

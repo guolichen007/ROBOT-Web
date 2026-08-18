@@ -1,0 +1,66 @@
+/* ============================================================================
+ * yd design tokens — "友道智造" light industrial console
+ * Only variables live here. No selectors.
+ * ==========================================================================*/
+
+:root {
+  color-scheme: light;
+
+  --yd-primary: #146cff;
+  --yd-primary-hover: #0a5ce5;
+  --yd-primary-soft: #edf4ff;
+
+  --yd-bg: #f5f7fb;
+  --yd-surface: #ffffff;
+  --yd-surface-soft: #f8fafd;
+
+  --yd-border: #dee6f2;
+  --yd-border-strong: #cad6e7;
+  --yd-border-soft: #edf1f6;
+
+  --yd-text: #1f3254;
+  --yd-text-2: #5f6f89;
+  --yd-text-3: #8a98ac;
+
+  --yd-success: #16a465;
+  --yd-success-soft: #ecf9f2;
+  --yd-warning: #ee9a2c;
+  --yd-warning-soft: #fff6e8;
+  --yd-danger: #ed3f3f;
+  --yd-danger-soft: #fff0f0;
+  --yd-danger-border: #ffcbc8;
+
+  --yd-sidebar-width: 208px;
+  --yd-topbar-height: 84px;
+
+  --yd-radius-sm: 7px;
+  --yd-radius-md: 10px;
+  --yd-radius-lg: 12px;
+
+  --yd-shadow-sm: 0 2px 8px rgba(30, 66, 120, 0.05);
+  --yd-shadow-md: 0 8px 24px rgba(30, 66, 120, 0.08);
+
+  --yd-font: 'Microsoft YaHei UI', 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif;
+  --yd-mono: 'Cascadia Code', 'SFMono-Regular', Consolas, 'Courier New', monospace;
+
+  font-family: var(--yd-font);
+
+  /* ---- TDesign light overrides: single source of truth for brand colour ---- */
+  --td-brand-color: var(--yd-primary);
+  --td-brand-color-hover: var(--yd-primary-hover);
+  --td-brand-color-focus: var(--yd-primary-soft);
+  --td-brand-color-active: var(--yd-primary-hover);
+  --td-brand-color-disabled: #b9ccf2;
+  --td-brand-color-light: var(--yd-primary-soft);
+
+  --td-text-color-primary: var(--yd-text);
+  --td-text-color-secondary: var(--yd-text-2);
+  --td-text-color-placeholder: var(--yd-text-3);
+  --td-bg-color-page: var(--yd-bg);
+  --td-bg-color-container: var(--yd-surface);
+  --td-border-level-1-color: var(--yd-border);
+  --td-border-level-2-color: var(--yd-border-strong);
+  --td-success-color: var(--yd-success);
+  --td-warning-color: var(--yd-warning);
+  --td-error-color: var(--yd-danger);
+}

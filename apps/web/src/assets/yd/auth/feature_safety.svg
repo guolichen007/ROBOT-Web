@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="安全可控">
+  <path d="M32 7 52 16v15c0 12-8 22-20 26C20 53 12 43 12 31V16z" fill="#F3F7FF" stroke="#2675F6" stroke-width="3"/>
+  <rect x="23" y="29" width="18" height="15" rx="3" fill="#2675F6"/>
+  <path d="M27 29v-5a5 5 0 0 1 10 0v5" fill="none" stroke="#2675F6" stroke-width="3"/>
+  <circle cx="32" cy="36" r="2" fill="#fff"/>
+</svg>
