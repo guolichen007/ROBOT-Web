@@ -569,8 +569,7 @@ tbody tr:hover {
 .user-form h2 {
   margin-bottom: 4px;
 }
-.user-form label,
-.login-form label {
+.user-form label {
   display: grid;
   gap: 7px;
   color: var(--yd-text-2);
@@ -578,8 +577,7 @@ tbody tr:hover {
   font-weight: 600;
 }
 .user-form input,
-.user-form select,
-.login-form input {
+.user-form select {
   height: 42px;
   border: 1px solid var(--yd-border-strong);
   background: var(--yd-surface);
@@ -590,8 +588,7 @@ tbody tr:hover {
   font-weight: 400;
 }
 .user-form input:focus,
-.user-form select:focus,
-.login-form input:focus {
+.user-form select:focus {
   border-color: var(--yd-primary);
   box-shadow: 0 0 0 3px var(--yd-primary-soft);
 }
