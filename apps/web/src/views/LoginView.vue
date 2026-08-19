@@ -77,12 +77,13 @@ async function submit(): Promise<void> {
           </div>
         </div>
         <div class="yd-field">
-          <label>账号</label>
+          <label for="login-username">账号</label>
           <div class="yd-input-shell">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="8" r="4" /><path d="M4 21c0-4.3 3.6-7 8-7s8 2.7 8 7" />
             </svg>
             <input
+              id="login-username"
               v-model="username"
               name="username"
               autocomplete="username"
@@ -92,12 +93,13 @@ async function submit(): Promise<void> {
           </div>
         </div>
         <div class="yd-field">
-          <label>密码</label>
+          <label for="login-password">密码</label>
           <div class="yd-input-shell">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" />
             </svg>
             <input
+              id="login-password"
               v-model="password"
               name="password"
               type="password"

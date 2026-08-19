@@ -24,7 +24,7 @@ async function login(page: Page, request: APIRequestContext): Promise<void> {
   await page.goto('/login')
   await page.getByLabel('账号').fill('admin')
   await page.getByLabel('密码').fill(credentials.value)
-  await page.getByRole('button', { name: '进入平台' }).click()
+  await page.getByRole('button', { name: '登录' }).click()
   if (credentials.mustChange) {
     await page.getByLabel('当前密码').fill(credentials.value)
     await page.getByLabel('新密码', { exact: true }).fill(changedPassword)
@@ -32,9 +32,9 @@ async function login(page: Page, request: APIRequestContext): Promise<void> {
     await page.getByRole('button', { name: '修改并重新登录' }).click()
     await expect(page).toHaveURL(/\/login$/)
     await page.getByLabel('密码', { exact: true }).fill(changedPassword)
-    await page.getByRole('button', { name: '进入平台' }).click()
+    await page.getByRole('button', { name: '登录' }).click()
   }
-  await expect(page.getByRole('heading', { name: '二维停车场地图' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '停车场巡检地图' })).toBeVisible()
 }
 
 async function token(request: APIRequestContext): Promise<string> {
@@ -70,13 +70,14 @@ async function waitForRobotIdle(request: APIRequestContext): Promise<void> {
     .toBe(false)
 }
 
-test('industrial operations home prioritizes map, roof camera and four controls', async ({
+test('industrial operations home prioritizes map, roof camera and five controls', async ({
   page,
   request,
 }) => {
   await login(page, request)
+  await expect(page.locator('.situation-banner')).toHaveCount(0)
   await expect(page.getByText('车顶实时相机').first()).toBeVisible()
-  for (const name of ['开始巡检', '停止巡检', '返回等待区', '软件紧急停止']) {
+  for (const name of ['开始巡检', '停止巡检', '返回等待区', '手动控制', '软件急停']) {
     await expect(page.getByRole('button', { name })).toBeVisible()
   }
   await expect(page.getByText('烟雾浓度')).toBeVisible()

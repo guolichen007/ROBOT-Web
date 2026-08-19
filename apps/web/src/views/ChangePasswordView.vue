@@ -74,12 +74,13 @@ async function submit(): Promise<void> {
           </div>
         </div>
         <div class="yd-field">
-          <label>当前密码</label>
+          <label for="cp-current">当前密码</label>
           <div class="yd-input-shell">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" />
             </svg>
             <input
+              id="cp-current"
               v-model="currentPassword"
               type="password"
               autocomplete="current-password"
@@ -89,12 +90,13 @@ async function submit(): Promise<void> {
           </div>
         </div>
         <div class="yd-field">
-          <label>新密码</label>
+          <label for="cp-new">新密码</label>
           <div class="yd-input-shell">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" />
             </svg>
             <input
+              id="cp-new"
               v-model="newPassword"
               type="password"
               autocomplete="new-password"
@@ -105,12 +107,13 @@ async function submit(): Promise<void> {
           </div>
         </div>
         <div class="yd-field">
-          <label>确认新密码</label>
+          <label for="cp-confirm">确认新密码</label>
           <div class="yd-input-shell">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" />
             </svg>
             <input
+              id="cp-confirm"
               v-model="confirmation"
               type="password"
               autocomplete="new-password"
