@@ -5,10 +5,9 @@ defineProps<{
   disabled: boolean
   stopDisabled: boolean
   estopDisabled: boolean
-  manualDisabled: boolean
   reason: string
 }>()
-const emit = defineEmits<{ patrol: []; stop: []; home: []; estop: []; manual: [] }>()
+const emit = defineEmits<{ patrol: []; stop: []; home: []; estop: [] }>()
 const hold = useHoldToConfirm(() => emit('estop'))
 function keyDown(event: KeyboardEvent): void {
   if (!event.repeat && ['Enter', ' '].includes(event.key)) hold.start()
@@ -36,12 +35,6 @@ function keyDown(event: KeyboardEvent): void {
         :title="reason"
         @click="$emit('home')"
         ><HomeIcon />返回等待区</t-button
-      ><t-button
-        variant="outline"
-        :disabled="manualDisabled"
-        :title="reason"
-        @click="$emit('manual')"
-        >手动控制</t-button
       ><button
         class="hold-estop"
         aria-label="软件急停"

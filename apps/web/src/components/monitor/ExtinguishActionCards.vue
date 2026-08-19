@@ -1,10 +1,14 @@
 <script setup lang="ts">
-defineProps<{ modelValue: string; disabledReason?: string }>()
-const emit = defineEmits<{ 'update:modelValue': [value: string]; confirm: [] }>()
+import iconBlanket from '@/assets/yd/actions/icon_extinguish_blanket_v4.svg'
+import iconSpray from '@/assets/yd/actions/icon_spray_agent_v4.svg'
+import iconJoint from '@/assets/yd/actions/icon_joint_extinguish_v4.svg'
+
+defineProps<{ disabledReason?: string; busyMode?: string }>()
+const emit = defineEmits<{ execute: [mode: 'DEPLOY_BLANKET' | 'SPRAY_AGENT' | 'DEPLOY_THEN_SPRAY'] }>()
 const actions = [
-  { value: 'DEPLOY_BLANKET', title: '展开灭火帐', detail: '展开并覆盖目标车辆' },
-  { value: 'SPRAY_AGENT', title: '喷射灭火剂', detail: '对准目标执行药剂喷射' },
-  { value: 'DEPLOY_THEN_SPRAY', title: '灭火帐 + 喷射', detail: '先展开灭火帐，再喷射灭火剂' },
+  { value: 'DEPLOY_BLANKET' as const, title: '展开灭火帐', detail: '展开并覆盖目标车辆', icon: iconBlanket },
+  { value: 'SPRAY_AGENT' as const, title: '喷射灭火剂', detail: '对准目标执行药剂喷射', icon: iconSpray },
+  { value: 'DEPLOY_THEN_SPRAY' as const, title: '灭火帐 + 喷射', detail: '先展开灭火帐，再喷射灭火剂', icon: iconJoint },
 ]
 </script>
 <template>
@@ -12,21 +16,15 @@ const actions = [
     <button
       v-for="item in actions"
       :key="item.value"
-      :class="{ selected: modelValue === item.value }"
-      :disabled="Boolean(disabledReason)"
-      @click="emit('update:modelValue', item.value)"
+      :disabled="Boolean(disabledReason) || Boolean(busyMode)"
+      :class="{ busy: busyMode === item.value }"
+      @click="emit('execute', item.value)"
     >
-      <span class="extinguish-radio" aria-hidden="true"></span>
+      <img :src="item.icon" alt="" />
       <span class="extinguish-copy">
-        <strong>{{ item.title }}</strong>
+        <strong>{{ busyMode === item.value ? '正在下发…' : item.title }}</strong>
         <span>{{ disabledReason || item.detail }}</span>
       </span>
     </button>
-    <div class="dispatch-summary">
-      <span>已选：{{ actions.find((item) => item.value === modelValue)?.title }}</span>
-      <t-button theme="danger" :disabled="Boolean(disabledReason)" @click="emit('confirm')"
-        >确认派发</t-button
-      >
-    </div>
   </section>
 </template>

@@ -2,20 +2,17 @@
 import AlarmLifecycleActions from './AlarmLifecycleActions.vue'
 import ExtinguishActionCards from './ExtinguishActionCards.vue'
 import OperationTimeline from './OperationTimeline.vue'
+import { alarmStateLabel, alarmTypeLabel, detectionMethodLabel, severityLabel } from '@/lib/ui-labels'
 import type { Alarm, AlarmTimelineItem } from '@/types'
 defineProps<{
   alarm?: Alarm
   timeline: AlarmTimelineItem[]
-  mode: string
   disabledReason?: string
+  busyMode?: string
   locationLabel?: string
   permissions: { ack: boolean; confirm: boolean; resolve: boolean }
 }>()
-defineEmits<{
-  transition: [action: 'acknowledge' | 'confirm' | 'resolve']
-  'update:mode': [value: string]
-  dispatch: []
-}>()
+defineEmits<{ transition: [action: 'acknowledge' | 'confirm' | 'resolve']; execute: [mode: string] }>()
 </script>
 <template>
   <section class="panel primary-alarm-panel">
@@ -24,12 +21,15 @@ defineEmits<{
         <header>
           <span>当前事件详情</span>
           <strong>{{ alarm.event_code }}</strong>
-          <small>{{ alarm.fire_type }} · {{ alarm.severity }} · {{ alarm.state }}</small>
+          <small
+            >{{ alarmTypeLabel(alarm.fire_type) }} · {{ severityLabel(alarm.severity) }} ·
+            {{ alarmStateLabel(alarm.state) }}</small
+          >
         </header>
         <dl>
           <div>
             <dt>事件类型</dt>
-            <dd>{{ alarm.fire_type }}</dd>
+            <dd>{{ alarmTypeLabel(alarm.fire_type) }}</dd>
           </div>
           <div>
             <dt>位置</dt>
@@ -45,11 +45,11 @@ defineEmits<{
           </div>
           <div>
             <dt>检测方式</dt>
-            <dd>{{ alarm.detection_method }}</dd>
+            <dd>{{ detectionMethodLabel(alarm.detection_method) }}</dd>
           </div>
           <div>
             <dt>严重级别</dt>
-            <dd>{{ alarm.severity }}</dd>
+            <dd>{{ severityLabel(alarm.severity) }}</dd>
           </div>
           <div>
             <dt>重复上报</dt>
@@ -60,8 +60,8 @@ defineEmits<{
             <dd>
               {{
                 alarm.media_snapshot_json && Object.keys(alarm.media_snapshot_json).length
-                  ? 'AVAILABLE'
-                  : 'MISSING'
+                  ? '有媒体证据'
+                  : '无媒体证据'
               }}
             </dd>
           </div>
@@ -80,10 +80,9 @@ defineEmits<{
           <span>处置操作</span>
         </header>
         <ExtinguishActionCards
-          :model-value="mode"
-          :disabled-reason="alarm.state !== 'CONFIRMED' ? '请先完成火情确认' : disabledReason"
-          @update:model-value="$emit('update:mode', $event)"
-          @confirm="$emit('dispatch')"
+          :disabled-reason="disabledReason"
+          :busy-mode="busyMode"
+          @execute="$emit('execute', $event)"
         />
       </div>
     </div>

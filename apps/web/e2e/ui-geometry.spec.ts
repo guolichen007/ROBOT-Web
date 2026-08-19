@@ -99,10 +99,11 @@ test.describe('ui-gate2 viewport geometry', () => {
       // 4 environment cards
       await expect(page.locator('.risk-ribbon-grid article')).toHaveCount(4)
 
-      // 5 command buttons, no clipped control
-      for (const name of ['开始巡检', '停止巡检', '返回等待区', '手动控制', '软件急停']) {
+      // 4 command buttons, no clipped control
+      for (const name of ['开始巡检', '停止巡检', '返回等待区', '软件急停']) {
         await expect(page.getByRole('button', { name })).toBeVisible()
       }
+      await expect(page.getByRole('button', { name: '手动控制' })).toHaveCount(0)
 
       // no page-level horizontal scroll
       expect(meta.scrollWidth).toBeLessThanOrEqual(viewport.width + 2)

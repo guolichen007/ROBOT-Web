@@ -2,7 +2,6 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ChevronDownIcon, LayersIcon } from 'tdesign-icons-vue-next'
 import MapCanvas from '@/components/MapCanvas.vue'
-import ManualControl from '@/components/ManualControl.vue'
 import SituationBanner from '@/components/monitor/SituationBanner.vue'
 import RiskTelemetryRibbon from '@/components/monitor/RiskTelemetryRibbon.vue'
 import MapSelectionBar from '@/components/monitor/MapSelectionBar.vue'
@@ -15,18 +14,18 @@ import { useMonitorStore } from '@/stores/monitor'
 import { api, errorMessage } from '@/lib/api'
 import { newUuid } from '@/lib/id'
 import { operationalSituation } from '@/lib/operations'
+import { alarmStateLabel, alarmTypeLabel, taskTypeLabel } from '@/lib/ui-labels'
 import type { AlarmTimelineItem, DetectionCoverage, StopOperation } from '@/types'
 
 const auth = useAuthStore()
 const monitor = useMonitorStore()
 const selectedSlotId = ref<string | null>(null)
-const extinguishMode = ref('DEPLOY_THEN_SPRAY')
+const busyMode = ref('')
 const timeline = ref<AlarmTimelineItem[]>([])
 const coverage = ref<DetectionCoverage | null>(null)
 const stopOperation = ref<StopOperation | null>(null)
 const notice = ref('')
 const working = ref(false)
-const manualOpen = ref(false)
 const layerMenuOpen = ref(false)
 const layers = reactive({ route: true, coverage: true, semantic: false })
 const otherEventsOpen = ref(false)
@@ -50,12 +49,6 @@ const trajectory = computed(() => monitor.snapshot.trajectories[0]?.path_json ||
 const stopReady = computed(() => Boolean(robot.value?.safety_command_ready?.stop_motion))
 const estopReady = computed(() => Boolean(robot.value?.safety_command_ready?.emergency_stop))
 const autonomousReady = computed(() => Boolean(robot.value?.autonomous_task_ready?.patrol))
-const manualReady = computed(
-  () =>
-    Boolean(robot.value?.manual_control_ready) &&
-    Boolean(robot.value?.supported_commands?.includes('manual_control')) &&
-    !readOnly.value,
-)
 const readOnly = computed(() => robot.value?.integration?.source_kind === 'ROS_COMPAT')
 const controlReason = computed(
   () =>
@@ -108,7 +101,7 @@ const patrolOnline = computed(() => robot.value?.online_state === 'ONLINE')
 const patrolStatus = computed(() =>
   activeTask.value ? '巡检执行中' : patrolOnline.value ? '待命' : '未接入',
 )
-const patrolMode = computed(() => activeTask.value?.type || '—')
+const patrolMode = computed(() => (activeTask.value ? taskTypeLabel(activeTask.value.type) : '—'))
 const patrolProgress = computed(() => activeTask.value?.progress ?? 0)
 const patrolCode = computed(() => activeTask.value?.task_code || '—')
 
@@ -145,26 +138,36 @@ async function transition(action: 'acknowledge' | 'confirm' | 'resolve') {
     toast(errorMessage(reason))
   }
 }
-async function dispatch() {
+async function dispatch(mode: string) {
   if (!primaryAlarm.value || !robot.value) return
   working.value = true
+  busyMode.value = mode
   try {
     await api.post(
       `/alarms/${primaryAlarm.value.id}/create-task`,
       {
         robot_id: robot.value.vehicle_id,
         trajectory_id: monitor.snapshot.trajectories[0]?.id,
-        parameters: { source: 'OPERATIONS_HMI', extinguish_mode: extinguishMode.value },
+        parameters: { source: 'OPERATIONS_HMI', extinguish_mode: mode },
       },
       { headers: { 'Idempotency-Key': newUuid() } },
     )
     await monitor.loadSnapshot()
     await refreshTimeline()
-    toast('灭火任务已创建，等待发布与车端确认')
+    const label =
+      (
+        {
+          DEPLOY_BLANKET: '灭火帐',
+          SPRAY_AGENT: '灭火剂喷射',
+          DEPLOY_THEN_SPRAY: '灭火帐+喷射',
+        } as Record<string, string>
+      )[mode] || '灭火'
+    toast(`${label}任务已下发`)
   } catch (reason) {
     toast(errorMessage(reason))
   } finally {
     working.value = false
+    busyMode.value = ''
   }
 }
 async function createManualAlarm() {
@@ -362,8 +365,8 @@ onUnmounted(() => {
           <PrimaryAlarmPanel
             :alarm="primaryAlarm"
             :timeline="timeline"
-            :mode="extinguishMode"
             :disabled-reason="extinguishReason"
+            :busy-mode="busyMode"
             :location-label="primaryAlarmLocation"
             :permissions="{
               ack: auth.can('alarm.ack'),
@@ -371,8 +374,7 @@ onUnmounted(() => {
               resolve: auth.can('alarm.resolve'),
             }"
             @transition="transition"
-            @update:mode="extinguishMode = $event"
-            @dispatch="dispatch"
+            @execute="dispatch"
           />
           <section class="panel secondary-alarms" :class="{ open: otherEventsOpen }">
             <header>
@@ -383,7 +385,7 @@ onUnmounted(() => {
               >
                 <strong>其他事件 ({{ Math.max(0, activeAlarms.length - 1) }})</strong>
                 <span v-if="!otherEventsOpen && activeAlarms.length > 1" class="other-events-summary">
-                  {{ activeAlarms[1]?.event_code }} · {{ activeAlarms[1]?.fire_type }}
+                  {{ activeAlarms[1]?.event_code }} · {{ alarmTypeLabel(activeAlarms[1]?.fire_type) }}
                 </span>
                 <ChevronDownIcon class="other-events-chevron" :class="{ open: otherEventsOpen }" />
               </button>
@@ -397,7 +399,9 @@ onUnmounted(() => {
               >
                 <i :data-level="alarm.severity"></i
                 ><span
-                  >{{ alarm.event_code }}<small>{{ alarm.fire_type }} · {{ alarm.state }}</small></span
+                  >{{ alarm.event_code }}<small
+                    >{{ alarmTypeLabel(alarm.fire_type) }} · {{ alarmStateLabel(alarm.state) }}</small
+                  ></span
                 ><time>{{ new Date(alarm.last_seen_at).toLocaleTimeString('zh-CN', { hour12: false }) }}</time>
               </button>
               <div v-if="activeAlarms.length <= 1" class="quiet-state">暂无其他活动事件</div>
@@ -433,22 +437,12 @@ onUnmounted(() => {
         :disabled="working || !autonomousReady"
         :stop-disabled="working || !stopReady"
         :estop-disabled="working || !estopReady"
-        :manual-disabled="working || !manualReady || !auth.can('robot.control.manual')"
         :reason="dockReason"
         @patrol="patrol"
         @stop="stop"
         @home="home"
         @estop="estop"
-        @manual="manualOpen = true"
       />
     </section>
-    <t-drawer v-model:visible="manualOpen" header="手动控制（高级操作）" size="420px" :footer="false">
-      <ManualControl :robot="robot" :show-safety="false" @notice="toast" />
-      <t-alert
-        theme="warning"
-        title="安全提示"
-        message="手动脉冲 TTL 500 ms；松键、失焦或页面隐藏会发送 stop_motion 并释放租约。真实车辆最终安全仍由车端 watchdog 和物理急停保证。"
-      />
-    </t-drawer>
   </main>
 </template>

@@ -70,16 +70,17 @@ async function waitForRobotIdle(request: APIRequestContext): Promise<void> {
     .toBe(false)
 }
 
-test('industrial operations home prioritizes map, roof camera and five controls', async ({
+test('industrial operations home prioritizes map, roof camera and four controls', async ({
   page,
   request,
 }) => {
   await login(page, request)
   await expect(page.locator('.situation-banner')).toHaveCount(0)
   await expect(page.getByText('车顶实时相机').first()).toBeVisible()
-  for (const name of ['开始巡检', '停止巡检', '返回等待区', '手动控制', '软件急停']) {
+  for (const name of ['开始巡检', '停止巡检', '返回等待区', '软件急停']) {
     await expect(page.getByRole('button', { name })).toBeVisible()
   }
+  await expect(page.getByRole('button', { name: '手动控制' })).toHaveCount(0)
   await expect(page.getByText('烟雾浓度')).toBeVisible()
 })
 
@@ -100,32 +101,27 @@ test('media ticket is absent from URL and WHEP uses Authorization bearer', async
   expect(anonymous.status()).toBe(401)
 })
 
-test('A-12 manual fire uses explicit three-mode extinguish drawer', async ({ page, request }) => {
+test('A-12 manual fire dispatches extinguish directly without confirm chain', async ({
+  page,
+  request,
+}) => {
   await forceRelease(request)
   await login(page, request)
   await page.getByRole('button', { name: '车位 A-12' }).click()
   await page.getByRole('button', { name: '人工上报火情' }).click()
   await expect(page.getByText(/A-12 人工火情已创建/)).toBeVisible()
-  await page.getByRole('button', { name: '确认收到' }).click()
-  await page.getByRole('button', { name: '确认火情' }).click()
   await expect(page.getByText('展开灭火帐', { exact: true })).toBeVisible()
   await expect(page.getByText('喷射灭火剂', { exact: true })).toBeVisible()
   await expect(page.getByText('灭火帐 + 喷射', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '确认派发' }).click()
-  await expect(page.getByText(/灭火任务已创建/)).toBeVisible()
+  await page.getByRole('button', { name: '展开灭火帐' }).click()
+  await expect(page.getByText(/灭火帐任务已下发/)).toBeVisible()
   await waitForRobotIdle(request)
 })
 
-test('manual control is in a drawer and leases remain mutually exclusive', async ({
-  page,
-  browser,
-  request,
-}) => {
+test('manual leases remain mutually exclusive via API', async ({ browser, request }) => {
+  // Manual-control UI is paused (Gate-3); the underlying lease contract stays
+  // protected by API-level integration tests.
   await forceRelease(request)
-  await waitForRobotIdle(request)
-  await login(page, request)
-  await page.getByRole('button', { name: '手动控制' }).click()
-  await expect(page.getByText('手动控制（高级操作）')).toBeVisible()
   const first = await browser.newContext(),
     second = await browser.newContext()
   const firstToken = await token(first.request),
@@ -145,21 +141,6 @@ test('manual control is in a drawer and leases remain mutually exclusive', async
   })
   await first.close()
   await second.close()
-})
-
-test('manual pointer release and hidden page stop and release', async ({ page, request }) => {
-  await forceRelease(request)
-  await waitForRobotIdle(request)
-  await login(page, request)
-  await page.getByRole('button', { name: '手动控制' }).click()
-  const forward = page.getByRole('button', { name: '↑ 前进' })
-  await forward.dispatchEvent('pointerdown')
-  await expect(page.getByText('租约 HELD')).toBeVisible()
-  await page.evaluate(() => {
-    Object.defineProperty(document, 'hidden', { configurable: true, get: () => true })
-    document.dispatchEvent(new Event('visibilitychange'))
-  })
-  await expect(page.getByText('无租约')).toBeVisible()
 })
 
 test('stop patrol waits for task cancellation, stop ACK and five fresh stationary frames', async ({
