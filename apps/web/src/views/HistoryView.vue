@@ -75,12 +75,16 @@ onUnmounted(() => {
   <section class="panel data-panel">
     <div class="tabs">
       <button
-        v-for="name in ['telemetry', 'commands', 'tasks']"
-        :key="name"
-        :class="{ active: tab === name }"
-        @click="changeTab(name as any)"
+        v-for="item in [
+          ['telemetry', '遥测'],
+          ['commands', '命令'],
+          ['tasks', '任务'],
+        ]"
+        :key="item[0]"
+        :class="{ active: tab === item[0] }"
+        @click="changeTab(item[0] as 'telemetry' | 'commands' | 'tasks')"
       >
-        {{ name }}
+        {{ item[1] }}
       </button>
     </div>
     <DataTable

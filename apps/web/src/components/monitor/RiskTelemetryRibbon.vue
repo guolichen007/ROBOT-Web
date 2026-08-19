@@ -1,19 +1,9 @@
 <script setup lang="ts">
 import type { DataSupportState, RobotState } from '@/types'
+import { localizationLabel, supportStateLabel } from '@/lib/ui-labels'
 const props = defineProps<{ robot?: RobotState; freshness: string }>()
 function state(channel: string): DataSupportState {
   return props.robot?.data_channels?.[channel]?.support_state || 'NOT_CONNECTED'
-}
-function stateLabel(channel: string): string {
-  return (
-    {
-      CONNECTED: '正常',
-      STALE: '数据陈旧',
-      NOT_CONNECTED: '未接入',
-      UNSUPPORTED: '当前车型不支持',
-      ERROR: '异常',
-    }[state(channel)] || '未接入'
-  )
 }
 function value(value: number | null | undefined, channel: string, unit: string): string {
   return state(channel) === 'CONNECTED' && value != null
@@ -25,23 +15,23 @@ const items = () => [
     label: '顶部热像',
     value: value(props.robot?.top_ir, 'top_ir', '℃'),
     state: state('top_ir'),
-    hint: stateLabel('top_ir'),
+    hint: supportStateLabel(state('top_ir')),
   },
   {
     label: '底部红外',
     value: value(props.robot?.bottom_ir, 'bottom_ir', '℃'),
     state: state('bottom_ir'),
-    hint: stateLabel('bottom_ir'),
+    hint: supportStateLabel(state('bottom_ir')),
   },
   {
     label: '烟雾浓度',
     value: value(props.robot?.smoke, 'smoke', '%'),
     state: state('smoke'),
-    hint: stateLabel('smoke'),
+    hint: supportStateLabel(state('smoke')),
   },
   {
     label: '定位质量',
-    value: props.robot?.localization_status || '未知',
+    value: localizationLabel(props.robot?.localization_status),
     state: props.robot?.x == null ? 'NOT_CONNECTED' : 'CONNECTED',
     hint: props.robot?.x == null ? '未接入' : '正常',
   },

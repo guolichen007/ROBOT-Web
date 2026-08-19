@@ -19,6 +19,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { useMonitorStore } from '@/stores/monitor'
 import { useSystemClock } from '@/composables/useSystemClock'
+import { localizationLabel, taskTypeLabel } from '@/lib/ui-labels'
 import brandLogo from '@/assets/yd/brand/youdao_brand_logo.png'
 import techWave from '@/assets/yd/decorative/tech_wave.svg'
 
@@ -208,11 +209,11 @@ function onUserMenuClick(data: { value?: unknown }): void {
           </span>
           <span class="status-cell"
             ><TaskIcon class="status-icon" /><span>当前任务</span
-            ><b>{{ activeTask?.type || '空闲' }}</b></span
+            ><b>{{ activeTask ? taskTypeLabel(activeTask.type) : '空闲' }}</b></span
           >
           <span class="status-cell"
             ><LocationIcon class="status-icon" /><span>定位状态</span
-            ><b>{{ robot?.localization_status || '--' }}</b></span
+            ><b>{{ localizationLabel(robot?.localization_status) }}</b></span
           >
         </div>
         <div class="user-side">

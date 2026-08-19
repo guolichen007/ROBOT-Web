@@ -1,22 +1,22 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
-import { FullscreenIcon } from 'tdesign-icons-vue-next'
+import { FullscreenIcon, VideoCameraIcon } from 'tdesign-icons-vue-next'
 import { api, errorMessage } from '@/lib/api'
 import { useSystemClock } from '@/composables/useSystemClock'
+import { streamStateLabel } from '@/lib/ui-labels'
 import type { StreamInfo } from '@/types'
-import StateChip from './StateChip.vue'
 
 const props = withDefaults(
   defineProps<{
     stream?: StreamInfo
     title: string
-    glyph?: string
     prominent?: boolean
     active?: boolean
   }>(),
-  { glyph: 'RGB', prominent: false, active: true },
+  { prominent: false, active: true },
 )
 const video = ref<HTMLVideoElement>()
+const stage = ref<HTMLDivElement>()
 const state = ref<'DISABLED' | 'OFFLINE' | 'CONNECTING' | 'LIVE' | 'ERROR'>(props.stream?.state || 'OFFLINE')
 const detail = ref('')
 const { now } = useSystemClock()
@@ -27,6 +27,12 @@ const canPlay = computed(() => Boolean(props.stream?.stream_id && props.stream.s
 const shouldAutoConnect = computed(
   () => props.active && ['CONNECTING', 'LIVE'].includes(props.stream?.state || 'OFFLINE'),
 )
+const stateText = computed(() => {
+  if (state.value === 'DISABLED') return '通道已停用'
+  if (state.value === 'CONNECTING') return '正在连接视频'
+  if (state.value === 'ERROR') return '视频连接异常'
+  return '视频未连接'
+})
 
 async function waitIce(pc: RTCPeerConnection): Promise<void> {
   if (pc.iceGatheringState === 'complete') return
@@ -93,7 +99,8 @@ async function connect(): Promise<void> {
 
 async function enterFullscreen(): Promise<void> {
   try {
-    if (video.value?.requestFullscreen) await video.value.requestFullscreen()
+    if (stage.value?.requestFullscreen) await stage.value.requestFullscreen()
+    else if (video.value?.requestFullscreen) await video.value.requestFullscreen()
   } catch {
     /* fullscreen may be denied; keep the overlay stable */
   }
@@ -111,16 +118,12 @@ onUnmounted(() => void disconnect())
 
 <template>
   <article class="video-card" :class="{ prominent }">
-    <header>
-      <span>{{ title }}</span
-      ><StateChip :value="state" />
-    </header>
-    <div class="video-stage">
+    <div ref="stage" class="video-stage">
       <video v-show="state === 'LIVE'" ref="video" autoplay muted playsinline />
       <div v-if="state === 'LIVE'" class="video-time">
         {{ new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'medium', hour12: false }).format(now) }}
       </div>
-      <div v-if="state === 'LIVE'" class="video-live-tag">LIVE</div>
+      <div v-if="state === 'LIVE'" class="video-live-tag">{{ streamStateLabel(state) }}</div>
       <button
         v-if="state === 'LIVE'"
         class="video-fullscreen"
@@ -131,17 +134,9 @@ onUnmounted(() => void disconnect())
         <FullscreenIcon />
       </button>
       <div v-if="state !== 'LIVE'" class="video-placeholder">
-        <span class="video-glyph">{{ glyph }}</span>
-        <strong>{{
-          state === 'DISABLED'
-            ? '通道已禁用'
-            : state === 'CONNECTING'
-              ? '正在连接实时视频'
-              : state === 'ERROR'
-                ? '视频连接失败'
-                : '视频源未连接'
-        }}</strong>
-        <small>{{ detail || `MediaMTX · ${stream?.codec || 'H.264'}` }}</small>
+        <span class="video-glyph"><VideoCameraIcon /></span>
+        <strong>{{ stateText }}</strong>
+        <small v-if="detail">{{ detail }}</small>
         <t-button v-if="canPlay && state !== 'CONNECTING'" size="small" variant="outline" @click="connect"
           >连接视频</t-button
         >

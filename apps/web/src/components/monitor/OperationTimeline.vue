@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { sourceTypeLabel, stateChipLabel } from '@/lib/ui-labels'
 import type { AlarmTimelineItem } from '@/types'
 
 defineProps<{ items: AlarmTimelineItem[] }>()
@@ -11,7 +12,7 @@ defineProps<{ items: AlarmTimelineItem[] }>()
       <li v-for="item in items" :key="`${item.occurred_at}-${item.state}`">
         <time>{{ new Date(item.occurred_at).toLocaleTimeString('zh-CN', { hour12: false }) }}</time>
         <span>{{ item.label }}</span>
-        <small>{{ item.source_type }} · {{ item.state }}</small>
+        <small>{{ sourceTypeLabel(item.source_type) }} · {{ stateChipLabel(item.state) }}</small>
       </li>
     </ol>
     <div v-if="!items.length" class="quiet-state">暂无处置记录</div>
