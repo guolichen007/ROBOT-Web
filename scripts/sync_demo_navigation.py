@@ -40,7 +40,7 @@ from app.db.session import SessionLocal  # noqa: E402
 from app.modules.navigation.route_builder import (  # noqa: E402
     REMOTE_WAITING,
     SlotRef,
-    build_cruise_trajectory,
+    build_cruise_waypoints,
     inspection_pose,
     ordered_codes,
 )
@@ -132,7 +132,7 @@ def sync(db, apply: bool) -> dict:
     elif waiting and apply:
         waiting.pose_json = dict(REMOTE_WAITING)
 
-    path = build_cruise_trajectory(slot_refs)
+    path = build_cruise_waypoints(slot_refs)
     trajectory = db.scalar(
         select(Trajectory).where(
             Trajectory.map_version_id == map_version.id,

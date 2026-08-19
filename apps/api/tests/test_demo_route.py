@@ -15,6 +15,7 @@ from app.modules.navigation.route_builder import (
     REMOTE_WAITING,
     SlotRef,
     build_cruise_trajectory,
+    build_cruise_waypoints,
     inspection_pose,
     ordered_codes,
     slot_is_on_vehicle_right,
@@ -69,6 +70,21 @@ def test_trajectory_starts_and_ends_at_remote_waiting() -> None:
     assert len(path) > 20
     assert (path[0]["x"], path[0]["y"]) == (REMOTE_WAITING["x"], REMOTE_WAITING["y"])
     assert (path[-1]["x"], path[-1]["y"]) == (REMOTE_WAITING["x"], REMOTE_WAITING["y"])
+
+
+def test_cruise_waypoints_include_all_54_inspection_checkpoints() -> None:
+    waypoints = build_cruise_waypoints(demo_slots())
+    inspections = [w for w in waypoints if w["kind"] == "INSPECTION"]
+    assert len(inspections) == 54
+    assert [w["sequence"] for w in inspections] == list(range(1, 55))
+    codes = [w["slot_code"] for w in inspections]
+    assert len(set(codes)) == 54
+    # S order: first column down, second up, third down, fourth up, top west.
+    assert codes[:9] == [f"A-{n:02d}" for n in range(27, 18, -1)]
+    assert codes[9:18] == [f"A-{n:02d}" for n in range(28, 37)]
+    assert codes[18:27] == [f"A-{n:02d}" for n in range(45, 36, -1)]
+    assert codes[27:36] == [f"A-{n:02d}" for n in range(46, 55)]
+    assert codes[36:] == [f"A-{n:02d}" for n in range(18, 0, -1)]
 
 
 def test_trajectory_segments_are_axis_aligned_lanes() -> None:

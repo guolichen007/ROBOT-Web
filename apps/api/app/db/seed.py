@@ -40,7 +40,7 @@ from app.db.session import SessionLocal
 from app.modules.navigation.route_builder import (
     REMOTE_WAITING,
     SlotRef,
-    build_cruise_trajectory,
+    build_cruise_waypoints,
     inspection_pose,
     ordered_codes,
 )
@@ -289,7 +289,7 @@ def seed() -> None:
                 "theta": math.pi if index < 18 else math.pi / 2,
             }
 
-        cruise_path = build_cruise_trajectory(
+        cruise_path = build_cruise_waypoints(
             [SlotRef(code=slot.code, x=slot.center_pose_json["x"], y=slot.center_pose_json["y"]) for slot in slots]
         )
         trajectory = _get_or_create(
@@ -297,7 +297,7 @@ def seed() -> None:
             Trajectory,
             map_version_id=map_version.id,
             code="RIGHT_SIDE_S_CRUISE",
-            defaults={"version": "2", "path_json": cruise_path, "enabled": True},
+            defaults={"version": "3", "path_json": cruise_path, "enabled": True},
         )
         trajectory.path_json = cruise_path
         trajectory.enabled = True
