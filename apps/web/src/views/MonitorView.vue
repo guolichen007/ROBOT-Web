@@ -15,7 +15,7 @@ import { useMonitorStore } from '@/stores/monitor'
 import { api, errorMessage } from '@/lib/api'
 import { newUuid } from '@/lib/id'
 import { operationalSituation } from '@/lib/operations'
-import { alarmStateLabel, alarmTypeLabel, reasonCodeLabel, taskTypeLabel } from '@/lib/ui-labels'
+import { alarmStateLabel, alarmTypeLabel, reasonCodeLabel } from '@/lib/ui-labels'
 import robotIdleArt from '@/assets/yd/gate4/status/robot_state_idle_art.png'
 import robotOnlineArt from '@/assets/yd/gate4/status/robot_state_online_art.png'
 import robotAlarmArt from '@/assets/yd/gate4/status/robot_state_alarm_art.png'
@@ -120,10 +120,15 @@ const patrolOnline = computed(() => robot.value?.online_state === 'ONLINE')
 const patrolStatus = computed(() =>
   activeTask.value ? '巡检执行中' : patrolOnline.value ? '待命' : '未接入',
 )
-const patrolMode = computed(() => (activeTask.value ? taskTypeLabel(activeTask.value.type) : '—'))
 const patrolProgress = computed(() => activeTask.value?.progress ?? 0)
 const patrolCode = computed(() => activeTask.value?.task_code || '—')
 const roofStream = computed(() => monitor.snapshot.streams.find((item) => item.camera_type === 'roof_rgb'))
+const liveCheckpoint = computed(() => {
+  const value = activeTask.value?.parameters_json?.live_checkpoint as
+    | { index?: number; total?: number; current_slot_code?: string; next_slot_code?: string }
+    | undefined
+  return value
+})
 const patrolArt = computed(() => {
   if (robot.value?.estop_active) return robotAlarmArt
   if (activeTask.value) return robotOnlineArt
@@ -533,8 +538,11 @@ onUnmounted(() => {
               <span>{{ activeTask ? `任务进行中 · ${patrolCode}` : '等待下发任务' }}</span>
             </div>
             <div class="yd-patrol-meta">
-              <div><span>巡检模式</span><b>{{ patrolMode }}</b></div>
-              <div><span>任务进度</span><b>{{ patrolProgress }}%</b></div>
+              <div><span>巡检路线</span><b>右侧全覆盖 S 型</b></div>
+              <div v-if="liveCheckpoint"><span>当前巡检</span><b>{{ liveCheckpoint.current_slot_code || '--' }}</b></div>
+              <div v-if="liveCheckpoint"><span>下一巡检</span><b>{{ liveCheckpoint.next_slot_code || '--' }}</b></div>
+              <div v-if="liveCheckpoint"><span>已巡检</span><b>{{ liveCheckpoint.index }} / {{ liveCheckpoint.total }}</b></div>
+              <div v-else><span>任务进度</span><b>{{ patrolProgress }}%</b></div>
             </div>
             <ProgressRingGate4 :value="patrolProgress" label="任务进度" />
           </section>

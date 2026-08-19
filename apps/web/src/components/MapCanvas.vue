@@ -2,6 +2,8 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { FullscreenIcon, ZoomInIcon, ZoomOutIcon } from 'tdesign-icons-vue-next'
 import { MapAdapter } from '@/lib/map-adapter'
+import { buildSensorSector } from '@/lib/detection-geometry'
+import { bodyToWorld } from '@/lib/body-frame'
 import type { Alarm, DetectionCoverage, MapPoint, MapVersion, ParkingSlot, RobotState } from '@/types'
 import fireSlotBadgeUrl from '@/assets/yd/map/fire_slot_badge_v4.svg'
 import firePinUrl from '@/assets/yd/map/fire_pin_v4_64.png'
@@ -52,12 +54,46 @@ const slotPoints = (slot: ParkingSlot) =>
 const pathPoints = computed(() => polygonPoints(props.trajectory))
 const alarmSlots = computed(() => new Map(props.alarms.map((item) => [item.parking_slot_id, item])))
 
-// ---- right-side detection sector (server-authoritative polygon) ----
-const coveragePoints = computed(() => polygonPoints(props.coverage?.polygon || []))
+// ---- visual detection sector: server configuration, live robot pose ----
 const coverageStale = computed(() => props.coverage?.state === 'STALE')
 const coverageInvalid = computed(
   () => props.coverage?.state === 'ERROR' && props.coverage?.reason === 'RIGHT_SENSOR_ORIENTATION_INVALID',
 )
+const visualSectorWorld = computed(() => {
+  const config = props.coverage?.configuration
+  const robot = props.robot
+  if (!config || robot?.x == null || robot?.y == null || robot?.theta == null) return []
+  if (props.coverage?.state !== 'CONNECTED') return []
+  return buildSensorSector(robot, config)
+})
+const visualSectorPoints = computed(() => polygonPoints(visualSectorWorld.value))
+const sensorOriginScreen = computed(() => {
+  const config = props.coverage?.configuration
+  const robot = props.robot
+  if (!config || robot?.x == null || robot?.y == null || robot?.theta == null) return null
+  const origin = bodyToWorld(
+    { x: robot.x, y: robot.y, theta: robot.theta },
+    config.sensor_mount_x_m,
+    config.sensor_mount_y_m,
+  )
+  return point(origin.x, origin.y)
+})
+const coverageRays = computed(() => {
+  const world = visualSectorWorld.value
+  if (world.length < 3) return []
+  const origin = world[0]
+  const arc = world.slice(1)
+  const indices = [
+    Math.floor(arc.length * 0.25),
+    Math.floor(arc.length * 0.5),
+    Math.floor(arc.length * 0.75),
+  ]
+  return indices.map((index) => {
+    const o = point(origin.x, origin.y)
+    const a = point(arc[index].x, arc[index].y)
+    return { x1: o.x, y1: o.y, x2: a.x, y2: a.y }
+  })
+})
 
 // ---- fire markers: slot badges vs free pins ----
 const fireMarkers = computed(() =>
@@ -83,6 +119,10 @@ const slotScreenBounds = (slot: ParkingSlot) => {
   const ys = screens.map((item) => item.y)
   return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) }
 }
+const slotTextLength = (slot: ParkingSlot) => {
+  const b = slotScreenBounds(slot)
+  return Math.max(10, b.maxX - b.minX - 4)
+}
 const slotFireBadges = computed(() =>
   fireMarkers.value
     .map((marker) => {
@@ -105,6 +145,26 @@ const slotFireBadges = computed(() =>
 const freeFirePins = computed(() =>
   fireMarkers.value.filter((marker) => !props.slots.some((slot) => slot.id === marker.alarm.parking_slot_id)),
 )
+
+// ---- robot body frame ----
+// robot_topdown_v4.png: front faces the image top. SVG rotate() is
+// clockwise-positive and world +Y maps to screen up, so pointing the sprite
+// along theta requires an additional 90-degree sprite offset. Verify against
+// the four-direction fixture if the asset orientation changes.
+const ROBOT_SPRITE_FORWARD_OFFSET_DEG = 90
+const robotScreen = computed(() => (props.robot?.x != null && props.robot?.y != null ? point(props.robot.x, props.robot.y) : null))
+const robotYawDeg = computed(() => {
+  const theta = props.robot?.theta
+  if (theta == null) return 0
+  return ROBOT_SPRITE_FORWARD_OFFSET_DEG - (theta * 180) / Math.PI
+})
+const rearLabel = computed(() => {
+  const screen = robotScreen.value
+  const theta = props.robot?.theta
+  if (!screen || theta == null) return null
+  const offset = 32
+  return { x: screen.x - Math.cos(theta) * offset, y: screen.y + Math.sin(theta) * offset }
+})
 
 function updateSize(): void {
   if (!frame.value) return
@@ -161,17 +221,6 @@ onUnmounted(() => observer?.disconnect())
   >
     <svg :viewBox="`0 0 ${size.width} ${size.height}`" role="img" aria-label="停车场二维态势地图">
       <defs>
-        <pattern
-          id="yd-right-dots-blue"
-          width="10"
-          height="10"
-          patternUnits="userSpaceOnUse"
-        >
-          <circle cx="2" cy="2" r="1.1" fill="#4f8cff" />
-        </pattern>
-        <pattern id="yd-right-dots-red" width="10" height="10" patternUnits="userSpaceOnUse">
-          <circle cx="2" cy="2" r="1.1" fill="#ef5757" />
-        </pattern>
         <marker
           id="yd-route-arrow"
           viewBox="0 0 10 10"
@@ -187,25 +236,6 @@ onUnmounted(() => observer?.disconnect())
 
       <rect width="100%" height="100%" class="map-floor" />
 
-      <!-- right-side detection sector: server polygon, drawn under route and slots -->
-      <template v-if="showCoverage && coveragePoints && !coverageInvalid">
-        <polygon
-          :points="coveragePoints"
-          class="coverage-soft-fill"
-          :class="{ danger: hasActiveFire, stale: coverageStale }"
-        />
-        <polygon
-          :points="coveragePoints"
-          class="coverage-dot-pattern"
-          :class="{ danger: hasActiveFire }"
-        />
-        <polygon
-          :points="coveragePoints"
-          class="coverage-outline"
-          :class="{ danger: hasActiveFire }"
-        />
-      </template>
-
       <polyline
         v-if="showRoute && trajectory.length"
         :points="pathPoints"
@@ -213,6 +243,15 @@ onUnmounted(() => observer?.disconnect())
         marker-end="url(#yd-route-arrow)"
       />
 
+      <!-- Z2: detection underlay (very faint fill, under parking slots) -->
+      <polygon
+        v-if="showCoverage && visualSectorPoints && !coverageInvalid"
+        :points="visualSectorPoints"
+        class="coverage-soft-fill"
+        :class="{ danger: hasActiveFire, stale: coverageStale }"
+      />
+
+      <!-- Z3: parking slot fills -->
       <g
         v-for="slot in slots"
         :key="slot.id"
@@ -236,9 +275,36 @@ onUnmounted(() => observer?.disconnect())
             },
           ]"
         />
+      </g>
+
+      <!-- Z4: detection edge + scan rays + sensor origin (over slots, under labels) -->
+      <template v-if="showCoverage && visualSectorPoints && !coverageInvalid">
+        <polygon
+          :points="visualSectorPoints"
+          class="coverage-outline"
+          :class="{ danger: hasActiveFire }"
+        />
+        <line
+          v-for="(ray, index) in coverageRays"
+          :key="index"
+          :x1="ray.x1"
+          :y1="ray.y1"
+          :x2="ray.x2"
+          :y2="ray.y2"
+          class="coverage-ray"
+          :class="{ danger: hasActiveFire }"
+        />
+        <circle v-if="sensorOriginScreen" :cx="sensorOriginScreen.x" :cy="sensorOriginScreen.y" r="3.5" class="coverage-origin" />
+      </template>
+
+      <!-- Z5: parking slot labels -->
+      <g v-for="slot in slots" :key="`label-${slot.id}`" class="slot-label">
         <text
           :x="point(slot.center_pose_json.x, slot.center_pose_json.y).x"
           :y="point(slot.center_pose_json.x, slot.center_pose_json.y).y + 4"
+          text-anchor="middle"
+          :text-length="slotTextLength(slot)"
+          length-adjust="spacingAndGlyphs"
         >
           {{ slot.code }}
         </text>
@@ -262,7 +328,7 @@ onUnmounted(() => observer?.disconnect())
         />
       </template>
 
-      <!-- slot fire badge + leader line -->
+      <!-- Z7: slot fire badge + leader line -->
       <g v-for="badge in slotFireBadges" :key="badge.alarm.id" class="slot-fire-badge">
         <line
           :x1="badge.anchor.x"
@@ -273,7 +339,6 @@ onUnmounted(() => observer?.disconnect())
         <image :href="fireSlotBadgeUrl" :x="badge.x" :y="badge.y" :width="badge.badge" :height="badge.badge" />
       </g>
 
-      <!-- free-position fire pins (no explicit slot) -->
       <g
         v-for="marker in freeFirePins"
         :key="marker.alarm.id"
@@ -284,14 +349,19 @@ onUnmounted(() => observer?.disconnect())
         <image :href="firePinUrl" :x="-14" :y="-14" width="28" height="28" />
       </g>
 
+      <!-- Z8: robot sprite (rotated with the body frame) -->
       <g
-        v-if="robot?.x != null && robot?.y != null"
-        :transform="`translate(${point(robot.x, robot.y).x} ${point(robot.x, robot.y).y}) rotate(${(-(robot.theta || 0) * 180) / Math.PI})`"
+        v-if="robotScreen"
+        :transform="`translate(${robotScreen.x} ${robotScreen.y}) rotate(${robotYawDeg})`"
         class="robot-marker"
       >
         <image :href="robotTopUrl" x="-14" y="-21" width="28" height="42" />
-        <rect class="robot-label-bg" x="-21" y="22" width="42" height="17" rx="8.5" />
-        <text x="0" y="34">{{ robot.vehicle_id }}</text>
+      </g>
+
+      <!-- Z9: robot id label at the rear, kept horizontal -->
+      <g v-if="rearLabel" :transform="`translate(${rearLabel.x} ${rearLabel.y})`" class="robot-rear-label">
+        <rect class="robot-label-bg" x="-21" y="-8.5" width="42" height="17" rx="8.5" />
+        <text x="0" y="4" text-anchor="middle">{{ robot?.vehicle_id }}</text>
       </g>
     </svg>
 

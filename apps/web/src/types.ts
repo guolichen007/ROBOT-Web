@@ -153,6 +153,7 @@ export interface Task {
   progress: number
   target_parking_slot_id?: string
   created_at: string
+  parameters_json?: Record<string, any>
 }
 
 export interface StreamInfo {
@@ -170,6 +171,7 @@ export interface DetectionCoverage {
   covered_parking_slot_ids: string[]
   sensor_origin?: { x: number; y: number; yaw: number }
   reason?: string
+  configuration?: SensorProfile
 }
 
 export interface NavigationPreset {
