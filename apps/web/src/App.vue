@@ -108,6 +108,17 @@ const batteryLevel = computed(() => {
 })
 const batteryBars = computed(() => Array.from({ length: 4 }, (_, index) => index + 1 <= Math.ceil(batteryLevel.value / 25)))
 
+const freshness = computed(() => {
+  if (!robot.value?.server_received_at) return '--'
+  const seconds = (Date.now() - Date.parse(robot.value.server_received_at)) / 1000
+  return `${Math.max(0, seconds).toFixed(0)} 秒前`
+})
+function metricValue(value: number | null | undefined, channel: string, unit: string): string {
+  const state = robot.value?.data_channels?.[channel]?.support_state
+  if (state !== 'CONNECTED' || value == null) return '--'
+  return `${value.toFixed(channel === 'smoke' ? 2 : 1)} ${unit}`
+}
+
 const userInitial = computed(() => (auth.user?.display_name || auth.user?.username || '?').slice(0, 1))
 
 watch(
@@ -215,6 +226,10 @@ function onUserMenuClick(data: { value?: unknown }): void {
             ><LocationIcon class="status-icon" /><span>定位状态</span
             ><b>{{ localizationLabel(robot?.localization_status) }}</b></span
           >
+          <span class="status-cell status-telemetry"><span>顶部热像</span><b>{{ metricValue(robot?.top_ir, 'top_ir', '℃') }}</b></span>
+          <span class="status-cell status-telemetry"><span>底部红外</span><b>{{ metricValue(robot?.bottom_ir, 'bottom_ir', '℃') }}</b></span>
+          <span class="status-cell status-telemetry"><span>烟雾浓度</span><b>{{ metricValue(robot?.smoke, 'smoke', '%') }}</b></span>
+          <span class="status-cell status-telemetry"><span>数据更新</span><b>{{ freshness }}</b></span>
         </div>
         <div class="user-side">
           <time>{{ clock }}</time>

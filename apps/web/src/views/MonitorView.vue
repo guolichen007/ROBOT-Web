@@ -3,29 +3,35 @@ import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ChevronDownIcon, LayersIcon } from 'tdesign-icons-vue-next'
 import MapCanvas from '@/components/MapCanvas.vue'
 import SituationBanner from '@/components/monitor/SituationBanner.vue'
-import RiskTelemetryRibbon from '@/components/monitor/RiskTelemetryRibbon.vue'
 import MapSelectionBar from '@/components/monitor/MapSelectionBar.vue'
 import VideoSurveillancePanel from '@/components/monitor/VideoSurveillancePanel.vue'
 import PrimaryAlarmPanel from '@/components/monitor/PrimaryAlarmPanel.vue'
 import OperationsCommandDock from '@/components/monitor/OperationsCommandDock.vue'
+import DeviceSnapshot from '@/components/monitor/DeviceSnapshot.vue'
+import ProgressRingGate4 from '@/components/monitor/ProgressRingGate4.vue'
 import { usePrimaryAlarm } from '@/composables/usePrimaryAlarm'
 import { useAuthStore } from '@/stores/auth'
 import { useMonitorStore } from '@/stores/monitor'
 import { api, errorMessage } from '@/lib/api'
 import { newUuid } from '@/lib/id'
 import { operationalSituation } from '@/lib/operations'
-import { alarmStateLabel, alarmTypeLabel, taskTypeLabel } from '@/lib/ui-labels'
+import { alarmStateLabel, alarmTypeLabel, reasonCodeLabel, taskTypeLabel } from '@/lib/ui-labels'
+import robotIdleArt from '@/assets/yd/gate4/status/robot_state_idle_art.png'
+import robotOnlineArt from '@/assets/yd/gate4/status/robot_state_online_art.png'
+import robotAlarmArt from '@/assets/yd/gate4/status/robot_state_alarm_art.png'
+import glowBlue from '@/assets/yd/gate4/decor/card_bg_status_glow_blue.png'
+import glowGreen from '@/assets/yd/gate4/decor/card_bg_status_glow_green.png'
 import type { AlarmTimelineItem, DetectionCoverage, StopOperation } from '@/types'
 
 const auth = useAuthStore()
 const monitor = useMonitorStore()
 const selectedSlotId = ref<string | null>(null)
 const busyMode = ref('')
+const busyCommand = ref('')
 const timeline = ref<AlarmTimelineItem[]>([])
 const coverage = ref<DetectionCoverage | null>(null)
 const stopOperation = ref<StopOperation | null>(null)
 const notice = ref('')
-const working = ref(false)
 const layerMenuOpen = ref(false)
 const layers = reactive({ route: true, coverage: true, semantic: false })
 const otherEventsOpen = ref(false)
@@ -46,9 +52,6 @@ const selectedPreset = computed(() =>
 )
 const activeTask = computed(() => monitor.activeTask)
 const trajectory = computed(() => monitor.snapshot.trajectories[0]?.path_json || [])
-const stopReady = computed(() => Boolean(robot.value?.safety_command_ready?.stop_motion))
-const estopReady = computed(() => Boolean(robot.value?.safety_command_ready?.emergency_stop))
-const autonomousReady = computed(() => Boolean(robot.value?.autonomous_task_ready?.patrol))
 const readOnly = computed(() => robot.value?.integration?.source_kind === 'ROS_COMPAT')
 const controlReason = computed(
   () =>
@@ -85,9 +88,9 @@ const navigationReason = computed(() => {
   return ''
 })
 const extinguishReason = computed(() => {
-  if (readOnly.value) return '只读接入中，尚未验证灭火执行链路'
-  if (!robot.value?.autonomous_task_ready?.extinguish) return controlReason.value
-  if (activeTask.value) return `存在执行中任务：${activeTask.value.type}`
+  if (readOnly.value) return '当前为只读接入，控制未开放'
+  if (!robot.value?.autonomous_task_ready?.extinguish) return '控制链路尚未就绪'
+  if (activeTask.value) return '当前已有执行中任务'
   return ''
 })
 const targetSlotId = computed(() => activeTask.value?.target_parking_slot_id)
@@ -104,12 +107,30 @@ const patrolStatus = computed(() =>
 const patrolMode = computed(() => (activeTask.value ? taskTypeLabel(activeTask.value.type) : '—'))
 const patrolProgress = computed(() => activeTask.value?.progress ?? 0)
 const patrolCode = computed(() => activeTask.value?.task_code || '—')
+const roofStream = computed(() => monitor.snapshot.streams.find((item) => item.camera_type === 'roof_rgb'))
+const patrolArt = computed(() => {
+  if (robot.value?.estop_active) return robotAlarmArt
+  if (activeTask.value) return robotOnlineArt
+  return robotIdleArt
+})
+const patrolGlow = computed(() => (activeTask.value ? glowGreen : glowBlue))
 
 function toast(value: string) {
   notice.value = value
   window.setTimeout(() => {
     if (notice.value === value) notice.value = ''
   }, 4000)
+}
+function friendlyError(reason: unknown): string {
+  const data = (reason as { response?: { data?: { error?: { code?: string }; detail?: { code?: string } } } })
+    ?.response?.data
+  const code = data?.error?.code || data?.detail?.code || ''
+  const labeled = reasonCodeLabel(code)
+  if (labeled) return labeled
+  const message = errorMessage(reason)
+  const messageLabel = reasonCodeLabel(message)
+  if (messageLabel) return messageLabel
+  return message
 }
 async function refreshCoverage() {
   if (!robot.value) return
@@ -139,8 +160,11 @@ async function transition(action: 'acknowledge' | 'confirm' | 'resolve') {
   }
 }
 async function dispatch(mode: string) {
-  if (!primaryAlarm.value || !robot.value) return
-  working.value = true
+  if (!primaryAlarm.value) return
+  if (!robot.value) {
+    toast('当前无机器人，无法执行灭火动作')
+    return
+  }
   busyMode.value = mode
   try {
     await api.post(
@@ -164,9 +188,8 @@ async function dispatch(mode: string) {
       )[mode] || '灭火'
     toast(`${label}任务已下发`)
   } catch (reason) {
-    toast(errorMessage(reason))
+    toast(friendlyError(reason))
   } finally {
-    working.value = false
     busyMode.value = ''
   }
 }
@@ -207,7 +230,11 @@ async function navigate() {
   }
 }
 async function patrol() {
-  if (!robot.value) return
+  if (!robot.value) {
+    toast('当前无机器人，无法开始巡检')
+    return
+  }
+  busyCommand.value = 'patrol'
   try {
     const plans = (await api.get('/patrol-plans')).data as Array<{
       id: string
@@ -224,7 +251,9 @@ async function patrol() {
     await monitor.loadSnapshot()
     toast('巡检任务已创建')
   } catch (reason) {
-    toast(errorMessage(reason))
+    toast(friendlyError(reason))
+  } finally {
+    busyCommand.value = ''
   }
 }
 async function pollStop(id: string) {
@@ -235,12 +264,18 @@ async function pollStop(id: string) {
       ['VEHICLE_STATIONARY_CONFIRMED', 'PARTIAL_UNCONFIRMED', 'UNCONFIRMED', 'FAILED'].includes(
         stopOperation.value?.state || '',
       )
-    )
+    ) {
       window.clearInterval(stopTimer)
+      await monitor.loadSnapshot()
+    }
   }, 500)
 }
 async function stop() {
-  if (!robot.value) return
+  if (!robot.value) {
+    toast('当前无机器人，无法停止巡检')
+    return
+  }
+  busyCommand.value = 'stop'
   try {
     stopOperation.value = (
       await api.post(
@@ -250,13 +285,19 @@ async function stop() {
       )
     ).data
     if (stopOperation.value) void pollStop(stopOperation.value.id)
-    toast('正在独立确认任务取消与车辆静止')
+    toast('正在请求停止巡检，独立确认任务取消与车辆静止')
   } catch (reason) {
-    toast(errorMessage(reason))
+    toast(friendlyError(reason))
+  } finally {
+    busyCommand.value = ''
   }
 }
 async function home() {
-  if (!robot.value) return
+  if (!robot.value) {
+    toast('当前无机器人，无法返回待命区')
+    return
+  }
+  busyCommand.value = 'home'
   const preset = monitor.snapshot.navigation_presets?.find((item) => item.category === 'WAITING_AREA')
   try {
     await api.post(
@@ -264,22 +305,32 @@ async function home() {
       { params: { navigation_preset_id: preset?.id } },
       { headers: { 'Idempotency-Key': newUuid() } },
     )
-    toast('返回等待区命令已创建')
+    await monitor.loadSnapshot()
+    toast('返回待命区命令已下发')
   } catch (reason) {
-    toast(errorMessage(reason))
+    toast(friendlyError(reason))
+  } finally {
+    busyCommand.value = ''
   }
 }
 async function estop() {
-  if (!robot.value) return
+  if (!robot.value) {
+    toast('当前无机器人，无法执行软件急停')
+    return
+  }
+  busyCommand.value = 'estop'
   try {
     await api.post(
       `/robots/${robot.value.vehicle_id}/commands/emergency-stop`,
       {},
       { headers: { 'Idempotency-Key': newUuid() } },
     )
-    toast('软件急停已发送，等待车端应用层 ACK')
+    await monitor.loadSnapshot()
+    toast('软件急停命令已发送，等待车辆确认')
   } catch (reason) {
-    toast(errorMessage(reason))
+    toast(friendlyError(reason))
+  } finally {
+    busyCommand.value = ''
   }
 }
 
@@ -360,7 +411,6 @@ onUnmounted(() => {
       </section>
       <aside class="yd-monitor-side" :class="{ 'is-alarm': Boolean(primaryAlarm) }">
         <VideoSurveillancePanel :streams="monitor.snapshot.streams" />
-        <RiskTelemetryRibbon :robot="robot" :freshness="freshness" />
         <template v-if="primaryAlarm">
           <PrimaryAlarmPanel
             :alarm="primaryAlarm"
@@ -408,18 +458,23 @@ onUnmounted(() => {
             </div>
           </section>
         </template>
-        <section v-else class="panel yd-patrol-card">
-          <div class="patrol-state">
-            <span class="ptitle">巡检状态</span>
-            <strong>{{ patrolStatus }}</strong>
-            <span>{{ activeTask ? `任务进行中 · ${patrolCode}` : '设备运行良好' }}</span>
-          </div>
-          <div class="yd-patrol-meta">
-            <div><span>巡检模式</span><br /><b>{{ patrolMode }}</b></div>
-            <div><span>任务进度</span><br /><b>{{ patrolProgress }}%</b></div>
-          </div>
-          <div class="score-ring">{{ patrolProgress }}%</div>
-        </section>
+        <template v-else>
+          <DeviceSnapshot :robot="robot" :task="activeTask" :stream="roofStream" :freshness="freshness" />
+          <section class="panel yd-patrol-card" :class="{ 'is-patrolling': activeTask }">
+            <img class="patrol-glow" :src="patrolGlow" alt="" aria-hidden="true" />
+            <img class="patrol-art" :src="patrolArt" alt="" aria-hidden="true" />
+            <div class="patrol-state">
+              <span class="ptitle">巡检状态</span>
+              <strong>{{ patrolStatus }}</strong>
+              <span>{{ activeTask ? `任务进行中 · ${patrolCode}` : '等待下发任务' }}</span>
+            </div>
+            <div class="yd-patrol-meta">
+              <div><span>巡检模式</span><b>{{ patrolMode }}</b></div>
+              <div><span>任务进度</span><b>{{ patrolProgress }}%</b></div>
+            </div>
+            <ProgressRingGate4 :value="patrolProgress" label="任务进度" />
+          </section>
+        </template>
       </aside>
     </section>
     <section v-if="stopOperation" class="stop-operation-state" aria-live="polite">
@@ -434,9 +489,7 @@ onUnmounted(() => {
     </section>
     <section class="yd-command-dock">
       <OperationsCommandDock
-        :disabled="working || !autonomousReady"
-        :stop-disabled="working || !stopReady"
-        :estop-disabled="working || !estopReady"
+        :busy="busyCommand"
         :reason="dockReason"
         @patrol="patrol"
         @stop="stop"

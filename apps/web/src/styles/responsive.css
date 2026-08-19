@@ -15,7 +15,7 @@
     grid-template-columns: minmax(0, 1.5fr) minmax(360px, 0.95fr);
   }
   .yd-monitor-side {
-    grid-template-rows: minmax(220px, 1.35fr) auto minmax(140px, 0.65fr);
+    grid-template-rows: minmax(220px, 1.35fr) minmax(140px, 0.65fr) minmax(170px, 0.75fr);
   }
 }
 
@@ -75,25 +75,20 @@
     gap: 8px;
   }
   .yd-monitor-side {
-    grid-template-rows: minmax(190px, 1.3fr) auto minmax(120px, 0.6fr);
+    grid-template-rows: minmax(190px, 1.3fr) minmax(120px, 0.6fr) minmax(160px, 0.7fr);
     gap: 8px;
   }
-  .risk-ribbon-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-  .risk-ribbon article {
-    min-height: 52px;
-    padding: 6px 9px;
+  .ds-grid {
+    grid-template-columns: 1fr;
   }
   .yd-patrol-card {
-    grid-template-columns: 1fr 1fr 70px;
+    grid-template-columns: 1fr auto 76px;
     padding: 10px 14px;
   }
-  .score-ring {
-    width: 62px;
-    height: 62px;
-    border-width: 6px;
-    font-size: 15px;
+  .yd-patrol-card .patrol-art {
+    width: 72px;
+    height: 66px;
+    opacity: 0.7;
   }
   .yd-command-dock {
     min-height: 74px;
