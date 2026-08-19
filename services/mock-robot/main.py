@@ -42,7 +42,8 @@ class MockRobot:
         self.map_checksum = os.getenv("MOCK_MAP_CHECKSUM", "demo-map-v1")
         self.boot_id = str(uuid4())
         self.seq = 0
-        self.x, self.y, self.theta = 39.0, 2.0, math.pi / 2
+        self.home = (1.2, 1.2, math.pi / 2)  # REMOTE_WAITING_AREA
+        self.x, self.y, self.theta = self.home
         self.linear = 0.0
         self.angular = 0.0
         self.battery = 96.0
@@ -76,11 +77,6 @@ class MockRobot:
         self.publish_count = 0
         self.rebooted = False
         self.offline_sent = False
-        self.patrol_route = [
-            *[(39.0, 2.0 + index * 0.55) for index in range(49)],
-            *[(39.0 - index * 0.6, 28.4) for index in range(62)],
-        ]
-        self.route_index = 0
         self.client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
             client_id=f"mock-{self.vehicle_id}-{self.boot_id[:8]}",
@@ -198,6 +194,18 @@ class MockRobot:
         self.publish("task_status", payload, 1)
         return payload
 
+    def _waypoints_for(self, command: dict) -> list[tuple[float, float]]:
+        params = command.get("params", {})
+        if command["cmd"] == "return_dock":
+            return [self.home[:2]]
+        trajectory = params.get("trajectory")
+        if isinstance(trajectory, list) and trajectory:
+            return [(float(p["x"]), float(p["y"])) for p in trajectory if "x" in p and "y" in p]
+        target = params.get("target_pose") if params.get("mission_kind") == "NAVIGATE_TO_PRESET" else None
+        if target and "x" in target and "y" in target:
+            return [(float(target["x"]), float(target["y"]))]
+        return []
+
     def simulate_task(self, command: dict) -> None:
         task_id = command.get("task_id") or command.get("params", {}).get("task_id")
         if not task_id:
@@ -211,48 +219,45 @@ class MockRobot:
                 if command["cmd"] == "patrol"
                 else "RETURN_DOCK"
             )
-        params = command.get("params", {})
-        preset_navigation = params.get("mission_kind") == "NAVIGATE_TO_PRESET"
-        target_pose = params.get("target_pose", {}) if preset_navigation else {}
+        waypoints = self._waypoints_for(command)
         emitted = [self.task_status(task_id, "accepted", "ACCEPTED", 0)]
-        for progress in (10, 25, 45, 65, 85):
-            if self.stop_event.wait(0.6):
-                return
-            with self.lock:
-                if self.estop or self.active_task_id != task_id:
+
+        if waypoints:
+            total = len(waypoints)
+            for index, (wx, wy) in enumerate(waypoints):
+                while True:
+                    if self.stop_event.wait(0.05):
+                        return
+                    with self.lock:
+                        if self.estop or self.active_task_id != task_id:
+                            return
+                        dx, dy = wx - self.x, wy - self.y
+                        distance = math.hypot(dx, dy)
+                        if distance < 0.6:
+                            self.linear = self.angular = 0
+                            break
+                        desired = math.atan2(dy, dx)
+                        delta = math.atan2(
+                            math.sin(desired - self.theta), math.cos(desired - self.theta)
+                        )
+                        self.angular = max(-0.8, min(0.8, delta * 2.2))
+                        # Accelerated time, not teleport: fast straight lanes, slow turns.
+                        self.linear = 5.0 if abs(delta) < 0.35 else 1.2
+                progress = round((index + 1) / total * 100)
+                emitted.append(self.task_status(task_id, "executing", "NAVIGATING", progress))
+        else:
+            for progress in (10, 25, 45, 65, 85):
+                if self.stop_event.wait(0.4):
                     return
-                if command["cmd"] == "patrol" and (
-                    preset_navigation or self.route_index < len(self.patrol_route)
-                ):
-                    target_x, target_y = (
-                        (float(target_pose["x"]), float(target_pose["y"]))
-                        if preset_navigation
-                        else self.patrol_route[self.route_index]
-                    )
-                    desired = math.atan2(target_y - self.y, target_x - self.x)
-                    delta = math.atan2(
-                        math.sin(desired - self.theta), math.cos(desired - self.theta)
-                    )
-                    self.angular = max(-0.6, min(0.6, delta * 1.8))
-                    self.linear = 0.24 if abs(delta) < 0.4 else 0.08
-                    if (
-                        not preset_navigation
-                        and math.hypot(target_x - self.x, target_y - self.y) < 0.45
-                    ):
-                        self.route_index = (self.route_index + 1) % len(self.patrol_route)
-                else:
-                    self.linear = 0.18
-                    self.angular = 0.08 * math.sin(progress)
-            emitted.append(self.task_status(task_id, "executing", "NAVIGATING", progress))
+                with self.lock:
+                    if self.estop or self.active_task_id != task_id:
+                        return
+                emitted.append(self.task_status(task_id, "executing", "NAVIGATING", progress))
+
         if command["cmd"] == "extinguish":
             emitted.append(self.task_status(task_id, "executing", "EXTINGUISHING", 95))
-            time.sleep(0.8)
-        if preset_navigation:
-            with self.lock:
-                self.x = float(target_pose["x"])
-                self.y = float(target_pose["y"])
-                self.theta = float(target_pose.get("theta", self.theta))
-                self.linear = self.angular = 0
+            time.sleep(0.6)
+
         emitted.append(self.task_status(task_id, "completed", "COMPLETED", 100))
         with self.lock:
             self.active_task_id = None
