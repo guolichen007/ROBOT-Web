@@ -139,9 +139,12 @@ export const auditActionLabel = (v?: string): string =>
     PATROL_STOP_REQUEST: '请求停止巡检',
     TASK_PATROL_CREATE: '创建巡检任务',
     TASK_EXTINGUISH_CREATE: '创建灭火任务',
+    NAVIGATE_PRESET_CREATE: '创建导航任务',
     ALARM_MANUAL_CREATE: '人工创建火情',
     ALARM_ACKNOWLEDGE: '确认收到火情',
+    ALARM_ACKNOWLEDGED: '已确认收到',
     ALARM_CONFIRM: '确认火情',
+    ALARM_CONFIRMED: '已确认火情',
     ALARM_RESOLVE: '解除火情',
     ALARM_RESOLVED: '火情已解除',
     RETURN_DOCK: '返回待命区',
@@ -150,6 +153,20 @@ export const auditActionLabel = (v?: string): string =>
     MAP_PUBLISH: '发布地图版本',
     MAP_ARCHIVE: '归档地图版本',
     USER_CREATE: '创建用户',
+  })[String(v || '').toUpperCase()] || String(v || '')
+
+export const resourceTypeLabel = (v?: string): string =>
+  ({
+    TASK: '任务',
+    COMMAND: '命令',
+    FIRE_EVENT: '火情事件',
+    NAVIGATION_PRESET: '导航预设点',
+    PATROL_PLAN: '巡检计划',
+    ROBOT: '机器人',
+    USER: '用户',
+    MAP: '地图',
+    MAP_VERSION: '地图版本',
+    MEDIA: '媒体',
   })[String(v || '').toUpperCase()] || String(v || '')
 
 // Generic chip label covering the common fleet/alarm/map/user/audit states.

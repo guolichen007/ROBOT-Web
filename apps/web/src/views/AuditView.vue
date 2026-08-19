@@ -4,7 +4,7 @@ import DataTable from '@/components/DataTable.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import StateChip from '@/components/StateChip.vue'
 import { api } from '@/lib/api'
-import { auditActionLabel } from '@/lib/ui-labels'
+import { auditActionLabel, resourceTypeLabel } from '@/lib/ui-labels'
 
 const rows = ref<any[]>([])
 onMounted(async () => {
@@ -35,6 +35,7 @@ onMounted(async () => {
       <template #action="{ value }">
         <span :title="String(value)">{{ auditActionLabel(String(value)) }}</span>
       </template>
+      <template #resource_type="{ value }">{{ resourceTypeLabel(String(value)) }}</template>
       <template #result="{ value }"><StateChip :value="String(value)" /></template>
     </DataTable>
   </section>

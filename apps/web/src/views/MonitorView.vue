@@ -51,7 +51,14 @@ const selectedPreset = computed(() =>
   ),
 )
 const activeTask = computed(() => monitor.activeTask)
-const trajectory = computed(() => monitor.snapshot.trajectories[0]?.path_json || [])
+const trajectory = computed(() => {
+  const trajectories = monitor.snapshot.trajectories
+  return (
+    trajectories.find((item) => item.code === 'RIGHT_SIDE_S_CRUISE')?.path_json ||
+    trajectories[0]?.path_json ||
+    []
+  )
+})
 const readOnly = computed(() => robot.value?.integration?.source_kind === 'ROS_COMPAT')
 const readinessText = computed(() => {
   const labels = [
@@ -248,10 +255,14 @@ async function patrol() {
     const plans = (await api.get('/patrol-plans')).data as Array<{
       id: string
       robot_id: string
+      code: string
       enabled: boolean
     }>
-    const plan = plans.find((item) => item.robot_id === robot.value?.id && item.enabled)
-    if (!plan) throw new Error('当前车辆没有可执行的巡检计划')
+    const enabled = plans.filter((item) => item.robot_id === robot.value?.id && item.enabled)
+    const plan =
+      enabled.find((item) => item.code === 'RIGHT_SIDE_S_CRUISE_PLAN') ||
+      (enabled.length === 1 ? enabled[0] : undefined)
+    if (!plan) throw new Error('存在多个可用巡检计划，请前往任务管理选择')
     await api.post(
       '/tasks/patrol-plan',
       { robot_id: robot.value.vehicle_id, patrol_plan_id: plan.id, parameters: { source: 'OPERATIONS_HMI' } },

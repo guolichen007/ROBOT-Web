@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { localizationLabel, robotModeLabel, streamStateLabel, supportStateLabel, taskTypeLabel } from '@/lib/ui-labels'
+import { robotModeLabel, streamStateLabel, supportStateLabel, taskTypeLabel } from '@/lib/ui-labels'
 import type { RobotState, StreamInfo, Task } from '@/types'
 
 const props = defineProps<{ robot?: RobotState; task?: Task; stream?: StreamInfo; freshness: string }>()
@@ -22,10 +22,8 @@ const rows = computed(() => [
   { label: '当前模式', value: mode.value },
   { label: '当前任务', value: props.task ? taskTypeLabel(props.task.type) : '空闲' },
   { label: '任务编号', value: props.task?.task_code || '--' },
-  { label: '定位状态', value: localizationLabel(props.robot?.localization_status) },
   { label: '右侧检测', value: rightDetection.value },
   { label: '视频状态', value: streamStateLabel(props.stream?.state) },
-  { label: '数据更新', value: props.freshness },
 ])
 </script>
 
@@ -33,7 +31,7 @@ const rows = computed(() => [
   <section class="panel device-snapshot">
     <div class="ds-head">
       <span>设备快照</span>
-      <small>{{ mode }}</small>
+      <small>数据 {{ freshness }}</small>
     </div>
     <dl class="ds-grid">
       <div v-for="row in rows" :key="row.label">

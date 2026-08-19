@@ -2,7 +2,6 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { FullscreenIcon, ZoomInIcon, ZoomOutIcon } from 'tdesign-icons-vue-next'
 import { MapAdapter } from '@/lib/map-adapter'
-import { buildSensorSector, isSectorOnVehicleRight, rightSensorProfile } from '@/lib/detection-geometry'
 import type { Alarm, DetectionCoverage, MapPoint, MapVersion, ParkingSlot, RobotState } from '@/types'
 import fireSlotBadgeUrl from '@/assets/yd/map/fire_slot_badge_v4.svg'
 import firePinUrl from '@/assets/yd/map/fire_pin_v4_64.png'
@@ -53,20 +52,11 @@ const slotPoints = (slot: ParkingSlot) =>
 const pathPoints = computed(() => polygonPoints(props.trajectory))
 const alarmSlots = computed(() => new Map(props.alarms.map((item) => [item.parking_slot_id, item])))
 
-// ---- right-side detection sector (vehicle-relative, from RIGHT sensor profile) ----
-const rightSensor = computed(() => rightSensorProfile(props.robot))
-const sectorWorld = computed(() => {
-  const profile = rightSensor.value
-  const robot = props.robot
-  if (!profile || !robot) return []
-  if (!['CONNECTED', 'STALE'].includes(profile.support_state)) return []
-  return buildSensorSector(robot, profile)
-})
-const sectorPoints = computed(() => polygonPoints(sectorWorld.value))
-const sectorStale = computed(() => rightSensor.value?.support_state === 'STALE')
-const sectorInvalid = computed(
-  () =>
-    sectorWorld.value.length > 0 && !isSectorOnVehicleRight(props.robot as RobotState, sectorWorld.value),
+// ---- right-side detection sector (server-authoritative polygon) ----
+const coveragePoints = computed(() => polygonPoints(props.coverage?.polygon || []))
+const coverageStale = computed(() => props.coverage?.state === 'STALE')
+const coverageInvalid = computed(
+  () => props.coverage?.state === 'ERROR' && props.coverage?.reason === 'RIGHT_SENSOR_ORIENTATION_INVALID',
 )
 
 // ---- fire markers: slot badges vs free pins ----
@@ -197,20 +187,20 @@ onUnmounted(() => observer?.disconnect())
 
       <rect width="100%" height="100%" class="map-floor" />
 
-      <!-- right-side detection sector: drawn under route and slots -->
-      <template v-if="showCoverage && sectorPoints && !sectorInvalid">
+      <!-- right-side detection sector: server polygon, drawn under route and slots -->
+      <template v-if="showCoverage && coveragePoints && !coverageInvalid">
         <polygon
-          :points="sectorPoints"
+          :points="coveragePoints"
           class="coverage-soft-fill"
-          :class="{ danger: hasActiveFire, stale: sectorStale }"
+          :class="{ danger: hasActiveFire, stale: coverageStale }"
         />
         <polygon
-          :points="sectorPoints"
+          :points="coveragePoints"
           class="coverage-dot-pattern"
           :class="{ danger: hasActiveFire }"
         />
         <polygon
-          :points="sectorPoints"
+          :points="coveragePoints"
           class="coverage-outline"
           :class="{ danger: hasActiveFire }"
         />
@@ -316,7 +306,7 @@ onUnmounted(() => observer?.disconnect())
       <span><i class="legend-sector"></i>右侧检测范围</span>
       <span v-if="hasActiveFire"><i class="legend-fire"></i>火情位置</span>
     </div>
-    <div v-if="sectorInvalid" class="map-warning">右侧检测配置异常</div>
+    <div v-if="coverageInvalid" class="map-warning">右侧检测配置异常</div>
     <div v-if="!mapVersion" class="map-empty">
       <strong>暂无有效地图</strong><span>未绘制任何演示道路或停车场几何</span>
     </div>

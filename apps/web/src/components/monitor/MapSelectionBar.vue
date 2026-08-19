@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { localizationLabel } from '@/lib/ui-labels'
 import type { DetectionCoverage, NavigationPreset, ParkingSlot, RobotState } from '@/types'
 defineProps<{
   parkingSlot: ParkingSlot
@@ -14,12 +15,12 @@ defineEmits<{ cancel: []; navigate: []; alarm: [] }>()
     <div>
       <strong>已选择 {{ parkingSlot.code }}</strong
       ><span
-        >{{ preset ? `检测点 ${preset.code}` : '没有显式关联的巡检检测点' }} · 地图
+        >{{ preset ? `巡检预设点 ${preset.code}` : '该车位未关联巡检预设点' }} · 地图
         {{ robot?.map_version || '--' }}</span
       >
     </div>
     <div>
-      <span>定位 {{ robot?.localization_status || '未知' }}</span
+      <span>定位{{ localizationLabel(robot?.localization_status) }}</span
       ><span>右侧覆盖 {{ coverage?.covered_parking_slot_ids.includes(parkingSlot.id) ? '是' : '否' }}</span
       ><small v-if="disabledReason">{{ disabledReason }}</small>
     </div>

@@ -169,6 +169,7 @@ export interface DetectionCoverage {
   polygon: Array<{ x: number; y: number }>
   covered_parking_slot_ids: string[]
   sensor_origin?: { x: number; y: number; yaw: number }
+  reason?: string
 }
 
 export interface NavigationPreset {

@@ -928,39 +928,62 @@
   height: 100%;
   min-height: 0;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+.alarm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--yd-border-soft);
+  background: var(--yd-surface);
+}
+.alarm-head-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.alarm-head-copy span {
+  color: var(--yd-text-3);
+  font-size: 12px;
+}
+.alarm-head-copy strong {
+  font-size: 15px;
+  color: var(--yd-danger);
+}
+.alarm-head-copy small {
+  color: var(--yd-text-2);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.alarm-body {
+  min-height: 0;
+  display: grid;
   grid-template-columns: minmax(0, 1.75fr) minmax(180px, 0.75fr);
-  grid-template-areas: 'detail actions';
   gap: 0;
+  overflow: hidden;
 }
 .alarm-detail-column {
-  grid-area: detail;
   min-width: 0;
   padding: 12px;
   overflow: auto;
   border-right: 1px solid var(--yd-border-soft);
 }
 .alarm-actions-column {
-  grid-area: actions;
   min-width: 0;
   padding: 12px;
   overflow: auto;
 }
-.alarm-detail-column > header,
 .alarm-actions-column > header {
   display: grid;
   gap: 3px;
   margin-bottom: 10px;
 }
-.alarm-detail-column > header span,
 .alarm-actions-column > header span {
-  color: var(--yd-text-3);
-  font-size: 12px;
-}
-.alarm-detail-column > header strong {
-  font-size: 15px;
-  color: var(--yd-danger);
-}
-.alarm-detail-column > header small {
   color: var(--yd-text-3);
   font-size: 12px;
 }
