@@ -1,11 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { Dropdown as TDropdown } from 'tdesign-vue-next'
 import {
   AlarmIcon,
+  BatteryIcon,
+  ChevronDownIcon,
   DashboardIcon,
   HistoryIcon,
+  LinkIcon,
+  LocationIcon,
   NotificationIcon,
+  RobotIcon,
   SettingIcon,
   TaskIcon,
   VehicleIcon,
@@ -122,6 +128,10 @@ async function logout(): Promise<void> {
   await auth.logout()
   await router.push('/login')
 }
+
+function onUserMenuClick(data: { value?: unknown }): void {
+  if (data.value === 'logout') void logout()
+}
 </script>
 
 <template>
@@ -172,32 +182,52 @@ async function logout(): Promise<void> {
       <div class="sidebar-foot">科技赋能&nbsp;&nbsp;领航未来</div>
     </aside>
     <main class="workspace">
+      <div class="workspace-alert"></div>
       <header class="topbar">
         <div class="status-group">
           <span class="status-cell"
-            ><i :class="monitor.connected ? 'ok' : ''"></i>链路状态：<b>{{
+            ><LinkIcon class="status-icon" :class="{ ok: monitor.connected }" /><span
+              >链路状态</span
+            ><b :class="monitor.connected ? 'ok' : ''">{{
               monitor.connected ? '正常' : '正在重连'
             }}</b></span
           >
           <span class="status-cell"
-            ><i :class="robot?.online_state === 'ONLINE' ? 'ok' : ''"></i
-            ><b>{{ robot?.online_state === 'ONLINE' ? '机器人在线' : '机器人离线' }}</b></span
+            ><RobotIcon class="status-icon" :class="{ ok: robot?.online_state === 'ONLINE' }" /><span
+              >机器人</span
+            ><b :class="robot?.online_state === 'ONLINE' ? 'ok' : ''">{{
+              robot?.online_state === 'ONLINE' ? '在线' : '离线'
+            }}</b></span
           >
           <span class="status-cell"
-            >电量
-            <b>{{ robot?.battery == null ? '--' : `${robot.battery.toFixed(0)}%` }}</b>
+            ><BatteryIcon class="status-icon" /><span>电量</span
+            ><b>{{ robot?.battery == null ? '--' : `${robot.battery.toFixed(0)}%` }}</b>
             <span class="battery-bars"
               ><i v-for="(on, index) in batteryBars" :key="index" :class="{ full: on }"></i
             ></span>
           </span>
-          <span class="status-cell">当前任务：<b>{{ activeTask?.type || '空闲' }}</b></span>
-          <span class="status-cell">定位状态：<b>{{ robot?.localization_status || '--' }}</b></span>
+          <span class="status-cell"
+            ><TaskIcon class="status-icon" /><span>当前任务</span
+            ><b>{{ activeTask?.type || '空闲' }}</b></span
+          >
+          <span class="status-cell"
+            ><LocationIcon class="status-icon" /><span>定位状态</span
+            ><b>{{ robot?.localization_status || '--' }}</b></span
+          >
         </div>
         <div class="user-side">
           <time>{{ clock }}</time>
-          <span class="avatar">{{ userInitial }}</span>
-          <b>{{ auth.user?.display_name || auth.user?.username }}</b>
-          <button type="button" @click="logout">退出</button>
+          <t-dropdown
+            :options="[{ content: '退出登录', value: 'logout' }]"
+            trigger="click"
+            @click="onUserMenuClick"
+          >
+            <button class="user-trigger" type="button">
+              <span class="avatar">{{ userInitial }}</span>
+              <b>{{ auth.user?.display_name || auth.user?.username }}</b>
+              <ChevronDownIcon class="user-chevron" />
+            </button>
+          </t-dropdown>
         </div>
       </header>
       <section class="page" :class="{ 'page--monitor': isMonitor }">

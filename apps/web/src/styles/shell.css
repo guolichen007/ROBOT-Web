@@ -198,7 +198,7 @@
 }
 .status-cell {
   height: 34px;
-  padding: 0 22px;
+  padding: 0 20px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -221,15 +221,17 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.status-cell i {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--yd-warning);
+.status-cell b.ok {
+  color: var(--yd-success);
+}
+.status-icon {
+  width: 18px;
+  height: 18px;
+  color: #5b7399;
   flex: 0 0 auto;
 }
-.status-cell i.ok {
-  background: var(--yd-success);
+.status-icon.ok {
+  color: var(--yd-success);
 }
 .battery-bars {
   display: inline-flex;
@@ -269,22 +271,30 @@
   font-size: 13px;
   font-weight: 600;
 }
-.user-side > b {
-  color: var(--yd-text);
-  font-weight: 600;
-}
-.user-side button {
-  height: 32px;
-  padding: 0 14px;
-  border: 1px solid var(--yd-border-strong);
+.user-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  height: 36px;
+  padding: 0 8px;
   border-radius: var(--yd-radius-sm);
-  background: var(--yd-surface);
-  color: var(--yd-text-2);
-  font-size: 12px;
+  color: var(--yd-text);
+  font-size: 13px;
 }
-.user-side button:hover {
-  color: var(--yd-primary);
-  border-color: var(--yd-primary);
+.user-trigger:hover {
+  background: #f2f6fc;
+}
+.user-trigger b {
+  font-weight: 600;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.user-chevron {
+  width: 15px;
+  height: 15px;
+  color: var(--yd-text-3);
 }
 
 /* ---------------- Page wrapper ---------------- */
