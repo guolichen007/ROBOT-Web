@@ -427,6 +427,17 @@ def calculate_detection_coverage(
                 origin[1] + profile.coverage_range_m * math.sin(yaw),
             )
         )
+
+    # The vehicle only detects its right side. Never mirror a mis-configured
+    # mount into a fake "correct" sector; surface the invariant violation.
+    if not _sector_is_on_vehicle_right(robot_pose, sector):
+        return {
+            "state": "ERROR",
+            "reason": "RIGHT_SENSOR_ORIENTATION_INVALID",
+            "polygon": [],
+            "covered_parking_slot_ids": [],
+        }
+
     covered: list[str] = []
     for slot in slots:
         source = (
@@ -446,6 +457,18 @@ def calculate_detection_coverage(
         "covered_parking_slot_ids": covered,
         "configuration": serialize_model(profile),
     }
+
+
+def _sector_is_on_vehicle_right(robot_pose: dict[str, float], sector: list[tuple[float, float]]) -> bool:
+    theta = float(robot_pose["theta"])
+    arc = sector[1:]
+    centroid = (
+        sum(point[0] for point in arc) / len(arc),
+        sum(point[1] for point in arc) / len(arc),
+    )
+    rel = (centroid[0] - float(robot_pose["x"]), centroid[1] - float(robot_pose["y"]))
+    right = (math.sin(theta), -math.cos(theta))
+    return rel[0] * right[0] + rel[1] * right[1] > 0
 
 
 @router.get("/robots/{robot_id}/detection-coverage")
