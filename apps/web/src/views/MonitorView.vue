@@ -53,17 +53,26 @@ const selectedPreset = computed(() =>
 const activeTask = computed(() => monitor.activeTask)
 const trajectory = computed(() => monitor.snapshot.trajectories[0]?.path_json || [])
 const readOnly = computed(() => robot.value?.integration?.source_kind === 'ROS_COMPAT')
+const readinessText = computed(() => {
+  const labels = [
+    ...new Set((robot.value?.readiness_reasons || []).map((code) => reasonCodeLabel(code) || '控制链路尚未就绪')),
+  ].filter(Boolean)
+  return labels.join('、')
+})
 const controlReason = computed(
   () =>
-    (readOnly.value ? 'ROS1 只读接入中，尚未验证下行控制链路' : '') ||
-    robot.value?.readiness_reasons?.join('、') ||
-    robot.value?.control_disabled_reason ||
+    (readOnly.value ? '当前为只读接入，控制未开放' : '') ||
+    readinessText.value ||
+    (robot.value?.control_disabled_reason
+      ? reasonCodeLabel(robot.value.control_disabled_reason) || '控制链路未验证'
+      : '') ||
     '控制链路未验证',
 )
 const dockReason = computed(() => {
-  if (readOnly.value) return 'ROS1 只读接入中，尚未验证下行控制链路'
-  if (robot.value?.readiness_reasons?.length) return robot.value.readiness_reasons.join('、')
-  if (robot.value?.control_disabled_reason) return robot.value.control_disabled_reason
+  if (readOnly.value) return '当前为只读接入，控制未开放'
+  if (readinessText.value) return readinessText.value
+  const disabled = robot.value?.control_disabled_reason
+  if (disabled) return reasonCodeLabel(disabled) || '控制链路尚未就绪'
   return ''
 })
 const freshness = computed(() => {
@@ -333,6 +342,50 @@ async function estop() {
     busyCommand.value = ''
   }
 }
+async function waitForEstopCleared(commandId?: string): Promise<'cleared' | 'pending' | 'rejected'> {
+  const started = Date.now()
+  while (Date.now() - started < 10000) {
+    try {
+      await monitor.loadSnapshot()
+    } catch {
+      /* keep polling */
+    }
+    if (robot.value?.estop_active === false) return 'cleared'
+    if (commandId) {
+      try {
+        const command = (await api.get(`/commands/${commandId}`)).data
+        if (command?.ack_status === 'rejected') return 'rejected'
+      } catch {
+        /* command may not exist yet */
+      }
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 500))
+  }
+  return robot.value?.estop_active === false ? 'cleared' : 'pending'
+}
+async function resetEstop() {
+  if (!robot.value) {
+    toast('当前无机器人，无法解除软件急停')
+    return
+  }
+  busyCommand.value = 'reset-estop'
+  try {
+    const { data } = await api.post(
+      `/robots/${robot.value.vehicle_id}/commands/reset-estop`,
+      {},
+      { headers: { 'Idempotency-Key': newUuid() } },
+    )
+    toast('正在解除软件急停，等待车辆确认')
+    const result = await waitForEstopCleared(data?.command_id)
+    if (result === 'cleared') toast('软件急停已解除，车辆当前处于待命状态')
+    else if (result === 'rejected') toast('复位命令被车辆拒绝')
+    else toast('复位命令已下发，但尚未收到车辆状态确认')
+  } catch (reason) {
+    toast(friendlyError(reason))
+  } finally {
+    busyCommand.value = ''
+  }
+}
 
 onMounted(() => {
   if (!monitor.connected && !monitor.resyncing) void monitor.start()
@@ -491,10 +544,12 @@ onUnmounted(() => {
       <OperationsCommandDock
         :busy="busyCommand"
         :reason="dockReason"
+        :estop-active="Boolean(robot?.estop_active)"
         @patrol="patrol"
         @stop="stop"
         @home="home"
         @estop="estop"
+        @reset-estop="resetEstop"
       />
     </section>
   </main>

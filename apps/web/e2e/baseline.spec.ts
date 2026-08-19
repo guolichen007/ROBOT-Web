@@ -161,6 +161,45 @@ test('stop patrol waits for task cancellation, stop ACK and five fresh stationar
   await expect(page.getByText(/连续静止帧 5\/5/)).toBeVisible()
 })
 
+test('software estop latches and reset-estop recovers to standby', async ({ page, request }) => {
+  await forceRelease(request)
+  await waitForRobotIdle(request)
+
+  // Ensure the robot is not already latched before the test.
+  const accessToken = await token(request)
+  const stateResponse = await request.get('/api/v1/robots/R001', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if ((await stateResponse.json()).estop_active) {
+    await request.post(
+      '/api/v1/robots/R001/commands/reset-estop',
+      { headers: { Authorization: `Bearer ${accessToken}`, 'Idempotency-Key': crypto.randomUUID() } },
+    )
+  }
+
+  await login(page, request)
+  const estopButton = page.getByRole('button', { name: '软件急停' })
+  await estopButton.dispatchEvent('pointerdown')
+  await page.waitForTimeout(1000)
+  await estopButton.dispatchEvent('pointerup')
+  await expect(page.getByText(/软件急停命令已发送/)).toBeVisible()
+
+  // Button flips to the reset state and the other motion actions lock out.
+  const resetButton = page.getByRole('button', { name: '解除急停' })
+  await expect(resetButton).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByText('软件急停已生效，请先解除急停后再执行车辆运动操作')).toBeVisible()
+  await expect(page.getByRole('button', { name: '开始巡检' })).toBeDisabled()
+
+  // Hold the reset action until the latch clears and the robot returns to standby.
+  await resetButton.dispatchEvent('pointerdown')
+  await page.waitForTimeout(1000)
+  await resetButton.dispatchEvent('pointerup')
+  await expect(page.getByText(/软件急停已解除/)).toBeVisible({ timeout: 15_000 })
+
+  await expect(page.getByRole('button', { name: '软件急停' })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('button', { name: '开始巡检' })).toBeEnabled()
+})
+
 test('patrol report PDF and Excel use authenticated browser downloads', async ({ page, request }) => {
   await forceRelease(request)
   await waitForRobotIdle(request)

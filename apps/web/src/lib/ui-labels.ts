@@ -106,6 +106,17 @@ export const robotModeLabel = map(
   '未知',
 )
 
+export const situationLabel = map(
+  {
+    FIRE_CRITICAL: '严重火情',
+    ESTOP_ACTIVE: '软件急停已生效',
+    DEGRADED: '系统降级',
+    NORMAL: '正常',
+    OFFLINE_UNKNOWN: '现场态势未知',
+  },
+  '系统异常',
+)
+
 export const reasonCodeLabel = (v?: string): string =>
   ({
     ROBOT_ESTOP_ACTIVE: '机器人处于急停状态',

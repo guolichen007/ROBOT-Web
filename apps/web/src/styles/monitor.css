@@ -48,6 +48,14 @@
 .situation-banner.critical svg {
   color: var(--yd-danger);
 }
+.situation-banner.danger {
+  border: 1px solid var(--yd-danger);
+  background: linear-gradient(90deg, #e6453f, #f0524c);
+  color: #fff;
+}
+.situation-banner.danger svg {
+  color: #fff;
+}
 .situation-banner.warning {
   border: 1px solid #f0cd96;
   background: linear-gradient(90deg, #fff8ec, #fffcf5);
@@ -894,6 +902,21 @@
 .hold-estop small {
   font-size: 10px;
   color: #d98585;
+}
+.hold-estop--active {
+  border-color: var(--yd-primary);
+  background: var(--yd-primary-soft);
+  color: var(--yd-primary);
+}
+.hold-estop--active > span {
+  background: rgba(20, 108, 255, 0.18);
+}
+.hold-estop--active small {
+  color: #5b7399;
+}
+.dock-status--estop {
+  color: var(--yd-danger);
+  font-weight: 600;
 }
 
 /* ---------------- Primary alarm panel (right rail) ---------------- */

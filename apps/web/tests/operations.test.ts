@@ -51,4 +51,17 @@ describe('industrial HMI operational semantics', () => {
       }),
     ).toBe('DEGRADED')
   })
+
+  it('reports a distinct ESTOP_ACTIVE situation when the latch is set', () => {
+    expect(
+      operationalSituation({
+        criticalFire: false,
+        websocketConnected: true,
+        onlineState: 'ONLINE',
+        localizationStatus: 'VALID_SOURCE',
+        estopActive: true,
+        estopSupport: 'CONNECTED',
+      }),
+    ).toBe('ESTOP_ACTIVE')
+  })
 })
