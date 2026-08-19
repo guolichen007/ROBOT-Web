@@ -96,8 +96,9 @@ test.describe('ui-gate2 viewport geometry', () => {
       expect(dock).not.toBeNull()
       expect(dock!.y + dock!.height).toBeLessThanOrEqual(viewport.height + 1)
 
-      // 4 environment cards
-      await expect(page.locator('.risk-ribbon-grid article')).toHaveCount(4)
+      // telemetry is consolidated in the topbar status strip
+      await expect(page.locator('.status-telemetry')).toHaveCount(4)
+      await expect(page.locator('.device-snapshot')).toBeVisible()
 
       // 4 command buttons, no clipped control
       for (const name of ['开始巡检', '停止巡检', '返回等待区', '软件急停']) {
