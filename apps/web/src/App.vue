@@ -196,40 +196,50 @@ function onUserMenuClick(data: { value?: unknown }): void {
     <main class="workspace">
       <div class="workspace-alert"></div>
       <header class="topbar">
-        <div class="status-group">
-          <span class="status-cell"
-            ><LinkIcon class="status-icon" :class="{ ok: monitor.connected }" /><span
-              >链路状态</span
-            ><b :class="monitor.connected ? 'ok' : ''">{{
-              monitor.connected ? '正常' : '正在重连'
-            }}</b></span
-          >
-          <span class="status-cell"
-            ><RobotIcon class="status-icon" :class="{ ok: robot?.online_state === 'ONLINE' }" /><span
-              >机器人</span
-            ><b :class="robot?.online_state === 'ONLINE' ? 'ok' : ''">{{
-              robot?.online_state === 'ONLINE' ? '在线' : '离线'
-            }}</b></span
-          >
-          <span class="status-cell"
-            ><BatteryIcon class="status-icon" /><span>电量</span
-            ><b>{{ robot?.battery == null ? '--' : `${robot.battery.toFixed(0)}%` }}</b>
-            <span class="battery-bars"
-              ><i v-for="(on, index) in batteryBars" :key="index" :class="{ full: on }"></i
-            ></span>
-          </span>
-          <span class="status-cell"
-            ><TaskIcon class="status-icon" /><span>当前任务</span
-            ><b>{{ activeTask ? taskTypeLabel(activeTask.type) : '空闲' }}</b></span
-          >
-          <span class="status-cell"
-            ><LocationIcon class="status-icon" /><span>定位状态</span
-            ><b>{{ localizationLabel(robot?.localization_status) }}</b></span
-          >
-          <span class="status-cell status-telemetry"><span>顶部热像</span><b>{{ metricValue(robot?.top_ir, 'top_ir', '℃') }}</b></span>
-          <span class="status-cell status-telemetry"><span>底部红外</span><b>{{ metricValue(robot?.bottom_ir, 'bottom_ir', '℃') }}</b></span>
-          <span class="status-cell status-telemetry"><span>烟雾浓度</span><b>{{ metricValue(robot?.smoke, 'smoke', '%') }}</b></span>
-          <span class="status-cell status-telemetry"><span>数据更新</span><b>{{ freshness }}</b></span>
+        <div class="status-area">
+          <div class="status-primary">
+            <span class="status-cell"
+              ><LinkIcon class="status-icon" :class="{ ok: monitor.connected }" /><span
+                >链路状态</span
+              ><b :class="monitor.connected ? 'ok' : ''">{{
+                monitor.connected ? '正常' : '正在重连'
+              }}</b></span
+            >
+            <span class="status-cell"
+              ><RobotIcon class="status-icon" :class="{ ok: robot?.online_state === 'ONLINE' }" /><span
+                >机器人</span
+              ><b :class="robot?.online_state === 'ONLINE' ? 'ok' : ''">{{
+                robot?.online_state === 'ONLINE' ? '在线' : '离线'
+              }}</b></span
+            >
+            <span class="status-cell"
+              ><BatteryIcon class="status-icon" /><span>电量</span
+              ><b>{{ robot?.battery == null ? '--' : `${robot.battery.toFixed(0)}%` }}</b>
+              <span class="battery-bars"
+                ><i v-for="(on, index) in batteryBars" :key="index" :class="{ full: on }"></i
+              ></span>
+            </span>
+            <span class="status-cell"
+              ><TaskIcon class="status-icon" /><span>当前任务</span
+              ><b>{{ activeTask ? taskTypeLabel(activeTask.type) : '空闲' }}</b></span
+            >
+            <span class="status-cell"
+              ><LocationIcon class="status-icon" /><span>定位状态</span
+              ><b>{{ localizationLabel(robot?.localization_status) }}</b></span
+            >
+          </div>
+          <div class="status-telemetry-row">
+            <span class="status-cell status-telemetry"
+              ><span>顶部热像</span><b>{{ metricValue(robot?.top_ir, 'top_ir', '℃') }}</b></span
+            >
+            <span class="status-cell status-telemetry"
+              ><span>底部红外</span><b>{{ metricValue(robot?.bottom_ir, 'bottom_ir', '℃') }}</b></span
+            >
+            <span class="status-cell status-telemetry"
+              ><span>烟雾浓度</span><b>{{ metricValue(robot?.smoke, 'smoke', '%') }}</b></span
+            >
+            <span class="status-cell status-telemetry"><span>数据更新</span><b>{{ freshness }}</b></span>
+          </div>
         </div>
         <div class="user-side">
           <time>{{ clock }}</time>

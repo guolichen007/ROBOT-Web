@@ -73,6 +73,7 @@ test.describe('ui-gate2 viewport geometry', () => {
     { name: '1672x941', width: 1672, height: 941 },
     { name: '1440x900', width: 1440, height: 900 },
     { name: '1366x768', width: 1366, height: 768 },
+    { name: '1280x800', width: 1280, height: 800 },
   ]) {
     test(`normal ${viewport.name}`, async ({ page }) => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height })
@@ -92,7 +93,7 @@ test.describe('ui-gate2 viewport geometry', () => {
       expect(sidebar!.width).toBeLessThanOrEqual(230)
       expect(topbar).not.toBeNull()
       expect(topbar!.height).toBeGreaterThanOrEqual(64)
-      expect(topbar!.height).toBeLessThanOrEqual(92)
+      expect(topbar!.height).toBeLessThanOrEqual(96)
       expect(dock).not.toBeNull()
       expect(dock!.y + dock!.height).toBeLessThanOrEqual(viewport.height + 1)
 
@@ -108,6 +109,18 @@ test.describe('ui-gate2 viewport geometry', () => {
 
       // no page-level horizontal scroll
       expect(meta.scrollWidth).toBeLessThanOrEqual(viewport.width + 2)
+
+      // topbar rows must not overlap the user side or each other
+      const primary = await page.locator('.status-primary').boundingBox()
+      const user = await page.locator('.user-side').boundingBox()
+      expect(primary).not.toBeNull()
+      expect(user).not.toBeNull()
+      expect(primary!.x + primary!.width).toBeLessThanOrEqual(user!.x + 1)
+      const telemetry = await page.locator('.status-telemetry-row').boundingBox()
+      expect(telemetry).not.toBeNull()
+      if (viewport.width < 1600) {
+        expect(primary!.y + primary!.height).toBeLessThanOrEqual(telemetry!.y + 1)
+      }
 
       await page.screenshot({ path: `${SHOT_DIR}/${viewport.name}-normal.png` })
     })

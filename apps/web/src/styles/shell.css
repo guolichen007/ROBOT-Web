@@ -189,12 +189,24 @@
   padding: 0 24px;
   gap: 24px;
 }
-.status-group {
+.status-area {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 0;
-  flex: 1 1 auto;
-  min-width: 0;
+}
+.status-primary,
+.status-telemetry-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+.status-telemetry-row .status-cell {
+  padding: 0 14px;
+}
+.status-telemetry-row .status-cell span {
+  color: var(--yd-text-3);
 }
 .status-cell {
   height: 34px;
