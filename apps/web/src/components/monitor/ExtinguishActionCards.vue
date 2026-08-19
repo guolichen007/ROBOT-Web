@@ -16,7 +16,7 @@ const actions = [
     <button
       v-for="item in actions"
       :key="item.value"
-      :disabled="Boolean(disabledReason) || Boolean(busyMode)"
+      :disabled="Boolean(busyMode)"
       :class="{ busy: busyMode === item.value }"
       @click="emit('execute', item.value)"
     >
