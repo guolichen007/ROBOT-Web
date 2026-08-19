@@ -4,6 +4,7 @@ import DataTable from '@/components/DataTable.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import StateChip from '@/components/StateChip.vue'
 import { api } from '@/lib/api'
+import { auditActionLabel } from '@/lib/ui-labels'
 
 const rows = ref<any[]>([])
 onMounted(async () => {
@@ -13,10 +14,10 @@ onMounted(async () => {
 
 <template>
   <PageHeader
-    eyebrow="IMMUTABLE TRAIL"
+    eyebrow="审计日志"
     title="审计日志"
-    description="关键控制贯通 operator、robot、command、target、time 与 result。"
-    ><span class="policy-badge">RETENTION 365D</span></PageHeader
+    description="关键控制贯通操作者、机器人、命令、目标、时间与结果。"
+    ><span class="policy-badge">保留 365 天</span></PageHeader
   >
   <section class="panel data-panel">
     <DataTable
@@ -31,6 +32,9 @@ onMounted(async () => {
         { key: 'request_id', label: '请求 ID' },
       ]"
     >
+      <template #action="{ value }">
+        <span :title="String(value)">{{ auditActionLabel(String(value)) }}</span>
+      </template>
       <template #result="{ value }"><StateChip :value="String(value)" /></template>
     </DataTable>
   </section>

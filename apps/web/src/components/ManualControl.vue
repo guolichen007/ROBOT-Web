@@ -226,7 +226,7 @@ onUnmounted(() => {
   <section class="control-panel panel">
     <div class="panel-heading">
       <div>
-        <span class="eyebrow">MANUAL CONTROL</span>
+        <span class="eyebrow">手动控制</span>
         <h3>手动控制</h3>
       </div>
       <span class="lease-state" :class="lease ? 'held' : ''">{{ lease ? '租约 HELD' : '无租约' }}</span>

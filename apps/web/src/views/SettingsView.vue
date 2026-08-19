@@ -18,7 +18,7 @@ onMounted(load)
 </script>
 
 <template>
-  <PageHeader eyebrow="OBSERVABILITY" title="系统状态" description="基础依赖、实时进程、媒体接入和部署边界。"
+  <PageHeader eyebrow="系统状态" title="系统状态" description="基础依赖、实时进程、媒体接入和部署边界。"
     ><button class="secondary-button compact" @click="load">刷新检查</button></PageHeader
   >
   <section class="service-grid">
@@ -55,9 +55,9 @@ onMounted(load)
         </div>
       </div>
       <div class="deployment-stamp">
-        <strong>SERVER DEPLOYMENT READY</strong
-        ><span>{{ status.server_deployment_ready ? 'YES' : 'NO' }}</span
-        ><small>SERVER DEPLOYED = {{ status.server_deployed ? 'YES' : 'NO' }}</small>
+        <strong>服务端部署就绪</strong
+        ><span>{{ status.server_deployment_ready ? '是' : '否' }}</span
+        ><small>已部署 = {{ status.server_deployed ? '是' : '否' }}</small>
       </div>
     </section>
   </div>

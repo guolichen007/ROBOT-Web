@@ -5,6 +5,7 @@ import PageHeader from '@/components/PageHeader.vue'
 import StateChip from '@/components/StateChip.vue'
 import { api, errorMessage } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth'
+import { alarmTypeLabel, detectionMethodLabel, severityLabel } from '@/lib/ui-labels'
 
 const auth = useAuthStore(),
   rows = ref<any[]>([]),
@@ -25,11 +26,11 @@ onMounted(load)
 
 <template>
   <PageHeader
-    eyebrow="FIRE EVENT LIFECYCLE"
+    eyebrow="火情生命周期"
     title="火情报警"
     description="自动报警与人工火情进入同一生命周期，重复事件按指纹和时间窗合并。"
     ><span class="policy-badge danger"
-      >{{ rows.filter((r) => !['RESOLVED', 'CLOSED', 'DISMISSED'].includes(r.state)).length }} ACTIVE</span
+      >{{ rows.filter((r) => !['RESOLVED', 'CLOSED', 'DISMISSED'].includes(r.state)).length }} 条活动</span
     ></PageHeader
   >
   <p v-if="notice" class="inline-notice">{{ notice }}</p>
@@ -49,8 +50,10 @@ onMounted(load)
     >
       <template #state="{ value }"><StateChip :value="String(value)" /></template>
       <template #severity="{ value }"
-        ><span class="severity-label" :data-level="value">{{ value }}</span></template
+        ><span class="severity-label" :data-level="value">{{ severityLabel(String(value)) }}</span></template
       >
+      <template #fire_type="{ value }">{{ alarmTypeLabel(String(value)) }}</template>
+      <template #detection_method="{ value }">{{ detectionMethodLabel(String(value)) }}</template>
       <template #actions="{ row }"
         ><div class="table-actions">
           <button v-if="row.state === 'NEW' && auth.can('alarm.ack')" @click="action(row, 'acknowledge')">

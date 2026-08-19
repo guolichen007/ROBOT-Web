@@ -13,7 +13,7 @@ onMounted(() => {
 
 <template>
   <PageHeader
-    eyebrow="SEMANTIC MAP"
+    eyebrow="车位与操作点"
     title="车位与操作点"
     description="车位、巡检点、灭火操作点与轨迹均绑定明确地图版本。"
     ><span class="policy-badge"

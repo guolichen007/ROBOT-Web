@@ -12,7 +12,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <PageHeader eyebrow="FLEET" title="机器人" description="车辆身份、在线状态、地图语境与能力清单。" />
+  <PageHeader eyebrow="设备管理" title="机器人" description="车辆身份、在线状态、地图语境与能力清单。" />
   <section class="panel data-panel">
     <DataTable
       :rows="rows"

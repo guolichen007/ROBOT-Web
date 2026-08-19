@@ -30,7 +30,7 @@ onMounted(load)
 </script>
 
 <template>
-  <PageHeader eyebrow="IDENTITY / RBAC" title="用户与权限" description="六类角色与高风险权限保持独立授权。"
+  <PageHeader eyebrow="用户与权限" title="用户与权限" description="六类角色与高风险权限保持独立授权。"
     ><button class="primary-button compact" @click="showForm = true">新建用户</button></PageHeader
   >
   <p v-if="notice" class="inline-notice">{{ notice }}</p>
@@ -51,7 +51,7 @@ onMounted(load)
   </section>
   <div v-if="showForm" class="modal-shade" @click.self="showForm = false">
     <form class="modal-card user-form" @submit.prevent="create">
-      <span class="eyebrow">CREATE USER</span>
+      <span class="eyebrow">新建用户</span>
       <h2>新建平台用户</h2>
       <label>账号<input v-model="form.username" required /></label
       ><label>显示名称<input v-model="form.display_name" required /></label

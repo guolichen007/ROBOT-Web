@@ -79,14 +79,67 @@ export const localizationLabel = map(
 )
 
 export const taskTypeLabel = map(
-  { PATROL: '巡检', EXTINGUISH: '灭火', NAVIGATE: '导航', RETURN_DOCK: '返回待命区' },
-  '任务',
+  {
+    PATROL: '巡检任务',
+    EXTINGUISH: '灭火任务',
+    NAVIGATE: '导航任务',
+    NAVIGATE_TO_PRESET: '前往预设点',
+    RETURN_DOCK: '返回待命区',
+  },
+  '其它任务',
 )
 
 export const sourceTypeLabel = map(
   { ALARM: '告警', TASK: '任务', COMMAND: '命令', OPERATION: '操作' },
   '其它',
 )
+
+export const robotModeLabel = map(
+  {
+    IDLE: '待命',
+    STANDBY: '待命',
+    PATROLLING: '巡检中',
+    EXTINGUISHING: '灭火中',
+    RETURNING: '返航中',
+    ESTOP: '急停',
+  },
+  '未知',
+)
+
+export const reasonCodeLabel = (v?: string): string =>
+  ({
+    ROBOT_ESTOP_ACTIVE: '机器人处于急停状态',
+    ROBOT_OFFLINE: '机器人离线',
+    CONTROL_NOT_READY: '控制链路尚未就绪',
+    ACTIVE_TASK_EXISTS: '当前已有执行中任务',
+    ACTIVE_TASK_CONFLICT: '当前已有执行中任务',
+    READ_ONLY_INTEGRATION: '当前为只读接入，控制未开放',
+    INTEGRATION_PROFILE_MISSING: '缺少控制集成配置',
+    CAPABILITY_DECLARATION_MISSING: '车辆能力声明缺失',
+    EXTINGUISH_MODE_REQUIRED: '灭火任务必须明确选择处理方式',
+  })[String(v || '').toUpperCase()] || ''
+
+export const auditActionLabel = (v?: string): string =>
+  ({
+    AUTH_LOGIN: '用户登录',
+    AUTH_LOGOUT: '用户退出',
+    EMERGENCY_STOP: '触发急停',
+    RESET_ESTOP: '急停复位',
+    PATROL_STOP_REQUEST: '请求停止巡检',
+    TASK_PATROL_CREATE: '创建巡检任务',
+    TASK_EXTINGUISH_CREATE: '创建灭火任务',
+    ALARM_MANUAL_CREATE: '人工创建火情',
+    ALARM_ACKNOWLEDGE: '确认收到火情',
+    ALARM_CONFIRM: '确认火情',
+    ALARM_RESOLVE: '解除火情',
+    ALARM_RESOLVED: '火情已解除',
+    RETURN_DOCK: '返回待命区',
+    MANUAL_LEASE_ACQUIRE: '获取手动控制租约',
+    MANUAL_LEASE_RELEASE: '释放手动控制租约',
+    MAP_PUBLISH: '发布地图版本',
+    MAP_ARCHIVE: '归档地图版本',
+    USER_CREATE: '创建用户',
+  })[String(v || '').toUpperCase()] || String(v || '')
 
 // Generic chip label covering the common fleet/alarm/map/user/audit states.
 const CHIP_LABELS: Record<string, string> = {

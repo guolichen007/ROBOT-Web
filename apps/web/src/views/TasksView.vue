@@ -7,6 +7,7 @@ import { api, errorMessage } from '@/lib/api'
 import { newUuid } from '@/lib/id'
 import { useAuthStore } from '@/stores/auth'
 import { useMonitorStore } from '@/stores/monitor'
+import { taskTypeLabel } from '@/lib/ui-labels'
 
 const auth = useAuthStore(),
   monitor = useMonitorStore()
@@ -57,7 +58,7 @@ onMounted(async () => {
 
 <template>
   <PageHeader
-    eyebrow="EXECUTION POLICY"
+    eyebrow="任务调度"
     title="任务调度"
     description="任务快照固化目标、地图版本和轨迹；冲突由 Robot Execution Policy 拒绝。"
     ><button
@@ -85,6 +86,7 @@ onMounted(async () => {
       ]"
     >
       <template #status="{ value }"><StateChip :value="String(value)" /></template>
+      <template #type="{ value }">{{ taskTypeLabel(String(value)) }}</template>
       <template #progress="{ value }"
         ><span>{{ value }}%</span></template
       >

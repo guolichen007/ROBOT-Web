@@ -30,10 +30,10 @@ onMounted(load)
 
 <template>
   <PageHeader
-    eyebrow="MAP GOVERNANCE"
+    eyebrow="地图版本"
     title="地图版本"
     description="Published 版本只读；任何语义变更必须创建新版本。"
-    ><span class="policy-badge">WORLD COORDINATES</span></PageHeader
+    ><span class="policy-badge">世界坐标系</span></PageHeader
   >
   <p v-if="notice" class="inline-notice">{{ notice }}</p>
   <div class="summary-cards">

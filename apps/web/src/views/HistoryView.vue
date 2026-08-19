@@ -67,7 +67,7 @@ onUnmounted(() => {
 
 <template>
   <PageHeader
-    eyebrow="TIME SERIES"
+    eyebrow="历史回放"
     title="历史与回放"
     description="遥测默认 1 Hz 降采样，同时保存源时间与服务端接收时间。"
   />
