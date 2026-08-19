@@ -13,6 +13,7 @@ from uuid import uuid4
 import paho.mqtt.client as mqtt
 from app.core.config import get_settings
 from app.core.logging import configure_logging
+from app.modules.navigation.follower import follower_command
 from jsonschema import ValidationError
 
 from services.protocol import validate_message
@@ -181,29 +182,67 @@ class MockRobot:
             self.publish("command_ack", duplicate, 1)
         return payload
 
-    def task_status(self, task_id: str, status: str, phase: str, progress: float) -> dict:
+    def task_status(
+        self,
+        task_id: str,
+        status: str,
+        phase: str,
+        progress: float,
+        failure_code: str | None = None,
+        failure_message: str | None = None,
+        checkpoint_index: int | None = None,
+        checkpoint_total: int | None = None,
+        current_slot_code: str | None = None,
+        next_slot_code: str | None = None,
+    ) -> dict:
         payload = self.message(
             "task_status",
             task_id=task_id,
             status=status,
             phase=phase,
             progress=progress,
-            failure_code=None,
-            failure_message=None,
+            failure_code=failure_code,
+            failure_message=failure_message,
+            checkpoint_index=checkpoint_index,
+            checkpoint_total=checkpoint_total,
+            current_slot_code=current_slot_code,
+            next_slot_code=next_slot_code,
         )
         self.publish("task_status", payload, 1)
         return payload
 
-    def _waypoints_for(self, command: dict) -> list[tuple[float, float]]:
+    def _cruise_waypoints(self, command: dict) -> list[dict]:
         params = command.get("params", {})
         if command["cmd"] == "return_dock":
-            return [self.home[:2]]
+            return [{"x": self.home[0], "y": self.home[1], "kind": "WAITING", "theta": self.home[2]}]
         trajectory = params.get("trajectory")
         if isinstance(trajectory, list) and trajectory:
-            return [(float(p["x"]), float(p["y"])) for p in trajectory if "x" in p and "y" in p]
+            waypoints: list[dict] = []
+            for point in trajectory:
+                if "x" not in point or "y" not in point:
+                    continue
+                waypoints.append(
+                    {
+                        "x": float(point["x"]),
+                        "y": float(point["y"]),
+                        "kind": point.get("kind", "TRANSIT"),
+                        "theta": float(point["theta"]) if point.get("theta") is not None else None,
+                        "slot_code": point.get("slot_code"),
+                        "sequence": point.get("sequence"),
+                    }
+                )
+            if waypoints:
+                return waypoints
         target = params.get("target_pose") if params.get("mission_kind") == "NAVIGATE_TO_PRESET" else None
         if target and "x" in target and "y" in target:
-            return [(float(target["x"]), float(target["y"]))]
+            return [
+                {
+                    "x": float(target["x"]),
+                    "y": float(target["y"]),
+                    "kind": "INSPECTION",
+                    "theta": float(target.get("theta", self.theta)),
+                }
+            ]
         return []
 
     def simulate_task(self, command: dict) -> None:
@@ -219,40 +258,85 @@ class MockRobot:
                 if command["cmd"] == "patrol"
                 else "RETURN_DOCK"
             )
-        waypoints = self._waypoints_for(command)
+        waypoints = self._cruise_waypoints(command)
+        inspections = [wp for wp in waypoints if wp["kind"] == "INSPECTION"]
+        inspection_total = len(inspections) or 1
+        inspection_done = 0
         emitted = [self.task_status(task_id, "accepted", "ACCEPTED", 0)]
 
-        if waypoints:
-            total = len(waypoints)
-            for index, (wx, wy) in enumerate(waypoints):
-                while True:
-                    if self.stop_event.wait(0.05):
-                        return
-                    with self.lock:
-                        if self.estop or self.active_task_id != task_id:
-                            return
-                        dx, dy = wx - self.x, wy - self.y
-                        distance = math.hypot(dx, dy)
-                        if distance < 0.6:
-                            self.linear = self.angular = 0
-                            break
-                        desired = math.atan2(dy, dx)
-                        delta = math.atan2(
-                            math.sin(desired - self.theta), math.cos(desired - self.theta)
-                        )
-                        self.angular = max(-0.8, min(0.8, delta * 2.2))
-                        # Accelerated time, not teleport: fast straight lanes, slow turns.
-                        self.linear = 5.0 if abs(delta) < 0.35 else 1.2
-                progress = round((index + 1) / total * 100)
-                emitted.append(self.task_status(task_id, "executing", "NAVIGATING", progress))
-        else:
-            for progress in (10, 25, 45, 65, 85):
-                if self.stop_event.wait(0.4):
+        def interrupted() -> bool:
+            with self.lock:
+                return bool(self.estop or self.active_task_id != task_id)
+
+        for waypoint in waypoints:
+            entered = time.monotonic()
+            last_progress_at = time.monotonic()
+            last_distance = math.inf
+            while True:
+                if self.stop_event.wait(0.05):
+                    return
+                if interrupted():
                     return
                 with self.lock:
-                    if self.estop or self.active_task_id != task_id:
-                        return
-                emitted.append(self.task_status(task_id, "executing", "NAVIGATING", progress))
+                    dx = waypoint["x"] - self.x
+                    dy = waypoint["y"] - self.y
+                    distance = math.hypot(dx, dy)
+                now = time.monotonic()
+                if distance < 0.25:
+                    with self.lock:
+                        self.x = waypoint["x"]
+                        self.y = waypoint["y"]
+                        if waypoint["theta"] is not None:
+                            self.theta = waypoint["theta"]
+                        self.linear = self.angular = 0
+                    if waypoint["kind"] == "INSPECTION":
+                        inspection_done += 1
+                        progress = min(99.0, round(inspection_done / inspection_total * 100))
+                        next_inspection = inspections[inspection_done] if inspection_done < len(inspections) else None
+                        emitted.append(
+                            self.task_status(
+                                task_id,
+                                "executing",
+                                "INSPECTING",
+                                progress,
+                                checkpoint_index=inspection_done,
+                                checkpoint_total=inspection_total,
+                                current_slot_code=waypoint.get("slot_code"),
+                                next_slot_code=next_inspection.get("slot_code") if next_inspection else None,
+                            )
+                        )
+                        # Short dwell so the checkpoint is observable.
+                        for _ in range(6):
+                            if self.stop_event.wait(0.05):
+                                return
+                            if interrupted():
+                                return
+                    break
+                # Watchdog: never orbit a waypoint indefinitely.
+                if now - last_progress_at > 3.0:
+                    emitted.append(
+                        self.task_status(
+                            task_id,
+                            "failed",
+                            "PATH_FOLLOWING_STALLED",
+                            inspection_done / inspection_total * 100,
+                            failure_code="PATH_FOLLOWING_STALLED",
+                            failure_message="巡航路径跟踪异常",
+                        )
+                    )
+                    with self.lock:
+                        self.active_task_id = None
+                        self.mode = "IDLE"
+                        self.linear = self.angular = 0
+                    self._store(command, emitted)
+                    return
+                if distance < last_distance - 0.02:
+                    last_distance = distance
+                    last_progress_at = now
+                linear, angular, _state = follower_command(self.theta, dx, dy, distance)
+                with self.lock:
+                    self.linear = linear
+                    self.angular = angular
 
         if command["cmd"] == "extinguish":
             emitted.append(self.task_status(task_id, "executing", "EXTINGUISHING", 95))
@@ -263,6 +347,9 @@ class MockRobot:
             self.active_task_id = None
             self.mode = "IDLE"
             self.linear = self.angular = 0
+        self._store(command, emitted)
+
+    def _store(self, command: dict, emitted: list[dict]) -> None:
         cached = self.processed.get(command["command_id"])
         if cached:
             self.processed[command["command_id"]] = (cached[0], emitted)

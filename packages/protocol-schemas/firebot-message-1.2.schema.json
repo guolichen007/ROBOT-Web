@@ -126,7 +126,11 @@
             "phase": { "type": "string", "minLength": 1 },
             "progress": { "type": "number", "minimum": 0, "maximum": 100 },
             "failure_code": { "type": ["string", "null"] },
-            "failure_message": { "type": ["string", "null"] }
+            "failure_message": { "type": ["string", "null"] },
+            "checkpoint_index": { "type": ["integer", "null"] },
+            "checkpoint_total": { "type": ["integer", "null"] },
+            "current_slot_code": { "type": ["string", "null"] },
+            "next_slot_code": { "type": ["string", "null"] }
           }
         }
       ]

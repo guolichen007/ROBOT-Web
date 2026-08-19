@@ -716,6 +716,15 @@ def handle_task_status(db, robot: Robot, msg: dict, received: datetime) -> None:
         task.completed_at = received
     task.failure_code = msg.get("failure_code")
     task.failure_message = msg.get("failure_message")
+    if msg.get("checkpoint_index") is not None:
+        parameters = dict(task.parameters_json or {})
+        parameters["live_checkpoint"] = {
+            "index": msg.get("checkpoint_index"),
+            "total": msg.get("checkpoint_total"),
+            "current_slot_code": msg.get("current_slot_code"),
+            "next_slot_code": msg.get("next_slot_code"),
+        }
+        task.parameters_json = parameters
     db.add(
         TaskEvent(
             task_id=task.id,
