@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { ChevronDownIcon, LayersIcon } from 'tdesign-icons-vue-next'
 import MapCanvas from '@/components/MapCanvas.vue'
 import ManualControl from '@/components/ManualControl.vue'
 import SituationBanner from '@/components/monitor/SituationBanner.vue'
@@ -26,6 +27,9 @@ const stopOperation = ref<StopOperation | null>(null)
 const notice = ref('')
 const working = ref(false)
 const manualOpen = ref(false)
+const layerMenuOpen = ref(false)
+const layers = reactive({ route: true, coverage: true, semantic: false })
+const otherEventsOpen = ref(false)
 const { activeAlarms, primaryAlarm, primaryAlarmId } = usePrimaryAlarm(
   computed(() => monitor.snapshot.alarms),
 )
@@ -43,7 +47,6 @@ const selectedPreset = computed(() =>
 )
 const activeTask = computed(() => monitor.activeTask)
 const trajectory = computed(() => monitor.snapshot.trajectories[0]?.path_json || [])
-const roofStream = computed(() => monitor.snapshot.streams.find((item) => item.camera_type === 'roof_rgb'))
 const stopReady = computed(() => Boolean(robot.value?.safety_command_ready?.stop_motion))
 const estopReady = computed(() => Boolean(robot.value?.safety_command_ready?.emergency_stop))
 const autonomousReady = computed(() => Boolean(robot.value?.autonomous_task_ready?.patrol))
@@ -61,6 +64,12 @@ const controlReason = computed(
     robot.value?.control_disabled_reason ||
     '控制链路未验证',
 )
+const dockReason = computed(() => {
+  if (readOnly.value) return 'ROS1 只读接入中，尚未验证下行控制链路'
+  if (robot.value?.readiness_reasons?.length) return robot.value.readiness_reasons.join('、')
+  if (robot.value?.control_disabled_reason) return robot.value.control_disabled_reason
+  return ''
+})
 const freshness = computed(() => {
   if (!robot.value?.server_received_at) return '无数据'
   return `${Math.max(0, (Date.now() - Date.parse(robot.value.server_received_at)) / 1000).toFixed(1)} 秒前`
@@ -89,6 +98,11 @@ const extinguishReason = computed(() => {
   return ''
 })
 const targetSlotId = computed(() => activeTask.value?.target_parking_slot_id)
+const primaryAlarmLocation = computed(() => {
+  const id = primaryAlarm.value?.parking_slot_id
+  if (!id) return undefined
+  return monitor.snapshot.parking_slots.find((slot) => slot.id === id)?.code
+})
 
 const patrolOnline = computed(() => robot.value?.online_state === 'ONLINE')
 const patrolStatus = computed(() =>
@@ -280,11 +294,13 @@ onUnmounted(() => {
 <template>
   <main class="yd-monitor-view" :class="{ 'is-alarm': Boolean(primaryAlarm) }">
     <div v-if="notice" class="toast">{{ notice }}</div>
-    <SituationBanner
-      :state="situation"
-      :alarm="primaryAlarm"
-      @select="primaryAlarmId = primaryAlarm?.id || null"
-    />
+    <Teleport to=".workspace-alert">
+      <SituationBanner
+        :state="situation"
+        :alarm="primaryAlarm"
+        @select="primaryAlarmId = primaryAlarm?.id || null"
+      />
+    </Teleport>
     <section class="yd-monitor-core">
       <section class="panel operations-map-panel">
         <header>
@@ -295,7 +311,21 @@ onUnmounted(() => {
               {{ monitor.snapshot.map_version?.version || '--' }}</span
             >
           </div>
-          <small>{{ robot ? `${robot.vehicle_id} · ${robot.online_state}` : 'NO ROBOT' }}</small>
+          <div class="map-layer-control">
+            <button
+              class="layer-trigger"
+              type="button"
+              aria-label="图层"
+              @click="layerMenuOpen = !layerMenuOpen"
+            >
+              <LayersIcon /><span>图层</span><ChevronDownIcon class="layer-chevron" />
+            </button>
+            <div v-if="layerMenuOpen" class="layer-menu">
+              <label><input v-model="layers.route" type="checkbox" /><span>巡检路线</span></label>
+              <label><input v-model="layers.coverage" type="checkbox" /><span>检测范围</span></label>
+              <label><input v-model="layers.semantic" type="checkbox" /><span>语义点</span></label>
+            </div>
+          </div>
         </header>
         <MapCanvas
           :map-version="monitor.snapshot.map_version"
@@ -308,6 +338,9 @@ onUnmounted(() => {
           :coverage="coverage"
           :selected-slot-id="selectedSlotId || undefined"
           :target-slot-id="targetSlotId"
+          :show-semantic-points="layers.semantic"
+          :show-route="layers.route"
+          :show-coverage="layers.coverage"
           @slot-click="selectedSlotId = $event.id"
         />
         <MapSelectionBar
@@ -324,13 +357,14 @@ onUnmounted(() => {
       </section>
       <aside class="yd-monitor-side" :class="{ 'is-alarm': Boolean(primaryAlarm) }">
         <VideoSurveillancePanel :streams="monitor.snapshot.streams" />
-        <RiskTelemetryRibbon :robot="robot" :freshness="freshness" :stream="roofStream" />
+        <RiskTelemetryRibbon :robot="robot" :freshness="freshness" />
         <template v-if="primaryAlarm">
           <PrimaryAlarmPanel
             :alarm="primaryAlarm"
             :timeline="timeline"
             :mode="extinguishMode"
             :disabled-reason="extinguishReason"
+            :location-label="primaryAlarmLocation"
             :permissions="{
               ack: auth.can('alarm.ack'),
               confirm: auth.can('alarm.confirm'),
@@ -340,22 +374,34 @@ onUnmounted(() => {
             @update:mode="extinguishMode = $event"
             @dispatch="dispatch"
           />
-          <section class="panel secondary-alarms">
+          <section class="panel secondary-alarms" :class="{ open: otherEventsOpen }">
             <header>
-              <strong>其他事件</strong><span>{{ Math.max(0, activeAlarms.length - 1) }}</span>
+              <button
+                class="other-events-toggle"
+                type="button"
+                @click="otherEventsOpen = !otherEventsOpen"
+              >
+                <strong>其他事件 ({{ Math.max(0, activeAlarms.length - 1) }})</strong>
+                <span v-if="!otherEventsOpen && activeAlarms.length > 1" class="other-events-summary">
+                  {{ activeAlarms[1]?.event_code }} · {{ activeAlarms[1]?.fire_type }}
+                </span>
+                <ChevronDownIcon class="other-events-chevron" :class="{ open: otherEventsOpen }" />
+              </button>
             </header>
-            <button
-              v-for="alarm in activeAlarms.filter((item) => item.id !== primaryAlarmId)"
-              :key="alarm.id"
-              :class="{ active: primaryAlarmId === alarm.id }"
-              @click="primaryAlarmId = alarm.id"
-            >
-              <i :data-level="alarm.severity"></i
-              ><span
-                >{{ alarm.event_code }}<small>{{ alarm.fire_type }} · {{ alarm.state }}</small></span
-              ><time>{{ new Date(alarm.last_seen_at).toLocaleTimeString('zh-CN', { hour12: false }) }}</time>
-            </button>
-            <div v-if="activeAlarms.length <= 1" class="quiet-state">暂无其他活动事件</div>
+            <div v-if="otherEventsOpen" class="other-events-list">
+              <button
+                v-for="alarm in activeAlarms.filter((item) => item.id !== primaryAlarmId)"
+                :key="alarm.id"
+                :class="{ active: primaryAlarmId === alarm.id }"
+                @click="primaryAlarmId = alarm.id"
+              >
+                <i :data-level="alarm.severity"></i
+                ><span
+                  >{{ alarm.event_code }}<small>{{ alarm.fire_type }} · {{ alarm.state }}</small></span
+                ><time>{{ new Date(alarm.last_seen_at).toLocaleTimeString('zh-CN', { hour12: false }) }}</time>
+              </button>
+              <div v-if="activeAlarms.length <= 1" class="quiet-state">暂无其他活动事件</div>
+            </div>
           </section>
         </template>
         <section v-else class="panel yd-patrol-card">
@@ -388,7 +434,7 @@ onUnmounted(() => {
         :stop-disabled="working || !stopReady"
         :estop-disabled="working || !estopReady"
         :manual-disabled="working || !manualReady || !auth.can('robot.control.manual')"
-        :reason="controlReason"
+        :reason="dockReason"
         @patrol="patrol"
         @stop="stop"
         @home="home"

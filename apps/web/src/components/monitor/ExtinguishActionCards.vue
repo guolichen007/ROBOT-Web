@@ -16,12 +16,15 @@ const actions = [
       :disabled="Boolean(disabledReason)"
       @click="emit('update:modelValue', item.value)"
     >
-      <strong>{{ item.title }}</strong
-      ><span>{{ disabledReason || item.detail }}</span>
+      <span class="extinguish-radio" aria-hidden="true"></span>
+      <span class="extinguish-copy">
+        <strong>{{ item.title }}</strong>
+        <span>{{ disabledReason || item.detail }}</span>
+      </span>
     </button>
     <div class="dispatch-summary">
-      <span>已选：{{ actions.find((item) => item.value === modelValue)?.title }}</span
-      ><t-button theme="danger" :disabled="Boolean(disabledReason)" @click="emit('confirm')"
+      <span>已选：{{ actions.find((item) => item.value === modelValue)?.title }}</span>
+      <t-button theme="danger" :disabled="Boolean(disabledReason)" @click="emit('confirm')"
         >确认派发</t-button
       >
     </div>

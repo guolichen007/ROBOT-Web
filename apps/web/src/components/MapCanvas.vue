@@ -1,27 +1,33 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { LocationIcon, ZoomInIcon, ZoomOutIcon } from 'tdesign-icons-vue-next'
+import { FullscreenIcon, ZoomInIcon, ZoomOutIcon } from 'tdesign-icons-vue-next'
 import { MapAdapter } from '@/lib/map-adapter'
 import type { Alarm, DetectionCoverage, MapPoint, MapVersion, ParkingSlot, RobotState } from '@/types'
 import fireMarkerUrl from '@/assets/yd/map/fire_marker.svg'
+import robotTopUrl from '@/assets/yd/map/robot_top_reference_white_bg.png'
 
-const props = defineProps<{
-  mapVersion: MapVersion | null
-  slots: ParkingSlot[]
-  inspectionPoints: MapPoint[]
-  extinguishPoints: MapPoint[]
-  trajectory: Array<{ x: number; y: number }>
-  robot?: RobotState
-  alarms: Alarm[]
-  coverage?: DetectionCoverage | null
-  selectedSlotId?: string
-  targetSlotId?: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    mapVersion: MapVersion | null
+    slots: ParkingSlot[]
+    inspectionPoints: MapPoint[]
+    extinguishPoints: MapPoint[]
+    trajectory: Array<{ x: number; y: number }>
+    robot?: RobotState
+    alarms: Alarm[]
+    coverage?: DetectionCoverage | null
+    selectedSlotId?: string
+    targetSlotId?: string
+    showSemanticPoints?: boolean
+    showRoute?: boolean
+    showCoverage?: boolean
+  }>(),
+  { showSemanticPoints: false, showRoute: true, showCoverage: true },
+)
 const emit = defineEmits<{ slotClick: [slot: ParkingSlot] }>()
 const frame = ref<HTMLDivElement>()
 const size = ref({ width: 900, height: 560 })
 const revision = ref(0)
-const followRobot = ref(false)
 let observer: ResizeObserver
 let drag: { x: number; y: number } | null = null
 const geometry = computed(
@@ -73,15 +79,7 @@ function zoom(delta: number): void {
 }
 function fit(): void {
   adapter.reset()
-  followRobot.value = false
   invalidate()
-}
-function toggleFollow(): void {
-  followRobot.value = !followRobot.value
-  if (followRobot.value && props.robot?.x != null && props.robot?.y != null) {
-    adapter.centerOn({ x: props.robot.x, y: props.robot.y })
-    invalidate()
-  }
 }
 function pointerDown(event: PointerEvent): void {
   if (event.target instanceof Element && event.target.closest('button, [role="button"]')) return
@@ -92,7 +90,6 @@ function pointerMove(event: PointerEvent): void {
   if (!drag) return
   adapter.panBy(event.clientX - drag.x, event.clientY - drag.y)
   drag = { x: event.clientX, y: event.clientY }
-  followRobot.value = false
   invalidate()
 }
 function pointerUp(): void {
@@ -104,15 +101,6 @@ watch(
     adapter.setMap(geometry.value)
     adapter.reset()
     void nextTick(updateSize)
-  },
-)
-watch(
-  () => [props.robot?.x, props.robot?.y],
-  () => {
-    if (followRobot.value && props.robot?.x != null && props.robot?.y != null) {
-      adapter.centerOn({ x: props.robot.x, y: props.robot.y })
-      invalidate()
-    }
   },
 )
 onMounted(() => {
@@ -133,10 +121,28 @@ onUnmounted(() => observer?.disconnect())
     @pointercancel="pointerUp"
   >
     <svg :viewBox="`0 0 ${size.width} ${size.height}`" role="img" aria-label="停车场二维态势地图">
+      <defs>
+        <marker
+          id="yd-route-arrow"
+          viewBox="0 0 10 10"
+          refX="5"
+          refY="5"
+          markerWidth="7"
+          markerHeight="7"
+          orient="auto"
+        >
+          <path d="M0,0 L10,5 L0,10 z" fill="#2f7cff" />
+        </marker>
+      </defs>
       <rect width="100%" height="100%" class="map-floor" />
-      <polyline v-if="trajectory.length" :points="pathPoints" class="trajectory-line planned" />
+      <polyline
+        v-if="showRoute && trajectory.length"
+        :points="pathPoints"
+        class="trajectory-line planned"
+        marker-end="url(#yd-route-arrow)"
+      />
       <polygon
-        v-if="coveragePoints"
+        v-if="showCoverage && coveragePoints"
         :points="coveragePoints"
         class="detection-sector"
         :class="{ danger: hasActiveFire }"
@@ -171,21 +177,23 @@ onUnmounted(() => observer?.disconnect())
           {{ slot.code }}
         </text>
       </g>
-      <circle
-        v-for="item in inspectionPoints"
-        :key="item.id"
-        :cx="point(item.pose_json.x, item.pose_json.y).x"
-        :cy="point(item.pose_json.x, item.pose_json.y).y"
-        r="2.5"
-        class="inspection-point"
-      />
-      <path
-        v-for="item in extinguishPoints"
-        :key="item.id"
-        :transform="`translate(${point(item.pose_json.x, item.pose_json.y).x} ${point(item.pose_json.x, item.pose_json.y).y})`"
-        d="M0,-4 L4,3 L-4,3 Z"
-        class="extinguish-point"
-      />
+      <template v-if="showSemanticPoints">
+        <circle
+          v-for="item in inspectionPoints"
+          :key="item.id"
+          :cx="point(item.pose_json.x, item.pose_json.y).x"
+          :cy="point(item.pose_json.x, item.pose_json.y).y"
+          r="2.5"
+          class="inspection-point"
+        />
+        <path
+          v-for="item in extinguishPoints"
+          :key="item.id"
+          :transform="`translate(${point(item.pose_json.x, item.pose_json.y).x} ${point(item.pose_json.x, item.pose_json.y).y})`"
+          d="M0,-4 L4,3 L-4,3 Z"
+          class="extinguish-point"
+        />
+      </template>
       <g
         v-for="marker in fireMarkers"
         :key="marker.alarm.id"
@@ -193,32 +201,22 @@ onUnmounted(() => observer?.disconnect())
         class="fire-marker"
       >
         <circle r="20" />
-        <image
-          :href="fireMarkerUrl"
-          :x="-18"
-          :y="-18"
-          width="36"
-          height="36"
-          alt="火情位置"
-        />
+        <image :href="fireMarkerUrl" :x="-18" :y="-18" width="36" height="36" alt="火情位置" />
       </g>
       <g
         v-if="robot?.x != null && robot?.y != null"
         :transform="`translate(${point(robot.x, robot.y).x} ${point(robot.x, robot.y).y}) rotate(${(-(robot.theta || 0) * 180) / Math.PI})`"
         class="robot-marker"
       >
-        <rect x="-8" y="-12" width="16" height="24" rx="4" />
-        <path d="M0 -18 L6 -8 L0 -10 L-6 -8 Z" />
-        <text x="15" y="4">{{ robot.vehicle_id }}</text>
+        <image :href="robotTopUrl" x="-14" y="-28" width="28" height="55" />
+        <rect class="robot-label-bg" x="-21" y="28" width="42" height="17" rx="8.5" />
+        <text x="0" y="40">{{ robot.vehicle_id }}</text>
       </g>
     </svg>
     <div class="map-tools">
       <button aria-label="放大" @click.stop="zoom(0.2)"><ZoomInIcon /></button>
       <button aria-label="缩小" @click.stop="zoom(-0.2)"><ZoomOutIcon /></button>
-      <button aria-label="适配地图" @click.stop="fit">Fit</button>
-      <button :class="{ active: followRobot }" aria-label="跟随车辆" @click.stop="toggleFollow">
-        <LocationIcon />
-      </button>
+      <button aria-label="适配地图" @click.stop="fit"><FullscreenIcon /></button>
     </div>
     <div class="map-legend">
       <span><i class="legend-dash"></i>巡检路线</span>

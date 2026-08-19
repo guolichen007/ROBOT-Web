@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
+import { FullscreenIcon } from 'tdesign-icons-vue-next'
 import { api, errorMessage } from '@/lib/api'
 import { useSystemClock } from '@/composables/useSystemClock'
 import type { StreamInfo } from '@/types'
@@ -90,6 +91,14 @@ async function connect(): Promise<void> {
   }
 }
 
+async function enterFullscreen(): Promise<void> {
+  try {
+    if (video.value?.requestFullscreen) await video.value.requestFullscreen()
+  } catch {
+    /* fullscreen may be denied; keep the overlay stable */
+  }
+}
+
 watch(
   () => [props.stream?.stream_id, props.stream?.state, props.active],
   () => {
@@ -112,6 +121,15 @@ onUnmounted(() => void disconnect())
         {{ new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'medium', hour12: false }).format(now) }}
       </div>
       <div v-if="state === 'LIVE'" class="video-live-tag">LIVE</div>
+      <button
+        v-if="state === 'LIVE'"
+        class="video-fullscreen"
+        type="button"
+        aria-label="全屏"
+        @click="enterFullscreen"
+      >
+        <FullscreenIcon />
+      </button>
       <div v-if="state !== 'LIVE'" class="video-placeholder">
         <span class="video-glyph">{{ glyph }}</span>
         <strong>{{

@@ -17,9 +17,6 @@
   .yd-monitor-side {
     grid-template-rows: minmax(220px, 1.35fr) auto minmax(140px, 0.65fr);
   }
-  .risk-ribbon-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
 }
 
 @media (max-width: 1280px) {
@@ -39,10 +36,10 @@
   .yd-monitor-side {
     gap: 8px;
   }
-  .operations-command-dock {
+  .dock-actions {
     gap: 8px;
   }
-  .operations-command-dock .t-button {
+  .dock-actions .t-button {
     font-size: 13px;
   }
   .settings-grid {
@@ -102,11 +99,14 @@
     min-height: 74px;
   }
   .operations-command-dock {
-    grid-template-columns: minmax(120px, 0.8fr) repeat(4, minmax(0, 1fr)) minmax(150px, 1fr);
-    gap: 7px;
-    padding: 9px 10px;
+    gap: 4px;
+    padding: 8px 10px;
   }
-  .operations-command-dock .t-button {
+  .dock-actions {
+    grid-template-columns: 1.12fr 1fr 1fr 1fr 0.95fr;
+    gap: 7px;
+  }
+  .dock-actions .t-button {
     min-height: 44px;
     font-size: 13px;
   }
@@ -138,7 +138,7 @@
   .yd-monitor-side {
     grid-template-rows: 320px 160px 140px;
   }
-  .operations-command-dock {
+  .dock-actions {
     grid-template-columns: repeat(2, 1fr);
   }
   .parking-layout {

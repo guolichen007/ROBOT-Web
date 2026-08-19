@@ -30,6 +30,7 @@ onMounted(() => {
         :extinguish-points="monitor.snapshot.extinguish_points"
         :trajectory="trajectory"
         :alarms="[]"
+        :show-semantic-points="true"
       />
     </section>
     <section class="panel slot-list">
