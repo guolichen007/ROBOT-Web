@@ -2,9 +2,11 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { FullscreenIcon, ZoomInIcon, ZoomOutIcon } from 'tdesign-icons-vue-next'
 import { MapAdapter } from '@/lib/map-adapter'
+import { buildSensorSector, isSectorOnVehicleRight, rightSensorProfile } from '@/lib/detection-geometry'
 import type { Alarm, DetectionCoverage, MapPoint, MapVersion, ParkingSlot, RobotState } from '@/types'
-import fireMarkerUrl from '@/assets/yd/map/fire_marker.svg'
-import robotTopUrl from '@/assets/yd/map/robot_top_reference_white_bg.png'
+import fireSlotBadgeUrl from '@/assets/yd/map/fire_slot_badge_v4.svg'
+import firePinUrl from '@/assets/yd/map/fire_pin_v4_64.png'
+import robotTopUrl from '@/assets/yd/map/robot_topdown_v4.png'
 
 const props = withDefaults(
   defineProps<{
@@ -49,8 +51,25 @@ const polygonPoints = (points: Array<{ x: number; y: number }>) =>
 const slotPoints = (slot: ParkingSlot) =>
   polygonPoints(Array.isArray(slot.polygon_json) ? slot.polygon_json : slot.polygon_json.points)
 const pathPoints = computed(() => polygonPoints(props.trajectory))
-const coveragePoints = computed(() => polygonPoints(props.coverage?.polygon || []))
 const alarmSlots = computed(() => new Map(props.alarms.map((item) => [item.parking_slot_id, item])))
+
+// ---- right-side detection sector (vehicle-relative, from RIGHT sensor profile) ----
+const rightSensor = computed(() => rightSensorProfile(props.robot))
+const sectorWorld = computed(() => {
+  const profile = rightSensor.value
+  const robot = props.robot
+  if (!profile || !robot) return []
+  if (!['CONNECTED', 'STALE'].includes(profile.support_state)) return []
+  return buildSensorSector(robot, profile)
+})
+const sectorPoints = computed(() => polygonPoints(sectorWorld.value))
+const sectorStale = computed(() => rightSensor.value?.support_state === 'STALE')
+const sectorInvalid = computed(
+  () =>
+    sectorWorld.value.length > 0 && !isSectorOnVehicleRight(props.robot as RobotState, sectorWorld.value),
+)
+
+// ---- fire markers: slot badges vs free pins ----
 const fireMarkers = computed(() =>
   props.alarms
     .map((alarm) => {
@@ -66,6 +85,36 @@ const fireMarkers = computed(() =>
     .filter((item): item is { alarm: Alarm; pos: { x: number; y: number } } => Boolean(item.pos)),
 )
 const hasActiveFire = computed(() => fireMarkers.value.length > 0)
+
+const slotScreenBounds = (slot: ParkingSlot) => {
+  const points = Array.isArray(slot.polygon_json) ? slot.polygon_json : slot.polygon_json.points
+  const screens = points.map((item) => point(item.x, item.y))
+  const xs = screens.map((item) => item.x)
+  const ys = screens.map((item) => item.y)
+  return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) }
+}
+const slotFireBadges = computed(() =>
+  fireMarkers.value
+    .map((marker) => {
+      const slot = props.slots.find((item) => item.id === marker.alarm.parking_slot_id)
+      if (!slot) return null
+      const b = slotScreenBounds(slot)
+      const badge = 24
+      let x = b.maxX + 8
+      const y = b.minY - 6
+      let flip = false
+      if (x + badge > size.value.width - 12) {
+        x = b.minX - badge - 8
+        flip = true
+      }
+      const anchor = { x: flip ? b.minX : b.maxX, y: b.minY + 2 }
+      return { alarm: marker.alarm, slot, x, y, anchor, flip, badge }
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item)),
+)
+const freeFirePins = computed(() =>
+  fireMarkers.value.filter((marker) => !props.slots.some((slot) => slot.id === marker.alarm.parking_slot_id)),
+)
 
 function updateSize(): void {
   if (!frame.value) return
@@ -122,6 +171,17 @@ onUnmounted(() => observer?.disconnect())
   >
     <svg :viewBox="`0 0 ${size.width} ${size.height}`" role="img" aria-label="停车场二维态势地图">
       <defs>
+        <pattern
+          id="yd-right-dots-blue"
+          width="10"
+          height="10"
+          patternUnits="userSpaceOnUse"
+        >
+          <circle cx="2" cy="2" r="1.1" fill="#4f8cff" />
+        </pattern>
+        <pattern id="yd-right-dots-red" width="10" height="10" patternUnits="userSpaceOnUse">
+          <circle cx="2" cy="2" r="1.1" fill="#ef5757" />
+        </pattern>
         <marker
           id="yd-route-arrow"
           viewBox="0 0 10 10"
@@ -134,19 +194,35 @@ onUnmounted(() => observer?.disconnect())
           <path d="M0,0 L10,5 L0,10 z" fill="#2f7cff" />
         </marker>
       </defs>
+
       <rect width="100%" height="100%" class="map-floor" />
+
+      <!-- right-side detection sector: drawn under route and slots -->
+      <template v-if="showCoverage && sectorPoints && !sectorInvalid">
+        <polygon
+          :points="sectorPoints"
+          class="coverage-soft-fill"
+          :class="{ danger: hasActiveFire, stale: sectorStale }"
+        />
+        <polygon
+          :points="sectorPoints"
+          class="coverage-dot-pattern"
+          :class="{ danger: hasActiveFire }"
+        />
+        <polygon
+          :points="sectorPoints"
+          class="coverage-outline"
+          :class="{ danger: hasActiveFire }"
+        />
+      </template>
+
       <polyline
         v-if="showRoute && trajectory.length"
         :points="pathPoints"
         class="trajectory-line planned"
         marker-end="url(#yd-route-arrow)"
       />
-      <polygon
-        v-if="showCoverage && coveragePoints"
-        :points="coveragePoints"
-        class="detection-sector"
-        :class="{ danger: hasActiveFire }"
-      />
+
       <g
         v-for="slot in slots"
         :key="slot.id"
@@ -177,6 +253,7 @@ onUnmounted(() => observer?.disconnect())
           {{ slot.code }}
         </text>
       </g>
+
       <template v-if="showSemanticPoints">
         <circle
           v-for="item in inspectionPoints"
@@ -194,25 +271,40 @@ onUnmounted(() => observer?.disconnect())
           class="extinguish-point"
         />
       </template>
+
+      <!-- slot fire badge + leader line -->
+      <g v-for="badge in slotFireBadges" :key="badge.alarm.id" class="slot-fire-badge">
+        <line
+          :x1="badge.anchor.x"
+          :y1="badge.anchor.y"
+          :x2="badge.flip ? badge.x + badge.badge : badge.x"
+          :y2="badge.y + badge.badge / 2"
+        />
+        <image :href="fireSlotBadgeUrl" :x="badge.x" :y="badge.y" :width="badge.badge" :height="badge.badge" />
+      </g>
+
+      <!-- free-position fire pins (no explicit slot) -->
       <g
-        v-for="marker in fireMarkers"
+        v-for="marker in freeFirePins"
         :key="marker.alarm.id"
         :transform="`translate(${point(marker.pos.x, marker.pos.y).x} ${point(marker.pos.x, marker.pos.y).y})`"
-        class="fire-marker"
+        class="fire-pin"
       >
-        <circle r="20" />
-        <image :href="fireMarkerUrl" :x="-18" :y="-18" width="36" height="36" alt="火情位置" />
+        <circle r="16" class="fire-pin-ring" />
+        <image :href="firePinUrl" :x="-14" :y="-14" width="28" height="28" />
       </g>
+
       <g
         v-if="robot?.x != null && robot?.y != null"
         :transform="`translate(${point(robot.x, robot.y).x} ${point(robot.x, robot.y).y}) rotate(${(-(robot.theta || 0) * 180) / Math.PI})`"
         class="robot-marker"
       >
-        <image :href="robotTopUrl" x="-14" y="-28" width="28" height="55" />
-        <rect class="robot-label-bg" x="-21" y="28" width="42" height="17" rx="8.5" />
-        <text x="0" y="40">{{ robot.vehicle_id }}</text>
+        <image :href="robotTopUrl" x="-14" y="-21" width="28" height="42" />
+        <rect class="robot-label-bg" x="-21" y="22" width="42" height="17" rx="8.5" />
+        <text x="0" y="34">{{ robot.vehicle_id }}</text>
       </g>
     </svg>
+
     <div class="map-tools">
       <button aria-label="放大" @click.stop="zoom(0.2)"><ZoomInIcon /></button>
       <button aria-label="缩小" @click.stop="zoom(-0.2)"><ZoomOutIcon /></button>
@@ -221,9 +313,10 @@ onUnmounted(() => observer?.disconnect())
     <div class="map-legend">
       <span><i class="legend-dash"></i>巡检路线</span>
       <span><i class="legend-robot"></i>机器人位置</span>
-      <span><i class="legend-sector"></i>检测范围</span>
+      <span><i class="legend-sector"></i>右侧检测范围</span>
       <span v-if="hasActiveFire"><i class="legend-fire"></i>火情位置</span>
     </div>
+    <div v-if="sectorInvalid" class="map-warning">右侧检测配置异常</div>
     <div v-if="!mapVersion" class="map-empty">
       <strong>暂无有效地图</strong><span>未绘制任何演示道路或停车场几何</span>
     </div>

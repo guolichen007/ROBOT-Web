@@ -237,14 +237,35 @@
   stroke-dasharray: 8 6;
   opacity: 0.85;
 }
-.detection-sector {
-  fill: rgba(47, 124, 255, 0.16);
-  stroke: #6ea4ff;
-  stroke-width: 1.2;
+/* right-side detection overlay: soft fill + sparse dots + clear outline,
+   drawn under route/slots so parking labels stay readable */
+.coverage-soft-fill {
+  fill: rgba(47, 124, 255, 0.045);
+  pointer-events: none;
 }
-.detection-sector.danger {
-  fill: rgba(255, 91, 91, 0.18);
-  stroke: #f25656;
+.coverage-soft-fill.danger {
+  fill: rgba(239, 68, 68, 0.06);
+}
+.coverage-soft-fill.stale {
+  fill: rgba(238, 154, 44, 0.05);
+}
+.coverage-dot-pattern {
+  fill: url(#yd-right-dots-blue);
+  opacity: 0.55;
+  pointer-events: none;
+}
+.coverage-dot-pattern.danger {
+  fill: url(#yd-right-dots-red);
+}
+.coverage-outline {
+  fill: none;
+  stroke: #4f8cff;
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+  pointer-events: none;
+}
+.coverage-outline.danger {
+  stroke: #ef5757;
 }
 .robot-marker image {
   filter: drop-shadow(0 3px 4px rgba(29, 61, 104, 0.3));
@@ -257,16 +278,27 @@
   font: 600 10px var(--yd-mono);
   text-anchor: middle;
 }
-.fire-marker {
+.slot-fire-badge {
   pointer-events: none;
 }
-.fire-marker circle {
-  fill: var(--yd-danger-soft);
-  stroke: #f24848;
-  stroke-width: 2.5;
+.slot-fire-badge line {
+  stroke: #ef5757;
+  stroke-width: 1;
+  opacity: 0.55;
 }
-.fire-marker path {
-  fill: #f24848;
+.slot-fire-badge image {
+  filter: drop-shadow(0 2px 3px rgba(180, 40, 40, 0.25));
+}
+.fire-pin {
+  pointer-events: none;
+}
+.fire-pin .fire-pin-ring {
+  fill: rgba(239, 87, 87, 0.08);
+  stroke: rgba(239, 87, 87, 0.25);
+  stroke-width: 1;
+}
+.fire-pin image {
+  filter: drop-shadow(0 2px 3px rgba(180, 40, 40, 0.3));
 }
 .map-tools {
   position: absolute;
@@ -355,6 +387,19 @@
 .map-empty strong {
   color: var(--yd-text-2);
 }
+.map-warning {
+  position: absolute;
+  left: 50%;
+  top: 16px;
+  transform: translateX(-50%);
+  z-index: 5;
+  padding: 6px 12px;
+  border: 1px solid #f0cd96;
+  background: var(--yd-warning-soft);
+  color: #a8620c;
+  border-radius: 6px;
+  font-size: 12px;
+}
 
 .map-selection-bar {
   position: absolute;
@@ -413,7 +458,7 @@
   min-height: 0;
   overflow: hidden;
   display: grid;
-  grid-template-rows: 44px minmax(0, 1fr);
+  grid-template-rows: 44px 42px minmax(0, 1fr);
 }
 .video-surveillance-head {
   display: flex;
@@ -424,35 +469,38 @@
   color: var(--yd-text);
   border-bottom: 1px solid var(--yd-border-soft);
 }
-.video-surveillance .t-tabs {
+.video-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 26px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--yd-border-soft);
+}
+.video-tab {
+  height: 42px;
+  border: 0;
+  background: transparent;
+  color: var(--yd-text-2);
+  font-size: 13px;
+}
+.video-tab:hover {
+  color: var(--yd-primary);
+}
+.video-tab.active {
+  color: var(--yd-primary);
+  font-weight: 700;
+  border-bottom: 3px solid var(--yd-primary);
+}
+.video-active-card {
   height: 100%;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-.video-surveillance .t-tabs__content,
-.video-surveillance .t-tab-panel {
-  flex: 1 1 auto;
-  min-height: 0;
-}
-.video-surveillance .t-tabs__content {
-  padding: 0;
-  min-height: 0;
-}
-.video-surveillance .t-tabs__header {
-  padding: 0 12px;
-  flex: 0 0 auto;
 }
 .video-card {
   height: 100%;
   min-height: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  display: block;
   background: #fff;
   border: 0;
-}
-.video-card > header {
-  display: none;
 }
 .video-stage {
   position: relative;
@@ -786,7 +834,7 @@
 }
 .dock-actions {
   display: grid;
-  grid-template-columns: 1.12fr 1fr 1fr 1fr 0.95fr;
+  grid-template-columns: 1.15fr 1fr 1fr 0.95fr;
   gap: 12px;
   align-items: stretch;
 }
@@ -918,31 +966,28 @@
 }
 .extinguish-actions > button {
   display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  min-height: 52px;
-  padding: 9px 10px;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 9px 11px;
   border: 1px solid var(--yd-border-strong);
   border-radius: var(--yd-radius-sm);
   background: #fff;
   text-align: left;
   color: var(--yd-text);
 }
-.extinguish-actions > button.selected {
+.extinguish-actions > button:hover:not(:disabled) {
   border-color: var(--yd-primary);
   background: var(--yd-primary-soft);
 }
-.extinguish-radio {
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  border: 1.5px solid var(--yd-border-strong);
-  flex: 0 0 auto;
-  margin-top: 2px;
-}
-.extinguish-actions > button.selected .extinguish-radio {
+.extinguish-actions > button.busy {
   border-color: var(--yd-primary);
-  background: radial-gradient(circle, var(--yd-primary) 45%, transparent 52%);
+  background: var(--yd-primary-soft);
+}
+.extinguish-actions > button img {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
 }
 .extinguish-copy {
   display: grid;
@@ -956,15 +1001,6 @@
 .extinguish-copy span {
   font-size: 11px;
   color: var(--yd-text-3);
-}
-.dispatch-summary {
-  display: grid;
-  gap: 8px;
-  margin-top: 10px;
-}
-.dispatch-summary > span {
-  font-size: 12px;
-  color: var(--yd-text-2);
 }
 .operation-timeline h4 {
   margin: 10px 0 6px;
