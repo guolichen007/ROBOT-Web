@@ -321,8 +321,8 @@ def alarm_create_task(
     alarm = db.get(FireEvent, alarm_id)
     if not alarm:
         raise HTTPException(404, "火情不存在")
-    if alarm.state != "CONFIRMED":
-        raise HTTPException(409, "只有已确认火情可以创建灭火任务")
+    if alarm.state not in {"NEW", "ACKNOWLEDGED", "CONFIRMED"}:
+        raise HTTPException(409, "该火情状态不允许创建灭火任务")
     task_payload = TaskInput(
         robot_id=payload.robot_id,
         target_parking_slot_id=alarm.parking_slot_id,

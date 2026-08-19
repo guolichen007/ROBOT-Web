@@ -397,6 +397,50 @@ def test_manual_alarm_idempotency_lifecycle_and_audit(client: TestClient) -> Non
         assert db.get(FireEvent, alarm_id).state == "RESOLVED"  # type: ignore[union-attr]
 
 
+def test_extinguish_task_allowed_before_confirm_rejected_after_resolve(client: TestClient) -> None:
+    token = login(client)
+    _, slot, version = target()
+
+    def create_alarm(note: str) -> str:
+        created = client.post(
+            "/api/v1/alarms/manual",
+            json={
+                "parking_slot_id": slot.id,
+                "fire_type": "smoke",
+                "note": note,
+                "map_version": version.version,
+            },
+            headers=auth(token, **{"Idempotency-Key": str(uuid4())}),
+        )
+        assert created.status_code == 201, created.text
+        return str(created.json()["id"])
+
+    payload = {
+        "robot_id": "R001",
+        "parameters": {"source": "OPERATIONS_HMI", "extinguish_mode": "DEPLOY_BLANKET"},
+    }
+
+    # NEW alarm: direct extinguish dispatch is allowed without prior confirmation
+    new_id = create_alarm("direct extinguish new")
+    created_task = client.post(
+        f"/api/v1/alarms/{new_id}/create-task",
+        json=payload,
+        headers=auth(token, **{"Idempotency-Key": str(uuid4())}),
+    )
+    assert created_task.status_code == 201, created_task.text
+
+    # RESOLVED alarm: dispatch is rejected even with authorization
+    resolved_id = create_alarm("direct extinguish resolved")
+    transitioned = client.post(f"/api/v1/alarms/{resolved_id}/resolve", headers=auth(token))
+    assert transitioned.status_code == 200, transitioned.text
+    rejected = client.post(
+        f"/api/v1/alarms/{resolved_id}/create-task",
+        json=payload,
+        headers=auth(token, **{"Idempotency-Key": str(uuid4())}),
+    )
+    assert rejected.status_code == 409
+
+
 def test_snapshot_watermark_replay_and_one_time_ws_ticket(client: TestClient) -> None:
     token = login(client)
     snapshot = client.get("/api/v1/monitor/snapshot", headers=auth(token))
