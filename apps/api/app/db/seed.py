@@ -37,6 +37,13 @@ from app.db.models import (
     user_roles,
 )
 from app.db.session import SessionLocal
+from app.modules.navigation.route_builder import (
+    REMOTE_WAITING,
+    SlotRef,
+    build_cruise_trajectory,
+    inspection_pose,
+    ordered_codes,
+)
 
 PERMISSIONS = {
     "robot.read": "查看机器人",
@@ -254,20 +261,12 @@ def seed() -> None:
                 map_version_id=map_version.id,
                 parking_slot_id=slot.id,
                 defaults={
-                    "pose_json": {
-                        "x": x if index < 18 else x - 3.0,
-                        "y": y - 2.8 if index < 18 else y,
-                        "theta": math.pi if index < 18 else math.pi / 2,
-                    },
+                    "pose_json": inspection_pose(SlotRef(code=code, x=x, y=y)),
                     "sensor_orientation_json": {"nominal_side": "RIGHT"},
                     "priority": 1,
                 },
             )
-            inspection.pose_json = {
-                "x": x if index < 18 else x - 3.0,
-                "y": y - 2.8 if index < 18 else y,
-                "theta": math.pi if index < 18 else math.pi / 2,
-            }
+            inspection.pose_json = inspection_pose(SlotRef(code=code, x=x, y=y))
             inspection.sensor_orientation_json = {"nominal_side": "RIGHT"}
             extinguish = _get_or_create(
                 db,
@@ -290,18 +289,18 @@ def seed() -> None:
                 "theta": math.pi if index < 18 else math.pi / 2,
             }
 
-        path = [
-            *[{"x": 39.0, "y": 2.0 + index * 0.55, "theta": math.pi / 2} for index in range(49)],
-            *[{"x": 39.0 - index * 0.6, "y": 28.4, "theta": math.pi} for index in range(62)],
-        ]
+        cruise_path = build_cruise_trajectory(
+            [SlotRef(code=slot.code, x=slot.center_pose_json["x"], y=slot.center_pose_json["y"]) for slot in slots]
+        )
         trajectory = _get_or_create(
             db,
             Trajectory,
             map_version_id=map_version.id,
-            code="DEMO_LOOP",
-            defaults={"version": "1", "path_json": path, "enabled": True},
+            code="RIGHT_SIDE_S_CRUISE",
+            defaults={"version": "2", "path_json": cruise_path, "enabled": True},
         )
-        trajectory.path_json = path
+        trajectory.path_json = cruise_path
+        trajectory.enabled = True
         robot = _get_or_create(
             db,
             Robot,
@@ -423,11 +422,11 @@ def seed() -> None:
             db,
             NavigationPreset,
             map_version_id=map_version.id,
-            code="WAITING_AREA",
+            code="REMOTE_WAITING_AREA",
             defaults={
-                "name": "等待区",
+                "name": "远端待命区",
                 "category": "WAITING_AREA",
-                "pose_json": {"x": 39.0, "y": 2.0, "theta": math.pi / 2},
+                "pose_json": dict(REMOTE_WAITING),
                 "position_tolerance_m": 0.25,
                 "yaw_tolerance_rad": 0.18,
                 "allowed_approach_json": {"direction": "FORWARD_ONLY"},
@@ -437,37 +436,40 @@ def seed() -> None:
                 "semantic_revision": map_version.semantic_revision,
             },
         )
-        _ = waiting
+        waiting.pose_json = dict(REMOTE_WAITING)
         for slot in slots:
-            inspection = db.scalar(
-                select(InspectionPoint).where(InspectionPoint.parking_slot_id == slot.id)
-            )
-            if inspection:
-                _get_or_create(
-                    db,
-                    NavigationPreset,
-                    map_version_id=map_version.id,
-                    code=f"INSPECT_{slot.code.replace('-', '_')}",
-                    defaults={
-                        "parking_slot_id": slot.id,
-                        "name": f"{slot.code} 巡检位",
-                        "category": "INSPECTION",
-                        "pose_json": inspection.pose_json,
-                        "position_tolerance_m": 0.2,
-                        "yaw_tolerance_rad": 0.15,
-                        "allowed_approach_json": {"direction": "FORWARD_ONLY"},
-                        "requires_reverse": False,
-                        "is_default": False,
-                        "enabled": True,
-                        "semantic_revision": map_version.semantic_revision,
-                    },
+            pose = inspection_pose(
+                SlotRef(
+                    code=slot.code,
+                    x=slot.center_pose_json["x"],
+                    y=slot.center_pose_json["y"],
                 )
+            )
+            _get_or_create(
+                db,
+                NavigationPreset,
+                map_version_id=map_version.id,
+                code=f"INSPECT_{slot.code.replace('-', '_')}",
+                defaults={
+                    "parking_slot_id": slot.id,
+                    "name": f"{slot.code} 巡检位",
+                    "category": "INSPECTION",
+                    "pose_json": pose,
+                    "position_tolerance_m": 0.2,
+                    "yaw_tolerance_rad": 0.15,
+                    "allowed_approach_json": {"direction": "FORWARD_ONLY"},
+                    "requires_reverse": False,
+                    "is_default": False,
+                    "enabled": True,
+                    "semantic_revision": map_version.semantic_revision,
+                },
+            )
         patrol_plan = _get_or_create(
             db,
             PatrolPlan,
-            code="DEMO_RIGHT_SIDE_PATROL",
+            code="RIGHT_SIDE_S_CRUISE_PLAN",
             defaults={
-                "name": "停车场右侧检测巡检",
+                "name": "右侧全覆盖 S 型巡航",
                 "robot_id": robot.id,
                 "map_version_id": map_version.id,
                 "trajectory_id": trajectory.id,
@@ -475,16 +477,23 @@ def seed() -> None:
                 "created_by": admin.id,
             },
         )
-        plan_presets = db.scalars(
-            select(NavigationPreset)
-            .where(
-                NavigationPreset.map_version_id == map_version.id,
-                NavigationPreset.category == "INSPECTION",
-            )
-            .order_by(NavigationPreset.code)
-            .limit(12)
-        ).all()
-        for sequence, preset in enumerate(plan_presets, 1):
+        patrol_plan.trajectory_id = trajectory.id
+        ordered = ordered_codes(
+            [SlotRef(code=s.code, x=s.center_pose_json["x"], y=s.center_pose_json["y"]) for s in slots]
+        )
+        presets_by_code = {
+            row.code: row
+            for row in db.scalars(
+                select(NavigationPreset).where(
+                    NavigationPreset.map_version_id == map_version.id,
+                    NavigationPreset.category == "INSPECTION",
+                )
+            ).all()
+        }
+        for sequence, code in enumerate(ordered, 1):
+            preset = presets_by_code.get(f"INSPECT_{code.replace('-', '_')}")
+            if not preset:
+                continue
             _get_or_create(
                 db,
                 PatrolPlanPoint,
