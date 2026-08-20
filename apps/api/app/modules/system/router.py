@@ -171,6 +171,105 @@ def system_status(db: DbSession, auth: CurrentAuth) -> dict:
     return status
 
 
+def build_operation_context(db, robot: Robot) -> dict:
+    """Server-authoritative mission interruption context for one robot.
+
+    The frontend must read this instead of scanning historical tasks. At any
+    moment a robot has either a running mission, an interrupted mission, or
+    nothing.
+    """
+    active_states = {"CREATED", "QUEUED", "ACCEPTED", "EXECUTING"}
+
+    def cursor_of(task: Task) -> dict:
+        return (task.parameters_json or {}).get("live_route_cursor") or {}
+
+    def checkpoint_of(task: Task) -> dict:
+        return (task.parameters_json or {}).get("live_checkpoint") or {}
+
+    base = {
+        "state": "IDLE",
+        "kind": None,
+        "task_id": None,
+        "patrol_plan_id": None,
+        "last_completed_waypoint_index": None,
+        "target_waypoint_index": None,
+        "waypoint_total": None,
+        "checkpoint_index": None,
+        "checkpoint_total": None,
+        "current_slot_code": None,
+        "next_slot_code": None,
+        "interrupted_reason": None,
+        "can_continue": False,
+        "can_return": True,
+    }
+
+    if robot.estop_active:
+        base["state"] = "ESTOPPED"
+
+    active = db.scalar(
+        select(Task)
+        .where(Task.robot_id == robot.id, Task.type.in_({"PATROL", "RETURN_DOCK"}), Task.status.in_(active_states))
+        .order_by(Task.created_at.desc())
+    )
+    if active:
+        base["state"] = "RUNNING"
+        base["kind"] = "PATROL" if active.type == "PATROL" else "RETURN"
+        base["task_id"] = active.id
+        base["patrol_plan_id"] = (active.parameters_json or {}).get("patrol_plan_id")
+        return base
+
+    patrol = db.scalar(
+        select(Task)
+        .where(
+            Task.robot_id == robot.id,
+            Task.type == "PATROL",
+            Task.status == "CANCELLED",
+        )
+        .order_by(Task.created_at.desc())
+    )
+    if patrol and (patrol.parameters_json or {}).get("resume_state") == "AVAILABLE":
+        cursor = cursor_of(patrol)
+        checkpoint = checkpoint_of(patrol)
+        base.update(
+            {
+                "state": "PAUSED" if base["state"] != "ESTOPPED" else base["state"],
+                "kind": "PATROL",
+                "task_id": patrol.id,
+                "patrol_plan_id": (patrol.parameters_json or {}).get("patrol_plan_id"),
+                "last_completed_waypoint_index": cursor.get("last_completed_waypoint_index", cursor.get("waypoint_index")),
+                "target_waypoint_index": cursor.get("target_waypoint_index"),
+                "waypoint_total": cursor.get("waypoint_total"),
+                "checkpoint_index": checkpoint.get("index"),
+                "checkpoint_total": checkpoint.get("total"),
+                "current_slot_code": checkpoint.get("current_slot_code"),
+                "next_slot_code": checkpoint.get("next_slot_code"),
+                "interrupted_reason": (patrol.parameters_json or {}).get("interruption_reason"),
+                "can_continue": True,
+                "can_return": True,
+            }
+        )
+        return base
+
+    ret = db.scalar(
+        select(Task)
+        .where(
+            Task.robot_id == robot.id,
+            Task.type == "RETURN_DOCK",
+            Task.status == "CANCELLED",
+        )
+        .order_by(Task.created_at.desc())
+    )
+    if ret and (ret.parameters_json or {}).get("resume_state") == "AVAILABLE":
+        base["state"] = "PAUSED" if base["state"] != "ESTOPPED" else base["state"]
+        base["kind"] = "RETURN"
+        base["task_id"] = ret.id
+        base["can_continue"] = False
+        base["can_return"] = True
+        return base
+
+    return base
+
+
 @router.get("/api/v1/monitor/snapshot")
 def monitor_snapshot(
     db: DbSession, _: AuthContext = Depends(require_permission("robot.read"))
@@ -279,6 +378,7 @@ def monitor_snapshot(
         "robots": latest,
         "alarms": [serialize_model(x) for x in alarms],
         "tasks": [serialize_model(x) for x in tasks],
+        "operation_context": build_operation_context(db, robots[0]) if robots else None,
         "streams": [
             serialize_model(x)
             for x in db.scalars(select(StreamRegistry).order_by(StreamRegistry.camera_type)).all()

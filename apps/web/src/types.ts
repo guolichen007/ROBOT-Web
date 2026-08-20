@@ -206,6 +206,23 @@ export interface StopOperation {
   mission_cancel_state: string
 }
 
+export interface OperationContext {
+  state: 'IDLE' | 'RUNNING' | 'PAUSED' | 'ESTOPPED'
+  kind: 'PATROL' | 'RETURN' | null
+  task_id: string | null
+  patrol_plan_id: string | null
+  last_completed_waypoint_index: number | null
+  target_waypoint_index: number | null
+  waypoint_total: number | null
+  checkpoint_index: number | null
+  checkpoint_total: number | null
+  current_slot_code: string | null
+  next_slot_code: string | null
+  interrupted_reason: string | null
+  can_continue: boolean
+  can_return: boolean
+}
+
 export interface MonitorSnapshot {
   snapshot_watermark: string
   site: Record<string, any> | null
@@ -220,6 +237,7 @@ export interface MonitorSnapshot {
   tasks: Task[]
   streams: StreamInfo[]
   navigation_presets?: NavigationPreset[]
+  operation_context?: OperationContext | null
 }
 
 export interface RealtimeEvent {
