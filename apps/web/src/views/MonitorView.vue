@@ -42,9 +42,22 @@ const resumeTaskId = computed(() => {
     (item) =>
       item.type === 'PATROL' &&
       item.status === 'CANCELLED' &&
+      item.parameters_json?.resume_state === 'AVAILABLE' &&
       Boolean(item.parameters_json?.live_route_cursor),
   )
   return cancelled?.id || null
+})
+const resumeNextSlot = computed(() => {
+  const cancelled = monitor.snapshot.tasks.find(
+    (item) =>
+      item.type === 'PATROL' &&
+      item.status === 'CANCELLED' &&
+      item.parameters_json?.resume_state === 'AVAILABLE',
+  )
+  const checkpoint = cancelled?.parameters_json?.live_checkpoint as
+    | { next_slot_code?: string }
+    | undefined
+  return checkpoint?.next_slot_code
 })
 let coverageTimer = 0
 let stopTimer = 0
@@ -59,7 +72,7 @@ const selectedPreset = computed(() =>
   ),
 )
 const activeTask = computed(() => monitor.activeTask)
-const { state: vehicleState, atWaitingArea } = useVehicleOperationState({
+const { state: vehicleState, atWaitingArea, resumeOptions } = useVehicleOperationState({
   robot,
   activeTask,
   stopOperation,
@@ -156,7 +169,7 @@ const patrolArt = computed(() => {
 })
 const patrolCardClass = computed(() => {
   if (robot.value?.estop_active) return 'is-estop'
-  if (vehicleState.value === 'STOPPING' || vehicleState.value === 'STOPPED_RESUMABLE') return 'is-stopping'
+  if (vehicleState.value === 'STOPPING' || vehicleState.value === 'PAUSED_SAFE') return 'is-stopping'
   if (vehicleState.value === 'RETURNING' || vehicleState.value === 'RETURN_STARTING') return 'is-returning'
   if (vehicleState.value === 'PATROLLING' || vehicleState.value === 'PATROL_STARTING') return 'is-patrolling'
   return 'is-idle'
@@ -339,20 +352,20 @@ async function pollStop(id: string) {
 }
 async function stop() {
   if (!robot.value) {
-    toast('当前无机器人，无法停止巡检')
+    toast('当前无机器人，无法停止')
     return
   }
   busyCommand.value = 'stop'
   try {
     stopOperation.value = (
       await api.post(
-        `/robots/${robot.value.vehicle_id}/stop-patrol`,
+        `/robots/${robot.value.vehicle_id}/stop-operation`,
         {},
         { headers: { 'Idempotency-Key': newUuid() } },
       )
     ).data
     if (stopOperation.value) void pollStop(stopOperation.value.id)
-    toast('正在请求停止巡检，独立确认任务取消与车辆静止')
+    toast('正在停止车辆任务，独立确认任务取消与车辆静止')
   } catch (reason) {
     toast(friendlyError(reason))
   } finally {
@@ -575,7 +588,15 @@ onUnmounted(() => {
             <div class="patrol-state">
               <span class="ptitle">巡检状态</span>
               <strong>{{ patrolStatus }}</strong>
-              <span>{{ activeTask ? `任务进行中 · ${patrolCode}` : '等待下发任务' }}</span>
+              <span>{{
+                vehicleState === 'PAUSED_SAFE'
+                  ? resumeNextSlot
+                    ? `已停止，可从 ${resumeNextSlot} 继续`
+                    : '已停止'
+                  : activeTask
+                    ? `任务进行中 · ${patrolCode}`
+                    : '等待下发任务'
+              }}</span>
             </div>
             <div class="yd-patrol-meta">
               <div><span>巡检路线</span><b>右侧全覆盖 S 型</b></div>
@@ -612,7 +633,7 @@ onUnmounted(() => {
         <span>禁止继续巡检与返航</span>
       </template>
       <template v-else>
-        <strong>正在停止巡检</strong>
+        <strong>正在停止车辆任务</strong>
         <span>连续静止帧 {{ stopOperation.stationary_frames }}/5</span>
       </template>
     </section>
@@ -623,6 +644,7 @@ onUnmounted(() => {
         :reason="dockReason"
         :estop-active="Boolean(robot?.estop_active)"
         :at-waiting-area="atWaitingArea"
+        :resume-options="resumeOptions"
         @patrol="patrol"
         @stop="stop"
         @home="home"

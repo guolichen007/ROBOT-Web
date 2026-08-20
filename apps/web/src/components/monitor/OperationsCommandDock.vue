@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { ControlPlatformIcon, HomeIcon, StopCircleIcon } from 'tdesign-icons-vue-next'
 import { useHoldToConfirm } from '@/composables/useHoldToConfirm'
-import type { VehicleOperationState } from '@/composables/useVehicleOperationState'
+import type { ResumeOptions, VehicleOperationState } from '@/composables/useVehicleOperationState'
 
 const props = defineProps<{
   busy: string
@@ -10,6 +10,7 @@ const props = defineProps<{
   estopActive: boolean
   vehicleState: VehicleOperationState
   atWaitingArea: boolean
+  resumeOptions: ResumeOptions
 }>()
 const emit = defineEmits<{ patrol: []; stop: []; home: []; estop: []; resetEstop: [] }>()
 const hold = useHoldToConfirm(() => {
@@ -20,11 +21,12 @@ function keyDown(event: KeyboardEvent): void {
   if (!event.repeat && ['Enter', ' '].includes(event.key)) hold.start()
 }
 
-const motionLocked = computed(() => props.estopActive || ['UNCONFIRMED', 'FAILED'].includes(props.vehicleState))
+const motionLocked = computed(() => props.estopActive || props.vehicleState === 'ERROR_STOP_UNCONFIRMED')
+
 const patrolLabel = computed(() => {
   if (props.busy === 'patrol') return '正在启动…'
   if (props.vehicleState === 'PATROLLING') return '● 巡检中'
-  if (props.vehicleState === 'STOPPED_RESUMABLE') return '继续巡检'
+  if (props.vehicleState === 'PAUSED_SAFE' && props.resumeOptions.canContinuePatrol) return '继续巡检'
   return '开始巡检'
 })
 const patrolDisabled = computed(
@@ -33,14 +35,19 @@ const patrolDisabled = computed(
     motionLocked.value ||
     ['PATROLLING', 'STOPPING', 'RETURNING', 'RETURN_STARTING'].includes(props.vehicleState),
 )
+
 const stopLabel = computed(() => {
   if (props.busy === 'stop') return '● 停止中'
-  if (props.vehicleState === 'STOPPED_RESUMABLE') return '已停止'
-  return '停止巡检'
+  if (props.vehicleState === 'PAUSED_SAFE' || props.vehicleState === 'ERROR_STOP_UNCONFIRMED') return '已停止'
+  return '停止'
 })
 const stopDisabled = computed(
-  () => Boolean(props.busy) || motionLocked.value || ['IDLE', 'STOPPED_RESUMABLE', 'RETURNING'].includes(props.vehicleState),
+  () =>
+    Boolean(props.busy) ||
+    motionLocked.value ||
+    ['IDLE', 'PAUSED_SAFE', 'ERROR_STOP_UNCONFIRMED'].includes(props.vehicleState),
 )
+
 const homeLabel = computed(() => {
   if (props.busy === 'home') return '● 返回中'
   if (props.atWaitingArea && props.vehicleState === 'IDLE') return '已在等待区'

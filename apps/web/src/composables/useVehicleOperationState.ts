@@ -6,13 +6,19 @@ export type VehicleOperationState =
   | 'PATROL_STARTING'
   | 'PATROLLING'
   | 'STOPPING'
-  | 'STOPPED_RESUMABLE'
+  | 'PAUSED_SAFE'
   | 'RETURN_STARTING'
   | 'RETURNING'
   | 'ESTOPPING'
   | 'ESTOPPED'
   | 'RESETTING'
-  | 'ERROR'
+  | 'ERROR_STOP_UNCONFIRMED'
+
+export interface ResumeOptions {
+  canContinuePatrol: boolean
+  canReturnWaiting: boolean
+  atWaitingArea: boolean
+}
 
 export function useVehicleOperationState(input: {
   robot: Ref<RobotState | undefined>
@@ -31,7 +37,8 @@ export function useVehicleOperationState(input: {
         stop.state || '',
       )
       if (!terminal) return 'STOPPING'
-      return 'STOPPED_RESUMABLE'
+      if (['UNCONFIRMED', 'FAILED'].includes(stop.state || '')) return 'ERROR_STOP_UNCONFIRMED'
+      return 'PAUSED_SAFE'
     }
 
     const task = input.activeTask.value
@@ -45,7 +52,7 @@ export function useVehicleOperationState(input: {
       if (task.type === 'EXTINGUISH') return 'PATROLLING'
     }
 
-    if (input.resumeTaskId.value) return 'STOPPED_RESUMABLE'
+    if (input.resumeTaskId.value) return 'PAUSED_SAFE'
     return 'IDLE'
   })
 
@@ -56,5 +63,11 @@ export function useVehicleOperationState(input: {
     return Math.hypot(robot.x - 1.2, robot.y - 1.2) < 0.6
   })
 
-  return { state, atWaitingArea }
+  const resumeOptions = computed<ResumeOptions>(() => ({
+    canContinuePatrol: Boolean(input.resumeTaskId.value),
+    canReturnWaiting: !atWaitingArea.value,
+    atWaitingArea: atWaitingArea.value,
+  }))
+
+  return { state, atWaitingArea, resumeOptions }
 }
