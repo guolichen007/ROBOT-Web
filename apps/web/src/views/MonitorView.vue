@@ -37,48 +37,17 @@ const otherEventsOpen = ref(false)
 const { activeAlarms, primaryAlarm, primaryAlarmId } = usePrimaryAlarm(
   computed(() => monitor.snapshot.alarms),
 )
+const operationContext = computed(() => monitor.snapshot.operation_context || null)
 const resumeTaskId = computed(() => {
-  const cancelled = monitor.snapshot.tasks.find(
-    (item) =>
-      item.type === 'PATROL' &&
-      item.status === 'CANCELLED' &&
-      item.parameters_json?.resume_state === 'AVAILABLE' &&
-      Boolean(item.parameters_json?.live_route_cursor),
-  )
-  return cancelled?.id || null
+  const context = operationContext.value
+  return context && context.kind === 'PATROL' && context.can_continue ? context.task_id : null
 })
-const returnResumeTask = computed(() =>
-  monitor.snapshot.tasks.find(
-    (item) =>
-      item.type === 'RETURN_DOCK' &&
-      item.status === 'CANCELLED' &&
-      item.parameters_json?.resume_state === 'AVAILABLE',
-  ),
-)
 const interruptedKind = computed<'patrol' | 'return' | null>(() => {
-  const patrol = resumeTaskId.value
-    ? monitor.snapshot.tasks.find((item) => item.id === resumeTaskId.value)
-    : undefined
-  const ret = returnResumeTask.value
-  if (!patrol && !ret) return null
-  if (patrol && !ret) return 'patrol'
-  if (ret && !patrol) return 'return'
-  return new Date(patrol!.created_at).getTime() >= new Date(ret!.created_at).getTime()
-    ? 'patrol'
-    : 'return'
+  const context = operationContext.value
+  if (!context || !['PAUSED', 'ESTOPPED'].includes(context.state)) return null
+  return context.kind === 'RETURN' ? 'return' : context.kind === 'PATROL' ? 'patrol' : null
 })
-const resumeNextSlot = computed(() => {
-  const cancelled = monitor.snapshot.tasks.find(
-    (item) =>
-      item.type === 'PATROL' &&
-      item.status === 'CANCELLED' &&
-      item.parameters_json?.resume_state === 'AVAILABLE',
-  )
-  const checkpoint = cancelled?.parameters_json?.live_checkpoint as
-    | { next_slot_code?: string }
-    | undefined
-  return checkpoint?.next_slot_code
-})
+const resumeNextSlot = computed(() => operationContext.value?.next_slot_code || undefined)
 let coverageTimer = 0
 let stopTimer = 0
 

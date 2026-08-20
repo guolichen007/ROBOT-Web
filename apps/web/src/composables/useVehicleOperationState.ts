@@ -56,7 +56,7 @@ export function useVehicleOperationState(input: {
       if (task.type === 'EXTINGUISH') return 'PATROLLING'
     }
 
-    if (input.resumeTaskId.value) return 'PAUSED_SAFE'
+    if (input.interruptedKind.value) return 'PAUSED_SAFE'
     return 'IDLE'
   })
 
