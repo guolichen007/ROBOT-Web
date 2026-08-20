@@ -236,6 +236,18 @@
 .status-cell b.ok {
   color: var(--yd-success);
 }
+.status-cell b.active {
+  color: var(--yd-primary);
+}
+.status-cell b.warn {
+  color: #d98518;
+}
+.status-cell b.danger {
+  color: #e33d36;
+}
+.status-cell b.muted {
+  color: var(--yd-text-3);
+}
 .status-icon {
   width: 18px;
   height: 18px;

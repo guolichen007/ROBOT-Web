@@ -4,6 +4,11 @@ import { robotModeLabel, streamStateLabel, supportStateLabel, taskTypeLabel } fr
 import type { RobotState, StreamInfo, Task } from '@/types'
 
 const props = defineProps<{ robot?: RobotState; task?: Task; stream?: StreamInfo; freshness: string }>()
+const freshnessClass = computed(() => {
+  if (props.freshness.includes('实时')) return 'ok'
+  if (props.freshness.includes('延迟')) return 'warn'
+  return 'danger'
+})
 
 const mode = computed(() => {
   if (props.robot?.estop_active) return robotModeLabel('ESTOP')
@@ -31,7 +36,7 @@ const rows = computed(() => [
   <section class="panel device-snapshot">
     <div class="ds-head">
       <span>设备快照</span>
-      <small>数据 {{ freshness }}</small>
+      <small :class="freshnessClass">● {{ freshness }}</small>
     </div>
     <dl class="ds-grid">
       <div v-for="row in rows" :key="row.label">

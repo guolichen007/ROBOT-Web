@@ -20,6 +20,15 @@ import { useAuthStore } from '@/stores/auth'
 import { useMonitorStore } from '@/stores/monitor'
 import { useSystemClock } from '@/composables/useSystemClock'
 import { localizationLabel, taskTypeLabel } from '@/lib/ui-labels'
+import {
+  batterySeverity,
+  channelSeverity,
+  freshnessSeverity,
+  linkSeverity,
+  localizationSeverity,
+  robotSeverity,
+  taskSeverity,
+} from '@/lib/telemetry-health'
 import brandLogo from '@/assets/yd/brand/youdao_brand_logo.png'
 import techWave from '@/assets/yd/decorative/tech_wave.svg'
 
@@ -108,11 +117,33 @@ const batteryLevel = computed(() => {
 })
 const batteryBars = computed(() => Array.from({ length: 4 }, (_, index) => index + 1 <= Math.ceil(batteryLevel.value / 25)))
 
-const freshness = computed(() => {
-  if (!robot.value?.server_received_at) return '--'
-  const seconds = (Date.now() - Date.parse(robot.value.server_received_at)) / 1000
-  return `${Math.max(0, seconds).toFixed(0)} 秒前`
+const freshnessAge = computed(() => {
+  if (!robot.value?.server_received_at) return null
+  return Math.max(0, (Date.now() - Date.parse(robot.value.server_received_at)) / 1000)
 })
+const freshness = computed(() => {
+  const age = freshnessAge.value
+  if (age == null) return '数据离线'
+  const stale = robot.value?.integration?.stale_seconds ?? 3
+  const offline = robot.value?.integration?.offline_seconds ?? 10
+  if (age >= offline) return '数据离线'
+  if (age >= stale) return `数据陈旧 ${age.toFixed(1)}s`
+  return '数据实时'
+})
+const sevClass = computed(() => ({
+  link: linkSeverity(monitor.connected),
+  robot: robotSeverity(robot.value?.online_state),
+  battery: batterySeverity(robot.value?.battery),
+  task: taskSeverity(activeTask.value?.type),
+  localization: localizationSeverity(robot.value?.localization_status),
+  topIr: channelSeverity(robot.value?.data_channels?.top_ir?.support_state),
+  bottomIr: channelSeverity(robot.value?.data_channels?.bottom_ir?.support_state),
+  smoke: channelSeverity(robot.value?.data_channels?.smoke?.support_state),
+  freshness: freshnessAge.value == null ? 'danger' : freshnessSeverity(freshnessAge.value, robot.value?.integration?.stale_seconds ?? 3, robot.value?.integration?.offline_seconds ?? 10),
+}))
+function sevLabel(severity: string): string {
+  return ({ normal: 'ok', active: 'active', warning: 'warn', danger: 'danger', unknown: 'muted' })[severity] || ''
+}
 function metricValue(value: number | null | undefined, channel: string, unit: string): string {
   const state = robot.value?.data_channels?.[channel]?.support_state
   if (state !== 'CONNECTED' || value == null) return '--'
@@ -199,46 +230,51 @@ function onUserMenuClick(data: { value?: unknown }): void {
         <div class="status-area">
           <div class="status-primary">
             <span class="status-cell"
-              ><LinkIcon class="status-icon" :class="{ ok: monitor.connected }" /><span
+              ><LinkIcon class="status-icon" :class="sevLabel(sevClass.link)" /><span
                 >链路状态</span
-              ><b :class="monitor.connected ? 'ok' : ''">{{
+              ><b :class="sevLabel(sevClass.link)">{{
                 monitor.connected ? '正常' : '正在重连'
               }}</b></span
             >
             <span class="status-cell"
-              ><RobotIcon class="status-icon" :class="{ ok: robot?.online_state === 'ONLINE' }" /><span
+              ><RobotIcon class="status-icon" :class="sevLabel(sevClass.robot)" /><span
                 >机器人</span
-              ><b :class="robot?.online_state === 'ONLINE' ? 'ok' : ''">{{
-                robot?.online_state === 'ONLINE' ? '在线' : '离线'
+              ><b :class="sevLabel(sevClass.robot)">{{
+                robot?.online_state === 'ONLINE' ? '在线' : robot?.online_state === 'STALE' ? '陈旧' : '离线'
               }}</b></span
             >
             <span class="status-cell"
               ><BatteryIcon class="status-icon" /><span>电量</span
-              ><b>{{ robot?.battery == null ? '--' : `${robot.battery.toFixed(0)}%` }}</b>
+              ><b :class="sevLabel(sevClass.battery)">{{ robot?.battery == null ? '--' : `${robot.battery.toFixed(0)}%` }}</b>
               <span class="battery-bars"
                 ><i v-for="(on, index) in batteryBars" :key="index" :class="{ full: on }"></i
               ></span>
             </span>
             <span class="status-cell"
               ><TaskIcon class="status-icon" /><span>当前任务</span
-              ><b>{{ activeTask ? taskTypeLabel(activeTask.type) : '空闲' }}</b></span
+              ><b :class="sevLabel(sevClass.task)">{{ activeTask ? taskTypeLabel(activeTask.type) : '空闲' }}</b></span
             >
             <span class="status-cell"
               ><LocationIcon class="status-icon" /><span>定位状态</span
-              ><b>{{ localizationLabel(robot?.localization_status) }}</b></span
+              ><b :class="sevLabel(sevClass.localization)">{{ localizationLabel(robot?.localization_status) }}</b></span
             >
           </div>
           <div class="status-telemetry-row">
             <span class="status-cell status-telemetry"
-              ><span>顶部热像</span><b>{{ metricValue(robot?.top_ir, 'top_ir', '℃') }}</b></span
+              ><span>顶部热像</span
+              ><b :class="sevLabel(sevClass.topIr)">{{ metricValue(robot?.top_ir, 'top_ir', '℃') }}</b></span
             >
             <span class="status-cell status-telemetry"
-              ><span>底部红外</span><b>{{ metricValue(robot?.bottom_ir, 'bottom_ir', '℃') }}</b></span
+              ><span>底部红外</span
+              ><b :class="sevLabel(sevClass.bottomIr)">{{ metricValue(robot?.bottom_ir, 'bottom_ir', '℃') }}</b></span
             >
             <span class="status-cell status-telemetry"
-              ><span>烟雾浓度</span><b>{{ metricValue(robot?.smoke, 'smoke', '%') }}</b></span
+              ><span>烟雾浓度</span
+              ><b :class="sevLabel(sevClass.smoke)">{{ metricValue(robot?.smoke, 'smoke', '%') }}</b></span
             >
-            <span class="status-cell status-telemetry"><span>数据更新</span><b>{{ freshness }}</b></span>
+            <span class="status-cell status-telemetry"
+              ><span>数据更新</span><b :class="sevLabel(sevClass.freshness)">{{ freshness }}</b></span
+            >
           </div>
         </div>
         <div class="user-side">

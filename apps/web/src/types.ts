@@ -72,6 +72,8 @@ export interface IntegrationProfile {
   read_only_reason?: string | null
   forward_only: boolean
   reverse_precision_navigation: boolean
+  stale_seconds?: number | null
+  offline_seconds?: number | null
 }
 
 export interface MotionProfile {
