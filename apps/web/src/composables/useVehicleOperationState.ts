@@ -14,10 +14,13 @@ export type VehicleOperationState =
   | 'RESETTING'
   | 'ERROR_STOP_UNCONFIRMED'
 
+export type InterruptedKind = 'patrol' | 'return' | null
+
 export interface ResumeOptions {
   canContinuePatrol: boolean
   canReturnWaiting: boolean
   atWaitingArea: boolean
+  interruptedKind: InterruptedKind
 }
 
 export function useVehicleOperationState(input: {
@@ -26,6 +29,7 @@ export function useVehicleOperationState(input: {
   stopOperation: Ref<StopOperation | null>
   requestBusy: Ref<string>
   resumeTaskId: Ref<string | null>
+  interruptedKind: Ref<InterruptedKind>
 }) {
   const state = computed<VehicleOperationState>(() => {
     const robot = input.robot.value
@@ -67,6 +71,7 @@ export function useVehicleOperationState(input: {
     canContinuePatrol: Boolean(input.resumeTaskId.value),
     canReturnWaiting: !atWaitingArea.value,
     atWaitingArea: atWaitingArea.value,
+    interruptedKind: input.interruptedKind.value,
   }))
 
   return { state, atWaitingArea, resumeOptions }

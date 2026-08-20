@@ -47,6 +47,26 @@ const resumeTaskId = computed(() => {
   )
   return cancelled?.id || null
 })
+const returnResumeTask = computed(() =>
+  monitor.snapshot.tasks.find(
+    (item) =>
+      item.type === 'RETURN_DOCK' &&
+      item.status === 'CANCELLED' &&
+      item.parameters_json?.resume_state === 'AVAILABLE',
+  ),
+)
+const interruptedKind = computed<'patrol' | 'return' | null>(() => {
+  const patrol = resumeTaskId.value
+    ? monitor.snapshot.tasks.find((item) => item.id === resumeTaskId.value)
+    : undefined
+  const ret = returnResumeTask.value
+  if (!patrol && !ret) return null
+  if (patrol && !ret) return 'patrol'
+  if (ret && !patrol) return 'return'
+  return new Date(patrol!.created_at).getTime() >= new Date(ret!.created_at).getTime()
+    ? 'patrol'
+    : 'return'
+})
 const resumeNextSlot = computed(() => {
   const cancelled = monitor.snapshot.tasks.find(
     (item) =>
@@ -78,6 +98,7 @@ const { state: vehicleState, atWaitingArea, resumeOptions } = useVehicleOperatio
   stopOperation,
   requestBusy: busyCommand,
   resumeTaskId,
+  interruptedKind,
 })
 const trajectory = computed(() => {
   const trajectories = monitor.snapshot.trajectories

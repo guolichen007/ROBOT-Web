@@ -33,7 +33,10 @@ const patrolDisabled = computed(
   () =>
     Boolean(props.busy) ||
     motionLocked.value ||
-    ['PATROLLING', 'STOPPING', 'RETURNING', 'RETURN_STARTING'].includes(props.vehicleState),
+    ['PATROLLING', 'STOPPING', 'RETURNING', 'RETURN_STARTING'].includes(props.vehicleState) ||
+    (props.vehicleState === 'PAUSED_SAFE' &&
+      props.resumeOptions.interruptedKind === 'return' &&
+      !props.resumeOptions.canContinuePatrol),
 )
 
 const stopLabel = computed(() => {
@@ -51,6 +54,8 @@ const stopDisabled = computed(
 const homeLabel = computed(() => {
   if (props.busy === 'home') return '● 返回中'
   if (props.atWaitingArea && props.vehicleState === 'IDLE') return '已在等待区'
+  if (props.vehicleState === 'PAUSED_SAFE' && props.resumeOptions.interruptedKind === 'return')
+    return '继续返回'
   return '返回等待区'
 })
 const homeDisabled = computed(
