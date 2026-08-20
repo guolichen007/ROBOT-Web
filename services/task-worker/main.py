@@ -179,26 +179,15 @@ def reconcile_stop_operations(db, now: datetime) -> None:
             else None
         )
         task = db.get(Task, operation.task_id) if operation.task_id else None
-        if stop and stop.ack_status == "accepted":
-            operation.motion_stop_state = (
-                "STATIONARY_CONFIRMED"
-                if operation.motion_stop_state == "STATIONARY_CONFIRMED"
-                else "VERIFYING_STATIONARY"
-            )
-        elif stop and stop.lifecycle_status in {"PUBLISHED_UNCONFIRMED", "FAILED", "EXPIRED"}:
-            operation.motion_stop_state = "UNCONFIRMED"
-            operation.failure_reason = stop.ack_reason or "STOP_ACK_TIMEOUT"
-        elif now >= operation.stop_ack_deadline_at:
-            operation.motion_stop_state = "UNCONFIRMED"
-            operation.failure_reason = "STOP_ACK_TIMEOUT"
 
-        if operation.mission_cancel_state != "NOT_REQUIRED":
+        # --- mission cancel truth (independent of motion stop) ---
+        if operation.mission_cancel_state not in {"NOT_REQUIRED", "CANCELLED_CONFIRMED", "UNCONFIRMED", "UNAVAILABLE"}:
             if task and task.status == "CANCELLED":
                 operation.mission_cancel_state = "CANCELLED_CONFIRMED"
             elif cancel and cancel.ack_status == "accepted":
                 operation.mission_cancel_state = "ACK_ACCEPTED"
             if (
-                operation.mission_cancel_state != "CANCELLED_CONFIRMED"
+                operation.mission_cancel_state not in {"CANCELLED_CONFIRMED", "UNCONFIRMED", "UNAVAILABLE"}
                 and operation.cancel_deadline_at
                 and now >= operation.cancel_deadline_at
             ):
@@ -211,27 +200,16 @@ def reconcile_stop_operations(db, now: datetime) -> None:
             "CANCELLED_CONFIRMED",
             "UNCONFIRMED",
         }
-        if operation.motion_stop_state == "UNCONFIRMED" and cancel_terminal:
-            operation.state = "UNCONFIRMED"
-            operation.terminal_at = now
-            queue_event(db, "operation.stop.updated", serialize_model(operation))
-            continue
-        if operation.motion_stop_state == "STATIONARY_CONFIRMED":
-            if operation.mission_cancel_state in {"NOT_REQUIRED", "CANCELLED_CONFIRMED"}:
-                operation.state = "VEHICLE_STATIONARY_CONFIRMED"
-                operation.terminal_at = now
-            elif operation.mission_cancel_state in {"UNAVAILABLE", "UNCONFIRMED"}:
-                operation.state = "PARTIAL_UNCONFIRMED"
-                operation.terminal_at = now
-            else:
-                operation.state = "STATIONARY_CONFIRMED_CANCEL_PENDING"
-            queue_event(db, "operation.stop.updated", serialize_model(operation))
-            continue
-        if operation.motion_stop_state != "VERIFYING_STATIONARY":
-            operation.state = "STOP_REQUESTED"
-            queue_event(db, "operation.stop.updated", serialize_model(operation))
-            continue
-        operation.state = "VERIFYING_STATIONARY"
+
+        # --- stop ACK truth (independent of physical stationary) ---
+        stop_ack_confirmed = bool(stop and stop.ack_status == "accepted")
+        stop_ack_unconfirmed = bool(
+            stop and stop.lifecycle_status in {"PUBLISHED_UNCONFIRMED", "FAILED", "EXPIRED"}
+        ) or (now >= operation.stop_ack_deadline_at and not stop_ack_confirmed)
+
+        # --- physical stationary truth: always verify telemetry, even when
+        # the stop ACK is lost. A missing ACK must never suppress the
+        # independent velocity check. ---
         robot = db.get(Robot, operation.robot_id)
         raw = redis.get(f"robot:{robot.vehicle_id}:latest") if robot else None
         latest = json.loads(raw) if raw else {}
@@ -243,33 +221,58 @@ def reconcile_stop_operations(db, now: datetime) -> None:
             angular_threshold=operation.angular_threshold,
         )
         operation.stationary_frames = operation.stationary_frames + 1 if stationary else 0
-        if operation.stationary_frames >= 5:
-            operation.motion_stop_state = "STATIONARY_CONFIRMED"
-            if operation.mission_cancel_state in {"NOT_REQUIRED", "CANCELLED_CONFIRMED"}:
-                operation.state = "VEHICLE_STATIONARY_CONFIRMED"
-                operation.terminal_at = now
-            elif operation.mission_cancel_state in {"UNAVAILABLE", "UNCONFIRMED"}:
-                operation.state = "PARTIAL_UNCONFIRMED"
-                operation.terminal_at = now
-            else:
-                operation.state = "STATIONARY_CONFIRMED_CANCEL_PENDING"
+        physically_stationary = operation.stationary_frames >= 5
+
+        def terminal(state: str, motion_state: str, failure_reason: str | None = None) -> None:
+            operation.state = state
+            operation.motion_stop_state = motion_state
+            operation.terminal_at = now
+            if failure_reason:
+                operation.failure_reason = failure_reason
             db.add(
                 RobotOperationEvent(
                     robot_id=operation.robot_id,
                     task_id=operation.task_id,
                     operation_type="STOP_PATROL",
-                    state=operation.motion_stop_state,
+                    state=motion_state,
                     payload_json={
                         "stationary_frames": operation.stationary_frames,
                         "mission_cancel_state": operation.mission_cancel_state,
                     },
                 )
             )
-        elif now >= operation.stationary_verify_deadline_at:
+            queue_event(db, "operation.stop.updated", serialize_model(operation))
+
+        if physically_stationary:
+            if operation.mission_cancel_state in {"NOT_REQUIRED", "CANCELLED_CONFIRMED"}:
+                if stop_ack_confirmed:
+                    terminal("VEHICLE_STATIONARY_CONFIRMED", "STATIONARY_CONFIRMED")
+                else:
+                    terminal("PARTIAL_UNCONFIRMED", "STATIONARY_CONFIRMED", "STOP_ACK_UNCONFIRMED")
+            elif operation.mission_cancel_state in {"UNAVAILABLE", "UNCONFIRMED"}:
+                terminal("PARTIAL_UNCONFIRMED", "STATIONARY_CONFIRMED", "TASK_CANCEL_UNCONFIRMED")
+            else:
+                operation.motion_stop_state = "STATIONARY_CONFIRMED"
+                operation.state = "STATIONARY_CONFIRMED_CANCEL_PENDING"
+                queue_event(db, "operation.stop.updated", serialize_model(operation))
+            continue
+
+        # Not yet physically stationary.
+        if not fresh and (stop_ack_unconfirmed or now >= operation.stationary_verify_deadline_at):
+            terminal("UNCONFIRMED", "UNCONFIRMED", "TELEMETRY_STALE")
+            continue
+        if now >= operation.stationary_verify_deadline_at:
+            terminal("UNCONFIRMED", "UNCONFIRMED", "VELOCITY_NOT_ZERO")
+            continue
+
+        # Still verifying: keep a descriptive motion state for the UI.
+        if stop_ack_confirmed:
+            operation.motion_stop_state = "VERIFYING_STATIONARY"
+        elif stop_ack_unconfirmed:
             operation.motion_stop_state = "UNCONFIRMED"
-            operation.state = "UNCONFIRMED"
-            operation.failure_reason = "TELEMETRY_STALE" if not fresh else "VELOCITY_NOT_ZERO"
-            operation.terminal_at = now
+        else:
+            operation.motion_stop_state = "WAITING_ACK"
+        operation.state = "VERIFYING_STATIONARY"
         queue_event(db, "operation.stop.updated", serialize_model(operation))
 
 
