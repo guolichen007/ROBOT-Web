@@ -36,6 +36,8 @@ REMOTE_WAITING = {"x": 1.2, "y": 1.2, "theta": math.pi / 2}
 
 _TOP_LANE_OFFSET_Y = -2.8
 _COLUMN_LANE_OFFSET = 3.0
+NORTH_TRANSFER_Y = 27.0  # safe east-west transfer lane north of the top row
+CLEARANCE_M = 0.3
 
 
 class SlotRef(NamedTuple):
@@ -116,8 +118,10 @@ def build_cruise_waypoints(slots: list[SlotRef]) -> list[dict]:
     ]
 
     first = inspection_pose(groups[0][0])
-    waypoints.append({"x": REMOTE_WAITING["x"], "y": first["y"], "kind": "TRANSIT"})
-    waypoints.append({"x": first["x"], "y": first["y"], "kind": "TRANSIT"})
+    # Enter the first column from the NORTH transfer lane, not by cutting
+    # laterally through A-27: (1.2,1.2) -> (1.2,27.0) -> (8.0,27.0) -> A-27.
+    waypoints.append({"x": REMOTE_WAITING["x"], "y": NORTH_TRANSFER_Y, "kind": "TRANSIT"})
+    waypoints.append({"x": first["x"], "y": NORTH_TRANSFER_Y, "kind": "TRANSIT"})
 
     sequence = 0
     for group_index, group in enumerate(groups):
@@ -143,9 +147,9 @@ def build_cruise_waypoints(slots: list[SlotRef]) -> list[dict]:
             waypoints.append({"x": end["x"], "y": 1.5, "kind": "TURN"})
             waypoints.append({"x": nxt["x"], "y": 1.5, "kind": "TURN"})
         elif group_index == 1:
-            # col2→col3 exit at the top: transverse y=27.0.
-            waypoints.append({"x": end["x"], "y": 27.0, "kind": "TURN"})
-            waypoints.append({"x": nxt["x"], "y": 27.0, "kind": "TURN"})
+            # col2→col3 exit at the top: transverse along the north lane.
+            waypoints.append({"x": end["x"], "y": NORTH_TRANSFER_Y, "kind": "TURN"})
+            waypoints.append({"x": nxt["x"], "y": NORTH_TRANSFER_Y, "kind": "TURN"})
         else:
             # col4→top row: exit north onto the top inspection lane (A18).
             waypoints.append({"x": end["x"], "y": nxt["y"], "kind": "TURN"})
@@ -197,3 +201,38 @@ def _dedupe_waypoints(points: list[dict]) -> list[dict]:
         if not out or out[-1]["x"] != point["x"] or out[-1]["y"] != point["y"]:
             out.append(point)
     return out
+
+
+def segment_intersects_slot(a: dict, b: dict, slot: SlotRef, half_width: float, half_height: float, margin: float) -> bool:
+    """True if the segment a->b intersects the slot's expanded AABB."""
+    min_x = slot.x - half_width - margin
+    max_x = slot.x + half_width + margin
+    min_y = slot.y - half_height - margin
+    max_y = slot.y + half_height + margin
+
+    # Segment vs AABB via slab test.
+    def in_bounds(x: float, y: float) -> bool:
+        return min_x <= x <= max_x and min_y <= y <= max_y
+
+    if in_bounds(a["x"], a["y"]) or in_bounds(b["x"], b["y"]):
+        return True
+
+    # Check each edge for intersection with the segment.
+    def crosses(p: tuple[float, float], q: tuple[float, float]) -> bool:
+        d1 = _cross((a["x"], a["y"]), (b["x"], b["y"]), p)
+        d2 = _cross((a["x"], a["y"]), (b["x"], b["y"]), q)
+        d3 = _cross(p, q, (a["x"], a["y"]))
+        d4 = _cross(p, q, (b["x"], b["y"]))
+        if ((d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)) and ((d3 > 0 and d4 < 0) or (d3 < 0 and d4 > 0)):
+            return True
+        return False
+
+    corners = [(min_x, min_y), (max_x, min_y), (max_x, max_y), (min_x, max_y)]
+    for index in range(4):
+        if crosses(corners[index], corners[(index + 1) % 4]):
+            return True
+    return False
+
+
+def _cross(o: tuple[float, float], a: tuple[float, float], b: tuple[float, float]) -> float:
+    return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])

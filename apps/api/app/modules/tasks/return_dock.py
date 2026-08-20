@@ -82,7 +82,6 @@ def build_return_task(
         parameters_json={
             "source": source,
             "waiting_preset_id": waiting.id,
-            "resume_cleared": True,
         },
         created_by=actor_id,
     )

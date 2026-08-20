@@ -141,6 +141,9 @@ def build_resumed_patrol_task(
     full_waypoints: list[dict[str, Any]] = trajectory.path_json if trajectory else []
     cursor = (previous_task.parameters_json or {}).get("live_route_cursor") or {}
     cursor_index = int(cursor["waypoint_index"]) if cursor.get("waypoint_index") is not None else 0
+    prev_params = dict(previous_task.parameters_json or {})
+    prev_params["resume_state"] = "CONSUMED_BY_RESUME"
+    previous_task.parameters_json = prev_params
 
     raw = get_redis().get(f"robot:{robot.vehicle_id}:latest")
     latest = json.loads(raw) if raw else {}
