@@ -725,11 +725,13 @@ def handle_task_status(db, robot: Robot, msg: dict, received: datetime) -> None:
             "next_slot_code": msg.get("next_slot_code"),
         }
         task.parameters_json = parameters
-    if msg.get("waypoint_index") is not None:
+    if msg.get("waypoint_index") is not None or msg.get("target_waypoint_index") is not None:
         parameters = dict(task.parameters_json or {})
         parameters["live_route_cursor"] = {
             "waypoint_index": msg.get("waypoint_index"),
             "waypoint_total": msg.get("waypoint_total"),
+            "target_waypoint_index": msg.get("target_waypoint_index"),
+            "last_completed_waypoint_index": msg.get("last_completed_waypoint_index"),
         }
         task.parameters_json = parameters
 

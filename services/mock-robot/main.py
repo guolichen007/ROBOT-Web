@@ -203,6 +203,8 @@ class MockRobot:
         next_slot_code: str | None = None,
         waypoint_index: int | None = None,
         waypoint_total: int | None = None,
+        target_waypoint_index: int | None = None,
+        last_completed_waypoint_index: int | None = None,
     ) -> dict:
         payload = self.message(
             "task_status",
@@ -218,6 +220,8 @@ class MockRobot:
             next_slot_code=next_slot_code,
             waypoint_index=waypoint_index,
             waypoint_total=waypoint_total,
+            target_waypoint_index=target_waypoint_index,
+            last_completed_waypoint_index=last_completed_waypoint_index,
         )
         self.publish("task_status", payload, 1)
         return payload
@@ -289,7 +293,18 @@ class MockRobot:
             return
         with self.lock:
             self.active_task_id = task_id
-            self.active_execution = {"task_id": task_id, "task_type": command["cmd"], "cursor": None, "progress": 0.0}
+            self.active_execution = {
+                "task_id": task_id,
+                "task_type": command["cmd"],
+                "last_completed_waypoint_index": None,
+                "target_waypoint_index": None,
+                "waypoint_total": 0,
+                "checkpoint_index": None,
+                "checkpoint_total": None,
+                "current_slot_code": None,
+                "next_slot_code": None,
+                "progress": 0.0,
+            }
             self.mode = (
                 "EXTINGUISH"
                 if command["cmd"] == "extinguish"
@@ -314,6 +329,11 @@ class MockRobot:
             last_progress_at = time.monotonic()
             last_distance = math.inf
             last_abs_heading_error = math.inf
+            # Every waypoint advances the route cursor, so an early stop still
+            # leaves a resumable position (last completed + current target).
+            with self.lock:
+                if self.active_execution:
+                    self.active_execution["target_waypoint_index"] = waypoint_index
             while True:
                 if self.stop_event.wait(0.05):
                     return
@@ -331,6 +351,8 @@ class MockRobot:
                         if waypoint["theta"] is not None:
                             self.theta = waypoint["theta"]
                         self.linear = self.angular = 0
+                        if self.active_execution:
+                            self.active_execution["last_completed_waypoint_index"] = waypoint_index
                     if waypoint["kind"] == "INSPECTION":
                         inspections_done_local += 1
                         checkpoint_index = inspection_base + inspections_done_local
@@ -342,14 +364,12 @@ class MockRobot:
                         )
                         with self.lock:
                             if self.active_execution:
-                                self.active_execution["cursor"] = {
-                                    "waypoint_index": waypoint_index,
-                                    "waypoint_total": waypoint_total,
-                                    "checkpoint_index": checkpoint_index,
-                                    "checkpoint_total": inspection_total,
-                                    "current_slot_code": waypoint.get("slot_code"),
-                                    "next_slot_code": next_inspection.get("slot_code") if next_inspection else None,
-                                }
+                                self.active_execution["checkpoint_index"] = checkpoint_index
+                                self.active_execution["checkpoint_total"] = inspection_total
+                                self.active_execution["current_slot_code"] = waypoint.get("slot_code")
+                                self.active_execution["next_slot_code"] = (
+                                    next_inspection.get("slot_code") if next_inspection else None
+                                )
                                 self.active_execution["progress"] = progress
                         emitted.append(
                             self.task_status(
@@ -363,6 +383,8 @@ class MockRobot:
                                 next_slot_code=next_inspection.get("slot_code") if next_inspection else None,
                                 waypoint_index=waypoint_index,
                                 waypoint_total=waypoint_total,
+                                target_waypoint_index=waypoint_index,
+                                last_completed_waypoint_index=waypoint_index,
                             )
                         )
                         # Short dwell so the checkpoint is observable.
@@ -458,7 +480,6 @@ class MockRobot:
             with self.lock:
                 execution = dict(self.active_execution or {})
                 interrupted_task_id = execution.get("task_id")
-                cursor = execution.get("cursor") or {}
                 progress = float(execution.get("progress") or 0.0)
                 self.estop = True
                 self.linear = self.angular = 0
@@ -474,12 +495,14 @@ class MockRobot:
                         "cancelled",
                         "ESTOP_INTERRUPTED",
                         progress,
-                        checkpoint_index=cursor.get("checkpoint_index"),
-                        checkpoint_total=cursor.get("checkpoint_total"),
-                        current_slot_code=cursor.get("current_slot_code"),
-                        next_slot_code=cursor.get("next_slot_code"),
-                        waypoint_index=cursor.get("waypoint_index"),
-                        waypoint_total=cursor.get("waypoint_total"),
+                        checkpoint_index=execution.get("checkpoint_index"),
+                        checkpoint_total=execution.get("checkpoint_total"),
+                        current_slot_code=execution.get("current_slot_code"),
+                        next_slot_code=execution.get("next_slot_code"),
+                        waypoint_index=execution.get("last_completed_waypoint_index"),
+                        waypoint_total=execution.get("waypoint_total"),
+                        target_waypoint_index=execution.get("target_waypoint_index"),
+                        last_completed_waypoint_index=execution.get("last_completed_waypoint_index"),
                     )
                 )
             with self.lock:
@@ -502,7 +525,6 @@ class MockRobot:
             task_id = command.get("task_id") or command.get("params", {}).get("task_id")
             with self.lock:
                 execution = dict(self.active_execution or {})
-                cursor = execution.get("cursor") or {}
                 progress = float(execution.get("progress") or 0.0)
                 self.active_task_id = None
                 self.active_execution = None
@@ -519,12 +541,14 @@ class MockRobot:
                         "cancelled",
                         "CANCELLED",
                         progress,
-                        checkpoint_index=cursor.get("checkpoint_index"),
-                        checkpoint_total=cursor.get("checkpoint_total"),
-                        current_slot_code=cursor.get("current_slot_code"),
-                        next_slot_code=cursor.get("next_slot_code"),
-                        waypoint_index=cursor.get("waypoint_index"),
-                        waypoint_total=cursor.get("waypoint_total"),
+                        checkpoint_index=execution.get("checkpoint_index"),
+                        checkpoint_total=execution.get("checkpoint_total"),
+                        current_slot_code=execution.get("current_slot_code"),
+                        next_slot_code=execution.get("next_slot_code"),
+                        waypoint_index=execution.get("last_completed_waypoint_index"),
+                        waypoint_total=execution.get("waypoint_total"),
+                        target_waypoint_index=execution.get("target_waypoint_index"),
+                        last_completed_waypoint_index=execution.get("last_completed_waypoint_index"),
                     )
                 )
             self.processed[command["command_id"]] = (ack, statuses)

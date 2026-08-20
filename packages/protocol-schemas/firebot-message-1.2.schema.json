@@ -132,7 +132,9 @@
             "current_slot_code": { "type": ["string", "null"] },
             "next_slot_code": { "type": ["string", "null"] },
             "waypoint_index": { "type": ["integer", "null"] },
-            "waypoint_total": { "type": ["integer", "null"] }
+            "waypoint_total": { "type": ["integer", "null"] },
+            "target_waypoint_index": { "type": ["integer", "null"] },
+            "last_completed_waypoint_index": { "type": ["integer", "null"] }
           }
         }
       ]
