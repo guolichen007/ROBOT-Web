@@ -167,52 +167,232 @@ def build_cruise_trajectory(slots: list[SlotRef]) -> list[dict]:
     return _dedupe([{"x": w["x"], "y": w["y"]} for w in build_cruise_waypoints(slots)])
 
 
-# Safe corridor graph: vertical lanes a robot may occupy, and the two
-# horizontal transfer lanes. The return planner only travels along these.
-SAFE_VERTICAL_X = [1.2, 8.0, 14.0, 32.0, 40.0]
-SOUTH_TRANSFER_Y = 1.0
-NORTH_TRANSFER_Y = 27.0
+# Safe corridor graph: explicit axis-aligned lanes a robot may occupy. The
+# return planner runs Dijkstra over it, so the shortest legal path is chosen
+# rather than reversing the cruise or hardcoding a north/south branch.
+import heapq  # noqa: E402
+
+CORRIDOR_VERTICALS: list[tuple[float, float, float]] = [
+    (1.2, 1.0, 28.7),  # west outer corridor (up to the top lane)
+    (8.0, 1.0, 27.0),  # col1 inspection lane (east of column 1)
+    (14.0, 1.0, 27.0),  # col2 inspection lane (west of column 2)
+    (32.0, 1.0, 27.0),  # col3 inspection lane (east of column 3)
+    (40.0, 1.0, 28.7),  # col4 inspection lane (west of column 4, to top lane)
+]
+CORRIDOR_HORIZONTALS: list[tuple[float, float, float]] = [
+    (1.0, 1.2, 40.0),  # south transfer
+    (27.0, 1.2, 40.0),  # north transfer
+    (28.7, 1.2, 44.2),  # top inspection lane
+]
+
+
+def _corridor_graph() -> tuple[dict, list[tuple[float, float]], dict]:
+    key_to_idx: dict = {}
+    node_xy: list[tuple[float, float]] = []
+
+    def idx(x: float, y: float) -> int:
+        key = (round(x, 4), round(y, 4))
+        if key not in key_to_idx:
+            key_to_idx[key] = len(node_xy)
+            node_xy.append(key)
+        return key_to_idx[key]
+
+    adjacency: dict[int, list[tuple[int, float]]] = {}
+
+    def link(ia: int, ib: int, w: float) -> None:
+        if w < 1e-6:
+            return
+        adjacency.setdefault(ia, []).append((ib, w))
+        adjacency.setdefault(ib, []).append((ia, w))
+
+    for x, ymin, ymax in CORRIDOR_VERTICALS:
+        ys = sorted(
+            {ymin, ymax}
+            | {hy for hy, xmin, xmax in CORRIDOR_HORIZONTALS if ymin <= hy <= ymax and xmin <= x <= xmax}
+        )
+        for a, b in zip(ys, ys[1:]):
+            link(idx(x, a), idx(x, b), b - a)
+    for hy, xmin, xmax in CORRIDOR_HORIZONTALS:
+        xs = sorted(
+            {xmin, xmax}
+            | {vx for vx, ymin, ymax in CORRIDOR_VERTICALS if ymin <= hy <= ymax and xmin <= vx <= xmax}
+        )
+        for a, b in zip(xs, xs[1:]):
+            link(idx(a, hy), idx(b, hy), b - a)
+
+    remote = idx(REMOTE_WAITING["x"], REMOTE_WAITING["y"])
+    west_south = idx(1.2, 1.0)
+    link(remote, west_south, 0.2)
+    return key_to_idx, node_xy, adjacency
+
+
+def _dijkstra(adjacency: dict, node_xy: list, start: int, goal: int) -> list[int] | None:
+    dist = {start: 0.0}
+    prev: dict[int, int] = {}
+    queue = [(0.0, start)]
+    while queue:
+        d, u = heapq.heappop(queue)
+        if d > dist.get(u, math.inf):
+            continue
+        if u == goal:
+            break
+        for v, w in adjacency.get(u, []):
+            nd = d + w
+            if nd < dist.get(v, math.inf):
+                dist[v] = nd
+                prev[v] = u
+                heapq.heappush(queue, (nd, v))
+    if goal not in dist:
+        return None
+    path = [goal]
+    while path[-1] != start:
+        path.append(prev[path[-1]])
+    path.reverse()
+    return path
+
+
+def _project_onto_segments(cx: float, cy: float, segments: list[tuple[tuple[float, float], tuple[float, float]]]) -> tuple[float, tuple[float, float], int]:
+    best: tuple[float, tuple[float, float], int] | None = None
+    for i, ((ax, ay), (bx, by)) in enumerate(segments):
+        dx, dy = bx - ax, by - ay
+        length2 = dx * dx + dy * dy
+        if length2 < 1e-9:
+            proj = (ax, ay)
+        else:
+            t = ((cx - ax) * dx + (cy - ay) * dy) / length2
+            t = max(0.0, min(1.0, t))
+            proj = (ax + t * dx, ay + t * dy)
+        d = math.hypot(cx - proj[0], cy - proj[1])
+        if best is None or d < best[0]:
+            best = (d, proj, i)
+    assert best is not None
+    return best
+
+
+def _corridor_segments() -> list[tuple[tuple[float, float], tuple[float, float]]]:
+    segments: list[tuple[tuple[float, float], tuple[float, float]]] = []
+    for x, ymin, ymax in CORRIDOR_VERTICALS:
+        segments.append(((x, ymin), (x, ymax)))
+    for hy, xmin, xmax in CORRIDOR_HORIZONTALS:
+        segments.append(((xmin, hy), (xmax, hy)))
+    return segments
+
+
+def _project_onto_route(cx: float, cy: float, waypoints: list[dict]) -> tuple[float, tuple[float, float], int, int]:
+    """Return (distance, projection, seg_a_idx, seg_b_idx) of the nearest cruise segment."""
+    best: tuple[float, tuple[float, float], int, int] | None = None
+    for i, (a, b) in enumerate(zip(waypoints, waypoints[1:])):
+        ax, ay = a["x"], a["y"]
+        bx, by = b["x"], b["y"]
+        dx, dy = bx - ax, by - ay
+        length2 = dx * dx + dy * dy
+        if length2 < 1e-9:
+            proj = (ax, ay)
+        else:
+            t = ((cx - ax) * dx + (cy - ay) * dy) / length2
+            t = max(0.0, min(1.0, t))
+            proj = (ax + t * dx, ay + t * dy)
+        d = math.hypot(cx - proj[0], cy - proj[1])
+        if best is None or d < best[0]:
+            best = (d, proj, i, i + 1)
+    assert best is not None
+    return best
 
 
 def build_return_waypoints(current_pose: dict, full_waypoints: list[dict] | None = None, route_cursor: int | None = None) -> list[dict]:
-    """Nearest safe return-to-waiting path.
+    """Shortest safe return-to-waiting path over the corridor graph.
 
-    Instead of reversing the entire cruise, take the shortest corridor route:
-    from the current pose drop onto the nearest vertical lane, then to the
-    south transfer lane (or the north transfer lane when already up top), then
-    west along the outer corridor and down to REMOTE_WAITING. This never cuts
-    diagonally across parking slots.
+    Projects the current pose onto the nearest corridor lane, runs Dijkstra to
+    REMOTE_WAITING, and only falls back to a simple corridor path when the
+    pose is far from every known lane.
     """
     cx = float(current_pose["x"])
     cy = float(current_pose["y"])
-    waypoints: list[dict] = [{"x": cx, "y": cy, "kind": "TRANSIT"}]
 
-    if cy > 25.4:
-        # Top region: descend to the north transfer lane, then west corridor.
-        waypoints.append({"x": cx, "y": NORTH_TRANSFER_Y, "kind": "TRANSIT"})
-        waypoints.append({"x": REMOTE_WAITING["x"], "y": NORTH_TRANSFER_Y, "kind": "TRANSIT"})
+    key_to_idx, node_xy, adjacency = _corridor_graph()
+    segments = _corridor_segments()
+    dist_to_lane, proj, _seg = _project_onto_segments(cx, cy, segments)
+    if dist_to_lane > 2.0:
+        return _fallback_return(cx, cy)
+
+    proj_key = (round(proj[0], 4), round(proj[1], 4))
+    if proj_key not in key_to_idx:
+        key_to_idx[proj_key] = len(node_xy)
+        node_xy.append(proj_key)
+    proj_idx = key_to_idx[proj_key]
+    # Connect the projection to the two ends of the lane it lies on.
+    for x, ymin, ymax in CORRIDOR_VERTICALS:
+        if abs(proj[0] - x) < 1e-6 and ymin <= proj[1] <= ymax:
+            a = key_to_idx[(round(x, 4), round(ymin, 4))]
+            b = key_to_idx[(round(x, 4), round(ymax, 4))]
+            adjacency.setdefault(proj_idx, []).append((a, abs(proj[1] - ymin)))
+            adjacency.setdefault(a, []).append((proj_idx, abs(proj[1] - ymin)))
+            adjacency.setdefault(proj_idx, []).append((b, abs(ymax - proj[1])))
+            adjacency.setdefault(b, []).append((proj_idx, abs(ymax - proj[1])))
+            break
     else:
-        # Column / south region: nearest vertical lane, then south transfer.
-        vx = min(SAFE_VERTICAL_X, key=lambda x: abs(x - cx))
-        if abs(vx - cx) > 1e-6:
-            waypoints.append({"x": vx, "y": cy, "kind": "TRANSIT"})
-        waypoints.append({"x": vx, "y": SOUTH_TRANSFER_Y, "kind": "TRANSIT"})
-        waypoints.append({"x": REMOTE_WAITING["x"], "y": SOUTH_TRANSFER_Y, "kind": "TRANSIT"})
+        for hy, xmin, xmax in CORRIDOR_HORIZONTALS:
+            if abs(proj[1] - hy) < 1e-6 and xmin <= proj[0] <= xmax:
+                a = key_to_idx[(round(xmin, 4), round(hy, 4))]
+                b = key_to_idx[(round(xmax, 4), round(hy, 4))]
+                adjacency.setdefault(proj_idx, []).append((a, abs(proj[0] - xmin)))
+                adjacency.setdefault(a, []).append((proj_idx, abs(proj[0] - xmin)))
+                adjacency.setdefault(proj_idx, []).append((b, abs(xmax - proj[0])))
+                adjacency.setdefault(b, []).append((proj_idx, abs(xmax - proj[0])))
+                break
 
+    remote_key = (round(REMOTE_WAITING["x"], 4), round(REMOTE_WAITING["y"], 4))
+    if remote_key not in key_to_idx:
+        return _fallback_return(cx, cy)
+    remote_idx = key_to_idx[remote_key]
+    path = _dijkstra(adjacency, node_xy, proj_idx, remote_idx)
+    if path is None:
+        return _fallback_return(cx, cy)
+
+    result: list[dict] = [{"x": cx, "y": cy, "kind": "TRANSIT"}]
+    for node in path:
+        x, y = node_xy[node]
+        if abs(x - REMOTE_WAITING["x"]) < 1e-6 and abs(y - REMOTE_WAITING["y"]) < 1e-6:
+            result.append({"x": x, "y": y, "kind": "WAITING", "theta": REMOTE_WAITING["theta"]})
+        else:
+            result.append({"x": x, "y": y, "kind": "TRANSIT"})
+    return _dedupe_waypoints(result)
+
+
+def _fallback_return(cx: float, cy: float) -> list[dict]:
+    waypoints: list[dict] = [{"x": cx, "y": cy, "kind": "TRANSIT"}]
+    vx = min((lane[0] for lane in CORRIDOR_VERTICALS), key=lambda x: abs(x - cx))
+    if abs(vx - cx) > 1e-6:
+        waypoints.append({"x": vx, "y": cy, "kind": "TRANSIT"})
+    waypoints.append({"x": vx, "y": 1.0, "kind": "TRANSIT"})
+    waypoints.append({"x": REMOTE_WAITING["x"], "y": 1.0, "kind": "TRANSIT"})
     waypoints.append(
         {"x": REMOTE_WAITING["x"], "y": REMOTE_WAITING["y"], "kind": "WAITING", "theta": REMOTE_WAITING["theta"]}
     )
     return _dedupe_waypoints(waypoints)
 
 
-def build_resumed_cruise_waypoints(current_pose: dict, full_waypoints: list[dict], route_cursor: int) -> list[dict]:
-    """Continue a cancelled cruise from the waypoint after the cursor.
+def infer_route_cursor(current_pose: dict, full_waypoints: list[dict]) -> dict:
+    """Infer the interrupted segment from the current pose.
 
-    The cursor points at the last COMPLETED inspection waypoint, so resume
-    from the following waypoint and never re-run REMOTE or A-27.
+    Returns {last_completed_waypoint_index, target_waypoint_index}. When the
+    robot is between waypoint i and i+1, the cursor says "completed i, heading
+    to i+1".
     """
-    next_index = min(route_cursor + 1, len(full_waypoints))
-    remaining = full_waypoints[next_index:]
+    cx = float(current_pose["x"])
+    cy = float(current_pose["y"])
+    _dist, _proj, seg_a, seg_b = _project_onto_route(cx, cy, full_waypoints)
+    return {"last_completed_waypoint_index": seg_a, "target_waypoint_index": seg_b}
+
+
+def build_resumed_cruise_waypoints(current_pose: dict, full_waypoints: list[dict], route_cursor: int | None = None) -> list[dict]:
+    """Continue a cancelled cruise from the current pose onto the target
+    waypoint, then the remaining canonical waypoints. Never re-runs REMOTE."""
+    if route_cursor is None:
+        cursor = infer_route_cursor(current_pose, full_waypoints)
+        route_cursor = cursor["target_waypoint_index"]
+    target = min(route_cursor, len(full_waypoints) - 1)
+    remaining = full_waypoints[target:]
     head: list[dict] = [{"x": current_pose["x"], "y": current_pose["y"], "kind": "TRANSIT"}]
     if remaining and remaining[0]["x"] == head[0]["x"] and remaining[0]["y"] == head[0]["y"]:
         return remaining
