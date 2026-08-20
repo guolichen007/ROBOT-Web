@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import math
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -13,7 +16,7 @@ from app.core.dependencies import (
     require_permission,
 )
 from app.core.errors import PlatformError
-from app.core.events import append_event
+from app.core.events import append_event, get_redis
 from app.core.idempotency import lookup, store
 from app.core.serialization import serialize_model
 from app.db.models import (
@@ -60,6 +63,17 @@ EXTINGUISH_MODES = {
     "SPRAY_AGENT": "喷射灭火剂",
     "DEPLOY_THEN_SPRAY": "先展开灭火帐，再喷射灭火剂",
 }
+
+REMOTE_WAITING_POSE = {"x": 1.2, "y": 1.2}
+WAITING_TOLERANCE_M = 0.8
+
+
+def _robot_at_waiting(db, robot: Robot) -> bool:
+    raw = get_redis().get(f"robot:{robot.vehicle_id}:latest")
+    latest = json.loads(raw) if raw else {}
+    if "x" not in latest or "y" not in latest:
+        return False
+    return math.hypot(float(latest["x"]) - REMOTE_WAITING_POSE["x"], float(latest["y"]) - REMOTE_WAITING_POSE["y"]) <= WAITING_TOLERANCE_M
 
 
 def target_snapshot(
@@ -281,6 +295,23 @@ def patrol_plan_task(
     plan = db.get(PatrolPlan, payload.patrol_plan_id)
     if not plan or plan.robot_id != robot.id:
         raise PlatformError("PATROL_PLAN_INVALID", "巡检计划不存在或不属于当前机器人")
+
+    # Server-side hard guards: never allow a fresh full patrol from an
+    # arbitrary pose, and never allow it while a patrol is resumable.
+    resume_available = db.scalar(
+        select(Task)
+        .where(
+            Task.robot_id == robot.id,
+            Task.type == "PATROL",
+            Task.status == "CANCELLED",
+        )
+        .order_by(Task.created_at.desc())
+    )
+    resume_available = (
+        resume_available
+        if resume_available and (resume_available.parameters_json or {}).get("resume_state") == "AVAILABLE"
+        else None
+    )
     if payload.resume_task_id:
         previous = db.get(Task, payload.resume_task_id)
         if (
@@ -301,6 +332,14 @@ def patrol_plan_task(
             previous_task=previous,
         )
     else:
+        if resume_available:
+            raise PlatformError(
+                "PATROL_RESUME_REQUIRED", "存在未完成巡检，请选择继续巡检或返回等待区"
+            )
+        if not _robot_at_waiting(db, robot):
+            raise PlatformError(
+                "PATROL_START_REQUIRES_WAITING_AREA", "机器人当前不在等待区，请先返回等待区"
+            )
         task, command_id = build_patrol_task(
             db,
             plan=plan,

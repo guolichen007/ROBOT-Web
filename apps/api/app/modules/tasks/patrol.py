@@ -140,7 +140,9 @@ def build_resumed_patrol_task(
         raise PlatformError("PATROL_PLAN_INVALID", "巡检计划或地图版本无效")
     full_waypoints: list[dict[str, Any]] = trajectory.path_json if trajectory else []
     cursor = (previous_task.parameters_json or {}).get("live_route_cursor") or {}
-    cursor_index = int(cursor["waypoint_index"]) if cursor.get("waypoint_index") is not None else 0
+    target_index = cursor.get("target_waypoint_index")
+    if target_index is None:
+        target_index = cursor.get("waypoint_index")
     prev_params = dict(previous_task.parameters_json or {})
     prev_params["resume_state"] = "CONSUMED_BY_RESUME"
     previous_task.parameters_json = prev_params
@@ -151,8 +153,9 @@ def build_resumed_patrol_task(
         raise PlatformError("ROBOT_POSE_UNKNOWN", "无法确定机器人当前位置，不能安全恢复巡检")
     current_pose = {"x": float(latest["x"]), "y": float(latest["y"]), "theta": float(latest["theta"])}
 
-    resumed = build_resumed_cruise_waypoints(current_pose, full_waypoints, cursor_index)
-    first = full_waypoints[cursor_index] if cursor_index < len(full_waypoints) else full_waypoints[-1]
+    route_cursor = int(target_index) if target_index is not None else None
+    resumed = build_resumed_cruise_waypoints(current_pose, full_waypoints, route_cursor)
+    first = resumed[1] if len(resumed) > 1 else current_pose
     task = Task(
         task_code=task_code(),
         robot_id=robot.id,
@@ -169,7 +172,7 @@ def build_resumed_patrol_task(
             "source": source,
             "patrol_plan_id": plan.id,
             "resumed_from_task_id": previous_task.id,
-            "resume_waypoint_index": cursor_index,
+            "resume_waypoint_index": route_cursor,
         },
         created_by=actor_id,
     )
