@@ -13,7 +13,13 @@ from uuid import uuid4
 import paho.mqtt.client as mqtt
 from app.core.config import get_settings
 from app.core.logging import configure_logging
-from app.modules.navigation.follower import follower_command
+from app.modules.navigation.follower import (
+    DISTANCE_PROGRESS_EPSILON,
+    DRIVE_STALL_TIMEOUT_S,
+    HEADING_PROGRESS_EPSILON,
+    ROTATE_STALL_TIMEOUT_S,
+    follower_command,
+)
 from jsonschema import ValidationError
 
 from services.protocol import validate_message
@@ -51,6 +57,7 @@ class MockRobot:
         self.mode = "IDLE"
         self.estop = False
         self.active_task_id: str | None = None
+        self.active_execution: dict | None = None
         self.last_manual = 0.0
         self.started = time.monotonic()
         self.processed: dict[str, tuple[dict, list[dict]]] = {}
@@ -249,12 +256,40 @@ class MockRobot:
             ]
         return []
 
+    def _stall(
+        self,
+        command: dict,
+        emitted: list[dict],
+        task_id: str,
+        failure_code: str,
+        inspection_base: int,
+        inspections_done_local: int,
+        inspection_total: int,
+    ) -> None:
+        emitted.append(
+            self.task_status(
+                task_id,
+                "failed",
+                "PATH_FOLLOWING_STALLED",
+                (inspection_base + inspections_done_local) / inspection_total * 100,
+                failure_code=failure_code,
+                failure_message="巡航路径跟踪异常",
+            )
+        )
+        with self.lock:
+            self.active_task_id = None
+            self.active_execution = None
+            self.mode = "IDLE"
+            self.linear = self.angular = 0
+        self._store(command, emitted)
+
     def simulate_task(self, command: dict) -> None:
         task_id = command.get("task_id") or command.get("params", {}).get("task_id")
         if not task_id:
             return
         with self.lock:
             self.active_task_id = task_id
+            self.active_execution = {"task_id": task_id, "task_type": command["cmd"], "cursor": None, "progress": 0.0}
             self.mode = (
                 "EXTINGUISH"
                 if command["cmd"] == "extinguish"
@@ -276,9 +311,9 @@ class MockRobot:
                 return bool(self.estop or self.active_task_id != task_id)
 
         for waypoint_index, waypoint in enumerate(waypoints):
-            entered = time.monotonic()
             last_progress_at = time.monotonic()
             last_distance = math.inf
+            last_abs_heading_error = math.inf
             while True:
                 if self.stop_event.wait(0.05):
                     return
@@ -305,6 +340,17 @@ class MockRobot:
                             if inspections_done_local < len(inspections)
                             else None
                         )
+                        with self.lock:
+                            if self.active_execution:
+                                self.active_execution["cursor"] = {
+                                    "waypoint_index": waypoint_index,
+                                    "waypoint_total": waypoint_total,
+                                    "checkpoint_index": checkpoint_index,
+                                    "checkpoint_total": inspection_total,
+                                    "current_slot_code": waypoint.get("slot_code"),
+                                    "next_slot_code": next_inspection.get("slot_code") if next_inspection else None,
+                                }
+                                self.active_execution["progress"] = progress
                         emitted.append(
                             self.task_status(
                                 task_id,
@@ -326,28 +372,25 @@ class MockRobot:
                             if interrupted():
                                 return
                     break
-                # Watchdog: never orbit a waypoint indefinitely.
-                if now - last_progress_at > 3.0:
-                    emitted.append(
-                        self.task_status(
-                            task_id,
-                            "failed",
-                            "PATH_FOLLOWING_STALLED",
-                            (inspection_base + inspections_done_local) / inspection_total * 100,
-                            failure_code="PATH_FOLLOWING_STALLED",
-                            failure_message="巡航路径跟踪异常",
-                        )
-                    )
-                    with self.lock:
-                        self.active_task_id = None
-                        self.mode = "IDLE"
-                        self.linear = self.angular = 0
-                    self._store(command, emitted)
-                    return
-                if distance < last_distance - 0.02:
-                    last_distance = distance
-                    last_progress_at = now
-                linear, angular, _state = follower_command(self.theta, dx, dy, distance)
+                linear, angular, follower_state, heading_error = follower_command(
+                    self.theta, dx, dy, distance
+                )
+                # State-aware watchdog: rotation progresses on heading error,
+                # driving progresses on distance. Never share one timeout.
+                if follower_state == "ROTATE":
+                    if abs(heading_error) < last_abs_heading_error - HEADING_PROGRESS_EPSILON:
+                        last_abs_heading_error = abs(heading_error)
+                        last_progress_at = now
+                    if now - last_progress_at > ROTATE_STALL_TIMEOUT_S:
+                        self._stall(command, emitted, task_id, "ROTATION_STALLED", inspection_base, inspections_done_local, inspection_total)
+                        return
+                else:
+                    if distance < last_distance - DISTANCE_PROGRESS_EPSILON:
+                        last_distance = distance
+                        last_progress_at = now
+                    if now - last_progress_at > DRIVE_STALL_TIMEOUT_S:
+                        self._stall(command, emitted, task_id, "PATH_FOLLOWING_STALLED", inspection_base, inspections_done_local, inspection_total)
+                        return
                 with self.lock:
                     self.linear = linear
                     self.angular = angular
@@ -359,6 +402,7 @@ class MockRobot:
         emitted.append(self.task_status(task_id, "completed", "COMPLETED", 100))
         with self.lock:
             self.active_task_id = None
+            self.active_execution = None
             self.mode = "IDLE"
             self.linear = self.angular = 0
         self._store(command, emitted)
@@ -412,12 +456,36 @@ class MockRobot:
             return
         if cmd == "emergency_stop":
             with self.lock:
+                execution = dict(self.active_execution or {})
+                interrupted_task_id = execution.get("task_id")
+                cursor = execution.get("cursor") or {}
+                progress = float(execution.get("progress") or 0.0)
                 self.estop = True
                 self.linear = self.angular = 0
                 self.mode = "ESTOP"
                 self.active_task_id = None
+            # Terminate the active mission on the platform side too, preserving
+            # the resume cursor so the operator can continue after reset.
+            statuses: list[dict] = []
+            if interrupted_task_id:
+                statuses.append(
+                    self.task_status(
+                        interrupted_task_id,
+                        "cancelled",
+                        "ESTOP_INTERRUPTED",
+                        progress,
+                        checkpoint_index=cursor.get("checkpoint_index"),
+                        checkpoint_total=cursor.get("checkpoint_total"),
+                        current_slot_code=cursor.get("current_slot_code"),
+                        next_slot_code=cursor.get("next_slot_code"),
+                        waypoint_index=cursor.get("waypoint_index"),
+                        waypoint_total=cursor.get("waypoint_total"),
+                    )
+                )
+            with self.lock:
+                self.active_execution = None
             ack = self.ack(command, "accepted")
-            self.processed[command["command_id"]] = (ack, [])
+            self.processed[command["command_id"]] = (ack, statuses)
             return
         if cmd == "reset_estop":
             with self.lock:

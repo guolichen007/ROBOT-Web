@@ -732,6 +732,28 @@ def handle_task_status(db, robot: Robot, msg: dict, received: datetime) -> None:
             "waypoint_total": msg.get("waypoint_total"),
         }
         task.parameters_json = parameters
+
+    # Interrupted patrols become resumable; a completed return consumes them.
+    parameters = dict(task.parameters_json or {})
+    if internal_status == "CANCELLED" and task.type == "PATROL" and parameters.get("live_route_cursor"):
+        parameters["resume_state"] = "AVAILABLE"
+        task.parameters_json = parameters
+    elif internal_status == "SUCCEEDED" and task.type == "RETURN_DOCK":
+        task.parameters_json = parameters
+        previous = db.scalar(
+            select(Task)
+            .where(
+                Task.robot_id == task.robot_id,
+                Task.type == "PATROL",
+                Task.status == "CANCELLED",
+            )
+            .order_by(Task.created_at.desc())
+        )
+        if previous:
+            prev_params = dict(previous.parameters_json or {})
+            if prev_params.get("resume_state") == "AVAILABLE":
+                prev_params["resume_state"] = "CONSUMED_BY_RETURN"
+                previous.parameters_json = prev_params
     db.add(
         TaskEvent(
             task_id=task.id,
