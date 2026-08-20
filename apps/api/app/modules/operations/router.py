@@ -794,8 +794,9 @@ def create_schedule(
     return serialize_model(row)
 
 
+@router.post("/robots/{robot_id}/stop-operation", status_code=202)
 @router.post("/robots/{robot_id}/stop-patrol", status_code=202)
-def stop_patrol(
+def stop_current_operation(
     robot_id: str,
     request: Request,
     db: DbSession,
@@ -803,17 +804,19 @@ def stop_patrol(
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ) -> dict:
     robot = find_robot(db, robot_id)
-    endpoint = f"/robots/{robot.id}/stop-patrol"
+    endpoint = f"/robots/{robot.id}/stop-operation"
     body: dict[str, Any] = {}
     cached = lookup(db, actor_id=auth.user.id, endpoint=endpoint, key=idempotency_key, payload=body)
     if cached:
         return cached.response_json
     active = db.scalar(
-        select(Task).where(
+        select(Task)
+        .where(
             Task.robot_id == robot.id,
-            Task.type == "PATROL",
+            Task.type.in_({"PATROL", "RETURN_DOCK", "NAVIGATE_TO_PRESET", "EXTINGUISH"}),
             Task.status.in_({"CREATED", "QUEUED", "ACCEPTED", "EXECUTING"}),
         )
+        .order_by(Task.created_at.desc())
     )
     # Safety stop is authorized independently and first. A missing map
     # contract is therefore never allowed to block a verified stop path.
@@ -822,7 +825,7 @@ def stop_patrol(
         robot=robot,
         operator_id=auth.user.id,
         cmd="stop_motion",
-        params={"reason": "STOP_PATROL"},
+        params={"reason": "OPERATOR_STOP"},
         task_id=active.id if active else None,
         ttl_ms=3000,
         priority=99,
@@ -837,7 +840,7 @@ def stop_patrol(
                 operator_id=auth.user.id,
                 cmd="cancel_task",
                 task_id=active.id,
-                params={"task_id": active.id, "reason": "OPERATOR_STOP_PATROL"},
+                params={"task_id": active.id, "reason": "OPERATOR_STOP"},
                 priority=96,
             )
             active.phase = "STOP_REQUESTED"
@@ -864,7 +867,7 @@ def stop_patrol(
         RobotOperationEvent(
             robot_id=robot.id,
             task_id=active.id if active else None,
-            operation_type="STOP_PATROL",
+            operation_type="STOP_OPERATION",
             state="STOP_REQUESTED",
             payload_json={
                 "cancel_command_id": cancel.command_id if cancel else None,
@@ -885,7 +888,7 @@ def stop_patrol(
     )
     write_audit(
         db,
-        action="PATROL_STOP_REQUEST",
+        action="STOP_OPERATION_REQUEST",
         resource_type="STOP_OPERATION",
         user_id=auth.user.id,
         robot_id=robot.id,
