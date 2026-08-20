@@ -161,3 +161,39 @@ def build_cruise_waypoints(slots: list[SlotRef]) -> list[dict]:
 def build_cruise_trajectory(slots: list[SlotRef]) -> list[dict]:
     """x/y path for the map polyline (axis-aligned lanes, no duplicates)."""
     return _dedupe([{"x": w["x"], "y": w["y"]} for w in build_cruise_waypoints(slots)])
+
+
+def build_return_waypoints(current_pose: dict, full_waypoints: list[dict], route_cursor: int | None = None) -> list[dict]:
+    """Safe return-to-waiting path along the already-validated cruise lanes.
+
+    Never cuts diagonally across parking slots. INSPECTION waypoints become
+    TRANSIT (no dwell) on the way back; only REMOTE_WAITING keeps its theta.
+    """
+    prefix = full_waypoints[:route_cursor] if route_cursor is not None else full_waypoints
+    waypoints: list[dict] = [{"x": current_pose["x"], "y": current_pose["y"], "kind": "TRANSIT"}]
+    for point in reversed(prefix):
+        kind = "WAITING" if point.get("kind") == "WAITING" else "TRANSIT"
+        theta = point.get("theta") if kind == "WAITING" else None
+        waypoints.append({"x": point["x"], "y": point["y"], "kind": kind, "theta": theta})
+    if not waypoints[-1].get("kind") == "WAITING":
+        waypoints.append(
+            {"x": REMOTE_WAITING["x"], "y": REMOTE_WAITING["y"], "kind": "WAITING", "theta": REMOTE_WAITING["theta"]}
+        )
+    return _dedupe_waypoints(waypoints)
+
+
+def build_resumed_cruise_waypoints(current_pose: dict, full_waypoints: list[dict], route_cursor: int) -> list[dict]:
+    """Continue a cancelled cruise from the route cursor without re-running REMOTE."""
+    remaining = full_waypoints[route_cursor:]
+    head: list[dict] = [{"x": current_pose["x"], "y": current_pose["y"], "kind": "TRANSIT"}]
+    if remaining and remaining[0]["x"] == head[0]["x"] and remaining[0]["y"] == head[0]["y"]:
+        return remaining
+    return head + remaining
+
+
+def _dedupe_waypoints(points: list[dict]) -> list[dict]:
+    out: list[dict] = []
+    for point in points:
+        if not out or out[-1]["x"] != point["x"] or out[-1]["y"] != point["y"]:
+            out.append(point)
+    return out

@@ -130,7 +130,9 @@
             "checkpoint_index": { "type": ["integer", "null"] },
             "checkpoint_total": { "type": ["integer", "null"] },
             "current_slot_code": { "type": ["string", "null"] },
-            "next_slot_code": { "type": ["string", "null"] }
+            "next_slot_code": { "type": ["string", "null"] },
+            "waypoint_index": { "type": ["integer", "null"] },
+            "waypoint_total": { "type": ["integer", "null"] }
           }
         }
       ]

@@ -29,7 +29,8 @@ from app.db.models import (
 )
 from app.modules.commands.service import create_durable_command, task_code
 from app.modules.robots.router import find_robot
-from app.modules.tasks.patrol import build_patrol_task
+from app.modules.tasks.patrol import build_patrol_task, build_resumed_patrol_task
+from app.modules.tasks.return_dock import build_return_task
 
 router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
 
@@ -45,6 +46,12 @@ class TaskInput(BaseModel):
 class PatrolPlanTaskInput(BaseModel):
     robot_id: str
     patrol_plan_id: str
+    parameters: dict = Field(default_factory=dict)
+    resume_task_id: str | None = None
+
+
+class ReturnDockTaskInput(BaseModel):
+    robot_id: str
     parameters: dict = Field(default_factory=dict)
 
 
@@ -274,13 +281,33 @@ def patrol_plan_task(
     plan = db.get(PatrolPlan, payload.patrol_plan_id)
     if not plan or plan.robot_id != robot.id:
         raise PlatformError("PATROL_PLAN_INVALID", "巡检计划不存在或不属于当前机器人")
-    task, command_id = build_patrol_task(
-        db,
-        plan=plan,
-        robot=robot,
-        actor_id=auth.user.id,
-        source=str(payload.parameters.get("source", "OPERATIONS_HMI")),
-    )
+    if payload.resume_task_id:
+        previous = db.get(Task, payload.resume_task_id)
+        if (
+            not previous
+            or previous.robot_id != robot.id
+            or previous.type != "PATROL"
+            or previous.status != "CANCELLED"
+        ):
+            raise PlatformError(
+                "PATROL_RESUME_INVALID", "上次巡检状态无法安全恢复，请先返回等待区"
+            )
+        task, command_id = build_resumed_patrol_task(
+            db,
+            plan=plan,
+            robot=robot,
+            actor_id=auth.user.id,
+            source=str(payload.parameters.get("source", "OPERATIONS_HMI")),
+            previous_task=previous,
+        )
+    else:
+        task, command_id = build_patrol_task(
+            db,
+            plan=plan,
+            robot=robot,
+            actor_id=auth.user.id,
+            source=str(payload.parameters.get("source", "OPERATIONS_HMI")),
+        )
     response = {**serialize_model(task), "command_id": command_id}
     store(
         db,
@@ -293,6 +320,62 @@ def patrol_plan_task(
     write_audit(
         db,
         action="TASK_PATROL_CREATE",
+        resource_type="TASK",
+        user_id=auth.user.id,
+        robot_id=robot.id,
+        resource_id=task.id,
+        after=response,
+        **request_meta(request),
+    )
+    db.commit()
+    append_event("task.created", response)
+    return response
+
+
+@router.post("/return-dock", status_code=201)
+def return_dock(
+    payload: ReturnDockTaskInput,
+    request: Request,
+    db: DbSession,
+    auth: AuthContext = Depends(require_permission("patrol.create")),
+    idempotency_key: str = Header(alias="Idempotency-Key"),
+) -> dict:
+    endpoint = "/tasks/return-dock"
+    body = payload.model_dump()
+    cached = lookup(db, actor_id=auth.user.id, endpoint=endpoint, key=idempotency_key, payload=body)
+    if cached:
+        return cached.response_json
+    robot = find_robot(db, payload.robot_id)
+    # Resume context is cleared by a successful return: find the latest
+    # cancelled patrol so we can reverse its route cursor back home.
+    previous = db.scalar(
+        select(Task)
+        .where(
+            Task.robot_id == robot.id,
+            Task.type == "PATROL",
+            Task.status == "CANCELLED",
+        )
+        .order_by(Task.created_at.desc())
+    )
+    task, command_id = build_return_task(
+        db,
+        robot=robot,
+        actor_id=auth.user.id,
+        source=str(payload.parameters.get("source", "OPERATIONS_HMI")),
+        previous_task=previous,
+    )
+    response = {**serialize_model(task), "command_id": command_id}
+    store(
+        db,
+        actor_id=auth.user.id,
+        endpoint=endpoint,
+        key=idempotency_key,
+        payload=body,
+        response=response,
+    )
+    write_audit(
+        db,
+        action="RETURN_DOCK",
         resource_type="TASK",
         user_id=auth.user.id,
         robot_id=robot.id,

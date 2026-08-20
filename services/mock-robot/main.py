@@ -194,6 +194,8 @@ class MockRobot:
         checkpoint_total: int | None = None,
         current_slot_code: str | None = None,
         next_slot_code: str | None = None,
+        waypoint_index: int | None = None,
+        waypoint_total: int | None = None,
     ) -> dict:
         payload = self.message(
             "task_status",
@@ -207,14 +209,14 @@ class MockRobot:
             checkpoint_total=checkpoint_total,
             current_slot_code=current_slot_code,
             next_slot_code=next_slot_code,
+            waypoint_index=waypoint_index,
+            waypoint_total=waypoint_total,
         )
         self.publish("task_status", payload, 1)
         return payload
 
     def _cruise_waypoints(self, command: dict) -> list[dict]:
         params = command.get("params", {})
-        if command["cmd"] == "return_dock":
-            return [{"x": self.home[0], "y": self.home[1], "kind": "WAITING", "theta": self.home[2]}]
         trajectory = params.get("trajectory")
         if isinstance(trajectory, list) and trajectory:
             waypoints: list[dict] = []
@@ -233,6 +235,8 @@ class MockRobot:
                 )
             if waypoints:
                 return waypoints
+        if command["cmd"] == "return_dock":
+            return [{"x": self.home[0], "y": self.home[1], "kind": "WAITING", "theta": self.home[2]}]
         target = params.get("target_pose") if params.get("mission_kind") == "NAVIGATE_TO_PRESET" else None
         if target and "x" in target and "y" in target:
             return [
@@ -260,15 +264,18 @@ class MockRobot:
             )
         waypoints = self._cruise_waypoints(command)
         inspections = [wp for wp in waypoints if wp["kind"] == "INSPECTION"]
-        inspection_total = len(inspections) or 1
-        inspection_done = 0
+        inspection_total = int(inspections[-1].get("sequence") or len(inspections)) if inspections else 1
+        first_sequence = inspections[0].get("sequence") if inspections else None
+        inspection_base = int(first_sequence) - 1 if isinstance(first_sequence, int) and first_sequence else 0
+        inspections_done_local = 0
+        waypoint_total = len(waypoints)
         emitted = [self.task_status(task_id, "accepted", "ACCEPTED", 0)]
 
         def interrupted() -> bool:
             with self.lock:
                 return bool(self.estop or self.active_task_id != task_id)
 
-        for waypoint in waypoints:
+        for waypoint_index, waypoint in enumerate(waypoints):
             entered = time.monotonic()
             last_progress_at = time.monotonic()
             last_distance = math.inf
@@ -290,19 +297,26 @@ class MockRobot:
                             self.theta = waypoint["theta"]
                         self.linear = self.angular = 0
                     if waypoint["kind"] == "INSPECTION":
-                        inspection_done += 1
-                        progress = min(99.0, round(inspection_done / inspection_total * 100))
-                        next_inspection = inspections[inspection_done] if inspection_done < len(inspections) else None
+                        inspections_done_local += 1
+                        checkpoint_index = inspection_base + inspections_done_local
+                        progress = min(99.0, round(checkpoint_index / inspection_total * 100))
+                        next_inspection = (
+                            inspections[inspections_done_local]
+                            if inspections_done_local < len(inspections)
+                            else None
+                        )
                         emitted.append(
                             self.task_status(
                                 task_id,
                                 "executing",
                                 "INSPECTING",
                                 progress,
-                                checkpoint_index=inspection_done,
+                                checkpoint_index=checkpoint_index,
                                 checkpoint_total=inspection_total,
                                 current_slot_code=waypoint.get("slot_code"),
                                 next_slot_code=next_inspection.get("slot_code") if next_inspection else None,
+                                waypoint_index=waypoint_index,
+                                waypoint_total=waypoint_total,
                             )
                         )
                         # Short dwell so the checkpoint is observable.
@@ -319,7 +333,7 @@ class MockRobot:
                             task_id,
                             "failed",
                             "PATH_FOLLOWING_STALLED",
-                            inspection_done / inspection_total * 100,
+                            (inspection_base + inspections_done_local) / inspection_total * 100,
                             failure_code="PATH_FOLLOWING_STALLED",
                             failure_message="巡航路径跟踪异常",
                         )
