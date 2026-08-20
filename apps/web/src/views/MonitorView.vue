@@ -10,6 +10,7 @@ import OperationsCommandDock from '@/components/monitor/OperationsCommandDock.vu
 import DeviceSnapshot from '@/components/monitor/DeviceSnapshot.vue'
 import ProgressRingGate4 from '@/components/monitor/ProgressRingGate4.vue'
 import { usePrimaryAlarm } from '@/composables/usePrimaryAlarm'
+import { useVehicleOperationState } from '@/composables/useVehicleOperationState'
 import { useAuthStore } from '@/stores/auth'
 import { useMonitorStore } from '@/stores/monitor'
 import { api, errorMessage } from '@/lib/api'
@@ -19,8 +20,6 @@ import { alarmStateLabel, alarmTypeLabel, reasonCodeLabel } from '@/lib/ui-label
 import robotIdleArt from '@/assets/yd/gate4/status/robot_state_idle_art.png'
 import robotOnlineArt from '@/assets/yd/gate4/status/robot_state_online_art.png'
 import robotAlarmArt from '@/assets/yd/gate4/status/robot_state_alarm_art.png'
-import glowBlue from '@/assets/yd/gate4/decor/card_bg_status_glow_blue.png'
-import glowGreen from '@/assets/yd/gate4/decor/card_bg_status_glow_green.png'
 import type { AlarmTimelineItem, DetectionCoverage, StopOperation } from '@/types'
 
 const auth = useAuthStore()
@@ -38,6 +37,15 @@ const otherEventsOpen = ref(false)
 const { activeAlarms, primaryAlarm, primaryAlarmId } = usePrimaryAlarm(
   computed(() => monitor.snapshot.alarms),
 )
+const resumeTaskId = computed(() => {
+  const cancelled = monitor.snapshot.tasks.find(
+    (item) =>
+      item.type === 'PATROL' &&
+      item.status === 'CANCELLED' &&
+      Boolean(item.parameters_json?.live_route_cursor),
+  )
+  return cancelled?.id || null
+})
 let coverageTimer = 0
 let stopTimer = 0
 
@@ -51,6 +59,13 @@ const selectedPreset = computed(() =>
   ),
 )
 const activeTask = computed(() => monitor.activeTask)
+const { state: vehicleState, atWaitingArea } = useVehicleOperationState({
+  robot,
+  activeTask,
+  stopOperation,
+  requestBusy: busyCommand,
+  resumeTaskId,
+})
 const trajectory = computed(() => {
   const trajectories = monitor.snapshot.trajectories
   return (
@@ -83,8 +98,13 @@ const dockReason = computed(() => {
   return ''
 })
 const freshness = computed(() => {
-  if (!robot.value?.server_received_at) return '无数据'
-  return `${Math.max(0, (Date.now() - Date.parse(robot.value.server_received_at)) / 1000).toFixed(1)} 秒前`
+  if (!robot.value?.server_received_at) return '数据离线'
+  const age = Math.max(0, (Date.now() - Date.parse(robot.value.server_received_at)) / 1000)
+  const stale = robot.value?.integration?.stale_seconds ?? 3
+  const offline = robot.value?.integration?.offline_seconds ?? 10
+  if (age >= offline) return '数据离线'
+  if (age >= stale) return `数据陈旧 ${age.toFixed(1)}s`
+  return '数据实时'
 })
 const situation = computed(() =>
   operationalSituation({
@@ -134,7 +154,13 @@ const patrolArt = computed(() => {
   if (activeTask.value) return robotOnlineArt
   return robotIdleArt
 })
-const patrolGlow = computed(() => (activeTask.value ? glowGreen : glowBlue))
+const patrolCardClass = computed(() => {
+  if (robot.value?.estop_active) return 'is-estop'
+  if (vehicleState.value === 'STOPPING' || vehicleState.value === 'STOPPED_RESUMABLE') return 'is-stopping'
+  if (vehicleState.value === 'RETURNING' || vehicleState.value === 'RETURN_STARTING') return 'is-returning'
+  if (vehicleState.value === 'PATROLLING' || vehicleState.value === 'PATROL_STARTING') return 'is-patrolling'
+  return 'is-idle'
+})
 
 function toast(value: string) {
   notice.value = value
@@ -270,11 +296,16 @@ async function patrol() {
     if (!plan) throw new Error('存在多个可用巡检计划，请前往任务管理选择')
     await api.post(
       '/tasks/patrol-plan',
-      { robot_id: robot.value.vehicle_id, patrol_plan_id: plan.id, parameters: { source: 'OPERATIONS_HMI' } },
+      {
+        robot_id: robot.value.vehicle_id,
+        patrol_plan_id: plan.id,
+        resume_task_id: resumeTaskId.value || undefined,
+        parameters: { source: 'OPERATIONS_HMI' },
+      },
       { headers: { 'Idempotency-Key': newUuid() } },
     )
     await monitor.loadSnapshot()
-    toast('巡检任务已创建')
+    toast(resumeTaskId.value ? '已从上次巡检位置继续' : '巡检任务已创建')
   } catch (reason) {
     toast(friendlyError(reason))
   } finally {
@@ -292,6 +323,17 @@ async function pollStop(id: string) {
     ) {
       window.clearInterval(stopTimer)
       await monitor.loadSnapshot()
+      const state = stopOperation.value?.state
+      if (state === 'VEHICLE_STATIONARY_CONFIRMED') {
+        window.setTimeout(() => {
+          stopOperation.value = null
+        }, 2000)
+      } else if (state === 'PARTIAL_UNCONFIRMED') {
+        window.setTimeout(() => {
+          stopOperation.value = null
+        }, 3000)
+      }
+      // UNCONFIRMED / FAILED keeps the bar visible and locks vehicle motion.
     }
   }, 500)
 }
@@ -323,15 +365,14 @@ async function home() {
     return
   }
   busyCommand.value = 'home'
-  const preset = monitor.snapshot.navigation_presets?.find((item) => item.category === 'WAITING_AREA')
   try {
     await api.post(
-      `/robots/${robot.value.vehicle_id}/commands/return-dock`,
-      { params: { navigation_preset_id: preset?.id } },
+      '/tasks/return-dock',
+      { robot_id: robot.value.vehicle_id, parameters: { source: 'OPERATIONS_HMI' } },
       { headers: { 'Idempotency-Key': newUuid() } },
     )
     await monitor.loadSnapshot()
-    toast('返回待命区命令已下发')
+    toast('返回待命区任务已创建')
   } catch (reason) {
     toast(friendlyError(reason))
   } finally {
@@ -529,8 +570,7 @@ onUnmounted(() => {
         </template>
         <template v-else>
           <DeviceSnapshot :robot="robot" :task="activeTask" :stream="roofStream" :freshness="freshness" />
-          <section class="panel yd-patrol-card" :class="{ 'is-patrolling': activeTask }">
-            <img class="patrol-glow" :src="patrolGlow" alt="" aria-hidden="true" />
+          <section class="panel yd-patrol-card" :class="patrolCardClass">
             <img class="patrol-art" :src="patrolArt" alt="" aria-hidden="true" />
             <div class="patrol-state">
               <span class="ptitle">巡检状态</span>
@@ -549,21 +589,40 @@ onUnmounted(() => {
         </template>
       </aside>
     </section>
-    <section v-if="stopOperation" class="stop-operation-state" aria-live="polite">
-      <strong>正在确认车辆静止</strong>
-      <span>任务取消：{{ stopOperation.mission_cancel_state }}</span>
-      <span>停止命令：{{ stopOperation.motion_stop_state }}</span>
-      <span>连续静止帧 {{ stopOperation.stationary_frames }}/5</span>
-      <strong v-if="stopOperation.state === 'VEHICLE_STATIONARY_CONFIRMED'">车辆已停止</strong>
-      <strong v-else-if="['PARTIAL_UNCONFIRMED', 'UNCONFIRMED', 'FAILED'].includes(stopOperation.state)"
-        >停止结果未完全确认</strong
-      >
+    <section
+      v-if="stopOperation"
+      class="stop-operation-state"
+      :class="{
+        'stop-success': stopOperation.state === 'VEHICLE_STATIONARY_CONFIRMED',
+        'stop-warning': stopOperation.state === 'PARTIAL_UNCONFIRMED',
+        'stop-danger': ['UNCONFIRMED', 'FAILED'].includes(stopOperation.state),
+      }"
+      aria-live="polite"
+    >
+      <template v-if="stopOperation.state === 'VEHICLE_STATIONARY_CONFIRMED'">
+        <strong>车辆已停止</strong>
+        <span>任务已取消，车辆静止已确认</span>
+      </template>
+      <template v-else-if="stopOperation.state === 'PARTIAL_UNCONFIRMED'">
+        <strong>车辆已静止，但部分回执未确认</strong>
+        <span>连续静止帧 {{ stopOperation.stationary_frames }}/5</span>
+      </template>
+      <template v-else-if="['UNCONFIRMED', 'FAILED'].includes(stopOperation.state)">
+        <strong>无法确认车辆已经停止</strong>
+        <span>禁止继续巡检与返航</span>
+      </template>
+      <template v-else>
+        <strong>正在停止巡检</strong>
+        <span>连续静止帧 {{ stopOperation.stationary_frames }}/5</span>
+      </template>
     </section>
     <section class="yd-command-dock">
       <OperationsCommandDock
         :busy="busyCommand"
+        :vehicle-state="vehicleState"
         :reason="dockReason"
         :estop-active="Boolean(robot?.estop_active)"
+        :at-waiting-area="atWaitingArea"
         @patrol="patrol"
         @stop="stop"
         @home="home"

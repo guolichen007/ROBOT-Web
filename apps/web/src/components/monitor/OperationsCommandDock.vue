@@ -1,7 +1,16 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { ControlPlatformIcon, HomeIcon, StopCircleIcon } from 'tdesign-icons-vue-next'
 import { useHoldToConfirm } from '@/composables/useHoldToConfirm'
-const props = defineProps<{ busy: string; reason: string; estopActive: boolean }>()
+import type { VehicleOperationState } from '@/composables/useVehicleOperationState'
+
+const props = defineProps<{
+  busy: string
+  reason: string
+  estopActive: boolean
+  vehicleState: VehicleOperationState
+  atWaitingArea: boolean
+}>()
 const emit = defineEmits<{ patrol: []; stop: []; home: []; estop: []; resetEstop: [] }>()
 const hold = useHoldToConfirm(() => {
   if (props.estopActive) emit('resetEstop')
@@ -10,6 +19,40 @@ const hold = useHoldToConfirm(() => {
 function keyDown(event: KeyboardEvent): void {
   if (!event.repeat && ['Enter', ' '].includes(event.key)) hold.start()
 }
+
+const motionLocked = computed(() => props.estopActive || ['UNCONFIRMED', 'FAILED'].includes(props.vehicleState))
+const patrolLabel = computed(() => {
+  if (props.busy === 'patrol') return '正在启动…'
+  if (props.vehicleState === 'PATROLLING') return '● 巡检中'
+  if (props.vehicleState === 'STOPPED_RESUMABLE') return '继续巡检'
+  return '开始巡检'
+})
+const patrolDisabled = computed(
+  () =>
+    Boolean(props.busy) ||
+    motionLocked.value ||
+    ['PATROLLING', 'STOPPING', 'RETURNING', 'RETURN_STARTING'].includes(props.vehicleState),
+)
+const stopLabel = computed(() => {
+  if (props.busy === 'stop') return '● 停止中'
+  if (props.vehicleState === 'STOPPED_RESUMABLE') return '已停止'
+  return '停止巡检'
+})
+const stopDisabled = computed(
+  () => Boolean(props.busy) || motionLocked.value || ['IDLE', 'STOPPED_RESUMABLE', 'RETURNING'].includes(props.vehicleState),
+)
+const homeLabel = computed(() => {
+  if (props.busy === 'home') return '● 返回中'
+  if (props.atWaitingArea && props.vehicleState === 'IDLE') return '已在等待区'
+  return '返回等待区'
+})
+const homeDisabled = computed(
+  () =>
+    Boolean(props.busy) ||
+    motionLocked.value ||
+    (props.atWaitingArea && props.vehicleState === 'IDLE') ||
+    ['PATROLLING', 'STOPPING', 'RETURNING'].includes(props.vehicleState),
+)
 </script>
 <template>
   <section class="panel operations-command-dock">
@@ -21,21 +64,21 @@ function keyDown(event: KeyboardEvent): void {
       <t-button
         theme="primary"
         :loading="busy === 'patrol'"
-        :disabled="Boolean(busy) || estopActive"
+        :disabled="patrolDisabled"
         @click="$emit('patrol')"
-        ><ControlPlatformIcon />{{ busy === 'patrol' ? '下发中…' : '开始巡检' }}</t-button
+        ><ControlPlatformIcon />{{ patrolLabel }}</t-button
       ><t-button
         variant="outline"
         :loading="busy === 'stop'"
-        :disabled="Boolean(busy) || estopActive"
+        :disabled="stopDisabled"
         @click="$emit('stop')"
-        ><StopCircleIcon />{{ busy === 'stop' ? '下发中…' : '停止巡检' }}</t-button
+        ><StopCircleIcon />{{ stopLabel }}</t-button
       ><t-button
         variant="outline"
         :loading="busy === 'home'"
-        :disabled="Boolean(busy) || estopActive"
+        :disabled="homeDisabled"
         @click="$emit('home')"
-        ><HomeIcon />{{ busy === 'home' ? '下发中…' : '返回等待区' }}</t-button
+        ><HomeIcon />{{ homeLabel }}</t-button
       ><button
         class="hold-estop"
         :class="{ 'hold-estop--active': estopActive, 'is-resetting': busy === 'reset-estop' }"

@@ -668,7 +668,7 @@
   white-space: nowrap;
 }
 
-/* patrol status card */
+/* patrol status card: scalable CSS gradients, no fixed-ratio PNG background */
 .yd-patrol-card {
   position: relative;
   overflow: hidden;
@@ -678,14 +678,30 @@
   padding: 14px 16px;
   gap: 10px;
 }
-.yd-patrol-card .patrol-glow {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  opacity: 0.5;
-  pointer-events: none;
+.yd-patrol-card.is-idle {
+  background:
+    radial-gradient(ellipse at 92% 120%, rgba(61, 169, 255, 0.18), transparent 48%),
+    linear-gradient(135deg, #f4fbff 0%, #f7fcff 48%, #ffffff 100%);
+}
+.yd-patrol-card.is-patrolling {
+  background:
+    radial-gradient(ellipse at 92% 120%, rgba(22, 164, 101, 0.18), transparent 48%),
+    linear-gradient(135deg, #f0fdf6 0%, #f5fdf9 48%, #ffffff 100%);
+}
+.yd-patrol-card.is-stopping {
+  background:
+    radial-gradient(ellipse at 92% 120%, rgba(238, 154, 44, 0.16), transparent 48%),
+    linear-gradient(135deg, #fff8ec 0%, #fffbf4 48%, #ffffff 100%);
+}
+.yd-patrol-card.is-returning {
+  background:
+    radial-gradient(ellipse at 92% 120%, rgba(20, 108, 255, 0.16), transparent 48%),
+    linear-gradient(135deg, #eef5ff 0%, #f4f8ff 48%, #ffffff 100%);
+}
+.yd-patrol-card.is-estop {
+  background:
+    radial-gradient(ellipse at 92% 120%, rgba(237, 63, 63, 0.16), transparent 48%),
+    linear-gradient(135deg, #fff1f1 0%, #fff6f6 48%, #ffffff 100%);
 }
 .yd-patrol-card .patrol-art {
   position: absolute;
@@ -847,6 +863,21 @@
 }
 .stop-operation-state strong {
   font-weight: 700;
+}
+.stop-operation-state.stop-success {
+  border-color: #9fd9bd;
+  background: var(--yd-success-soft);
+  color: #0e7a47;
+}
+.stop-operation-state.stop-warning {
+  border-color: #f0cd96;
+  background: var(--yd-warning-soft);
+  color: #a8620c;
+}
+.stop-operation-state.stop-danger {
+  border-color: #f2a9a5;
+  background: var(--yd-danger-soft);
+  color: #c22a24;
 }
 
 /* ---------------- Bottom command dock ---------------- */
