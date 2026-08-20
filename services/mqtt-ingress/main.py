@@ -733,9 +733,14 @@ def handle_task_status(db, robot: Robot, msg: dict, received: datetime) -> None:
         }
         task.parameters_json = parameters
 
-    # Interrupted patrols become resumable; a completed return consumes them.
+    # Interrupted missions become resumable; a completed return consumes them.
     parameters = dict(task.parameters_json or {})
     if internal_status == "CANCELLED" and task.type == "PATROL" and parameters.get("live_route_cursor"):
+        parameters["resume_state"] = "AVAILABLE"
+        task.parameters_json = parameters
+    elif internal_status == "CANCELLED" and task.type == "RETURN_DOCK":
+        # A stopped return is resumable: the next return re-plans from the
+        # current pose, no route cursor required.
         parameters["resume_state"] = "AVAILABLE"
         task.parameters_json = parameters
     elif internal_status == "SUCCEEDED" and task.type == "RETURN_DOCK":

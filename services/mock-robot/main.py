@@ -501,11 +501,32 @@ class MockRobot:
         if cmd == "cancel_task":
             task_id = command.get("task_id") or command.get("params", {}).get("task_id")
             with self.lock:
+                execution = dict(self.active_execution or {})
+                cursor = execution.get("cursor") or {}
+                progress = float(execution.get("progress") or 0.0)
                 self.active_task_id = None
+                self.active_execution = None
                 self.linear = self.angular = 0
                 self.mode = "IDLE"
             ack = self.ack(command, "accepted")
-            statuses = [self.task_status(task_id, "cancelled", "CANCELLED", 0)] if task_id else []
+            statuses: list[dict] = []
+            if task_id:
+                # Preserve the resume cursor so the operator can continue from
+                # the interrupted point instead of restarting from REMOTE.
+                statuses.append(
+                    self.task_status(
+                        task_id,
+                        "cancelled",
+                        "CANCELLED",
+                        progress,
+                        checkpoint_index=cursor.get("checkpoint_index"),
+                        checkpoint_total=cursor.get("checkpoint_total"),
+                        current_slot_code=cursor.get("current_slot_code"),
+                        next_slot_code=cursor.get("next_slot_code"),
+                        waypoint_index=cursor.get("waypoint_index"),
+                        waypoint_total=cursor.get("waypoint_total"),
+                    )
+                )
             self.processed[command["command_id"]] = (ack, statuses)
             return
         if cmd in {"patrol", "extinguish", "return_dock"}:

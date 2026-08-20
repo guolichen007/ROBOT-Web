@@ -167,31 +167,59 @@ def build_cruise_trajectory(slots: list[SlotRef]) -> list[dict]:
     return _dedupe([{"x": w["x"], "y": w["y"]} for w in build_cruise_waypoints(slots)])
 
 
-def build_return_waypoints(current_pose: dict, full_waypoints: list[dict], route_cursor: int | None = None) -> list[dict]:
-    """Safe return-to-waiting path along the already-validated cruise lanes.
+# Safe corridor graph: vertical lanes a robot may occupy, and the two
+# horizontal transfer lanes. The return planner only travels along these.
+SAFE_VERTICAL_X = [1.2, 8.0, 14.0, 32.0, 40.0]
+SOUTH_TRANSFER_Y = 1.0
+NORTH_TRANSFER_Y = 27.0
 
-    Never cuts diagonally across parking slots. INSPECTION waypoints become
-    TRANSIT (no dwell) on the way back; only REMOTE_WAITING keeps its theta.
+
+def build_return_waypoints(current_pose: dict, full_waypoints: list[dict] | None = None, route_cursor: int | None = None) -> list[dict]:
+    """Nearest safe return-to-waiting path.
+
+    Instead of reversing the entire cruise, take the shortest corridor route:
+    from the current pose drop onto the nearest vertical lane, then to the
+    south transfer lane (or the north transfer lane when already up top), then
+    west along the outer corridor and down to REMOTE_WAITING. This never cuts
+    diagonally across parking slots.
     """
-    prefix = full_waypoints[:route_cursor] if route_cursor is not None else full_waypoints
-    waypoints: list[dict] = [{"x": current_pose["x"], "y": current_pose["y"], "kind": "TRANSIT"}]
-    for point in reversed(prefix):
-        kind = "WAITING" if point.get("kind") == "WAITING" else "TRANSIT"
-        theta = point.get("theta") if kind == "WAITING" else None
-        waypoints.append({"x": point["x"], "y": point["y"], "kind": kind, "theta": theta})
-    if not waypoints[-1].get("kind") == "WAITING":
-        waypoints.append(
-            {"x": REMOTE_WAITING["x"], "y": REMOTE_WAITING["y"], "kind": "WAITING", "theta": REMOTE_WAITING["theta"]}
-        )
+    cx = float(current_pose["x"])
+    cy = float(current_pose["y"])
+    waypoints: list[dict] = [{"x": cx, "y": cy, "kind": "TRANSIT"}]
+
+    if cy > 25.4:
+        # Top region: descend to the north transfer lane, then west corridor.
+        waypoints.append({"x": cx, "y": NORTH_TRANSFER_Y, "kind": "TRANSIT"})
+        waypoints.append({"x": REMOTE_WAITING["x"], "y": NORTH_TRANSFER_Y, "kind": "TRANSIT"})
+    else:
+        # Column / south region: nearest vertical lane, then south transfer.
+        vx = min(SAFE_VERTICAL_X, key=lambda x: abs(x - cx))
+        if abs(vx - cx) > 1e-6:
+            waypoints.append({"x": vx, "y": cy, "kind": "TRANSIT"})
+        waypoints.append({"x": vx, "y": SOUTH_TRANSFER_Y, "kind": "TRANSIT"})
+        waypoints.append({"x": REMOTE_WAITING["x"], "y": SOUTH_TRANSFER_Y, "kind": "TRANSIT"})
+
+    waypoints.append(
+        {"x": REMOTE_WAITING["x"], "y": REMOTE_WAITING["y"], "kind": "WAITING", "theta": REMOTE_WAITING["theta"]}
+    )
     return _dedupe_waypoints(waypoints)
 
 
 def build_resumed_cruise_waypoints(current_pose: dict, full_waypoints: list[dict], route_cursor: int) -> list[dict]:
-    """Continue a cancelled cruise from the route cursor without re-running REMOTE."""
-    remaining = full_waypoints[route_cursor:]
+    """Continue a cancelled cruise from the waypoint after the cursor.
+
+    The cursor points at the last COMPLETED inspection waypoint, so resume
+    from the following waypoint and never re-run REMOTE or A-27.
+    """
+    next_index = min(route_cursor + 1, len(full_waypoints))
+    remaining = full_waypoints[next_index:]
     head: list[dict] = [{"x": current_pose["x"], "y": current_pose["y"], "kind": "TRANSIT"}]
     if remaining and remaining[0]["x"] == head[0]["x"] and remaining[0]["y"] == head[0]["y"]:
         return remaining
+    if not remaining:
+        return head + [
+            {"x": REMOTE_WAITING["x"], "y": REMOTE_WAITING["y"], "kind": "WAITING", "theta": REMOTE_WAITING["theta"]}
+        ]
     return head + remaining
 
 
