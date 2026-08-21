@@ -188,18 +188,15 @@ if (-not $adminPass) {
     }
 }
 
-# Summary.
+# Summary. A check passes with 'PASS' or 'YES' (WS_ORIGIN_ACCEPTED uses 'YES').
 Write-Host ''
 $allPass = $true
+$passValues = @('PASS', 'YES')
 foreach ($key in $results.Keys) {
     $val = $results[$key]
-    $color = switch ($val) {
-        'PASS' { 'Green' }
-        'SKIP' { 'Yellow' }
-        default { 'Red' }
-    }
+    $color = if ($passValues -contains $val) { 'Green' } elseif ($val -eq 'SKIP') { 'Yellow' } else { 'Red' }
     Write-Host ("{0,-30} {1}" -f $key, $val) -ForegroundColor $color
-    if ($val -ne 'PASS') { $allPass = $false }
+    if ($passValues -notcontains $val) { $allPass = $false }
 }
 
 Write-Host ''
