@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import importlib.util
 import math
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from app.core.config import Settings
@@ -14,6 +16,20 @@ from app.dev.reset_mock import (
     check_reset_allowed,
     run_reset,
 )
+
+ROOT = Path(__file__).resolve().parents[3]
+
+
+def load_mock_robot():
+    # services/mock-robot has a hyphenated name and no __init__.py, so it must be
+    # loaded by file path (same approach as test_operations_upgrade.load_service).
+    spec = importlib.util.spec_from_file_location(
+        "services_mock_robot_main", ROOT / "services" / "mock-robot" / "main.py"
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.MockRobot
 
 
 def make_robot() -> Robot:
@@ -64,8 +80,7 @@ class FakeRedis:
 # TEST A
 def test_mock_robot_cold_start_is_at_remote_waiting(monkeypatch) -> None:
     monkeypatch.setenv("MOCK_VEHICLE_ID", "R001")
-    from services.mock_robot.main import MockRobot
-
+    MockRobot = load_mock_robot()
     robot = MockRobot()
     assert robot.x == pytest.approx(1.2)
     assert robot.y == pytest.approx(1.2)
