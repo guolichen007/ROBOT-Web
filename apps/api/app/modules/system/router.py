@@ -270,6 +270,36 @@ def build_operation_context(db, robot: Robot) -> dict:
     return base
 
 
+def assemble_robot_state(robot: Robot, raw: str | None) -> dict:
+    """Merge DB-authoritative identity/config fields over the Redis realtime cache.
+
+    Redis latest is an intentionally compact realtime projection; it never
+    carries ``enabled`` and may lag the DB on other platform fields. A disabled
+    robot with live Redis data must still report enabled=false, never undefined.
+    """
+    state = json.loads(raw) if raw else serialize_model(robot)
+    state.update(
+        {
+            "id": robot.id,
+            "robot_id": robot.id,
+            "vehicle_id": robot.vehicle_id,
+            "name": robot.name,
+            "model": robot.model,
+            "enabled": robot.enabled,
+            "last_seen_at": robot.last_seen_at.isoformat() if robot.last_seen_at else None,
+            "current_map_id": robot.current_map_id,
+            "current_map_version": robot.current_map_version,
+        }
+    )
+    # Realtime fields fall back to the database when Redis has no value yet.
+    state.setdefault("online_state", robot.online_state)
+    state.setdefault("mode", robot.current_mode)
+    state.setdefault("current_mode", robot.current_mode)
+    state.setdefault("battery", robot.battery)
+    state.setdefault("estop_active", robot.estop_active)
+    return state
+
+
 @router.get("/api/v1/monitor/snapshot")
 def monitor_snapshot(
     db: DbSession, _: AuthContext = Depends(require_permission("robot.read"))
@@ -288,19 +318,7 @@ def monitor_snapshot(
     latest = []
     for robot in robots:
         raw = get_redis().get(f"robot:{robot.vehicle_id}:latest")
-        state = json.loads(raw) if raw else serialize_model(robot)
-        # Redis latest is an intentionally compact realtime projection.  The
-        # monitor contract still needs stable database identity and display
-        # fields, including when the snapshot was assembled from that cache.
-        state.update(
-            {
-                "id": robot.id,
-                "robot_id": robot.id,
-                "vehicle_id": robot.vehicle_id,
-                "name": robot.name,
-                "model": robot.model,
-            }
-        )
+        state = assemble_robot_state(robot, raw)
         capability = db.get(RobotCapability, robot.id)
         integration = db.get(RobotIntegrationProfile, robot.id)
         state["supported_commands"] = capability.supported_commands_json if capability else []
@@ -379,6 +397,9 @@ def monitor_snapshot(
         "alarms": [serialize_model(x) for x in alarms],
         "tasks": [serialize_model(x) for x in tasks],
         "operation_context": build_operation_context(db, robots[0]) if robots else None,
+        "operation_contexts": {
+            robot.vehicle_id: build_operation_context(db, robot) for robot in robots
+        },
         "streams": [
             serialize_model(x)
             for x in db.scalars(select(StreamRegistry).order_by(StreamRegistry.camera_type)).all()
