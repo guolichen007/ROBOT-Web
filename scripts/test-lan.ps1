@@ -3,7 +3,9 @@ param(
     [string]$HostName  = 'firebot.lan',
     [string]$LocalHost = '127.0.0.1',
     [int]   $LocalPort = 8080,
-    [string]$LanIP     = '192.168.110.101'
+    [string]$LanIP     = '192.168.110.101',
+    [string]$Username  = '',
+    [string]$Password  = ''
 )
 
 # LAN connectivity + WebSocket origin acceptance test. Run on the DEV machine
@@ -71,6 +73,35 @@ function Test-WebSocket {
     }
 }
 
+function Get-ErrorDetail {
+    param($ErrorRecord)
+    $status = ''
+    $detail = ''
+    # PowerShell 7: ErrorDetails.Message usually carries the response body.
+    if ($ErrorRecord.ErrorDetails -and $ErrorRecord.ErrorDetails.Message) {
+        $detail = $ErrorRecord.ErrorDetails.Message
+    }
+    try {
+        $resp = $ErrorRecord.Exception.Response
+        if ($resp) {
+            try { $status = [string][int]$resp.StatusCode } catch { }
+            # PowerShell 5.1: read the body from the WebResponse stream.
+            if (-not $detail) {
+                try {
+                    $stream = $resp.GetResponseStream()
+                    if ($stream) {
+                        $reader = New-Object IO.StreamReader($stream)
+                        $body = $reader.ReadToEnd()
+                        if ($body) { $detail = $body }
+                    }
+                } catch { }
+            }
+        }
+    } catch { }
+    if (-not $detail) { $detail = $ErrorRecord.Exception.Message }
+    return @{ Status = $status; Detail = $detail }
+}
+
 Write-Host ''
 Write-Host 'Firebot LAN test' -ForegroundColor Cyan
 Write-Host ''
@@ -88,18 +119,23 @@ $results['FIREBOT_LAN_HOSTNAME_HTTP'] = if (Test-Http "http://${HostName}/health
 $results['FIREBOT_LAN_LOGIN_PAGE'] = if (Test-Http "http://${HostName}/") { 'PASS' } else { 'FAIL' }
 
 # 5+6. API login + ws-ticket, then a real WebSocket connect with the Origin header.
-$adminUser = 'admin'
-$adminPass = $null
-$envPath = Join-Path $repo '.env'
-if (Test-Path $envPath) {
-    foreach ($line in [IO.File]::ReadAllLines($envPath)) {
-        if ($line -match '^\s*BOOTSTRAP_ADMIN_USERNAME\s*=') { $adminUser = ($line -replace '^\s*BOOTSTRAP_ADMIN_USERNAME\s*=\s*', '').Trim() }
-        if ($line -match '^\s*BOOTSTRAP_ADMIN_PASSWORD\s*=') { $adminPass = ($line -replace '^\s*BOOTSTRAP_ADMIN_PASSWORD\s*=\s*', '').Trim() }
+# Credentials: -Password/-Username override, otherwise read from .env. Note the
+# seed only creates the admin once, so .env can drift if the password was ever
+# changed in the UI — pass -Password with the current password in that case.
+$adminUser = if ($Username) { $Username } else { 'admin' }
+$adminPass = $Password
+if (-not $adminPass) {
+    $envPath = Join-Path $repo '.env'
+    if (Test-Path $envPath) {
+        foreach ($line in [IO.File]::ReadAllLines($envPath)) {
+            if (-not $Username -and $line -match '^\s*BOOTSTRAP_ADMIN_USERNAME\s*=') { $adminUser = ($line -replace '^\s*BOOTSTRAP_ADMIN_USERNAME\s*=\s*', '').Trim() }
+            if ($line -match '^\s*BOOTSTRAP_ADMIN_PASSWORD\s*=') { $adminPass = ($line -replace '^\s*BOOTSTRAP_ADMIN_PASSWORD\s*=\s*', '').Trim() }
+        }
     }
 }
 
 if (-not $adminPass) {
-    $results['FIREBOT_LAN_LOGIN']      = 'SKIP (no admin password in .env)'
+    $results['FIREBOT_LAN_LOGIN']      = 'SKIP (no admin password; pass -Password)'
     $results['FIREBOT_LAN_API']        = 'SKIP'
     $results['FIREBOT_LAN_WS']         = 'SKIP'
     $results['WS_ORIGIN_ACCEPTED']     = 'NO'
@@ -110,6 +146,14 @@ if (-not $adminPass) {
         $login = Invoke-RestMethod -Uri "http://${HostName}/api/v1/auth/login" -Method Post -ContentType 'application/json' -Body $body -TimeoutSec 10
         $accessToken = $login.access_token
     } catch {
+        $errInfo = Get-ErrorDetail $_
+        Write-Host "login failed: HTTP $($errInfo.Status) $($errInfo.Detail)" -ForegroundColor Yellow
+        if ($errInfo.Status -eq '401') {
+            Write-Host '  -> 密码不正确。浏览器若能登录，说明 .env 的 BOOTSTRAP_ADMIN_PASSWORD 已与数据库不一致。' -ForegroundColor Yellow
+            Write-Host '     用当前密码重跑:  .\scripts\test-lan.ps1 -Password "<当前密码>"' -ForegroundColor Yellow
+        } elseif ($errInfo.Status -eq '429' -or $errInfo.Status -eq '423') {
+            Write-Host '  -> 登录被限流或账号锁定，等 5 分钟再试。' -ForegroundColor Yellow
+        }
         $accessToken = $null
     }
     $results['FIREBOT_LAN_LOGIN'] = if ($accessToken) { 'PASS' } else { 'FAIL' }
@@ -121,6 +165,8 @@ if (-not $adminPass) {
             $ticketResp = Invoke-RestMethod -Uri "http://${HostName}/api/v1/auth/ws-ticket" -Method Post -Headers $headers -TimeoutSec 10
             $ticket = $ticketResp.ticket
         } catch {
+            $errInfo = Get-ErrorDetail $_
+            Write-Host "ws-ticket failed: HTTP $($errInfo.Status) $($errInfo.Detail)" -ForegroundColor Yellow
             $ticket = $null
         }
     }
