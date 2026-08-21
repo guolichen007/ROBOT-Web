@@ -17,7 +17,7 @@ param(
 # must reach 101 Switching Protocols, not a 4403 origin rejection.
 #
 # Mock realtime + patrol/stop/return control still need a manual browser check
-# (CASE C/D) — see docs/LAN_WEB_ACCESS.md. This script proves HTTP + API + WS.
+# (CASE C/D) - see docs/LAN_WEB_ACCESS.md. This script proves HTTP + API + WS.
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -121,7 +121,7 @@ $results['FIREBOT_LAN_LOGIN_PAGE'] = if (Test-Http "http://${HostName}/") { 'PAS
 # 5+6. API login + ws-ticket, then a real WebSocket connect with the Origin header.
 # Credentials: -Password/-Username override, otherwise read from .env. Note the
 # seed only creates the admin once, so .env can drift if the password was ever
-# changed in the UI — pass -Password with the current password in that case.
+# changed in the UI - pass -Password with the current password in that case.
 $adminUser = if ($Username) { $Username } else { 'admin' }
 $adminPass = $Password
 if (-not $adminPass) {
@@ -149,10 +149,10 @@ if (-not $adminPass) {
         $errInfo = Get-ErrorDetail $_
         Write-Host "login failed: HTTP $($errInfo.Status) $($errInfo.Detail)" -ForegroundColor Yellow
         if ($errInfo.Status -eq '401') {
-            Write-Host '  -> 密码不正确。浏览器若能登录，说明 .env 的 BOOTSTRAP_ADMIN_PASSWORD 已与数据库不一致。' -ForegroundColor Yellow
-            Write-Host '     用当前密码重跑:  .\scripts\test-lan.ps1 -Password "<当前密码>"' -ForegroundColor Yellow
+            Write-Host '  -> Wrong password. If the browser can log in, the .env BOOTSTRAP_ADMIN_PASSWORD has drifted from the DB.' -ForegroundColor Yellow
+            Write-Host '     Re-run with the current password:  .\scripts\test-lan.ps1 -Password YOUR_PASSWORD' -ForegroundColor Yellow
         } elseif ($errInfo.Status -eq '429' -or $errInfo.Status -eq '423') {
-            Write-Host '  -> 登录被限流或账号锁定，等 5 分钟再试。' -ForegroundColor Yellow
+            Write-Host '  -> Login rate-limited or account locked. Wait 5 minutes and retry.' -ForegroundColor Yellow
         }
         $accessToken = $null
     }
