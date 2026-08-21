@@ -106,6 +106,15 @@ export const robotModeLabel = map(
   '未知',
 )
 
+export const sourceKindLabel = map(
+  {
+    MOCK: '模拟车辆',
+    CANONICAL_MQTT: '真实 MQTT',
+    ROS_COMPAT: 'ROS 兼容',
+  },
+  '未配置',
+)
+
 export const situationLabel = map(
   {
     FIRE_CRITICAL: '严重火情',
