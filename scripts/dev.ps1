@@ -57,11 +57,32 @@ for ($i = 0; $i -lt 90; $i++) {
 }
 if (-not $ready) { docker compose -f compose.dev.yml ps; throw 'The stack did not become ready in time.' }
 
-Write-Host 'Web:       http://127.0.0.1:8080'
-Write-Host 'API docs:  http://127.0.0.1:8080/api/docs'
-Write-Host 'Health:    http://127.0.0.1:8080/health/ready'
-Write-Host 'Metrics:   http://127.0.0.1:8080/metrics'
-Write-Host 'Media API: http://localhost:9997/v3/paths/list'
+Write-Host ''
+Write-Host 'Firebot DEV READY' -ForegroundColor Green
+Write-Host ''
+Write-Host '本机开发:' -ForegroundColor Cyan
+Write-Host '  Web:       http://127.0.0.1:8080'
+Write-Host '  API docs:  http://127.0.0.1:8080/api/docs'
+Write-Host '  Health:    http://127.0.0.1:8080/health/ready'
+Write-Host '  Metrics:   http://127.0.0.1:8080/metrics'
+Write-Host '  Media API: http://localhost:9997/v3/paths/list'
+Write-Host ''
+Write-Host '局域网:' -ForegroundColor Cyan
+$lanReady = $false
+try {
+    & curl.exe --noproxy '*' --fail --silent --show-error --max-time 2 'http://firebot.lan/health/ready' *> $null
+    if ($LASTEXITCODE -eq 0) { $lanReady = $true }
+} catch {
+    $lanReady = $false
+}
+if ($lanReady) {
+    Write-Host '  http://firebot.lan'
+} else {
+    Write-Host '  NOT CONFIGURED'
+    Write-Host ''
+    Write-Host '  如需局域网展示，请在管理员 PowerShell 运行:' -ForegroundColor Yellow
+    Write-Host '    .\scripts\enable-lan.ps1'
+}
 if ($created) {
     Write-Host 'DEV bootstrap (shown once):' -ForegroundColor Yellow
     Write-Host '  username: admin'
