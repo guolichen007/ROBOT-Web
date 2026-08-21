@@ -18,13 +18,14 @@ from app.core.dependencies import (
     require_permission,
 )
 from app.core.errors import PlatformError
-from app.core.events import current_watermark, get_redis, queue_redis_delete
+from app.core.events import append_event, current_watermark, get_redis, queue_redis_delete
 from app.core.serialization import serialize_model
 from app.db.models import (
     ManualControlSession,
     Robot,
     RobotCapability,
     RobotConnectionLog,
+    Task,
     TelemetrySample,
     User,
 )
@@ -57,6 +58,85 @@ def robot_detail(
     _: AuthContext = Depends(require_permission("robot.read")),
 ) -> dict:
     return serialize_model(find_robot(db, robot_id))
+
+
+class EnabledRequest(BaseModel):
+    enabled: bool
+
+
+def assert_robot_can_disable(db, robot, redis) -> None:
+    """Safety gates for disabling platform operations. Never auto-cancels tasks,
+    never stops motion, never resets e-stop — it only refuses an unsafe disable."""
+    active = db.scalar(
+        select(Task).where(
+            Task.robot_id == robot.id,
+            Task.status.in_({"CREATED", "QUEUED", "ACCEPTED", "EXECUTING"}),
+        )
+    )
+    if active:
+        raise PlatformError(
+            "ROBOT_DISABLE_ACTIVE_TASK",
+            "当前车辆存在活动任务，请先执行停止任务，再停用平台操作",
+            status_code=409,
+        )
+    if robot.estop_active:
+        raise PlatformError(
+            "ROBOT_DISABLE_ESTOP_ACTIVE",
+            "软件急停尚未清除，不能停用平台操作",
+            status_code=409,
+        )
+    if robot.online_state == "ONLINE" and robot.current_mode not in {"IDLE", "STANDBY"}:
+        raise PlatformError(
+            "ROBOT_DISABLE_NOT_IDLE",
+            "车辆当前不在待命状态，不能停用平台操作",
+            status_code=409,
+        )
+    if active_lease(redis, robot):
+        raise PlatformError(
+            "ROBOT_DISABLE_MANUAL_LEASE",
+            "存在有效手动控制租约，请先释放再停用平台操作",
+            status_code=409,
+        )
+
+
+@router.put("/{robot_id}/enabled")
+def set_platform_enabled(
+    robot_id: str,
+    payload: EnabledRequest,
+    request: Request,
+    db: DbSession,
+    auth: AuthContext = Depends(require_permission("settings.manage")),
+) -> dict:
+    """Enable/disable platform operations for a robot.
+
+    This is a platform control gate, never a vehicle control command. Disabling
+    stops the platform from creating new control operations for the vehicle; it
+    does not stop a moving vehicle, does not cancel tasks, and does not delete
+    history. Telemetry/MQTT uplink and history remain intact.
+    """
+    robot = find_robot(db, robot_id)
+    if payload.enabled:
+        robot.enabled = True
+        action = "ROBOT_PLATFORM_ENABLED"
+    else:
+        assert_robot_can_disable(db, robot, get_redis())
+        robot.enabled = False
+        action = "ROBOT_PLATFORM_DISABLED"
+    write_audit(
+        db,
+        action=action,
+        resource_type="ROBOT",
+        user_id=auth.user.id,
+        robot_id=robot.id,
+        resource_id=robot.id,
+        before={"enabled": not payload.enabled},
+        after={"enabled": payload.enabled},
+        **request_meta(request),
+    )
+    result = serialize_model(robot)
+    db.commit()
+    append_event("robot.updated", result)
+    return result
 
 
 @router.get("/{robot_id}/latest")
