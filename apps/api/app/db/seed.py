@@ -592,6 +592,26 @@ def seed() -> None:
                         seq=i,
                     )
                 )
+            # Final initial-standby sample: the demo robot starts at REMOTE_WAITING.
+            # Timestamp is later than the seeded history so the first page load
+            # never briefly shows the vehicle out in the field.
+            db.add(
+                TelemetrySample(
+                    robot_id=robot.id,
+                    source_timestamp=now,
+                    server_received_at=now,
+                    x=REMOTE_WAITING["x"],
+                    y=REMOTE_WAITING["y"],
+                    theta=REMOTE_WAITING["theta"],
+                    linear_speed=0,
+                    angular_speed=0,
+                    battery=96,
+                    localization_status="OK",
+                    map_version="1",
+                    boot_id="seed-waiting",
+                    seq=20,
+                )
+            )
         for key, value in {
             "retention": {"telemetry_days": 30, "sensor_days": 90, "audit_days": 365},
             "system": {"site": "DEMO_PARKING", "server_deployed": False},
