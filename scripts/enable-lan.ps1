@@ -135,13 +135,13 @@ $hostsLines = Get-ManagedHostsLines -LanIP $LanIP -HostName $HostName -Path $hos
 [IO.File]::WriteAllLines($hostsPath, $hostsLines, [Text.Encoding]::ASCII)
 Write-Host "hosts: $LanIP $HostName (managed block)" -ForegroundColor Green
 
-# P0-8. Safely add http://firebot.lan to ALLOWED_ORIGINS in the existing .env,
-#       preserving every other value (JWT/refresh/CSRF/admin password untouched)
-#       and never printing secrets.
+# P0-8. Safely add the LAN origins (hostname + IP) to ALLOWED_ORIGINS in the
+#       existing .env, preserving every other value (JWT/refresh/CSRF/admin
+#       password untouched) and never printing secrets.
 $envPath = Join-Path $repo '.env'
 if (Test-Path $envPath) {
     $envLines    = [IO.File]::ReadAllLines($envPath)
-    $originNeed  = "http://$HostName"
+    $originNeed  = @("http://$HostName", "http://$LanIP")
     $found       = $false
     for ($i = 0; $i -lt $envLines.Count; $i++) {
         if ($envLines[$i] -match '^\s*ALLOWED_ORIGINS\s*=') {
@@ -150,17 +150,19 @@ if (Test-Path $envPath) {
             foreach ($item in ($current.Split(',') | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
                 if (-not $origins.Contains($item)) { $origins.Add($item) }
             }
-            if (-not $origins.Contains($originNeed)) { $origins.Add($originNeed) }
+            foreach ($need in $originNeed) {
+                if (-not $origins.Contains($need)) { $origins.Add($need) }
+            }
             $envLines[$i] = 'ALLOWED_ORIGINS=' + ($origins -join ',')
             $found = $true
             break
         }
     }
     if (-not $found) {
-        $envLines += "ALLOWED_ORIGINS=$originNeed"
+        $envLines += "ALLOWED_ORIGINS=" + ($originNeed -join ',')
     }
     [IO.File]::WriteAllLines($envPath, $envLines, [Text.UTF8Encoding]::new($false))
-    Write-Host 'env: ALLOWED_ORIGINS now includes http://firebot.lan (secrets untouched)' -ForegroundColor Green
+    Write-Host "env: ALLOWED_ORIGINS now includes $($originNeed -join ' and ') (secrets untouched)" -ForegroundColor Green
 } else {
     Write-Host '.env not found; skipping ALLOWED_ORIGINS update.' -ForegroundColor Yellow
 }
@@ -178,5 +180,6 @@ if ($RestartApi) {
 
 Write-Host ''
 Write-Host 'Firebot LAN gateway enabled.' -ForegroundColor Green
-Write-Host "  LAN:        http://$HostName"
+Write-Host "  LAN (IP):   http://$LanIP"
+Write-Host "  LAN (DNS):  http://$HostName"
 Write-Host "  Local dev:  http://127.0.0.1:$DockerPort"
