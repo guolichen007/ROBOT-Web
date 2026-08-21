@@ -3,8 +3,12 @@
 开发/演示阶段，同一个局域网内的任何电脑接入网络后，直接用浏览器打开
 `http://firebot.lan` 即可，不需要安装证书、不需要运行任何脚本。
 
-正式方案是**路由器 DNS**；`install-firebot-lan-client.ps1` 只是 DNS 未配好时的
-应急 fallback，不作为正式部署流程。
+LAN 域名解析的正式方案是**路由器 DNS**；`install-firebot-lan-client.ps1` 只是
+DNS 未配好时的应急 fallback，不作为正式部署流程。
+
+注意：当前 `http://firebot.lan` 是纯 HTTP，仅用于开发/演示，不代表生产安全
+部署——登录凭据和控制指令没有 HTTPS 加密。真车正式 HMI 应升级到 HTTPS 或
+Tailscale 访问。
 
 ## 目标体验
 
@@ -68,15 +72,15 @@ firebot.lan    A    192.168.110.101
 DNS 重写 / Local DNS Records / 域名解析
 ```
 
-如果是 OpenWrt，用 dnsmasq 最简单，逻辑上就是：
+如果是 OpenWrt（默认 dnsmasq，主配置入口是 UCI 的 `/etc/config/dhcp`），优先在
+LuCI 的 `Network → DHCP and DNS` 里添加域名绑定 / 自定义记录；直接改
+`/etc/dnsmasq.conf` 是另一种方式。逻辑上等价于 dnsmasq 的：
 
 ```text
 address=/firebot.lan/192.168.110.101
 ```
 
-可以写在 `/etc/dnsmasq.conf`，或在 LuCI 的
-`Network → DHCP and DNS` 里添加自定义配置 / 域名绑定。随后确认 DHCP 给客户端
-下发的是这台路由器的 DNS（通常默认就是）。
+随后确认 DHCP 给客户端下发的是这台路由器的 DNS（通常默认就是）。
 
 配好之后，任何电脑只要：
 
@@ -156,7 +160,17 @@ http://127.0.0.1:8080
 5. 校验 `firebot.lan` 解析到 `192.168.110.101`；
 6. 校验 `http://firebot.lan/health/ready` 返回 `200 ok=true`。
 
-DNS 配好后，客户端不再需要保存任何 Firebot 文件，也不应有 hosts 残留。
+DNS 配好后，客户端不再需要保存任何 Firebot 文件，也不应有 hosts 残留。以前
+运行过 fallback 脚本的电脑，在路由器 DNS 配好后执行一次清理脚本：
+
+```powershell
+.\remove-firebot-lan-client.ps1
+```
+
+它只删除 hosts 里的 `# BEGIN FIREBOT LAN ... # END FIREBOT LAN` 托管块并
+`ipconfig /flushdns`，不碰其它 hosts 行。否则一旦服务器 IP 以后变更（例如从
+`.101` 换成 `.57`），残留的 hosts 会把这些电脑强制解析回旧 IP，出现「只有某几
+台电脑打不开」。
 
 ## 验收
 
@@ -177,6 +191,28 @@ Protocols` 而不是 `4403`，最终输出 `WS_ORIGIN_ACCEPTED=YES`。
 2. 确认 Mock `R001` 在线、地图位置实时变化；
 3. 开始巡检 → 停止 / 返航 / 急停，确认状态实时更新；
 4. 按 F12 → Network → WS，`/ws/v1/monitor` 应为 `101`，Console 无重连循环。
+
+## 故障排查：DNS 已配好但仍打不开 / 502
+
+在一台「从未跑过 hosts 脚本」的干净电脑上按顺序确认：
+
+```powershell
+ipconfig /all
+Resolve-DnsName firebot.lan
+curl.exe --noproxy "*" -i http://firebot.lan/health/ready
+```
+
+必须看到 `firebot.lan` 解析为 `192.168.110.101`，health 返回 `200` 且
+`"ok": true`。
+
+- 若 `Resolve-DnsName` 返回的不是 `192.168.110.101`：DNS 还没生效，或这台电脑
+  的 DNS 没有指向路由器；检查路由器 DNS 记录和 DHCP 下发的 DNS。
+- 若 DNS 和 health 都正常，但 Chrome 仍 `502`：问题不在 Firebot 也不在 DNS，而是
+  这台电脑的 HTTP 代理 / 浏览器代理在接管 `.lan` 请求。给代理增加 bypass：
+  `firebot.lan`、`192.168.110.*`（Windows 系统代理在「设置 → 网络和 Internet →
+  代理」加例外；浏览器扩展/其他代理同样加 bypass）。
+- 若 health 返回 502 或非 200：先确认开发机 `http://127.0.0.1:8080/health/ready`
+  是否正常，再检查开发机的 portproxy / 防火墙 / Docker 栈。
 
 ## 关闭局域网入口
 
