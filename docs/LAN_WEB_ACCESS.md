@@ -10,6 +10,17 @@ DNS 未配好时的应急 fallback，不作为正式部署流程。
 部署——登录凭据和控制指令没有 HTTPS 加密。真车正式 HMI 应升级到 HTTPS 或
 Tailscale 访问。
 
+## 三种入口
+
+| 场景 | 地址 |
+| --- | --- |
+| 本机开发 | `http://127.0.0.1:8080` |
+| 局域网（无 DNS 也能用） | `http://192.168.110.101` |
+| 局域网（配好路由器 DNS 后） | `http://firebot.lan` |
+
+三个入口都已加入 `ALLOWED_ORIGINS`，都能登录并看到 Mock 机器人实时数据
+（WebSocket 均已放行）。
+
 ## 目标体验
 
 ```text
@@ -131,7 +142,8 @@ http://127.0.0.1:8080
 5. 建立（幂等）防火墙规则 `Firebot Web LAN HTTP`（仅 `192.168.110.0/24`）；
 6. 幂等写入开发机 hosts 的 `# BEGIN FIREBOT LAN` 托管块（保证开发机自己也能解析
    `firebot.lan`，即使路由器 DNS 尚未配置）；
-7. 把 `http://firebot.lan` 安全地加入 `.env` 的 `ALLOWED_ORIGINS`（不改动任何 secret）。
+7. 把 `http://firebot.lan` 和 `http://192.168.110.101` 安全地加入 `.env` 的
+   `ALLOWED_ORIGINS`（不改动任何 secret）。
 
 > 重要：`ALLOWED_ORIGINS` 修改后，必须重建 api 容器才能让新配置生效
 > （`docker compose` 的 `env_file` 只在重建容器时重新读取）：
@@ -181,9 +193,10 @@ DNS 配好后，客户端不再需要保存任何 Firebot 文件，也不应有 
 ```
 
 脚本会依次验证：`127.0.0.1:8080`、`192.168.110.101`、`firebot.lan` 的
-`/health/ready`、登录页、API 登录与 `ws-ticket`，并用真实票据建立
-`ws://firebot.lan/ws/v1/monitor` 的 WebSocket 连接，确认握手为 `101 Switching
-Protocols` 而不是 `4403`，最终输出 `WS_ORIGIN_ACCEPTED=YES`。
+`/health/ready`、登录页、API 登录与 `ws-ticket`，并用真实票据分别建立
+`ws://firebot.lan/ws/v1/monitor` 和 `ws://192.168.110.101/ws/v1/monitor` 的
+WebSocket 连接，确认握手为 `101 Switching Protocols` 而不是 `4403`，最终输出
+`WS_ORIGIN_ACCEPTED=YES` 和 `IP_WS_ORIGIN_ACCEPTED=YES`。
 
 脚本之外的浏览器人工验收（在一台走 DNS 的客户端上）：
 
