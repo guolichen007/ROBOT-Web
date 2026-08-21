@@ -35,9 +35,9 @@ const layerMenuOpen = ref(false)
 const layers = reactive({ route: true, coverage: true, semantic: false })
 const otherEventsOpen = ref(false)
 const { activeAlarms, primaryAlarm, primaryAlarmId } = usePrimaryAlarm(
-  computed(() => monitor.snapshot.alarms),
+  computed(() => monitor.activeRobotAlarms),
 )
-const operationContext = computed(() => monitor.snapshot.operation_context || null)
+const operationContext = computed(() => monitor.operationContext)
 const resumeTaskId = computed(() => {
   const context = operationContext.value
   return context && context.kind === 'PATROL' && context.can_continue ? context.task_id : null
@@ -145,7 +145,7 @@ const patrolStatus = computed(() =>
 )
 const patrolProgress = computed(() => activeTask.value?.progress ?? 0)
 const patrolCode = computed(() => activeTask.value?.task_code || '—')
-const roofStream = computed(() => monitor.snapshot.streams.find((item) => item.camera_type === 'roof_rgb'))
+const roofStream = computed(() => monitor.activeRobotStreams.find((item) => item.camera_type === 'roof_rgb'))
 const liveCheckpoint = computed(() => {
   const value = activeTask.value?.parameters_json?.live_checkpoint as
     | { index?: number; total?: number; current_slot_code?: string; next_slot_code?: string }
@@ -197,6 +197,15 @@ watch(
   () => primaryAlarm.value?.id,
   () => void refreshTimeline(),
   { immediate: true },
+)
+watch(
+  () => robot.value?.vehicle_id,
+  () => {
+    selectedSlotId.value = null
+    stopOperation.value = null
+    coverage.value = null
+    void refreshCoverage()
+  },
 )
 
 async function transition(action: 'acknowledge' | 'confirm' | 'resolve') {
@@ -523,7 +532,7 @@ onUnmounted(() => {
         />
       </section>
       <aside class="yd-monitor-side" :class="{ 'is-alarm': Boolean(primaryAlarm) }">
-        <VideoSurveillancePanel :streams="monitor.snapshot.streams" />
+        <VideoSurveillancePanel :streams="monitor.activeRobotStreams" />
         <template v-if="primaryAlarm">
           <PrimaryAlarmPanel
             :alarm="primaryAlarm"

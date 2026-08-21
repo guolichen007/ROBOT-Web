@@ -3,6 +3,9 @@ import { computed, ref } from 'vue'
 import { api } from '@/lib/api'
 import type { Alarm, MonitorSnapshot, RealtimeEvent, RobotState, Task } from '@/types'
 
+const ACTIVE_VEHICLE_KEY = 'firebot.activeVehicleId'
+const ACTIVE_TASK_STATUSES = ['CREATED', 'QUEUED', 'ACCEPTED', 'EXECUTING']
+
 const emptySnapshot = (): MonitorSnapshot => ({
   snapshot_watermark: '0-0',
   site: null,
@@ -19,6 +22,23 @@ const emptySnapshot = (): MonitorSnapshot => ({
   navigation_presets: [],
 })
 
+function readStoredVehicleId(): string | null {
+  try {
+    return localStorage.getItem(ACTIVE_VEHICLE_KEY)
+  } catch {
+    return null
+  }
+}
+
+function writeStoredVehicleId(vehicleId: string | null): void {
+  try {
+    if (vehicleId) localStorage.setItem(ACTIVE_VEHICLE_KEY, vehicleId)
+    else localStorage.removeItem(ACTIVE_VEHICLE_KEY)
+  } catch {
+    /* storage unavailable; selection remains in-memory only */
+  }
+}
+
 export const useMonitorStore = defineStore('monitor', () => {
   const snapshot = ref<MonitorSnapshot>(emptySnapshot())
   const activeRobotId = ref<string | null>(null)
@@ -31,15 +51,55 @@ export const useMonitorStore = defineStore('monitor', () => {
   let connecting = false
   let starting: Promise<void> | null = null
 
+  const enabledRobots = computed(() =>
+    [...snapshot.value.robots]
+      .filter((item) => item.enabled !== false)
+      .sort((left, right) => left.vehicle_id.localeCompare(right.vehicle_id)),
+  )
+
   const robot = computed(() =>
     snapshot.value.robots.find(
       (item) => item.id === activeRobotId.value || item.vehicle_id === activeRobotId.value,
     ),
   )
-  const activeAlarm = computed(() => snapshot.value.alarms[0])
+
+  // ---------- ACTIVE-VEHICLE SCOPED SELECTORS ----------
+  // All Monitor-side UI must consume these; never scan the global lists again.
+  const activeRobotTasks = computed(() => {
+    const selected = robot.value
+    if (!selected) return []
+    return snapshot.value.tasks.filter((item) => item.robot_id === selected.id)
+  })
+
   const activeTask = computed(() =>
-    snapshot.value.tasks.find((item) => ['CREATED', 'QUEUED', 'ACCEPTED', 'EXECUTING'].includes(item.status)),
+    activeRobotTasks.value.find((item) => ACTIVE_TASK_STATUSES.includes(item.status)),
   )
+
+  const activeRobotAlarms = computed(() => {
+    const selected = robot.value
+    if (!selected) return []
+    return snapshot.value.alarms.filter((item) => item.robot_id === selected.id)
+  })
+
+  const activeRobotStreams = computed(() => {
+    const selected = robot.value
+    if (!selected) return []
+    return snapshot.value.streams.filter((item) => item.robot_id === selected.id)
+  })
+
+  const operationContext = computed(() => {
+    const key = robot.value?.vehicle_id
+    return (key && snapshot.value.operation_contexts?.[key]) || null
+  })
+
+  function activeTaskOf(robotId: string): Task | undefined {
+    return snapshot.value.tasks.find(
+      (item) => item.robot_id === robotId && ACTIVE_TASK_STATUSES.includes(item.status),
+    )
+  }
+
+  // Kept as a scoped alias for any legacy consumer.
+  const activeAlarm = computed(() => activeRobotAlarms.value[0])
 
   function replaceById<T extends { id?: string }>(rows: T[], value: T): void {
     const index = rows.findIndex((row) => row.id === value.id)
@@ -53,10 +113,13 @@ export const useMonitorStore = defineStore('monitor', () => {
     if (event.event_type.startsWith('robot.') || event.event_type.startsWith('vehicle.')) {
       const vehicleId = String(event.data.vehicle_id || '')
       const index = snapshot.value.robots.findIndex((item) => item.vehicle_id === vehicleId)
+      // Events for OTHER vehicles update their cache but must never switch the
+      // active vehicle away from what the operator is looking at.
       if (index >= 0) snapshot.value.robots[index] = { ...snapshot.value.robots[index], ...event.data }
       else {
         snapshot.value.robots.push(event.data as RobotState)
-        if (!activeRobotId.value) activeRobotId.value = vehicleId
+        // Only initialize a selection when nothing is selected yet; never switch.
+        if (!activeRobotId.value && event.data.enabled !== false) activeRobotId.value = vehicleId
       }
     } else if (event.event_type.startsWith('alarm.')) {
       replaceById(snapshot.value.alarms, event.data as Alarm)
@@ -69,15 +132,38 @@ export const useMonitorStore = defineStore('monitor', () => {
     resyncing.value = true
     try {
       snapshot.value = (await api.get('/monitor/snapshot')).data
-      const ids = [...snapshot.value.robots]
-        .filter((item) => item.enabled !== false)
-        .sort((left, right) => left.vehicle_id.localeCompare(right.vehicle_id))
-        .map((item) => item.id || item.vehicle_id)
-      if (!activeRobotId.value || !ids.includes(activeRobotId.value)) activeRobotId.value = ids[0] || null
+      // Restore priority: stored vehicle_id -> in-memory id -> first enabled.
+      const enabled = enabledRobots.value
+      const stored = readStoredVehicleId()
+      let next: string | null = null
+      if (stored) {
+        const hit = enabled.find((item) => item.vehicle_id === stored)
+        if (hit) next = hit.vehicle_id
+      }
+      if (!next) {
+        const current = enabled.find(
+          (item) => item.id === activeRobotId.value || item.vehicle_id === activeRobotId.value,
+        )
+        if (current) next = current.vehicle_id
+      }
+      if (!next) next = enabled[0]?.vehicle_id || null
+      activeRobotId.value = next
+      if (next !== stored) writeStoredVehicleId(next)
       lastStreamId.value = snapshot.value.snapshot_watermark
     } finally {
       resyncing.value = false
     }
+  }
+
+  function selectRobot(vehicleId: string): boolean {
+    const target = snapshot.value.robots.find(
+      (item) => item.vehicle_id === vehicleId || item.id === vehicleId,
+    )
+    if (!target) return false
+    if (target.enabled === false) return false
+    activeRobotId.value = target.vehicle_id
+    writeStoredVehicleId(target.vehicle_id)
+    return true
   }
 
   async function connect(): Promise<void> {
@@ -153,8 +239,15 @@ export const useMonitorStore = defineStore('monitor', () => {
     snapshot,
     activeRobotId,
     robot,
+    enabledRobots,
     activeAlarm,
+    activeRobotTasks,
     activeTask,
+    activeRobotAlarms,
+    activeRobotStreams,
+    operationContext,
+    activeTaskOf,
+    selectRobot,
     connected,
     resyncing,
     lastStreamId,

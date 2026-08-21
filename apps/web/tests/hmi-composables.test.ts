@@ -6,6 +6,7 @@ import type { Alarm } from '@/types'
 
 const alarm = (id: string, severity: string, state = 'NEW', last = id): Alarm => ({
   id,
+  robot_id: 'robot-a',
   event_code: id,
   state,
   severity,

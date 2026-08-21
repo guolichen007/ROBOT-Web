@@ -5,6 +5,7 @@ import type { Alarm } from '@/types'
 function alarm(severity: string, state: string, last_seen_at: string): Alarm {
   return {
     id: `${severity}-${state}`,
+    robot_id: 'robot-a',
     event_code: 'FE-TEST',
     severity,
     state,

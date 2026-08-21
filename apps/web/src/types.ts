@@ -13,8 +13,12 @@ export interface RobotState {
   id?: string
   vehicle_id: string
   name?: string
+  model?: string
   enabled?: boolean
   online_state?: OnlineState
+  last_seen_at?: string | null
+  current_map_id?: string | null
+  current_map_version?: string | null
   x?: number
   y?: number
   theta?: number
@@ -26,6 +30,7 @@ export interface RobotState {
   planar_speed?: number
   battery?: number | null
   mode?: string
+  current_mode?: string
   estop_active?: boolean | null
   map_version?: string
   smoke?: number
@@ -74,6 +79,10 @@ export interface IntegrationProfile {
   reverse_precision_navigation: boolean
   stale_seconds?: number | null
   offline_seconds?: number | null
+  reported_site_code?: string | null
+  reported_map_code?: string | null
+  reported_map_version?: string | null
+  reported_map_checksum?: string | null
 }
 
 export interface MotionProfile {
@@ -126,6 +135,7 @@ export interface MapVersion {
 
 export interface Alarm {
   id: string
+  robot_id: string
   event_code: string
   parking_slot_id?: string
   state: string
@@ -148,6 +158,7 @@ export interface Alarm {
 
 export interface Task {
   id: string
+  robot_id: string
   task_code: string
   type: string
   status: string
@@ -161,6 +172,7 @@ export interface Task {
 export interface StreamInfo {
   stream_id: string
   id: string
+  robot_id: string
   camera_type: string
   state: 'DISABLED' | 'OFFLINE' | 'CONNECTING' | 'LIVE' | 'ERROR'
   playback_url?: string
@@ -238,6 +250,7 @@ export interface MonitorSnapshot {
   streams: StreamInfo[]
   navigation_presets?: NavigationPreset[]
   operation_context?: OperationContext | null
+  operation_contexts?: Record<string, OperationContext>
 }
 
 export interface RealtimeEvent {
