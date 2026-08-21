@@ -13,8 +13,9 @@ param(
 # gateway is enabled (scripts\enable-lan.ps1).
 #
 # The script verifies the critical fix for "LAN login works but Mock Robot does
-# not move": a real WebSocket connect against ws://firebot.lan/ws/v1/monitor
-# must reach 101 Switching Protocols, not a 4403 origin rejection.
+# not move": real WebSocket connects against both ws://firebot.lan/ws/v1/monitor
+# and ws://192.168.110.101/ws/v1/monitor must reach 101 Switching Protocols,
+# not a 4403 origin rejection.
 #
 # Mock realtime + patrol/stop/return control still need a manual browser check
 # (CASE C/D) - see docs/LAN_WEB_ACCESS.md. This script proves HTTP + API + WS.
@@ -139,6 +140,8 @@ if (-not $adminPass) {
     $results['FIREBOT_LAN_API']        = 'SKIP'
     $results['FIREBOT_LAN_WS']         = 'SKIP'
     $results['WS_ORIGIN_ACCEPTED']     = 'NO'
+    $results['FIREBOT_LAN_IP_WS']      = 'SKIP'
+    $results['IP_WS_ORIGIN_ACCEPTED']  = 'NO'
 } else {
     $accessToken = $null
     try {
@@ -185,6 +188,34 @@ if (-not $adminPass) {
     } else {
         $results['FIREBOT_LAN_WS']     = 'SKIP'
         $results['WS_ORIGIN_ACCEPTED'] = 'NO'
+    }
+
+    # IP entry WebSocket acceptance: same backend, Origin and ws-uri use the LAN IP.
+    $ticketIp = $null
+    if ($accessToken) {
+        try {
+            $headersIp = @{ Authorization = "Bearer $accessToken"; Origin = "http://${LanIP}" }
+            $ticketRespIp = Invoke-RestMethod -Uri "http://${LanIP}/api/v1/auth/ws-ticket" -Method Post -Headers $headersIp -TimeoutSec 10
+            $ticketIp = $ticketRespIp.ticket
+        } catch {
+            $errInfoIp = Get-ErrorDetail $_
+            Write-Host "ws-ticket (IP) failed: HTTP $($errInfoIp.Status) $($errInfoIp.Detail)" -ForegroundColor Yellow
+            $ticketIp = $null
+        }
+    }
+    if ($ticketIp) {
+        $wsIpResult = Test-WebSocket -WsUri "ws://${LanIP}/ws/v1/monitor?ticket=$ticketIp&after=0-0" -Origin "http://${LanIP}"
+        if ($wsIpResult.Connected) {
+            $results['FIREBOT_LAN_IP_WS']     = 'PASS'
+            $results['IP_WS_ORIGIN_ACCEPTED'] = 'YES'
+        } else {
+            $results['FIREBOT_LAN_IP_WS']     = 'FAIL'
+            $results['IP_WS_ORIGIN_ACCEPTED'] = 'NO'
+            Write-Host "WebSocket (IP) detail: $($wsIpResult.Reason)" -ForegroundColor Yellow
+        }
+    } else {
+        $results['FIREBOT_LAN_IP_WS']     = 'SKIP'
+        $results['IP_WS_ORIGIN_ACCEPTED'] = 'NO'
     }
 }
 
