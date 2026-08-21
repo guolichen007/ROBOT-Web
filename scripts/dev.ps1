@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([switch]$NoBuild)
+param([switch]$NoBuild, [switch]$PreserveMockState)
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -56,6 +56,21 @@ for ($i = 0; $i -lt 90; $i++) {
     Start-Sleep -Seconds 2
 }
 if (-not $ready) { docker compose -f compose.dev.yml ps; throw 'The stack did not become ready in time.' }
+
+# DEV Mock session: a fresh demo session (default) resets R001 back to the
+# waiting area and recreates the mock robot; -PreserveMockState keeps the
+# running mock state for stop/resume/return/estop debugging.
+$mockMode = if ($PreserveMockState) { 'PRESERVE' } else { 'RESET' }
+Write-Host ''
+Write-Host "MOCK_SESSION_MODE=$mockMode"
+if (-not $PreserveMockState) {
+    docker compose -f compose.dev.yml exec -T api python -m app.dev.reset_mock
+    if ($LASTEXITCODE -ne 0) { Write-Host 'Mock session reset reported non-zero exit (see above).' -ForegroundColor Yellow }
+    docker compose -f compose.dev.yml up -d --force-recreate mock-robot
+    if ($LASTEXITCODE -ne 0) { throw 'Mock robot recreate failed.' }
+    docker compose -f compose.dev.yml exec -T api python -m app.dev.reset_mock wait
+    if ($LASTEXITCODE -ne 0) { Write-Host 'Mock waiting-pose check timed out.' -ForegroundColor Yellow }
+}
 
 Write-Host ''
 Write-Host 'Firebot DEV READY' -ForegroundColor Green
