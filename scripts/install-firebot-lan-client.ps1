@@ -5,11 +5,12 @@ param(
     [int]   $Port     = 80
 )
 
-# One-time setup for a LAN demo machine in the same 192.168.110.0/24 subnet.
+# FALLBACK setup for a LAN demo machine in the same 192.168.110.0/24 subnet.
 #
-# After this script, the machine opens http://firebot.lan in a browser with
-# nothing else required: no Docker, no Node, no source code, no Tailscale,
-# no certificate.
+# The primary deployment mode is router DNS: add "firebot.lan A 192.168.110.101"
+# on 192.168.110.1 (see docs/LAN_WEB_ACCESS.md), then clients need nothing at all.
+# Use this script ONLY when the router DNS is not yet configured and a machine
+# needs temporary access right now — it writes a hosts entry as a stopgap.
 #
 # Run once from an elevated PowerShell:
 #
