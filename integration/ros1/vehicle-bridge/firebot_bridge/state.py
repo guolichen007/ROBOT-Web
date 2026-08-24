@@ -104,6 +104,16 @@ class BridgeState:
         with self._lock:
             self.last_location = value
 
+    def apply_status(self, fields: dict) -> None:
+        """只应用真实出现的 status 字段（partial），不伪造缺失字段。"""
+        with self._lock:
+            if "mode" in fields:
+                self.mode = fields["mode"]
+            if "estop_active" in fields:
+                self.estop_active = fields["estop_active"]
+            if "active_task_id" in fields:
+                self.active_task_id = fields["active_task_id"]
+
     def snapshot_telemetry(self) -> dict:
         with self._lock:
             return {

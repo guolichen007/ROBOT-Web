@@ -14,6 +14,8 @@ Environment=FIREBOT_ROS_SETUP=@ROS_SETUP@
 Environment=FIREBOT_ROS_WORKSPACE_SETUP=@ROS_WORKSPACE_SETUP@
 # 密码经 EnvironmentFile 注入（root:root 600），不写进本文件、不进 Git
 EnvironmentFile=-/etc/firebot/bridge-secret.env
+# 固定 runtime 状态目录（verify.sh 从这里读 status.json）
+RuntimeDirectory=firebot-bridge
 
 [Install]
 WantedBy=multi-user.target

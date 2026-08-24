@@ -1,27 +1,22 @@
 #!/usr/bin/env python3
-"""Firebot 车端 ROS Bridge 主入口。
+"""Firebot 车端 ROS Bridge 主入口（父进程）。
 
 职责（通信层）：
-  - MQTT/TLS 常驻连接 + LWT + 初始/运行时重连
+  - MQTT/TLS 常驻连接（单一 owner：connect_async + loop_start）
   - 上行：availability/heartbeat/capabilities/status(battery)/sensor(smoke)/location
-  - 下行：订阅 robot/{id}/command → 校验/去重 → 转发 ROS placeholder → 据 feedback 回 ACK/task_status
+  - 下行：订阅 robot/{id}/command → 校验/去重 → 转发 ROS 子进程 → 据 feedback 回 ACK/task_status
   - 不做任何车辆运动/巡航/急停/灭火/回充/手动控制执行
 
-关键架构：MQTT 通信层与 ROS master 生死解耦。ROS 由后台 RosLifecycle 管理——
-无 roscore 时 MQTT 仍在线（命令 rejected + BRIDGE_ADAPTER_NOT_CONNECTED），
-roscore 延迟出现自动初始化，进程/boot_id 不变。
+架构：MQTT 父进程 + ROS adapter 子进程。ROS 由 RosChildManager 管理——无 roscore 时
+MQTT 仍在线（命令 rejected + BRIDGE_ADAPTER_NOT_CONNECTED），roscore 出现 spawn 子进程、
+死亡 terminate、恢复 spawn 全新子进程完整重注册；进程/boot_id 不变。
 """
 from __future__ import annotations
 
 import logging
+import signal
 import threading
 import time
-
-# 尝试导入 rospy（ROS Noetic）；不可用时 MQTT 仍工作，命令回 rejected
-try:
-    import rospy  # type: ignore
-except Exception:  # noqa: BLE001
-    rospy = None
 
 from .config import get_config
 from .identity import Identity
@@ -29,7 +24,7 @@ from .protocol import Protocol
 from .state import BridgeState
 from .mqtt_client import MqttClient
 from .downlink.command_receiver import CommandProcessor
-from .ros.lifecycle import RosLifecycle
+from .ros.lifecycle import RosChildManager
 from .runtime_status import RuntimeStatus
 from .uplink import availability as avail_uplink
 from .uplink import heartbeat as hb_uplink
@@ -41,6 +36,13 @@ LOG = logging.getLogger("firebot-bridge")
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
 )
+
+
+def make_stop_handler(stop: threading.Event):
+    """返回一个 signal handler：设置 stop，触发优雅停机（SIGTERM/SIGINT 通用）。"""
+    def _handler(signum, frame) -> None:
+        stop.set()
+    return _handler
 
 
 # ---------------- 周期上报 ----------------
@@ -94,21 +96,25 @@ def main() -> int:
     status = RuntimeStatus()
     status.set(boot_id=identity.boot_id)
 
-    # 1) ROS lifecycle（后台线程，与 MQTT 解耦，绝不阻塞）
-    ros = RosLifecycle(rospy, state, status=status)
+    # 1) ROS 子进程生命周期管理（与 MQTT 解耦，绝不阻塞）
+    ros = RosChildManager(config, state, status=status)
     processor = CommandProcessor(config, state, identity, proto, mqtt_client=None, placeholder=ros)
     ros.set_on_feedback(processor.on_feedback)
 
-    # 2) MQTT 先上线（与 ROS master 无关）
+    # 2) MQTT（单一连接 owner）
     mqtt = MqttClient(config, identity, proto, processor.on_command, status=status)
     processor.client = mqtt  # 注入 MQTT client 用于回执
 
-    ros.start()
-    mqtt.loop_start()
-    mqtt.connect_with_retry()  # 初始连接失败不退出进程，指数退避重试
-
-    # 3) 周期上报线程（连上后才启动）
+    # 3) 信号：SIGTERM/SIGINT → 优雅停机（offline/BRIDGE_STOP）
     stop = threading.Event()
+    handler = make_stop_handler(stop)
+    signal.signal(signal.SIGTERM, handler)
+    signal.signal(signal.SIGINT, handler)
+
+    ros.start()
+    mqtt.start()
+
+    # 4) 周期上报线程
     threads = [
         threading.Thread(target=heartbeat_loop, args=(proto, mqtt, stop), daemon=True),
         threading.Thread(target=telemetry_loop, args=(proto, mqtt, state, stop), daemon=True),
@@ -118,17 +124,20 @@ def main() -> int:
         t.start()
 
     try:
-        stop.wait()
-    except KeyboardInterrupt:
-        LOG.info("收到 Ctrl+C，停止")
+        while not stop.is_set():
+            stop.wait(1.0)
     finally:
         ros.stop()
-        mqtt.publish(
+        info = mqtt.publish(
             proto.topic("availability"),
             avail_uplink.make_availability(proto, "offline", reason="BRIDGE_STOP"),
             qos=1,
             retain=True,
         )
+        try:
+            info.wait_for_publish(timeout=2)
+        except Exception:  # noqa: BLE001
+            pass
         time.sleep(0.3)
         mqtt.loop_stop()
         mqtt.disconnect()
