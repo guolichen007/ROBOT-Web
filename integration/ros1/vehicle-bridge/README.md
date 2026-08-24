@@ -88,7 +88,7 @@ sudo systemctl enable --now firebot-bridge
 ## 测试
 
 ```bash
-cd ros-bridge && python3 tests/test_bridge.py
+cd vehicle-bridge && python3 tests/test_bridge.py
 ```
 
 ## 验收边界

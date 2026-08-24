@@ -67,4 +67,6 @@ sudo systemctl enable --now firebot-bridge
 
 - 本阶段**不**做真实 ROS 控制：Bridge 只把 MQTT 命令转发到 `/firebot_bridge/command`，只有 ROS 明确回 `ACCEPTED` 才回 `accepted`。
 - 所有 control flags（`control_contract_verified` 等）保持 false；`ROS_COMPAT_DOWNLINK_IMPLEMENTED` 保持 False。
+- 若历史 `firebot-vehicle-01` 的 `source_kind` 仍是 `ROS_COMPAT`，用显式一次性迁移工具切换为 `CANONICAL_MQTT`（不自动、可审计、控制位强制保持 false）：
+  `docker compose -f docker-compose.server.yml exec -T api python -m app.dev.set_vehicle_source_kind firebot-vehicle-01 CANONICAL_MQTT`
 - 密码、生产证书私钥、现场 `.env` 不进 Git。

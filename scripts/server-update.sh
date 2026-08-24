@@ -17,7 +17,8 @@ TARGET_SHA="$(git rev-parse HEAD)"
 echo "TARGET_SHA=$TARGET_SHA"
 
 # 2) preflight（secret/端口/依赖/环境）
-SERVER_ENV_FILE="$ENV_FILE" scripts/server-preflight.sh
+# UPDATE_MODE=true：运行中的 Firebot 自有 443/8883 不阻断升级；非 Firebot 占用仍阻断。
+SERVER_ENV_FILE="$ENV_FILE" UPDATE_MODE=true scripts/server-preflight.sh
 
 # 3) compose 配置校验
 "${COMPOSE[@]}" config --quiet

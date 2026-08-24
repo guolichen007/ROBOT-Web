@@ -46,8 +46,28 @@ elif ! command -v chronyc >/dev/null 2>&1; then
   fail 'neither timedatectl nor chronyc can confirm time sync'
 fi
 
+firebot_owns_port() {
+  port="$1"
+  svc=""
+  case "$port" in
+    80|443) svc=nginx ;;
+    8883) svc=mosquitto ;;
+  esac
+  [ -n "$svc" ] || return 1
+  cid="$(docker compose --env-file "$ENV_FILE" -f docker-compose.server.yml ps -q "$svc" 2>/dev/null || true)"
+  [ -n "$cid" ] && docker port "$cid" "$port" >/dev/null 2>&1
+}
+
 if command -v ss >/dev/null 2>&1 && [ "${ALLOW_OCCUPIED_PORTS:-false}" != true ]; then
-  for port in 80 443 8883; do ss -lnt | awk '{print $4}' | grep -Eq "[:.]$port$" && fail "port occupied: $port" || true; done
+  for port in 80 443 8883; do
+    if ss -lnt | awk '{print $4}' | grep -Eq "[:.]$port$"; then
+      if [ "${UPDATE_MODE:-false}" = true ] && firebot_owns_port "$port"; then
+        : # 运行中的 Firebot 自有端口，升级放行
+      else
+        fail "port occupied: $port"
+      fi
+    fi
+  done
 fi
 docker compose --env-file "$ENV_FILE" -f docker-compose.server.yml config --quiet || fail 'SERVER compose config failed'
 

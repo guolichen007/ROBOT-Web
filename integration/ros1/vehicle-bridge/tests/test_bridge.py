@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """车端 Bridge 核心逻辑单元测试（无 ROS/MQTT 依赖）。
 
-运行：cd ros-bridge && python3 tests/test_bridge.py
+运行：cd vehicle-bridge && python3 tests/test_bridge.py
 """
 from __future__ import annotations
 
@@ -223,6 +223,16 @@ def main() -> int:
     proc.on_command(cmd)
     proc.on_feedback({"command_id": cmd["command_id"], "state": "EXECUTING"})
     check("非任务命令 EXECUTING 不产生 task_status", all(t != "robot/firebot-vehicle-01/task_status" for t, _, _ in cli.published))
+
+    # 非任务命令 ACCEPTED 即终态：finalize 且 pending 不泄漏
+    proc, cli, identity = _make_processor()
+    cmd = sample_command(cmd="stop_motion", task_id=None, target_boot_id=identity.boot_id)
+    proc.on_command(cmd)
+    proc.on_feedback({"command_id": cmd["command_id"], "state": "ACCEPTED"})
+    by_topic = {t: p for t, p, _ in cli.published}
+    check("非任务命令 ACCEPTED → command_ack accepted", by_topic.get("robot/firebot-vehicle-01/command_ack", {}).get("status") == "accepted")
+    check("非任务命令 ACCEPTED 后 pending 不泄漏", len(proc._pending) == 0)
+    check("非任务命令 ACCEPTED 不产生 task_status", all(t != "robot/firebot-vehicle-01/task_status" for t, _, _ in cli.published))
 
     # 生产 supported_commands=[] 零命令能力 → 全部拒绝
     empty_cfg = _Cfg()

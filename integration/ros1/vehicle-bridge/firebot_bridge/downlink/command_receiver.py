@@ -116,8 +116,11 @@ class CommandProcessor:
             pending.acked = True
             self._ack(command, "accepted", None)
             if is_task:
-                # 任务命令 accepted 同时产生 task_status=accepted，保证任务生命周期完整
+                # 任务命令 accepted 同时产生 task_status=accepted，并保留 pending 等后续状态
                 self._report_task(command_id, task_id, "accepted", "ACCEPTED", 0, feedback)
+            else:
+                # 非任务命令 accepted 即终态，立即 finalize，不泄漏 pending
+                self._finalize(command_id, pending)
         elif ros_state == "REJECTED":
             self._release_if_needed(cmd)
             self._ack(command, "rejected", feedback.get("reason_code") or "COMMAND_REJECTED")

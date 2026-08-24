@@ -44,7 +44,6 @@ class Config:
     # ---- 上报频率 ----
     heartbeat_hz: float = _env_float("FIREBOT_HEARTBEAT_HZ", 1.0)
     status_hz: float = _env_float("FIREBOT_STATUS_HZ", 1.0)
-    sensor_hz: float = _env_float("FIREBOT_SENSOR_HZ", 1.0)
     location_max_hz: float = _env_float("FIREBOT_LOCATION_MAX_HZ", 10.0)
 
     # ---- 控制占位语义 ----
@@ -82,7 +81,7 @@ class Config:
     def validate(self) -> None:
         if not self.mqtt_password:
             print(
-                "ERROR: FIREBOT_MQTT_PASSWORD 未设置（应从 /etc/firebot/vehicle-mqtt-password 或 "
+                "ERROR: FIREBOT_MQTT_PASSWORD 未设置（应从 /etc/firebot/bridge-secret.env 或 "
                 "systemd EnvironmentFile 注入）",
                 file=sys.stderr,
             )
