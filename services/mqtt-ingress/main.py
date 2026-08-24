@@ -852,9 +852,12 @@ def process(topic: str, payload: bytes) -> None:
         mqtt_payload_rejected_total.labels(reason="rate_limit").inc()
         increment_mqtt_metric("invalid:rate_limit")
         return
-    dedup_key = f"dedup:message:{msg['message_id']}"
+    # availability（尤其 LWT offline）的 message_id 在 bridge 进程生命周期内固定，
+    # 不能按 message_id 做长期去重（否则同一 boot 第二次相同 LWT offline 会被丢弃）。
+    # 只保留 30s 的 in-flight pending 去重。
+    dedup_key = None if msg["type"] == "availability" else f"dedup:message:{msg['message_id']}"
     pending_key = f"dedup:pending:{msg['message_id']}"
-    if redis.exists(dedup_key) or not redis.set(pending_key, "1", ex=30, nx=True):
+    if (dedup_key and redis.exists(dedup_key)) or not redis.set(pending_key, "1", ex=30, nx=True):
         mqtt_duplicate_total.inc()
         increment_mqtt_metric("duplicate")
         return
@@ -982,7 +985,8 @@ def process(topic: str, payload: bytes) -> None:
         redis.delete(pending_key)
         logger.exception("MQTT database transaction failed; message remains retryable")
         return
-    redis.setex(dedup_key, dedup_ttl(msg["type"]), "1")
+    if dedup_key:
+        redis.setex(dedup_key, dedup_ttl(msg["type"]), "1")
     if accepted:
         redis.setex(last_key, 86400, msg["seq"])
     redis.delete(pending_key)

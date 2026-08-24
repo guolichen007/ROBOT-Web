@@ -157,6 +157,79 @@ def main() -> int:
     check("emergency_stop→EMERGENCY_STOP", MQTT_CMD_TO_ROS["emergency_stop"] == "EMERGENCY_STOP")
     check("8 命令齐全", len(MQTT_CMD_TO_ROS) == 8)
 
+    print("=== 命令生命周期（CommandProcessor，无 ROS/MQTT 依赖）===")
+    from firebot_bridge.downlink.command_receiver import CommandProcessor
+    from firebot_bridge.identity import Identity
+
+    class _FullCfg:
+        bridge_stub_mode = False
+        supported_commands = [
+            "patrol", "stop_motion", "emergency_stop", "reset_estop",
+            "return_dock", "extinguish", "cancel_task", "manual_control",
+        ]
+        feedback_timeout_seconds = 3.0
+        stub_simulate_feedback = False
+        stub_feedback_simulation = "rejected"
+
+    class _FakeClient:
+        def __init__(self):
+            self.published = []
+
+        def publish(self, topic, payload, qos=0, retain=False):
+            self.published.append((topic, payload, qos))
+
+    class _FakePlaceholder:
+        def publish_command(self, command):
+            return True
+
+    def _make_processor():
+        cfg = _FullCfg()
+        state = BridgeState()
+        identity = Identity("firebot-vehicle-01")
+        proto = Protocol("firebot-vehicle-01", identity.boot_id)
+        client = _FakeClient()
+        placeholder = _FakePlaceholder()
+        return CommandProcessor(cfg, state, identity, proto, client, placeholder), client, identity
+
+    # ACK 只 JSON 编码一次（payload 必须是 dict，不是 str）
+    proc, cli, identity = _make_processor()
+    cmd = sample_command(cmd="patrol", task_id="task-1", target_boot_id=identity.boot_id)
+    proc.on_command(cmd)
+    proc.on_feedback({"command_id": cmd["command_id"], "state": "ACCEPTED", "task_id": "task-1"})
+    by_topic = {t: p for t, p, _ in cli.published}
+    check("command_ack payload 是 dict（未二次 JSON）", isinstance(by_topic.get("robot/firebot-vehicle-01/command_ack"), dict))
+    check("任务命令 ACCEPTED → command_ack accepted", by_topic.get("robot/firebot-vehicle-01/command_ack", {}).get("status") == "accepted")
+    check("任务命令 ACCEPTED → task_status accepted", by_topic.get("robot/firebot-vehicle-01/task_status", {}).get("status") == "accepted")
+
+    # 任务命令 COMPLETED → task_status completed
+    proc, cli, identity = _make_processor()
+    cmd = sample_command(cmd="patrol", task_id="task-2", target_boot_id=identity.boot_id)
+    proc.on_command(cmd)
+    proc.on_feedback({"command_id": cmd["command_id"], "state": "COMPLETED", "task_id": "task-2"})
+    by_topic = {t: p for t, p, _ in cli.published}
+    check("任务命令 COMPLETED → task_status completed", by_topic.get("robot/firebot-vehicle-01/task_status", {}).get("status") == "completed")
+
+    # 任务命令 CANCELLED → task_status cancelled
+    proc, cli, identity = _make_processor()
+    cmd = sample_command(cmd="patrol", task_id="task-3", target_boot_id=identity.boot_id)
+    proc.on_command(cmd)
+    proc.on_feedback({"command_id": cmd["command_id"], "state": "CANCELLED", "task_id": "task-3"})
+    by_topic = {t: p for t, p, _ in cli.published}
+    check("任务命令 CANCELLED → task_status cancelled", by_topic.get("robot/firebot-vehicle-01/task_status", {}).get("status") == "cancelled")
+
+    # 非任务命令不产生 task_status
+    proc, cli, identity = _make_processor()
+    cmd = sample_command(cmd="stop_motion", task_id=None, target_boot_id=identity.boot_id)
+    proc.on_command(cmd)
+    proc.on_feedback({"command_id": cmd["command_id"], "state": "EXECUTING"})
+    check("非任务命令 EXECUTING 不产生 task_status", all(t != "robot/firebot-vehicle-01/task_status" for t, _, _ in cli.published))
+
+    # 生产 supported_commands=[] 零命令能力 → 全部拒绝
+    empty_cfg = _Cfg()
+    empty_cfg.supported_commands = []
+    ok, reason = validate_received_command(sample_command(cmd="patrol"), "boot-boot-boot", empty_cfg)
+    check("production supported_commands=[] 拒绝 patrol", not ok and reason == "COMMAND_UNSUPPORTED")
+
     print(f"\n结果: PASS={PASS} FAIL={FAIL}")
     return 0 if FAIL == 0 else 1
 

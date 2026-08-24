@@ -2,10 +2,12 @@
 
 Bridge 不做任何执行。只有 ROS /firebot_bridge/command_feedback 明确回 ACCEPTED
 后 Bridge 才回 MQTT accepted；无 feedback（ROS 未接）→ rejected + BRIDGE_ADAPTER_NOT_CONNECTED。
+
+task_status 只由任务类命令（patrol/return_dock/extinguish）产生；stop/estop/reset/
+cancel/manual 只有 accepted/rejected 的 command_ack 语义，绝不产生 task_status。
 """
 from __future__ import annotations
 
-import json
 import logging
 import threading
 
@@ -104,29 +106,35 @@ class CommandProcessor:
             LOG.info("feedback for unknown/expired command_id=%s", command_id)
             return
         command = pending.command
+        cmd = command.get("cmd")
         ros_state = feedback.get("state")
         task_id = feedback.get("task_id") or command.get("task_id")
+        is_task = cmd in TASK_CMDS
 
         if ros_state == "ACCEPTED":
             pending.cancel_timer()
             pending.acked = True
             self._ack(command, "accepted", None)
+            if is_task:
+                # 任务命令 accepted 同时产生 task_status=accepted，保证任务生命周期完整
+                self._report_task(command_id, task_id, "accepted", "ACCEPTED", 0, feedback)
         elif ros_state == "REJECTED":
-            self._release_if_needed(command.get("cmd"))
-            self._ack(
-                command, "rejected", feedback.get("reason_code") or "COMMAND_REJECTED"
-            )
+            self._release_if_needed(cmd)
+            self._ack(command, "rejected", feedback.get("reason_code") or "COMMAND_REJECTED")
             self._finalize(command_id, pending)
+        elif not is_task:
+            # 非任务命令只有 accepted/rejected 语义，绝不产生 task_status
+            LOG.info("非任务命令 %s 收到非 ACK feedback=%s，忽略", cmd, ros_state)
         elif ros_state == "EXECUTING":
             self._report_task(
                 command_id, task_id, "executing",
                 feedback.get("phase") or "NAVIGATING", feedback.get("progress") or 0,
                 feedback,
             )
-        elif ros_state in ("COMPLETED", "FAILED"):
-            self._release_if_needed(command.get("cmd"))
-            status = "completed" if ros_state == "COMPLETED" else "failed"
-            phase = feedback.get("phase") or ("COMPLETED" if ros_state == "COMPLETED" else "FAILED")
+        elif ros_state in ("COMPLETED", "FAILED", "CANCELLED"):
+            self._release_if_needed(cmd)
+            status = "completed" if ros_state == "COMPLETED" else ("failed" if ros_state == "FAILED" else "cancelled")
+            phase = feedback.get("phase") or ros_state
             progress = feedback.get("progress") or (100 if ros_state == "COMPLETED" else 0)
             self._report_task(command_id, task_id, status, phase, progress, feedback)
             self._finalize(command_id, pending)
@@ -206,9 +214,8 @@ class CommandProcessor:
                  str(task_id)[:8], status, phase, progress)
 
     def _publish(self, name: str, payload: dict) -> None:
-        self.client.publish(
-            self.proto.topic(name), json.dumps(payload, ensure_ascii=False), qos=1
-        )
+        # 只传 dict；MqttClient.publish 负责一次 json.dumps（避免二次 JSON 编码）
+        self.client.publish(self.proto.topic(name), payload, qos=1)
 
     def _release_if_needed(self, cmd: str) -> None:
         if cmd in TASK_CMDS:

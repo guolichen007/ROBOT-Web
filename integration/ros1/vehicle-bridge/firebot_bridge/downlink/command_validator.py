@@ -16,7 +16,9 @@ def validate_received_command(
     # 任务类命令必须携带非空 task_id，否则内部任务锁形同虚设
     if cmd in TASK_CMDS and not command.get("task_id"):
         return False, "INVALID_PROTOCOL_MESSAGE"
-    # 能力支持性：生产模式只接受声明支持的命令；stub 联调模式放行全部（用于消息联调）
-    if not config.bridge_stub_mode and config.supported_commands and cmd not in config.supported_commands:
+    # 能力支持性：生产模式（stub=false）只接受声明支持的命令；
+    # supported_commands=[] 表示零命令能力，任何命令都被拒。
+    # stub=true 才允许联调放行。
+    if not config.bridge_stub_mode and cmd not in config.supported_commands:
         return False, "COMMAND_UNSUPPORTED"
     return True, None
