@@ -126,15 +126,7 @@
             "phase": { "type": "string", "minLength": 1 },
             "progress": { "type": "number", "minimum": 0, "maximum": 100 },
             "failure_code": { "type": ["string", "null"] },
-            "failure_message": { "type": ["string", "null"] },
-            "checkpoint_index": { "type": ["integer", "null"] },
-            "checkpoint_total": { "type": ["integer", "null"] },
-            "current_slot_code": { "type": ["string", "null"] },
-            "next_slot_code": { "type": ["string", "null"] },
-            "waypoint_index": { "type": ["integer", "null"] },
-            "waypoint_total": { "type": ["integer", "null"] },
-            "target_waypoint_index": { "type": ["integer", "null"] },
-            "last_completed_waypoint_index": { "type": ["integer", "null"] }
+            "failure_message": { "type": ["string", "null"] }
           }
         }
       ]

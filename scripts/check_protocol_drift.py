@@ -61,6 +61,9 @@ if __name__ == "__main__":
     current = digest()
     if current != expected:
         raise SystemExit(
-            "Protocol generated models are stale. Run scripts/generate_protocol_types.py"
+            "Protocol drift detected: 1.2 frozen artifacts are stale. "
+            "Do NOT refresh the stamp — fix the source drift in "
+            "packages/generated-python / packages/generated-typescript against "
+            "packages/protocol-schemas/firebot-message-1.2.schema.json."
         )
     print(f"protocol schema/model stamp OK: {current}")
