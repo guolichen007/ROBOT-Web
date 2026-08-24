@@ -240,6 +240,58 @@ def main() -> int:
     ok, reason = validate_received_command(sample_command(cmd="patrol"), "boot-boot-boot", empty_cfg)
     check("production supported_commands=[] 拒绝 patrol", not ok and reason == "COMMAND_UNSUPPORTED")
 
+    print("=== ROS lifecycle 可靠性（MQTT 与 ROS master 解耦）===")
+    import firebot_bridge.ros.lifecycle as lc
+
+    class _FakeRos:
+        def __init__(self):
+            self.inited = False
+
+        def init_node(self, *a, **kw):
+            self.inited = True
+
+        def Subscriber(self, topic, cls, cb):
+            return None
+
+        def Publisher(self, topic, cls, queue_size=10):
+            return None
+
+    # no master：不阻塞、不 ready、命令拒绝
+    _orig_reachable = lc._ros_master_reachable
+    lc._ros_master_reachable = lambda: False
+    try:
+        ros1 = _FakeRos()
+        lf1 = lc.RosLifecycle(ros1, BridgeState())
+        check("无 roscore：_try_init 返回 False（不阻塞）", lf1._try_init() is False)
+        check("无 roscore：ready=False", lf1.ready is False)
+        check("无 roscore：publish_command 返回 False", lf1.publish_command({"cmd": "patrol", "command_id": "C"}) is False)
+    finally:
+        lc._ros_master_reachable = _orig_reachable
+
+    # delayed master：master 出现后 init_node 成功、adapter ready
+    lc._ros_master_reachable = lambda: True
+    try:
+        ros2 = _FakeRos()
+        lf2 = lc.RosLifecycle(ros2, BridgeState())
+        check("延迟 roscore：_try_init 返回 True", lf2._try_init() is True)
+        check("延迟 roscore：rospy.init_node 被调用", ros2.inited is True)
+    finally:
+        lc._ros_master_reachable = _orig_reachable
+
+    print("=== battery canonical 契约 ===")
+    from firebot_bridge.ros.providers import RosProviders
+
+    class _Float32Msg:
+        def __init__(self, data):
+            self.data = data
+
+    bstate = BridgeState()
+    RosProviders(None, bstate)._on_battery(_Float32Msg(67.5))
+    check("battery /firebot_bridge/battery Float32=67.5 → state.battery", bstate.last_battery == 67.5)
+    bmsg = status_uplink.make_status(proto, bstate)
+    check("battery 67.5 → status.battery=67.5", bmsg is not None and bmsg.get("battery") == 67.5)
+    check("无 battery provider 不伪造", BridgeState().last_battery is None)
+
     print(f"\n结果: PASS={PASS} FAIL={FAIL}")
     return 0 if FAIL == 0 else 1
 

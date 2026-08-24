@@ -1,4 +1,4 @@
-"""电池值提供（真实来源：/robot_status.battery_percentage → state.last_battery）。"""
+"""电池值提供（canonical 来源：/firebot_bridge/battery std_msgs/Float32 → state.last_battery）。"""
 from __future__ import annotations
 
 from ..state import BridgeState

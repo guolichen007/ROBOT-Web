@@ -2,14 +2,14 @@
 """Firebot 车端 ROS Bridge 主入口。
 
 职责（通信层）：
-  - MQTT/TLS 常驻连接 + LWT + reconnect
+  - MQTT/TLS 常驻连接 + LWT + 初始/运行时重连
   - 上行：availability/heartbeat/capabilities/status(battery)/sensor(smoke)/location
   - 下行：订阅 robot/{id}/command → 校验/去重 → 转发 ROS placeholder → 据 feedback 回 ACK/task_status
   - 不做任何车辆运动/巡航/急停/灭火/回充/手动控制执行
 
-边界（冻结，见 FIREBOT_BRIDGE_CONTRACT_1.3.md）：
-  - 生产 BRIDGE_STUB_MODE=false：命令只转发，无 ROS feedback 时回 rejected/BRIDGE_ADAPTER_NOT_CONNECTED
-  - 联调 BRIDGE_STUB_MODE=true：可临时声明测试命令、模拟 feedback
+关键架构：MQTT 通信层与 ROS master 生死解耦。ROS 由后台 RosLifecycle 管理——
+无 roscore 时 MQTT 仍在线（命令 rejected + BRIDGE_ADAPTER_NOT_CONNECTED），
+roscore 延迟出现自动初始化，进程/boot_id 不变。
 """
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ import logging
 import threading
 import time
 
-# 尝试导入 rospy（ROS Noetic）；不可用时降级 MQTT-only（不订阅 ROS，命令无法转发）
+# 尝试导入 rospy（ROS Noetic）；不可用时 MQTT 仍工作，命令回 rejected
 try:
     import rospy  # type: ignore
 except Exception:  # noqa: BLE001
@@ -29,10 +29,8 @@ from .protocol import Protocol
 from .state import BridgeState
 from .mqtt_client import MqttClient
 from .downlink.command_receiver import CommandProcessor
-from .downlink.ros_placeholder import RosPlaceholder
-from .ros.feedback import FeedbackListener
-from .ros.providers import RosProviders
-from .ros.ros_types import IgkRobotStatus, Odometry, PoseWithCovarianceStamped
+from .ros.lifecycle import RosLifecycle
+from .runtime_status import RuntimeStatus
 from .uplink import availability as avail_uplink
 from .uplink import heartbeat as hb_uplink
 from .uplink import location as loc_uplink
@@ -83,63 +81,6 @@ def location_loop(proto, mqtt, state, stop: threading.Event) -> None:
         stop.wait(0.1)
 
 
-# ---------------- ROS 订阅（只读 → 缓存） ----------------
-def setup_ros_subscribers(state: BridgeState) -> None:
-    """订阅 /odom、/amcl_pose、/robot_status，缓存数据。必须在 rospy.init_node 之后调用。"""
-    if rospy is None:
-        return
-    _speed = {"linear": 0.0, "angular": 0.0}
-
-    def handle_odom(msg) -> None:
-        try:
-            _speed["linear"] = msg.twist.twist.linear.x
-            _speed["angular"] = msg.twist.twist.angular.z
-        except Exception:  # noqa: BLE001
-            pass
-
-    def handle_amcl(msg) -> None:
-        """/amcl_pose（map 系）→ location。以 amcl 为准（odom 是 LOCAL，不冒充 map）。"""
-        try:
-            p = msg.pose.pose
-            q = p.orientation
-            import math
-
-            yaw = math.atan2(
-                2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z)
-            )
-            state.set_location(
-                {
-                    "position": {"x": p.position.x, "y": p.position.y, "theta": yaw},
-                    "linear": _speed["linear"],
-                    "angular": _speed["angular"],
-                    "localization_status": "OK",
-                }
-            )
-        except Exception:  # noqa: BLE001
-            pass
-
-    def handle_robot_status(msg) -> None:
-        """/robot_status.battery_percentage → battery（本轮电量真实源）。"""
-        try:
-            battery = getattr(msg, "battery_percentage", None)
-            if battery is not None:
-                state.set_battery(float(battery))
-        except Exception:  # noqa: BLE001
-            pass
-
-    try:
-        # 使用真实 import 的 message class，不用字符串类名。
-        if Odometry is not None:
-            rospy.Subscriber("/odom", Odometry, handle_odom)
-        if PoseWithCovarianceStamped is not None:
-            rospy.Subscriber("/amcl_pose", PoseWithCovarianceStamped, handle_amcl)
-        if IgkRobotStatus is not None:
-            rospy.Subscriber("/robot_status", IgkRobotStatus, handle_robot_status)
-        LOG.info("ROS 订阅就绪：/odom /amcl_pose /robot_status")
-    except Exception as exc:  # noqa: BLE001
-        LOG.warning("ROS 订阅失败：%s", exc)
-
-
 # ---------------- 主流程 ----------------
 def main() -> int:
     config = get_config()
@@ -150,29 +91,23 @@ def main() -> int:
     LOG.info("bridge 启动: vehicle=%s boot=%s stub=%s",
              config.vehicle_id, identity.boot_id[:8], config.bridge_stub_mode)
 
-    # rospy.init_node 必须先于任何 Publisher/Subscriber 创建。
-    ros_ok = rospy is not None
-    if ros_ok:
-        rospy.init_node("firebot_bridge", anonymous=True)
+    status = RuntimeStatus()
+    status.set(boot_id=identity.boot_id)
 
-    # ROS 占位
-    placeholder = RosPlaceholder(rospy)
-    processor = CommandProcessor(config, state, identity, proto, mqtt_client=None, placeholder=placeholder)
+    # 1) ROS lifecycle（后台线程，与 MQTT 解耦，绝不阻塞）
+    ros = RosLifecycle(rospy, state, status=status)
+    processor = CommandProcessor(config, state, identity, proto, mqtt_client=None, placeholder=ros)
+    ros.set_on_feedback(processor.on_feedback)
 
-    # ROS feedback + providers + 数据订阅（init_node 之后）
-    feedback = FeedbackListener(rospy, processor.on_feedback)
-    feedback.start()
-    providers = RosProviders(rospy, state)
-    providers.start()
-    setup_ros_subscribers(state)
-
-    # MQTT
-    mqtt = MqttClient(config, identity, proto, processor.on_command)
+    # 2) MQTT 先上线（与 ROS master 无关）
+    mqtt = MqttClient(config, identity, proto, processor.on_command, status=status)
     processor.client = mqtt  # 注入 MQTT client 用于回执
-    mqtt.connect()
-    mqtt.loop_start()
 
-    # 周期线程
+    ros.start()
+    mqtt.loop_start()
+    mqtt.connect_with_retry()  # 初始连接失败不退出进程，指数退避重试
+
+    # 3) 周期上报线程（连上后才启动）
     stop = threading.Event()
     threads = [
         threading.Thread(target=heartbeat_loop, args=(proto, mqtt, stop), daemon=True),
@@ -183,14 +118,11 @@ def main() -> int:
         t.start()
 
     try:
-        if ros_ok:
-            rospy.spin()
-        else:
-            LOG.info("MQTT-only 模式（rospy 不可用）；等待 Ctrl+C")
-            stop.wait()
+        stop.wait()
     except KeyboardInterrupt:
         LOG.info("收到 Ctrl+C，停止")
     finally:
+        ros.stop()
         mqtt.publish(
             proto.topic("availability"),
             avail_uplink.make_availability(proto, "offline", reason="BRIDGE_STOP"),

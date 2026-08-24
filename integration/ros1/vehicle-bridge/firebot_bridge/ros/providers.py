@@ -1,8 +1,9 @@
 """ROS 数据提供：订阅 /firebot_bridge/{battery,smoke,status,location} → 缓存到 state。
 
-battery 真实来源：/robot_status.battery_percentage（见 main.py 的 handle_robot_status）。
+battery canonical 来源：/firebot_bridge/battery（std_msgs/Float32）——原始车辆电量
+如何取得属于车端 provider/adapter，不是 MQTT Bridge 的责任。
 smoke 真实来源：由车端提供方发布到 /firebot_bridge/smoke（Modbus/standalone 脚本）。
-没有真实 smoke 源时，providers 不产生 smoke 数据，Bridge 不发布 sensor（不伪造 0）。
+没有真实 provider 时，battery/smoke 均为 None，Bridge 不伪造数据。
 """
 from __future__ import annotations
 

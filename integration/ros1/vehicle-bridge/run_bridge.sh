@@ -8,7 +8,8 @@
 set -eo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="${1:-$DIR/config/bridge.env}"
+# 唯一配置位置：/etc/firebot/bridge.env（由 install.sh 生成，systemd 传入）
+ENV_FILE="${1:-${FIREBOT_BRIDGE_ENV:-/etc/firebot/bridge.env}}"
 
 # 1) 读取非密配置
 if [ -f "$ENV_FILE" ]; then

@@ -14,6 +14,13 @@
 Bridge 只做 5 件事：MQTT 连接、协议校验、上行数据封装、下行命令转交、ROS 反馈重新封装。
 **它不知道"怎么巡航"**——只把"服务器要求开始巡航"可靠转交给 ROS 层。
 
+**MQTT 与 ROS master 解耦**：MQTT/TLS 生命周期不依赖 roscore——无 roscore 时 MQTT 仍在线
+（命令 rejected + `BRIDGE_ADAPTER_NOT_CONNECTED`）；roscore 出现后自动初始化，进程/boot_id 不变；
+初始 MQTT 连接失败在进程内指数退避重试，不靠 systemd 重启。
+
+**battery canonical 来源**：`/firebot_bridge/battery`（std_msgs/Float32），由车端 provider/adapter 发布；
+没有 provider 时不伪造电量（`BATTERY_PROVIDER=NOT_AVAILABLE`）。
+
 ## 目录结构
 
 ```

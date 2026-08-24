@@ -56,7 +56,7 @@ sudo systemctl enable --now firebot-bridge
 | --- | --- | --- |
 | availability | 服务器看到 online | QoS1 retain |
 | heartbeat | 1Hz | 车端在线判据 |
-| battery | `/robot_status.battery_percentage` 入 DB `robots.battery` | 真实源 |
+| battery | `/firebot_bridge/battery`（std_msgs/Float32）入 DB `robots.battery` | 真实源，由车端 provider/adapter 发布 |
 | smoke | 仅当有真实 provider 才 PASS | Modbus/standalone，非 ROS topic；无源不发布 |
 | location | 默认 disabled（`FIREBOT_LOCATION_ENABLED=false`） | 地图身份确认前不发 |
 | patrol command transport | `next-cruise-loop-sender.py --once` → bridge 收到 | schema 1.3 command |

@@ -18,8 +18,3 @@ except Exception:  # noqa: BLE001 — rospy 未安装
     Odometry = None
     PoseWithCovarianceStamped = None
     _ROS_TYPES_OK = False
-
-try:
-    from igk_robot.msg import RobotStatus as IgkRobotStatus
-except Exception:  # noqa: BLE001 — 自定义消息包可能未安装
-    IgkRobotStatus = None

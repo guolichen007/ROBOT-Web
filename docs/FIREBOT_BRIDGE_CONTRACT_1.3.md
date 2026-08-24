@@ -90,7 +90,7 @@ cmd 枚举：`patrol / stop_motion / emergency_stop / reset_estop / return_dock 
 ### 3.3 数据上行（ROS → Bridge）
 | topic | 类型 | 说明 |
 |---|---|---|
-| `/firebot_bridge/battery` | std_msgs/Float32 | 电量百分比（本轮接 `/robot_status.battery_percentage`） |
+| `/firebot_bridge/battery` | std_msgs/Float32 | 电量百分比（canonical 唯一来源） |
 | `/firebot_bridge/smoke` | std_msgs/Float32 | 烟雾浓度（**真实来源 Phase 0 确认：Modbus/standalone，非 ROS topic**，由车端提供方接入） |
 | `/firebot_bridge/status` | std_msgs/String(JSON) | mode/estop_active/active_task_id |
 | `/firebot_bridge/location` | std_msgs/String(JSON) | x/y/theta/linear/angular（map 系） |
@@ -115,7 +115,7 @@ MQTT command → 校验(boot/过期/支持性) → 去重(command_id 幂等)
 
 | 数据 | 真实来源 | Bridge 处理 |
 |---|---|---|
-| battery | `/robot_status.battery_percentage`（igk_robot/RobotStatus） | status partial `{"battery": ...}` |
+| battery | `/firebot_bridge/battery`（std_msgs/Float32，由车端 provider/adapter 发布） | status partial `{"battery": ...}` |
 | smoke | Modbus/standalone（非 ROS topic） | SmokeProvider 接真实来源 → sensor `{"smoke": ...}`；无真实源**不发布 sensor**，不伪造 0 |
 | mode/estop | 车端未提供前**不伪造** | status 缺省，服务器保持 NULL/unknown |
 | location | `/odom`(速度) + `/amcl_pose`(map 位姿) | 以 amcl 为准；amcl 缺席不发（或标降级） |
