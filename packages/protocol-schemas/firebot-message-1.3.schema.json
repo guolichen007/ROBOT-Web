@@ -1,0 +1,234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://firebot.local/schemas/firebot-message-1.3.schema.json",
+  "title": "Firebot MQTT Contract 1.3.0 / Schema 1.3",
+  "oneOf": [
+    { "$ref": "#/$defs/location" },
+    { "$ref": "#/$defs/status" },
+    { "$ref": "#/$defs/sensor" },
+    { "$ref": "#/$defs/alarm" },
+    { "$ref": "#/$defs/taskStatus" },
+    { "$ref": "#/$defs/heartbeat" },
+    { "$ref": "#/$defs/availability" },
+    { "$ref": "#/$defs/capabilities" },
+    { "$ref": "#/$defs/command" },
+    { "$ref": "#/$defs/commandAck" }
+  ],
+  "$defs": {
+    "vehicleBase": {
+      "type": "object",
+      "required": ["schema_version", "message_id", "type", "vehicle_id", "boot_id", "timestamp", "seq"],
+      "properties": {
+        "schema_version": { "const": "1.3" },
+        "message_id": { "type": "string", "format": "uuid" },
+        "type": { "type": "string" },
+        "vehicle_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "boot_id": { "type": "string", "format": "uuid" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "seq": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "pose": {
+      "type": "object",
+      "required": ["x", "y", "theta"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "theta": { "type": "number" }
+      },
+      "additionalProperties": false
+    },
+    "location": {
+      "allOf": [
+        { "$ref": "#/$defs/vehicleBase" },
+        {
+          "type": "object",
+          "required": ["position", "site_code", "map_code", "map_version", "map_checksum", "frame_id"],
+          "properties": {
+            "type": { "const": "location" },
+            "position": { "$ref": "#/$defs/pose" },
+            "linear_speed": { "type": "number" },
+            "angular_speed": { "type": "number" },
+            "battery": { "type": "number", "minimum": 0, "maximum": 100 },
+            "site_code": { "type": "string", "minLength": 1 },
+            "map_code": { "type": "string", "minLength": 1 },
+            "map_version": { "type": "string", "minLength": 1 },
+            "map_checksum": { "type": "string", "minLength": 8, "maxLength": 128 },
+            "frame_id": { "const": "map" },
+            "parking_slot_code": { "type": ["string", "null"] },
+            "localization_status": { "type": "string" }
+          }
+        }
+      ]
+    },
+    "status": {
+      "allOf": [
+        { "$ref": "#/$defs/vehicleBase" },
+        {
+          "type": "object",
+          "properties": {
+            "type": { "const": "status" },
+            "mode": { "enum": ["IDLE", "MANUAL", "PATROL", "EXTINGUISH", "RETURN_DOCK", "ESTOP"] },
+            "battery": { "type": "number", "minimum": 0, "maximum": 100 },
+            "estop_active": { "type": "boolean" },
+            "active_task_id": { "type": ["string", "null"] },
+            "network_rssi": { "type": ["number", "null"] }
+          }
+        }
+      ]
+    },
+    "sensor": {
+      "allOf": [
+        { "$ref": "#/$defs/vehicleBase" },
+        {
+          "type": "object",
+          "required": ["smoke"],
+          "properties": {
+            "type": { "const": "sensor" },
+            "smoke": { "type": "number" },
+            "bottom_ir": { "type": "number" },
+            "top_ir_max": { "type": "number" },
+            "payload": { "type": "object" }
+          }
+        }
+      ]
+    },
+    "alarm": {
+      "allOf": [
+        { "$ref": "#/$defs/vehicleBase" },
+        {
+          "type": "object",
+          "required": ["event_id", "fire_type", "severity", "position"],
+          "properties": {
+            "type": { "const": "alarm" },
+            "event_id": { "type": "string", "minLength": 1 },
+            "fire_type": { "enum": ["smoke", "flame", "unknown"] },
+            "severity": { "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+            "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+            "parking_slot_code": { "type": ["string", "null"] },
+            "position": { "$ref": "#/$defs/pose" },
+            "media": { "type": "object" }
+          }
+        }
+      ]
+    },
+    "taskStatus": {
+      "allOf": [
+        { "$ref": "#/$defs/vehicleBase" },
+        {
+          "type": "object",
+          "required": ["task_id", "status", "phase", "progress"],
+          "properties": {
+            "type": { "const": "task_status" },
+            "task_id": { "type": "string", "minLength": 1 },
+            "status": { "enum": ["accepted", "executing", "completed", "failed", "cancelled"] },
+            "phase": { "type": "string", "minLength": 1 },
+            "progress": { "type": "number", "minimum": 0, "maximum": 100 },
+            "failure_code": { "type": ["string", "null"] },
+            "failure_message": { "type": ["string", "null"] },
+            "checkpoint_index": { "type": ["integer", "null"] },
+            "checkpoint_total": { "type": ["integer", "null"] },
+            "current_slot_code": { "type": ["string", "null"] },
+            "next_slot_code": { "type": ["string", "null"] },
+            "waypoint_index": { "type": ["integer", "null"] },
+            "waypoint_total": { "type": ["integer", "null"] },
+            "target_waypoint_index": { "type": ["integer", "null"] },
+            "last_completed_waypoint_index": { "type": ["integer", "null"] }
+          }
+        }
+      ]
+    },
+    "heartbeat": {
+      "allOf": [
+        { "$ref": "#/$defs/vehicleBase" },
+        { "type": "object", "properties": { "type": { "const": "heartbeat" }, "uptime_seconds": { "type": "number", "minimum": 0 } } }
+      ]
+    },
+    "availability": {
+      "allOf": [
+        { "$ref": "#/$defs/vehicleBase" },
+        {
+          "type": "object",
+          "required": ["state"],
+          "properties": {
+            "type": { "const": "availability" },
+            "state": { "enum": ["online", "offline"] },
+            "reason": { "type": ["string", "null"] }
+          }
+        }
+      ]
+    },
+    "capabilities": {
+      "allOf": [
+        { "$ref": "#/$defs/vehicleBase" },
+        {
+          "type": "object",
+          "required": ["protocol_version", "supported_commands", "sensors", "media"],
+          "properties": {
+            "type": { "const": "capabilities" },
+            "protocol_version": { "enum": ["1.2.0", "1.3.0"] },
+            "supported_commands": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+            "sensors": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+            "media": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+          }
+        }
+      ]
+    },
+    "command": {
+      "type": "object",
+      "required": ["schema_version", "message_id", "type", "vehicle_id", "target_boot_id", "command_id", "correlation_id", "issued_at", "expires_at", "ttl_ms", "priority", "source", "operator_id", "cmd", "params"],
+      "properties": {
+        "schema_version": { "const": "1.3" },
+        "message_id": { "type": "string", "format": "uuid" },
+        "type": { "const": "command" },
+        "vehicle_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "target_boot_id": { "type": ["string", "null"], "format": "uuid" },
+        "command_id": { "type": "string", "minLength": 1 },
+        "correlation_id": { "type": "string", "format": "uuid" },
+        "task_id": { "type": ["string", "null"] },
+        "lease_id": { "type": ["string", "null"] },
+        "control_session_id": { "type": ["string", "null"] },
+        "seq": { "type": "integer", "minimum": 0 },
+        "issued_at": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": "string", "format": "date-time" },
+        "ttl_ms": { "type": "integer", "minimum": 1 },
+        "priority": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "source": { "const": "WEB" },
+        "operator_id": { "type": "string", "minLength": 1 },
+        "cmd": { "enum": ["manual_control", "stop_motion", "emergency_stop", "reset_estop", "return_dock", "patrol", "extinguish", "cancel_task"] },
+        "params": { "type": "object" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "cmd": { "const": "emergency_stop" } }, "required": ["cmd"] },
+          "else": { "properties": { "target_boot_id": { "type": "string", "format": "uuid" } } }
+        },
+        {
+          "if": { "properties": { "cmd": { "const": "manual_control" } }, "required": ["cmd"] },
+          "then": { "required": ["lease_id", "control_session_id", "seq"] }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "commandAck": {
+      "allOf": [
+        { "$ref": "#/$defs/vehicleBase" },
+        {
+          "type": "object",
+          "required": ["command_id", "status", "reason_code"],
+          "properties": {
+            "type": { "const": "command_ack" },
+            "command_id": { "type": "string", "minLength": 1 },
+            "task_id": { "type": ["string", "null"] },
+            "status": { "enum": ["accepted", "rejected", "unsupported"] },
+            "reason_code": {
+              "type": ["string", "null"],
+              "enum": [null, "ROBOT_DISABLED", "ROBOT_STALE", "ROBOT_OFFLINE", "ROBOT_BOOT_SESSION_UNKNOWN", "ROBOT_CAPABILITY_UNSUPPORTED", "ROBOT_ESTOP_ACTIVE", "MANUAL_LEASE_INVALID", "ACTIVE_TASK_CONFLICT", "MAP_VERSION_MISMATCH", "COMMAND_EXPIRED", "COMMAND_REJECTED", "COMMAND_UNSUPPORTED", "INVALID_PROTOCOL_MESSAGE", "PROTOCOL_VERSION_UNSUPPORTED", "BRIDGE_ADAPTER_NOT_CONNECTED"]
+            },
+            "reason": { "type": ["string", "null"] }
+          }
+        }
+      ]
+    }
+  }
+}

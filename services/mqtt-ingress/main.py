@@ -303,33 +303,52 @@ def handle_location(
 
 
 def handle_status(db, robot: Robot, msg: dict) -> None:
-    robot.current_mode = msg["mode"]
-    robot.battery = msg["battery"]
-    robot.estop_active = bool(msg["estop_active"])
-    robot.current_task_id = msg.get("active_task_id")
+    """Update robot snapshot from a status message.
+
+    v1.3 allows partial status (only the fields the vehicle really has), so
+    missing fields are left untouched / NULL instead of being fabricated.
+    """
+    if "mode" in msg:
+        robot.current_mode = msg["mode"]
+    if "battery" in msg:
+        robot.battery = msg["battery"]
+    if "estop_active" in msg:
+        robot.estop_active = bool(msg["estop_active"])
+    if "active_task_id" in msg:
+        robot.current_task_id = msg.get("active_task_id")
     raw = redis.get(f"robot:{robot.vehicle_id}:latest")
     latest = json.loads(raw) if raw else {"vehicle_id": robot.vehicle_id, "robot_id": robot.id}
-    latest.update(
-        {
-            "mode": robot.current_mode,
-            "battery": robot.battery,
-            "estop_active": robot.estop_active,
-            "active_task_id": robot.current_task_id,
-        }
-    )
+    updates: dict = {}
+    if "mode" in msg:
+        updates["mode"] = robot.current_mode
+    if "battery" in msg:
+        updates["battery"] = robot.battery
+    if "estop_active" in msg:
+        updates["estop_active"] = robot.estop_active
+    if "active_task_id" in msg:
+        updates["active_task_id"] = robot.current_task_id
+    latest.update(updates)
     queue_redis_set(db, f"robot:{robot.vehicle_id}:latest", json.dumps(latest, ensure_ascii=False))
     queue_event(db, "vehicle.status", latest)
 
 
 def handle_sensor(db, robot: Robot, msg: dict, source_ts: datetime, received: datetime) -> None:
+    """Store a sensor sample.
+
+    v1.3 sensor is capability-driven: ``smoke`` is required, bottom_ir/top_ir_max
+    are optional and only present when the vehicle actually has that sensor.
+    """
+    smoke = msg.get("smoke")
+    bottom_ir = msg.get("bottom_ir")
+    top_ir_max = msg.get("top_ir_max")
     db.add(
         SensorSample(
             robot_id=robot.id,
             source_timestamp=source_ts,
             server_received_at=received,
-            smoke=msg["smoke"],
-            bottom_ir=msg["bottom_ir"],
-            top_ir_max=msg["top_ir_max"],
+            smoke=smoke,
+            bottom_ir=bottom_ir,
+            top_ir_max=top_ir_max,
             payload_json=msg.get("payload", {}),
             boot_id=msg["boot_id"],
             seq=msg["seq"],
@@ -337,15 +356,15 @@ def handle_sensor(db, robot: Robot, msg: dict, source_ts: datetime, received: da
     )
     raw = redis.get(f"robot:{robot.vehicle_id}:latest")
     latest = json.loads(raw) if raw else {"vehicle_id": robot.vehicle_id, "robot_id": robot.id}
-    latest.update(
-        {
-            "smoke": msg["smoke"],
-            "bottom_ir": msg["bottom_ir"],
-            "top_ir": msg["top_ir_max"],
-            "top_ir_max": msg["top_ir_max"],
-            "server_received_at": received.isoformat(),
-        }
-    )
+    updates: dict = {"server_received_at": received.isoformat()}
+    if smoke is not None:
+        updates["smoke"] = smoke
+    if bottom_ir is not None:
+        updates["bottom_ir"] = bottom_ir
+    if top_ir_max is not None:
+        updates["top_ir"] = top_ir_max
+        updates["top_ir_max"] = top_ir_max
+    latest.update(updates)
     queue_redis_set(db, f"robot:{robot.vehicle_id}:latest", json.dumps(latest, ensure_ascii=False))
     queue_event(db, "vehicle.sensor", latest)
 
@@ -841,7 +860,10 @@ def process(topic: str, payload: bytes) -> None:
         return
     last_key = f"seq:{msg['vehicle_id']}:{msg['boot_id']}:{expected}"
     last_seq = redis.get(last_key)
-    if last_seq is not None and msg["seq"] <= int(last_seq):
+    # availability (online/offline) is not subject to the monotonic seq check:
+    # the LWT offline payload is fixed before connect and cannot know the latest
+    # seq; use message_id / server receive time for ordering (v1.3 constraint).
+    if expected != "availability" and last_seq is not None and msg["seq"] <= int(last_seq):
         mqtt_out_of_order_total.inc()
         increment_mqtt_metric("out_of_order")
         redis.setex(dedup_key, dedup_ttl(msg["type"]), "1")
