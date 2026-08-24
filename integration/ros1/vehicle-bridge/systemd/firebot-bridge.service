@@ -1,0 +1,19 @@
+[Unit]
+Description=Firebot vehicle ROS bridge (communication layer, schema 1.3)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 修改为车辆上实际部署路径
+ExecStart=/bin/bash /home/tl/firebot-bridge/run_bridge.sh /home/tl/firebot-bridge/config/bridge.env
+Restart=always
+RestartSec=5
+User=tl
+Environment=PYTHONUNBUFFERED=1
+# 密码经 EnvironmentFile 注入（受控权限），避免 chown 密码文件给应用用户
+# 创建：/etc/firebot/firebot-bridge.env（root 600），内容含 FIREBOT_MQTT_PASSWORD=...
+EnvironmentFile=-/etc/firebot/firebot-bridge.env
+
+[Install]
+WantedBy=multi-user.target
