@@ -1,15 +1,37 @@
+# Firebot Mosquitto ACL 模板（多车通用）
+# 约定：MQTT username == canonical vehicle_id。%u 会自动展开为当前用户名。
+
+# ---- 平台账号（服务器端下发命令 + 消费全部上行）----
 user platform
 topic readwrite robot/+/+
 topic readwrite _platform/compat/+/+
 
+# ---- 车端账号模板 ----
+# 每个真车复制下面 11 行，只改 `user <vehicle_id>`（topic 用 %u 无需再改）。
+# 车端只允许：写自己的遥测/ACK，读自己的 command。绝不允许车写 command。
+
+# 首台真车（canonical vehicle_id = firebot-vehicle-01）
+user firebot-vehicle-01
+topic write robot/%u/availability
+topic write robot/%u/heartbeat
+topic write robot/%u/capabilities
+topic write robot/%u/status
+topic write robot/%u/sensor
+topic write robot/%u/location
+topic write robot/%u/alarm
+topic write robot/%u/task_status
+topic write robot/%u/command_ack
+topic read robot/%u/command
+
+# Mock/联调车辆示例（DEV 使用，username = R001）
 user R001
-topic write robot/R001/location
-topic write robot/R001/status
-topic write robot/R001/sensor
-topic write robot/R001/alarm
-topic write robot/R001/task_status
-topic write robot/R001/command_ack
-topic write robot/R001/heartbeat
-topic write robot/R001/availability
-topic write robot/R001/capabilities
-topic read robot/R001/command
+topic write robot/%u/availability
+topic write robot/%u/heartbeat
+topic write robot/%u/capabilities
+topic write robot/%u/status
+topic write robot/%u/sensor
+topic write robot/%u/location
+topic write robot/%u/alarm
+topic write robot/%u/task_status
+topic write robot/%u/command_ack
+topic read robot/%u/command
