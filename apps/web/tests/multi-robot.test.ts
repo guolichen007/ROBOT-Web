@@ -157,4 +157,31 @@ describe('multi-robot active-vehicle scoping', () => {
     expect(store.selectRobot('firebot-vehicle-01')).toBe(false)
     expect(store.activeRobotId).toBeNull()
   })
+
+  it('falls back immediately when the active vehicle is disabled by another client', () => {
+    const store = useMonitorStore()
+    store.snapshot = makeSnapshot({ robots: [robotA, robotB] })
+    store.selectRobot('firebot-vehicle-01')
+    expect(store.activeRobotId).toBe('firebot-vehicle-01')
+
+    store.applyEvent({
+      stream_id: '10-0',
+      event_type: 'robot.updated',
+      data: { vehicle_id: 'firebot-vehicle-01', enabled: false },
+    })
+    expect(store.activeRobotId).toBe('R001')
+    expect(localStorage.getItem('firebot.activeVehicleId')).toBe('R001')
+  })
+
+  it('does not switch when a non-active vehicle is disabled', () => {
+    const store = useMonitorStore()
+    store.snapshot = makeSnapshot({ robots: [robotA, robotB] })
+    store.selectRobot('firebot-vehicle-01')
+    store.applyEvent({
+      stream_id: '11-0',
+      event_type: 'robot.updated',
+      data: { vehicle_id: 'R001', enabled: false },
+    })
+    expect(store.activeRobotId).toBe('firebot-vehicle-01')
+  })
 })

@@ -115,8 +115,17 @@ export const useMonitorStore = defineStore('monitor', () => {
       const index = snapshot.value.robots.findIndex((item) => item.vehicle_id === vehicleId)
       // Events for OTHER vehicles update their cache but must never switch the
       // active vehicle away from what the operator is looking at.
-      if (index >= 0) snapshot.value.robots[index] = { ...snapshot.value.robots[index], ...event.data }
-      else {
+      if (index >= 0) {
+        snapshot.value.robots[index] = { ...snapshot.value.robots[index], ...event.data }
+        // Another client may disable the active vehicle in real time via
+        // robot.updated; fall back immediately to the first enabled vehicle.
+        if (event.data.enabled === false) {
+          const selected = robot.value
+          if (selected && (selected.vehicle_id === vehicleId || selected.id === vehicleId)) {
+            selectFirstEnabledVehicle()
+          }
+        }
+      } else {
         snapshot.value.robots.push(event.data as RobotState)
         // Only initialize a selection when nothing is selected yet; never switch.
         if (!activeRobotId.value && event.data.enabled !== false) activeRobotId.value = vehicleId
@@ -164,6 +173,12 @@ export const useMonitorStore = defineStore('monitor', () => {
     activeRobotId.value = target.vehicle_id
     writeStoredVehicleId(target.vehicle_id)
     return true
+  }
+
+  function selectFirstEnabledVehicle(): void {
+    const next = enabledRobots.value[0]?.vehicle_id ?? null
+    activeRobotId.value = next
+    writeStoredVehicleId(next)
   }
 
   async function connect(): Promise<void> {

@@ -115,6 +115,7 @@ def set_platform_enabled(
     history. Telemetry/MQTT uplink and history remain intact.
     """
     robot = find_robot(db, robot_id)
+    before_enabled = robot.enabled
     if payload.enabled:
         robot.enabled = True
         action = "ROBOT_PLATFORM_ENABLED"
@@ -129,8 +130,8 @@ def set_platform_enabled(
         user_id=auth.user.id,
         robot_id=robot.id,
         resource_id=robot.id,
-        before={"enabled": not payload.enabled},
-        after={"enabled": payload.enabled},
+        before={"enabled": before_enabled},
+        after={"enabled": robot.enabled},
         **request_meta(request),
     )
     result = serialize_model(robot)

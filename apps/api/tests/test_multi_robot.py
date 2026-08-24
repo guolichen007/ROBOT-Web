@@ -206,6 +206,35 @@ def test_enable_endpoint_does_not_promote_readiness(monkeypatch) -> None:
 
     assert robot.enabled is True
     assert audit["action"] == "ROBOT_PLATFORM_ENABLED"
+    assert audit["before"] == {"enabled": False}
+    assert audit["after"] == {"enabled": True}
     assert profile.control_contract_verified is False
     assert profile.ack_contract_verified is False
     assert profile.map_contract_verified is False
+
+
+def test_disable_endpoint_audit_records_real_before_value(monkeypatch) -> None:
+    import app.modules.robots.router as rr
+    from app.modules.robots.router import EnabledRequest, set_platform_enabled
+
+    # An already-disabled robot: the audit "before" must be the real stored
+    # value (False), never a derived `not payload.enabled`.
+    robot = make_robot("R001", "robot-a", enabled=False)
+
+    class Db(FakeDb):
+        def get(self, model, key):
+            return None
+
+    db = Db()
+    audit: dict = {}
+    monkeypatch.setattr(rr, "find_robot", lambda db, rid: robot)
+    monkeypatch.setattr(rr, "request_meta", lambda request: {})
+    monkeypatch.setattr(rr, "write_audit", lambda db, **kw: audit.update(kw))
+    monkeypatch.setattr(rr, "append_event", lambda event_type, payload: None)
+    monkeypatch.setattr(rr, "get_redis", lambda: FakeRedis())
+
+    auth = type("Auth", (), {"user": type("User", (), {"id": "u1"})()})()
+    set_platform_enabled("R001", EnabledRequest(enabled=False), None, db, auth)
+
+    assert audit["before"] == {"enabled": False}
+    assert audit["after"] == {"enabled": False}
