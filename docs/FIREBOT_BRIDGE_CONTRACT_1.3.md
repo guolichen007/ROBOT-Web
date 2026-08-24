@@ -37,7 +37,7 @@ Broker：`100.110.31.112:8883`（TLS，项目 CA）。schema_version = `1.3`（�
 | heartbeat | 1Hz | ✅ | uptime_seconds |
 | capabilities | 连接时 | ✅ | protocol_version=1.3, **supported_commands=真实能力**, **sensors=[真实传感器]**（唯一权威）, media；**QoS1 retain=true** |
 | status | 1Hz | ✅ | **partial**：mode/battery/estop_active/active_task_id 均可缺失，只发真实字段（`{"battery":82.4}` 合法） |
-| sensor | 1Hz | ✅ | **smoke（必须）**，bottom_ir/top_ir_max 有则带（缺的不出现，不伪造 0） |
+| sensor | 1Hz | ✅ | **capability-driven：smoke / bottom_ir / top_ir_max 至少一个**，有则带（缺的不出现，不伪造 0） |
 | location | ≤10Hz | 冻结 | position(x/y/theta, map 系), linear_speed, angular_speed, battery, site_code, map_code, map_version, map_checksum, frame_id=map |
 | command_ack | 命令后即回 | ✅ | command_id, **task_id（顶层）**, status(accepted/rejected/unsupported), reason_code(枚举白名单) |
 | task_status | 任务事件 | 冻结 | task_id, status, phase, progress, failure_code/message, checkpoint/waypoint 游标 |
@@ -80,12 +80,12 @@ cmd 枚举：`patrol / stop_motion / emergency_stop / reset_estop / return_dock 
 ### 3.2 上行（ROS → Bridge）：`/firebot_bridge/command_feedback`（JSON）
 ```json
 { "command_id": "...", "task_id": "...",
-  "state": "ACCEPTED|EXECUTING|COMPLETED|REJECTED|FAILED",
+  "state": "ACCEPTED|EXECUTING|COMPLETED|REJECTED|FAILED|CANCELLED",
   "reason_code": null, "message": null, "progress": 0, "phase": "PATROLLING" }
 ```
-- ROS 回 `ACCEPTED` → Bridge 回 MQTT `command_ack accepted`
+- ROS 回 `ACCEPTED` → Bridge 回 MQTT `command_ack accepted`；任务命令（patrol/return_dock/extinguish）同时发 `task_status=accepted`
 - ROS 回 `REJECTED`/`FAILED` → Bridge 回 MQTT `rejected`（带 reason_code）
-- `EXECUTING`/`COMPLETED` → Bridge 发 MQTT `task_status`
+- `EXECUTING`/`COMPLETED`/`CANCELLED` → 任务命令发 MQTT `task_status`（executing/completed/cancelled）；非任务命令不产生 task_status
 
 ### 3.3 数据上行（ROS → Bridge）
 | topic | 类型 | 说明 |

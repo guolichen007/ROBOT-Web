@@ -1,6 +1,6 @@
 # 智能灭火机器人云控平台
 
-ROBOT-Web 是智能灭火机器人项目的云端与 Web 平台，当前发布目标为 **V2 Integration-Ready Final**。平台已经完成真实 ROS2 接入前的集中工程化加固，Robot Integration Contract 冻结为 `1.2.0`，MQTT Schema 冻结为 `1.2`。
+ROBOT-Web 是智能灭火机器人项目的云端与 Web 平台。Robot Integration Contract 为 `1.2.0`（frozen legacy）；MQTT Schema 双版本共存：`1.2`（frozen legacy，向后兼容）与 `1.3`（current vehicle bridge contract）。服务器同时接受 1.2/1.3，未知版本显式 reject。
 
 ## 1. 项目简介
 
@@ -14,9 +14,9 @@ ROBOT-Web 是智能灭火机器人项目的云端与 Web 平台，当前发布�
 
 ## 3. 当前版本与状态
 
-- 平台：`v2.0.0-integration-ready`
-- 合同：`1.2.0`
-- Schema：`1.2`
+- 平台：`ui/youdao-light-hmi-v1`（approved release ref）
+- 合同：`1.2.0`（frozen legacy）
+- Schema：`1.2`（frozen legacy）+ `1.3`（current bridge contract）
 - 本机 DEV/TEST：可运行
 - SERVER：部署就绪，未在第二台服务器实际部署
 - 真车/真实视频：待现场接入
@@ -125,7 +125,7 @@ docker compose -f compose.test.yml --profile full down --volumes
 
 ## 14. Mock Robot
 
-Mock R001 是独立 MQTT client，遵循与未来真车完全相同的 Schema 1.2；禁止直接调用 API/DB。支持 reboot、丢包、延迟、重复、乱序、错误 Schema、时钟偏差、迟到/重复/错误 ACK 等故障注入。
+Mock R001 是独立 MQTT client，遵循 Schema 1.2；真车 Vehicle Bridge 上行 Schema 1.3。禁止直接调用 API/DB。支持 reboot、丢包、延迟、重复、乱序、错误 Schema、时钟偏差、迟到/重复/错误 ACK 等故障注入。
 
 ## 15. ROS2 边界与交付
 
@@ -137,7 +137,7 @@ Mock R001 是独立 MQTT client，遵循与未来真车完全相同的 Schema 1.
 
 输出 `dist/firebot-ros2-integration-1.2.0.zip` 与 `.sha256`。平台不会猜测现场 ROS topic、速度、量程、地图或视频地址。
 
-首台实车是 ROS1 Noetic。当前只读兼容接口、麦克纳姆 `vy` 安全处理、AMCL/odom 边界、缺失急停能力、`cmd_vel` 仲裁阻塞项及运行态清单见 [ROS1 Noetic 实车只读兼容接入说明](docs/ROS原生兼容接入说明.md) 和 [integration/ros1](integration/ros1/ROS1运行态只读验收清单.md)。该路径不会升级 Canonical 1.2，也不会在本轮实现车端下行。
+首台实车是 ROS1 Noetic。当前只读兼容接口、麦克纳姆 `vy` 安全处理、AMCL/odom 边界、缺失急停能力、`cmd_vel` 仲裁阻塞项及运行态清单见 [ROS1 Noetic 实车只读兼容接入说明](docs/ROS原生兼容接入说明.md) 和 [integration/ros1](integration/ros1/ROS1运行态只读验收清单.md)。该只读兼容路径保持 1.2。车端下行由 Vehicle Bridge（schema 1.3）承担，见 [integration/ros1/vehicle-bridge](integration/ros1/vehicle-bridge/README.md) 与 [真实车 Bridge 部署](docs/REAL_VEHICLE_BRIDGE_DEPLOYMENT.md)。
 
 ## 16. 服务器部署
 
@@ -159,7 +159,7 @@ SERVER 公网默认只开放 80（跳转）、443（HTTPS/WSS/WebRTC gateway）�
 
 统一入口：[docs/文档索引.md](docs/文档索引.md)。API、数据库、运维、安全、协议、坐标、车辆安全合同和发布检查均从该索引进入。
 
-本轮工业中控、右侧检测、巡检计划/报告和首台真车只读兼容说明见 [工业中控与巡检升级说明.md](docs/工业中控与巡检升级说明.md)、[巡检与预设位置接口.md](docs/巡检与预设位置接口.md) 与 [ROS原生兼容接入说明.md](docs/ROS原生兼容接入说明.md)。Canonical MQTT 继续冻结为 1.2，不因平台页面或业务能力增加而升级协议。
+本轮工业中控、右侧检测、巡检计划/报告和首台真车只读兼容说明见 [工业中控与巡检升级说明.md](docs/工业中控与巡检升级说明.md)、[巡检与预设位置接口.md](docs/巡检与预设位置接口.md) 与 [ROS原生兼容接入说明.md](docs/ROS原生兼容接入说明.md)。Canonical MQTT 为 1.2（frozen legacy）+ 1.3（current bridge contract）；服务器同时接受 1.2/1.3，未知版本显式 reject。
 
 ## 21. Git 与贡献流程
 

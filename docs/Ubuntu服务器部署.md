@@ -23,7 +23,7 @@ sudo mkdir -p /opt/firebot
 sudo chown "$USER":"$USER" /opt/firebot
 git clone git@github.com:guolichen007/ROBOT-Web.git /opt/firebot/ROBOT-Web
 cd /opt/firebot/ROBOT-Web
-git checkout v2.0.0-integration-ready
+git checkout ui/youdao-light-hmi-v1    # approved release ref（不再引用历史 tag v2.0.0-integration-ready）
 cp .env.server.example .env.server
 ```
 
@@ -95,7 +95,7 @@ sudo ufw allow 443/tcp
 sudo ufw allow 8883/tcp
 sudo ufw enable
 curl -fsS https://YOUR_HOST/health/live
-mosquitto_sub -h YOUR_HOST -p 8883 --cafile ca.crt -u R001 -P 'OWNER_SECRET' -t 'robot/R001/command' -d
+mosquitto_sub -h YOUR_HOST -p 8883 --cafile ca.crt -u firebot-vehicle-01 -P 'OWNER_SECRET' -t 'robot/firebot-vehicle-01/command' -d
 ```
 
 公网不得开放 5432、6379、1883、8554、8889、9997、metrics 或 ready。浏览器确认登录、Settings、media ticket；机器人先按 ROS2 handoff Gate 验证 identity/heartbeat/location，再验证命令。
@@ -110,6 +110,6 @@ docker compose --env-file .env.server -f docker-compose.server.yml logs --since 
 docker compose --env-file .env.server -f docker-compose.server.yml down
 ```
 
-更新前备份，checkout 已批准 tag，运行 preflight/build/up/migration/smoke。回滚 checkout 上一 tag 并恢复兼容备份；不得 force reset 主线或盲目降级数据库。
+更新前备份，checkout 已批准 ref（`ui/youdao-light-hmi-v1`），然后运行 `scripts/server-update.sh`（preflight → build → migrate → recreate 变更服务 → health）。回滚 checkout 上一 ref 并恢复兼容备份；不得 force reset 主线或盲目降级数据库。
 
 所有 `YOUR_HOST`、证书和现场账号都必须由 deployment owner 提供；文档中的示例不是生产值。

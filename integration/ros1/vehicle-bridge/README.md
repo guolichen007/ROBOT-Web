@@ -2,7 +2,7 @@
 
 > 版本：1.3.0 · 2026-08-24
 > 边界：**只做 Bridge 通信层**。不实现任何真实车辆运动/巡航/急停/灭火/回充/手动控制。真实执行由车端 ROS 控制程序后续实现。
-> 协议契约见上级目录 `next-vehicle-bridge-contract-1.3.md`。
+> 协议契约见 [`docs/FIREBOT_BRIDGE_CONTRACT_1.3.md`](../../../docs/FIREBOT_BRIDGE_CONTRACT_1.3.md)。
 
 ## 职责
 
@@ -17,59 +17,54 @@ Bridge 只做 5 件事：MQTT 连接、协议校验、上行数据封装、下�
 ## 目录结构
 
 ```
-ros-bridge/
+vehicle-bridge/
 ├── firebot_bridge/
 │   ├── main.py            # 入口（线程布局）
 │   ├── config.py          # env 配置
 │   ├── mqtt_client.py     # MQTTv5+TLS+LWT+reconnect+订阅 command
-│   ├── protocol.py        # vehicleBase/seq/消息构造/命令校验（兼容 1.2/1.3）
+│   ├── protocol.py        # vehicleBase/seq/消息构造/命令校验（下行接受 1.2/1.3）
 │   ├── identity.py        # boot_id 生命周期
-│   ├── state.py           # 共享状态（任务锁/数据缓存/幂等）
+│   ├── state.py           # 共享状态（任务锁/数据缓存/命令幂等重放）
 │   ├── uplink/            # 上行消息：availability/heartbeat/capabilities/status/sensor/location
 │   ├── downlink/          # 下行：command_receiver/validator/dedup/ros_placeholder
-│   └── ros/               # /firebot_bridge/* 冻结契约：interfaces/providers/feedback
-├── config/bridge.env.example   # 配置模板
-├── run_bridge.sh               # 启动（systemd 修复版）
-├── firebot-bridge.service      # systemd（EnvironmentFile 注入密码）
-├── tests/test_bridge.py        # 协议/幂等/partial 单测
+│   └── ros/               # /firebot_bridge/* 冻结契约：interfaces/providers/feedback/ros_types
+├── config/bridge.env.example        # 配置模板（无密码、无危险地图默认值）
+├── systemd/firebot-bridge.service.template  # systemd 模板（install.sh 生成实际 unit）
+├── install.sh / uninstall.sh / verify.sh    # 安装 / 卸载 / 验收
+├── run_bridge.sh               # 启动（ROS 路径经环境变量，不硬编码 /home/tl）
+├── requirements.txt            # paho-mqtt
+├── tests/test_bridge.py        # 协议/幂等/partial/命令生命周期单测
 └── README.md
 ```
 
-## 部署（车端 tl-RaptorLake）
+## 部署（车端，GitHub 为唯一交付源）
+
+默认安装到固定目录 `/opt/firebot/vehicle-bridge`，不绑定开发人员 home；systemd 由 install.sh 从模板生成。
 
 ```bash
 # 1) 依赖
-pip3 install paho-mqtt          # rospy 随 ROS Noetic 自带
+pip3 install -r requirements.txt          # paho-mqtt；rospy 随 ROS Noetic 自带
 
-# 2) 拷贝整个 ros-bridge/ 到车端，例如 /home/tl/firebot-bridge/
+# 2) 安装（可配置：FIREBOT_INSTALL_DIR / FIREBOT_BRIDGE_USER / FIREBOT_ROS_SETUP / FIREBOT_ROS_WORKSPACE_SETUP）
+./install.sh
 
-# 3) CA 放好
+# 3) 确认 CA + 编辑配置（无密码）
 sudo cp production-ca.crt /etc/firebot/production-ca.crt
+nano /opt/firebot/vehicle-bridge/config/bridge.env   # SITE/MAP/频率/STUB；密码不写这里
 
-# 4) 配置（无密码）
-cp config/bridge.env.example config/bridge.env
-nano config/bridge.env   # 按需改 SITE_CODE/MAP/频率；密码不写这里
+# 4) secret（root:root 600，install.sh 会提示）
+sudo install -m 600 /dev/null /etc/firebot/bridge-secret.env
+echo 'FIREBOT_MQTT_PASSWORD=<车辆MQTT密码>' | sudo tee /etc/firebot/bridge-secret.env >/dev/null
+sudo chmod 600 /etc/firebot/bridge-secret.env
 
-# 5) 密码（二选一，优先 EnvironmentFile）
-sudo mkdir -p /etc/firebot
-# 方式A（systemd EnvironmentFile，推荐）：
-sudo tee /etc/firebot/firebot-bridge.env >/dev/null <<'EOF'
-FIREBOT_MQTT_PASSWORD=<车辆MQTT密码>
-EOF
-sudo chmod 600 /etc/firebot/firebot-bridge.env
-# 方式B（旧安全文件）：
-echo -n '<车辆MQTT密码>' | sudo tee /etc/firebot/vehicle-mqtt-password >/dev/null
-sudo chmod 600 /etc/firebot/vehicle-mqtt-password
-
-# 6) systemd 常驻
-sudo cp firebot-bridge.service /etc/systemd/system/
-sudo systemctl daemon-reload
+# 5) 启动
 sudo systemctl enable --now firebot-bridge
 
-# 7) 验证常驻
-systemctl status firebot-bridge          # active
-journalctl -u firebot-bridge -f          # 看 MQTT connected + heartbeat
+# 6) 验收
+./verify.sh
 ```
+
+卸载：`./uninstall.sh`（`--purge` 删除安装目录；secret 永不删除）。
 
 ## 关键配置（config/bridge.env）
 
