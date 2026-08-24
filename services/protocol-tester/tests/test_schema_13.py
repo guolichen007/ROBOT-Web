@@ -33,9 +33,15 @@ def test_schema_13_sensor_with_optional_ir() -> None:
     validate_message(_base(type="sensor", smoke=3.5, bottom_ir=31.2, top_ir_max=36.1))
 
 
-def test_schema_13_sensor_requires_smoke() -> None:
+def test_schema_13_sensor_ir_only() -> None:
+    # capability-driven：只有红外（无 smoke）也应合法
+    validate_message(_base(type="sensor", bottom_ir=31.2))
+
+
+def test_schema_13_sensor_empty_invalid() -> None:
+    # smoke / bottom_ir / top_ir_max 至少一个存在
     with pytest.raises(ValidationError):
-        validate_message(_base(type="sensor", bottom_ir=31.2))
+        validate_message(_base(type="sensor"))
 
 
 def test_schema_13_status_partial_battery_only() -> None:

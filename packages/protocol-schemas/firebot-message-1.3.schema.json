@@ -82,7 +82,6 @@
         { "$ref": "#/$defs/vehicleBase" },
         {
           "type": "object",
-          "required": ["smoke"],
           "properties": {
             "type": { "const": "sensor" },
             "smoke": { "type": "number" },
@@ -90,6 +89,13 @@
             "top_ir_max": { "type": "number" },
             "payload": { "type": "object" }
           }
+        },
+        {
+          "anyOf": [
+            { "required": ["smoke"] },
+            { "required": ["bottom_ir"] },
+            { "required": ["top_ir_max"] }
+          ]
         }
       ]
     },
