@@ -86,12 +86,16 @@ FIREBOT_FIELD_TRACE=true
 | 项 | 内容 | 关键约束 |
 | --- | --- | --- |
 | R0 | 安全 capability：看到 vehicle online、capabilities 收到、`commands=[]`、`sensors=[]` | 不声明任何真实控制能力 |
-| R1 | 无 roscore：Bridge MQTT 仍在线，命令回 `rejected + BRIDGE_ADAPTER_NOT_CONNECTED` | MQTT 与 ROS master 解耦 |
+| R1 | 无 roscore：Bridge MQTT 仍在线、heartbeat 持续、`ros.master=unavailable`、adapter=not ready、boot_id/PID 不变 | 因 `supported_commands=[]`，不进行合法控制命令的 ROS 转发验证；此时发 patrol 正确结果是 `COMMAND_UNSUPPORTED` |
 | R2 | Bridge 在线后启动 roscore：adapter 自动初始化，boot_id / 进程不变 | ROS master 出现后自动接入 |
 | R3 | broker 受控断开/恢复 | **OWNER_APPROVAL_REQUIRED**，车端人员不得私自重启服务器 Mosquitto |
 | R4 | `MANUAL_ROSTOPIC` 手工发布 battery=67.5，验证链路到 Web | `BATTERY_TEST_SOURCE=MANUAL_ROSTOPIC`；`REAL_BATTERY_PROVIDER=NOT_VERIFIED` |
 
 R3 受控故障注入必须由 owner 批准执行；车端人员不得私自修改服务器 / 网络 / firewall。
+
+> `BRIDGE_ADAPTER_NOT_CONNECTED` 只在“命令已通过 supported capability 校验并成功转发 ROS 后无 feedback”时才回。
+> 当前 `FIREBOT_SUPPORTED_COMMANDS=`（空），R0–R4 默认安全配置下不会触发；它属于未来某命令正式加入
+> `FIREBOT_SUPPORTED_COMMANDS` 之后的 adapter-loss 反证测试。
 
 ---
 

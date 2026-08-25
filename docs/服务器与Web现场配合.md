@@ -86,13 +86,26 @@ ROS 是否存在**不应**决定 MQTT online。
 OWNER_APPROVAL_REQUIRED
 ```
 
-MQTT service 名为 `mosquitto`（`docker-compose.server.yml`）。受控重启前必须由 owner 批准，并使用与现场部署一致的 compose 调用，例如：
+MQTT service 名为 `mosquitto`（`docker-compose.server.yml`）。受控重启前必须由 owner 批准：
 
 ```bash
-docker compose -f docker-compose.server.yml restart mosquitto
+cd /opt/firebot/ROBOT-Web
+docker compose \
+  --env-file .env.server \
+  -f docker-compose.server.yml \
+  restart mosquitto
 ```
 
-> 车端人员不得私自重启服务器 Mosquitto。具体 `--env-file` 以现场实际部署为准。
+重启后立即确认：
+
+```bash
+docker compose \
+  --env-file .env.server \
+  -f docker-compose.server.yml \
+  ps mosquitto mqtt-ingress command-dispatcher
+```
+
+> 车端人员不得私自重启服务器 Mosquitto。
 
 ---
 

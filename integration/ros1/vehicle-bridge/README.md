@@ -14,9 +14,10 @@
 Bridge 只做 5 件事：MQTT 连接、协议校验、上行数据封装、下行命令转交、ROS 反馈重新封装。
 **它不知道"怎么巡航"**——只把"服务器要求开始巡航"可靠转交给 ROS 层。
 
-**MQTT 与 ROS master 解耦**：MQTT/TLS 生命周期不依赖 roscore——无 roscore 时 MQTT 仍在线
-（命令 rejected + `BRIDGE_ADAPTER_NOT_CONNECTED`）；roscore 出现后自动初始化，进程/boot_id 不变；
-初始 MQTT 连接失败在进程内指数退避重试，不靠 systemd 重启。
+**MQTT 与 ROS master 解耦**：MQTT/TLS 生命周期不依赖 roscore——无 roscore 时 MQTT 仍在线；
+production 默认 `supported_commands=[]`，此时任何命令都在 validator 回 `COMMAND_UNSUPPORTED`
+（不会转发 ROS）；只有命令已通过 capability 校验并成功转发 ROS 后无 feedback，才回 `BRIDGE_ADAPTER_NOT_CONNECTED`。
+roscore 出现后自动初始化，进程/boot_id 不变；初始 MQTT 连接失败在进程内指数退避重试，不靠 systemd 重启。
 
 **battery canonical 来源**：`/firebot_bridge/battery`（std_msgs/Float32），由车端 provider/adapter 发布；
 没有 provider 时不伪造电量（`BATTERY_PROVIDER=NOT_AVAILABLE`）。
@@ -62,10 +63,14 @@ pip3 install -r requirements.txt          # paho-mqtt；rospy 随 ROS Noetic 自
 test -f /etc/firebot/production-ca.crt || { echo "STOP: CA 不存在，向部署所有者索取"; exit 1; }
 nano /etc/firebot/bridge.env   # SITE/MAP/频率/STUB；密码不写这里
 
-# 4) secret（root:root 600，install.sh 会提示）
-sudo install -m 600 /dev/null /etc/firebot/bridge-secret.env
-echo 'FIREBOT_MQTT_PASSWORD=<车辆MQTT密码>' | sudo tee /etc/firebot/bridge-secret.env >/dev/null
-sudo chmod 600 /etc/firebot/bridge-secret.env
+# 4) secret：已有则保留，绝不覆盖/重新生成；缺失则 STOP，由部署所有者提供
+if sudo test -f /etc/firebot/bridge-secret.env; then
+  echo "PASS: existing bridge secret preserved"
+else
+  echo "STOP: bridge secret missing; deployment owner must provision it"
+  exit 1
+fi
+sudo stat -c '%U:%G %a %n' /etc/firebot/bridge-secret.env
 
 # 5) 启动
 sudo systemctl enable --now firebot-bridge
