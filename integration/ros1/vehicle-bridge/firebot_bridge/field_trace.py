@@ -55,7 +55,13 @@ class FieldTrace:
         if not self.enabled:
             return
         try:
-            record = {"event": event, "level": level, "mono": round(time.monotonic(), 3)}
+            record = {
+                "event": event,
+                "level": level,
+                # mono 只用于 throttle/latency；wall 只用于显示真实现场时间
+                "mono": round(time.monotonic(), 6),
+                "wall": time.time(),
+            }
             record.update(sanitize(fields))
             LOG.info(
                 "%s%s",

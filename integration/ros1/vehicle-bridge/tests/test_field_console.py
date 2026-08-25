@@ -261,6 +261,81 @@ def main() -> int:
     check("STATUS-02 Stub OFF", "OFF" in header)
     check("STATUS-02 Control NOT IMPLEMENTED", "NOT IMPLEMENTED" in header)
 
+    print("=== 微修：wall clock / 因果顺序 / 视觉语义 / LINK / status 签名 ===")
+    # wall time 毫秒显示（wall 只用于显示）
+    c = field_console.FieldConsole()
+    out = c.render({"event": "mqtt.connected", "level": "ok", "wall": 1700000000.136, "broker": "x"})
+    check("wall 毫秒显示 HH:MM:SS.mmm", out is not None and ".136" in out)
+    check("mono 不再被 localtime 误用", out is not None and ".136" in out)
+
+    # feedback 因果顺序：ros.feedback.rx 必须先于 mqtt.command_ack.tx
+    import firebot_bridge.ros.lifecycle as lc
+    from firebot_bridge.state import BridgeState
+
+    buf, handler, ft = _capture()
+    trace = FieldTrace(True)
+    state = BridgeState()
+    mgr = lc.RosChildManager(_Cfg(), state, status=None, trace=trace)
+
+    def _on_fb(fb):
+        trace.emit("mqtt.command_ack.tx", level="tx", status="accepted", command_id=fb.get("command_id"))
+
+    mgr.set_on_feedback(_on_fb)
+    mgr._handle_event({"type": "feedback", "feedback": {"command_id": "c1", "state": "ACCEPTED"}})
+    lines = _trace_lines(buf)
+    rx = next((i for i, l in enumerate(lines) if "ros.feedback.rx" in l), None)
+    ack = next((i for i, l in enumerate(lines) if "mqtt.command_ack.tx" in l), None)
+    check("feedback trace 在 ACK trace 前", rx is not None and ack is not None and rx < ack)
+    _release(handler, ft)
+
+    # 视觉语义
+    check("master AVAILABLE green", field_console.effective_flag("ros.master.changed", {"state": "AVAILABLE"}, "ok") == "ok")
+    check("master UNAVAILABLE non-green", field_console.effective_flag("ros.master.changed", {"state": "UNAVAILABLE"}, "ok") == "warn")
+    check("adapter READY green", field_console.effective_flag("ros.adapter.changed", {"state": "READY"}, "ok") == "ok")
+    check("adapter NOT_READY non-green", field_console.effective_flag("ros.adapter.changed", {"state": "NOT_READY"}, "ok") == "warn")
+
+    # header FIELD TRACE ON/OFF 动态
+    h_off = field_console.FieldConsole().header({"field_trace_enabled": False})
+    check("header FIELD TRACE OFF", "FIELD TRACE OFF" in h_off)
+    h_on = field_console.FieldConsole().header({"field_trace_enabled": True})
+    check("header FIELD TRACE ON", "FIELD TRACE ON" in h_on)
+
+    # LINK 节点模型无歧义
+    c = field_console.FieldConsole()
+    c.mqtt = False
+    c.master = True
+    c.adapter = True
+    link = c._link_line()
+    check("MQTT 断连 LINK 无 MQTT ●", "MQTT ●" not in link)
+    check("MQTT 断连 LINK 有 MQTT ×", "MQTT ×" in link)
+    c.mqtt = True
+    c.master = False
+    link = c._link_line()
+    check("master unavailable LINK 无 MASTER ●", "MASTER ●" not in link)
+
+    # status 签名完整：mode / active_task_id 变化即使 battery 不变也产生 trace
+    rec2 = {"publish_calls": 0}
+    _install_fake_paho(rec2)
+    from firebot_bridge.mqtt_client import MqttClient as _MC
+
+    buf, handler, ft = _capture()
+    mqtt2 = _MC(_Cfg(), _Identity(), _Proto(), lambda c: None, status=None, trace=FieldTrace(True))
+    mqtt2._trace_publish({"type": "status", "battery": 67.5, "mode": "IDLE"})
+    mqtt2._trace_publish({"type": "status", "battery": 67.5, "mode": "PATROL"})
+    check("status mode 变化仍产生 trace", len(_trace_lines(buf)) == 2)
+    _release(handler, ft)
+
+    buf, handler, ft = _capture()
+    mqtt3 = _MC(_Cfg(), _Identity(), _Proto(), lambda c: None, status=None, trace=FieldTrace(True))
+    mqtt3._trace_publish({"type": "status", "battery": 67.5, "active_task_id": None})
+    mqtt3._trace_publish({"type": "status", "battery": 67.5, "active_task_id": "t1"})
+    check("status active_task_id 变化仍产生 trace", len(_trace_lines(buf)) == 2)
+    _release(handler, ft)
+
+    # install.sh 安装 verify.sh
+    install_text = (ROOT / "install.sh").read_text(encoding="utf-8")
+    check("install.sh 复制 verify.sh", 'verify.sh' in install_text)
+
     print(f"\n结果: PASS={PASS} FAIL={FAIL}")
     return 0 if FAIL == 0 else 1
 

@@ -84,6 +84,15 @@ def short_id(value, full=False):
     return s if full else s[:8]
 
 
+def effective_flag(name, ev, default):
+    """按事件内容动态判定视觉状态：transition 到健康才绿，否则黄。"""
+    if name == "ros.master.changed":
+        return "ok" if ev.get("state") == "AVAILABLE" else "warn"
+    if name == "ros.adapter.changed":
+        return "ok" if ev.get("state") == "READY" else "warn"
+    return default
+
+
 def parse_trace(line: str):
     """从一行日志里解析出 FBTRACE 事件 dict；不是 trace 返回 None。"""
     marker = line.find(TRACE_PREFIX)
@@ -125,7 +134,7 @@ class FieldConsole:
         if name == "mqtt.capabilities.tx":
             return f"commands={ev.get('commands')} sensors={ev.get('sensors')}"
         if name == "mqtt.status.tx":
-            return f"battery={ev.get('battery')} mode={ev.get('mode')}"
+            return f"battery={ev.get('battery')} mode={ev.get('mode')} estop={ev.get('estop_active')} task={ev.get('active_task_id')}"
         if name == "mqtt.sensor.tx":
             return f"smoke={ev.get('smoke')}"
         if name == "mqtt.command_ack.tx":
@@ -183,10 +192,11 @@ class FieldConsole:
         return before != after
 
     def _link_line(self):
-        p1 = "●" if self.mqtt else "×"
-        p3 = "●" if self.adapter else "○"
-        p4 = "●" if self.master else "○"
-        return f"LINK  SERVER {p1}──MQTT●──BRIDGE{p3}──ROS{p4} VEHICLE"
+        mqtt = "●" if self.mqtt else "×"
+        master = "●" if self.master else "○"
+        adapter = "●" if self.adapter else "○"
+        # 节点模型：每个 symbol 只表示紧邻节点自身状态，避免线段两边混 symbol
+        return f"LINK  SERVER ── MQTT {mqtt} ── BRIDGE ● ── ROS MASTER {master} ── ADAPTER {adapter}"
 
     def render(self, event: dict):
         """渲染单个 FBTRACE 事件，返回字符串或 None（verbose 过滤的 debug 事件）。"""
@@ -197,10 +207,14 @@ class FieldConsole:
                 return None
             return self._c(_DIM, f"  UNKNOWN  {name} {json.dumps(event, ensure_ascii=False)}")
         path, label, flag = _EVENT_TABLE[name]
+        flag = effective_flag(name, event, flag)
         # debug 级别只在 verbose 显示
         if flag == "debug" and not self.verbose:
             return None
-        ts = time.strftime("%H:%M:%S", time.localtime(event.get("mono", 0)))
+        wall = float(event.get("wall", time.time()))
+        seconds = int(wall)
+        millis = int(round((wall - seconds) * 1000)) % 1000
+        ts = f"{time.strftime('%H:%M:%S', time.localtime(seconds))}.{millis:03d}"
         detail = self._detail(name, event)
         if self.compact:
             line = f"{ts} {self._flag(flag)} {path} {label} {detail}"
@@ -228,9 +242,10 @@ class FieldConsole:
         def row(left_k, left_v, right_k, right_v):
             return f"│ {left_k:<10}{left_v:<22} {right_k:<12}{right_v:<24}│"
 
+        trace_label = "FIELD TRACE ON" if status.get("field_trace_enabled") else "FIELD TRACE OFF"
         lines = [
             "┌────────────────────────────────────────────────────────────────────────────┐",
-            "│ FIREBOT VEHICLE BRIDGE                                    FIELD TRACE ON  │",
+            f"│ FIREBOT VEHICLE BRIDGE                                    {trace_label:<16}│",
             "├────────────────────────────────────────────────────────────────────────────┤",
             row("Vehicle", vehicle, "Protocol", proto),
             row("Boot", boot, "PID", str(pid)),

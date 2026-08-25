@@ -44,9 +44,10 @@ sudo rm -rf "$INSTALL_DIR/firebot_bridge" "$INSTALL_DIR/tools"
 sudo cp -r "$SCRIPT_DIR/firebot_bridge" "$INSTALL_DIR/"
 sudo cp -r "$SCRIPT_DIR/tools" "$INSTALL_DIR/"
 sudo cp "$SCRIPT_DIR/run_bridge.sh" "$INSTALL_DIR/"
+sudo cp "$SCRIPT_DIR/verify.sh" "$INSTALL_DIR/"
 sudo cp "$SCRIPT_DIR/watch-bridge.sh" "$INSTALL_DIR/"
 sudo cp "$SCRIPT_DIR/requirements.txt" "$INSTALL_DIR/"
-sudo chmod 0755 "$INSTALL_DIR/watch-bridge.sh" "$INSTALL_DIR/run_bridge.sh"
+sudo chmod 0755 "$INSTALL_DIR/watch-bridge.sh" "$INSTALL_DIR/run_bridge.sh" "$INSTALL_DIR/verify.sh"
 sudo chown -R "$BRIDGE_USER":"$(id -gn "$BRIDGE_USER" 2>/dev/null || echo "$BRIDGE_USER")" "$INSTALL_DIR"
 
 # 4) bridge.env 唯一真实位置（无密码）

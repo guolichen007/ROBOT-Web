@@ -316,8 +316,7 @@ class RosChildManager:
                 self._spawn_backoff = _SPAWN_BACKOFF_MIN_S
         elif t == "feedback":
             fb = payload.get("feedback") or {}
-            if self._on_feedback:
-                self._on_feedback(fb)
+            # 必须先 trace「ROS 已收到」，再进入状态机（否则 ACK trace 会先于 feedback trace）
             if self.trace:
                 self.trace.emit(
                     "ros.feedback.rx",
@@ -330,6 +329,8 @@ class RosChildManager:
                     progress=fb.get("progress"),
                     latency_ms=self.trace.latency_ms(fb.get("command_id")),
                 )
+            if self._on_feedback:
+                self._on_feedback(fb)
         elif t == "provider":
             channel = payload.get("channel")
             if channel == "battery":

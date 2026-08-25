@@ -147,8 +147,22 @@ class MqttClient:
                 self.trace.throttle("mqtt.heartbeat", 10.0, "mqtt.heartbeat.tx", level="debug",
                                     seq=payload.get("seq"), uptime=payload.get("uptime_seconds"))
             elif msg_type == "status":
-                self.trace.changed("mqtt.status.battery", payload.get("battery"), "mqtt.status.tx",
-                                   tolerance=0.1, battery=payload.get("battery"), mode=payload.get("mode"))
+                # 完整签名：任一字段变化都产生一次 trace（不只 battery）
+                signature = (
+                    payload.get("battery"),
+                    payload.get("mode"),
+                    payload.get("estop_active"),
+                    payload.get("active_task_id"),
+                )
+                self.trace.changed(
+                    "mqtt.status",
+                    signature,
+                    "mqtt.status.tx",
+                    battery=payload.get("battery"),
+                    mode=payload.get("mode"),
+                    estop_active=payload.get("estop_active"),
+                    active_task_id=payload.get("active_task_id"),
+                )
             elif msg_type == "sensor":
                 self.trace.changed("mqtt.sensor.smoke", payload.get("smoke"), "mqtt.sensor.tx",
                                    smoke=payload.get("smoke"))
