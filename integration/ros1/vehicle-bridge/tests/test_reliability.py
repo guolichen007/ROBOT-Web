@@ -252,13 +252,14 @@ def main() -> int:
     check("child crash：ROS telemetry 清空（不 stale）", crash_state.last_battery is None)
     check("child crash：退避生效（_next_spawn_allowed 未来）", crash_mgr._next_spawn_allowed > time.monotonic())
 
-    # READY timeout
+    # READY timeout（现在看 adapter_ready，不是 node_ready）
     timeout_mgr = lc.RosChildManager(_Cfg(), BridgeState(), status=None)
     timeout_mgr._proc = _FakeProc()
     timeout_mgr._spawn_time = time.monotonic() - 20
-    check("READY 超时判定：未 ready 且超时 → True", timeout_mgr._ready_timed_out(time.monotonic()) is True)
-    timeout_mgr.node_ready = True
-    check("READY 超时判定：已 ready → False", timeout_mgr._ready_timed_out(time.monotonic()) is False)
+    check("READY 超时判定：adapter 未就绪且超时 → True", timeout_mgr._ready_timed_out(time.monotonic()) is True)
+    timeout_mgr.command_publisher_ready = True
+    timeout_mgr.feedback_ready = True
+    check("READY 超时判定：adapter 就绪 → False", timeout_mgr._ready_timed_out(time.monotonic()) is False)
 
     # generation 隔离
     gen_mgr = lc.RosChildManager(_Cfg(), BridgeState(), status=None)
@@ -268,6 +269,39 @@ def main() -> int:
     check("generation 匹配 → 当前", gen_mgr._is_current(pa, 5) is True)
     check("旧 generation 事件被拒绝", gen_mgr._is_current(pa, 4) is False)
     check("旧 proc 事件被拒绝", gen_mgr._is_current(_FakeProc(), 5) is False)
+
+    # P0：clear_ros_telemetry 绝不清任务锁（reported 与 lock 分离）
+    lock_state = BridgeState()
+    check("task A acquire 成功", lock_state.acquire_task("task-A") is True)
+    lock_state.apply_status({"active_task_id": "task-A"})
+    lock_state.clear_ros_telemetry()
+    check("clear telemetry 清 reported_active_task_id", lock_state.reported_active_task_id is None)
+    check("clear telemetry 绝不清 task_lock_id", lock_state.task_lock_id == "task-A")
+    check("task B 仍 ACTIVE_TASK_CONFLICT", lock_state.acquire_task("task-B") is False)
+
+    # P1：backoff 指数增长，且只有 adapter ready 才重置
+    bk_mgr = lc.RosChildManager(_Cfg(), BridgeState(), status=None)
+    bk_mgr._bump_backoff()
+    b1 = bk_mgr._spawn_backoff
+    bk_mgr._bump_backoff()
+    b2 = bk_mgr._spawn_backoff
+    bk_mgr._bump_backoff()
+    b3 = bk_mgr._spawn_backoff
+    check("backoff 指数增长 1→2→4", b1 == 2.0 and b2 == 4.0 and b3 == 8.0)
+    bk_mgr._spawn_backoff = 30.0
+    bk_mgr._handle_event({"type": "ready", "ok": True, "command_publisher": True,
+                          "feedback": True, "providers": {"battery": True}})
+    check("adapter ready 后 backoff 重置为 MIN", bk_mgr._spawn_backoff == lc._SPAWN_BACKOFF_MIN_S)
+
+    # P1：node_ready=true 但 command adapter 未就绪 → READY timeout 仍触发
+    half_mgr = lc.RosChildManager(_Cfg(), BridgeState(), status=None)
+    half_mgr._proc = _FakeProc()
+    half_mgr._spawn_time = time.monotonic() - 20
+    half_mgr.node_ready = True
+    half_mgr.command_publisher_ready = False
+    half_mgr.feedback_ready = False
+    check("node_ready=true 但 adapter_ready=false → READY timeout True",
+          half_mgr._ready_timed_out(time.monotonic()) is True)
 
     print("=== IPC 隔离 / 最小权限 ===")
     from firebot_bridge.ros_adapter import normalize_status
@@ -282,6 +316,10 @@ def main() -> int:
     check("status 非法 mode 被丢弃", "mode" not in ns3)
     ns4 = normalize_status({"estop_active": True, "active_task_id": "t1"})
     check("status estop/task 透传", ns4.get("estop_active") is True and ns4.get("active_task_id") == "t1")
+    ns5 = normalize_status({"estop_active": "false"})
+    check("estop 字符串 'false' 被丢弃（不误判 True）", "estop_active" not in ns5)
+    ns6 = normalize_status({"active_task_id": 123})
+    check("active_task_id 非 str/None 被丢弃", "active_task_id" not in ns6)
 
     saved_pw = os.environ.get("FIREBOT_MQTT_PASSWORD")
     os.environ["FIREBOT_MQTT_PASSWORD"] = "super-secret"

@@ -15,7 +15,10 @@ class BridgeState:
         self.mode: str | None = None
         # 软件急停锁存位。初始 None = 车端未提供，不得伪造
         self.estop_active: bool | None = None
-        self.active_task_id: str | None = None
+        # ROS 上报的当前任务（遥测字段；clear_ros_telemetry 会清）
+        self.reported_active_task_id: str | None = None
+        # Bridge 内部任务互斥锁（仅 CommandProcessor acquire/release，绝不因遥测清空）
+        self.task_lock_id: str | None = None
         self.cancel_requested: bool = False
         # 数据缓存（ROS providers 写入，telemetry_loop 读取）
         self.last_battery: float | None = None
@@ -71,20 +74,20 @@ class BridgeState:
                 rec["terminal"] = True
                 rec["ts"] = time.time()
 
-    # ---- 任务锁 ----
+    # ---- 任务锁（内部互斥，独立于 ROS 遥测）----
     def acquire_task(self, task_id: str) -> bool:
         with self._lock:
             # 空 task_id 不能形成有效锁，拒绝
-            if not task_id or self.active_task_id is not None:
+            if not task_id or self.task_lock_id is not None:
                 return False
-            self.active_task_id = task_id
+            self.task_lock_id = task_id
             self.cancel_requested = False
             return True
 
     def release_task(self) -> None:
         # 只释放内部任务锁；绝不伪造 vehicle mode（mode 只能来自真实车端状态源）
         with self._lock:
-            self.active_task_id = None
+            self.task_lock_id = None
             self.cancel_requested = False
 
     def request_cancel(self) -> None:
@@ -112,10 +115,13 @@ class BridgeState:
             if "estop_active" in fields:
                 self.estop_active = fields["estop_active"]
             if "active_task_id" in fields:
-                self.active_task_id = fields["active_task_id"]
+                self.reported_active_task_id = fields["active_task_id"]
 
     def clear_ros_telemetry(self) -> None:
-        """ROS 子进程丢失/降级时清空 ROS 来源数据，避免把旧数据包装成新消息上报。"""
+        """ROS 子进程丢失/降级时清空 ROS 来源数据，避免把旧数据包装成新消息上报。
+
+        绝不清 task_lock_id（内部任务互斥锁，只有 CommandProcessor 能 acquire/release）。
+        """
         with self._lock:
             self.last_battery = None
             self.last_smoke = None
@@ -124,14 +130,14 @@ class BridgeState:
             self.last_location = None
             self.mode = None
             self.estop_active = None
-            self.active_task_id = None
+            self.reported_active_task_id = None
 
     def snapshot_telemetry(self) -> dict:
         with self._lock:
             return {
                 "mode": self.mode,
                 "estop_active": self.estop_active,
-                "active_task_id": self.active_task_id,
+                "active_task_id": self.reported_active_task_id,
                 "battery": self.last_battery,
                 "smoke": self.last_smoke,
                 "bottom_ir": self.last_bottom_ir,

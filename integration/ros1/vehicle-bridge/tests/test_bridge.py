@@ -142,7 +142,7 @@ def main() -> int:
     s4 = BridgeState()
     s4.acquire_task("t-1")
     s4.release_task()
-    check("release 后 active_task_id 为空", s4.active_task_id is None)
+    check("release 后 task_lock_id 为空", s4.task_lock_id is None)
     check("release 不伪造 mode", s4.mode is None)
 
     print("=== location 默认门控 ===")

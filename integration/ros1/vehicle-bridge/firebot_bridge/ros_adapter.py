@@ -40,16 +40,17 @@ def _emit(payload: dict) -> None:
 def normalize_status(data: dict) -> dict:
     """status 字段白名单：只透传 mode/estop_active/active_task_id，绝不 `**data` 覆盖 type。
 
-    mode 一律 uppercase 且只允许 schema enum；非法 mode 丢弃。
+    mode 一律 uppercase 且只允许 schema enum；estop_active 只接受 bool；active_task_id
+    只接受 str/None。类型不符直接丢弃（防止 "false" 字符串被 bool() 误判为 True）。
     """
     out: dict = {"type": "status"}
     if "mode" in data:
         mode = str(data["mode"]).upper()
         if mode in _STATUS_MODE_ENUM:
             out["mode"] = mode
-    if "estop_active" in data:
-        out["estop_active"] = bool(data["estop_active"])
-    if "active_task_id" in data:
+    if "estop_active" in data and isinstance(data["estop_active"], bool):
+        out["estop_active"] = data["estop_active"]
+    if "active_task_id" in data and isinstance(data["active_task_id"], (str, type(None))):
         out["active_task_id"] = data["active_task_id"]
     return out
 

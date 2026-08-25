@@ -135,9 +135,11 @@ class RosChildManager:
             self._stop.wait(_POLL_INTERVAL_S)
 
     def _ready_timed_out(self, now: float) -> bool:
+        # 关键就绪 = adapter_ready（command_publisher && feedback），不是 node_ready。
+        # node_ready=true 但 publisher/feedback 未就绪时也必须超时重启。
         return (
             self._proc is not None
-            and not self.node_ready
+            and not self.adapter_ready
             and now - self._spawn_time > _READY_TIMEOUT_S
         )
 
@@ -164,7 +166,6 @@ class RosChildManager:
             self._proc = proc
             self._stdin = proc.stdin
         self._spawn_time = time.monotonic()
-        self._spawn_backoff = _SPAWN_BACKOFF_MIN_S
         self._next_spawn_allowed = self._spawn_time
         self._reset_ready()
         threading.Thread(
@@ -263,6 +264,9 @@ class RosChildManager:
             self.provider_ready = bool(providers) and all(providers.values())
             if not self.node_ready:
                 LOG.warning("ROS 子进程未就绪: %s", payload.get("reason"))
+            if self.adapter_ready:
+                # 只有真正 command adapter 就绪稳定后才重置退避（不是 Popen 成功就重置）
+                self._spawn_backoff = _SPAWN_BACKOFF_MIN_S
         elif t == "feedback":
             if self._on_feedback:
                 self._on_feedback(payload.get("feedback") or {})
