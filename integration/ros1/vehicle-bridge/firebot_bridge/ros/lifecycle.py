@@ -59,10 +59,11 @@ def build_child_env() -> dict:
 
 
 class RosChildManager:
-    def __init__(self, config, state, status=None) -> None:
+    def __init__(self, config, state, status=None, trace=None) -> None:
         self.config = config
         self.state = state
         self.status = status
+        self.trace = trace
         self._on_feedback = None
         self._proc = None
         self._stdin = None
@@ -101,6 +102,15 @@ class RosChildManager:
     def publish_command(self, command: dict) -> bool:
         if not self.adapter_ready or self._proc is None or self._proc.poll() is not None:
             LOG.info("ROS 未就绪（no child / not ready）：命令无法转发")
+            if self.trace:
+                self.trace.emit(
+                    "ros.command.tx_failed",
+                    level="warn",
+                    reason="ADAPTER_NOT_READY",
+                    cmd=command.get("cmd"),
+                    command_id=command.get("command_id"),
+                    task_id=command.get("task_id"),
+                )
             return False
         with self._stdin_lock:
             if self._stdin is None:
@@ -108,9 +118,26 @@ class RosChildManager:
             try:
                 self._stdin.write(json.dumps({"type": "command", "command": command}) + "\n")
                 self._stdin.flush()
+                if self.trace:
+                    self.trace.emit(
+                        "ros.command.tx",
+                        level="tx",
+                        cmd=command.get("cmd"),
+                        command_id=command.get("command_id"),
+                        task_id=command.get("task_id"),
+                        latency_ms=self.trace.latency_ms(command.get("command_id")),
+                    )
                 return True
             except (BrokenPipeError, ValueError, OSError) as exc:
                 LOG.warning("ROS 命令转发失败: %s", exc)
+                if self.trace:
+                    self.trace.emit(
+                        "ros.command.tx_failed",
+                        level="warn",
+                        reason="BROKEN_PIPE",
+                        cmd=command.get("cmd"),
+                        command_id=command.get("command_id"),
+                    )
                 return False
 
     # ---- 生命周期线程 ----
@@ -129,6 +156,14 @@ class RosChildManager:
                         self._spawn()
                 elif self._ready_timed_out(now):
                     LOG.warning("ROS child READY 超时（%.1fs），terminate 后重试", _READY_TIMEOUT_S)
+                    if self.trace:
+                        self.trace.emit(
+                            "ros.child.ready_timeout",
+                            level="warn",
+                            pid=self._proc.pid if self._proc else None,
+                            generation=self._generation,
+                            timeout_s=_READY_TIMEOUT_S,
+                        )
                     self._bump_backoff()
                     self._terminate_child()
             self._refresh_status()
@@ -175,11 +210,15 @@ class RosChildManager:
             daemon=True,
         ).start()
         LOG.info("ROS 子进程已启动 pid=%s gen=%s", proc.pid, self._generation)
+        if self.trace:
+            self.trace.emit("ros.child.spawned", level="ok", pid=proc.pid, generation=self._generation)
 
     def _bump_backoff(self) -> None:
         self._spawn_backoff = min(self._spawn_backoff * 2, _SPAWN_BACKOFF_MAX_S)
         self._next_spawn_allowed = time.monotonic() + self._spawn_backoff
         LOG.warning("ROS child 退避 %.1fs 后允许重启", self._spawn_backoff)
+        if self.trace:
+            self.trace.emit("ros.child.backoff", level="warn", seconds=self._spawn_backoff)
 
     def _terminate_child(self) -> None:
         with self._lock:
@@ -213,6 +252,14 @@ class RosChildManager:
     def _on_child_exit(self, proc) -> None:
         """child EOF / 崩溃：reap + 清引用 + 清 readiness/telemetry + 退避。"""
         self._reap(proc)
+        if self.trace:
+            self.trace.emit(
+                "ros.child.exited",
+                level="warn",
+                pid=getattr(proc, "pid", None),
+                generation=self._generation,
+                returncode=proc.poll(),
+            )
         with self._lock:
             if self._proc is proc:
                 self._proc = None
@@ -268,24 +315,80 @@ class RosChildManager:
                 # 只有真正 command adapter 就绪稳定后才重置退避（不是 Popen 成功就重置）
                 self._spawn_backoff = _SPAWN_BACKOFF_MIN_S
         elif t == "feedback":
+            fb = payload.get("feedback") or {}
             if self._on_feedback:
-                self._on_feedback(payload.get("feedback") or {})
+                self._on_feedback(fb)
+            if self.trace:
+                self.trace.emit(
+                    "ros.feedback.rx",
+                    level="rx",
+                    state=fb.get("state"),
+                    command_id=fb.get("command_id"),
+                    task_id=fb.get("task_id"),
+                    reason_code=fb.get("reason_code"),
+                    phase=fb.get("phase"),
+                    progress=fb.get("progress"),
+                    latency_ms=self.trace.latency_ms(fb.get("command_id")),
+                )
         elif t == "provider":
             channel = payload.get("channel")
             if channel == "battery":
-                self.state.set_battery(payload.get("value"))
+                value = payload.get("value")
+                self.state.set_battery(value)
                 self.battery_provider_seen = True
                 self.battery_last_update = time.time()
+                if self.trace:
+                    self.trace.changed("ros.battery", value, "ros.battery.rx", tolerance=0.1, battery=value)
             elif channel == "smoke":
-                self.state.set_smoke(payload.get("value"))
+                value = payload.get("value")
+                self.state.set_smoke(value)
+                if self.trace:
+                    self.trace.changed("ros.smoke", value, "ros.smoke.rx", smoke=value)
         elif t == "status":
             # apply_status 只取 mode/estop_active/active_task_id，天然忽略 type 等其它字段
             self.state.apply_status(payload)
+            if self.trace:
+                self.trace.changed(
+                    "ros.status",
+                    (payload.get("mode"), payload.get("estop_active"), payload.get("active_task_id")),
+                    "ros.status.rx",
+                    mode=payload.get("mode"),
+                    estop_active=payload.get("estop_active"),
+                    active_task_id=payload.get("active_task_id"),
+                )
         elif t == "location":
-            self.state.set_location(payload.get("location"))
+            loc = payload.get("location") or {}
+            self.state.set_location(loc)
+            if self.trace:
+                pos = loc.get("position") or loc
+                self.trace.throttle(
+                    "ros.location",
+                    5.0,
+                    "ros.location.rx",
+                    x=pos.get("x"),
+                    y=pos.get("y"),
+                    theta=pos.get("theta"),
+                    localization_status=loc.get("localization_status"),
+                )
         self._refresh_status()
 
     def _refresh_status(self) -> None:
+        if self.trace:
+            self.trace.transition(
+                "ros.master",
+                self.master_available,
+                "ros.master.changed",
+                state="AVAILABLE" if self.master_available else "UNAVAILABLE",
+            )
+            self.trace.transition(
+                "ros.adapter",
+                self.adapter_ready,
+                "ros.adapter.changed",
+                state="READY" if self.adapter_ready else "NOT_READY",
+                node=self.node_ready,
+                publisher=self.command_publisher_ready,
+                feedback=self.feedback_ready,
+            )
         if not self.status:
             return
         self.status.set(

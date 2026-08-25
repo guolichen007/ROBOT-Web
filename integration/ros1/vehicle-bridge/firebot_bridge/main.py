@@ -14,11 +14,13 @@ MQTT 仍在线（命令 rejected + BRIDGE_ADAPTER_NOT_CONNECTED），roscore 出
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import threading
 import time
 
 from .config import get_config
+from .field_trace import FieldTrace
 from .identity import Identity
 from .protocol import Protocol
 from .state import BridgeState
@@ -94,15 +96,37 @@ def main() -> int:
              config.vehicle_id, identity.boot_id[:8], config.bridge_stub_mode)
 
     status = RuntimeStatus()
-    status.set(boot_id=identity.boot_id)
+    status.set(
+        boot_id=identity.boot_id,
+        vehicle_id=config.vehicle_id,
+        protocol_version=config.protocol_version,
+        pid=os.getpid(),
+        stub_mode=config.bridge_stub_mode,
+        supported_commands=config.supported_commands,
+        sensors=config.sensors,
+        location_enabled=config.location_enabled,
+        field_trace_enabled=config.field_trace_enabled,
+    )
+
+    trace = FieldTrace(config.field_trace_enabled)
+    trace.emit(
+        "bridge.started",
+        level="ok",
+        vehicle=config.vehicle_id,
+        boot=identity.boot_id,
+        protocol=config.protocol_version,
+        pid=os.getpid(),
+        stub=config.bridge_stub_mode,
+        commands=config.supported_commands,
+    )
 
     # 1) ROS 子进程生命周期管理（与 MQTT 解耦，绝不阻塞）
-    ros = RosChildManager(config, state, status=status)
-    processor = CommandProcessor(config, state, identity, proto, mqtt_client=None, placeholder=ros)
+    ros = RosChildManager(config, state, status=status, trace=trace)
+    processor = CommandProcessor(config, state, identity, proto, mqtt_client=None, placeholder=ros, trace=trace)
     ros.set_on_feedback(processor.on_feedback)
 
     # 2) MQTT（单一连接 owner）
-    mqtt = MqttClient(config, identity, proto, processor.on_command, status=status)
+    mqtt = MqttClient(config, identity, proto, processor.on_command, status=status, trace=trace)
     processor.client = mqtt  # 注入 MQTT client 用于回执
 
     # 3) 信号：SIGTERM/SIGINT → 优雅停机（offline/BRIDGE_STOP）
@@ -127,6 +151,7 @@ def main() -> int:
         while not stop.is_set():
             stop.wait(1.0)
     finally:
+        trace.emit("bridge.stopping", level="ok", boot=identity.boot_id)
         ros.stop()
         info = mqtt.publish(
             proto.topic("availability"),

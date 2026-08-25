@@ -77,6 +77,10 @@ class Config:
     ]
     protocol_version: str = os.environ.get("FIREBOT_PROTOCOL_VERSION", "1.3.0")
 
+    # ---- 现场通信链路追踪（纯 observability，不参与任何业务/协议/控制）----
+    # 生产长期运行默认 false；R0-R4 现场验证临时 true。
+    field_trace_enabled: bool = _env_bool("FIREBOT_FIELD_TRACE", False)
+
     # ---- 密码缺失即退出 ----
     def validate(self) -> None:
         if not self.mqtt_password:

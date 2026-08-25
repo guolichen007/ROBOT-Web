@@ -8,6 +8,14 @@ import threading
 
 _DEFAULT_FIELDS = {
     "boot_id": "",
+    "vehicle_id": "",
+    "protocol_version": "",
+    "pid": None,
+    "stub_mode": False,
+    "supported_commands": [],
+    "sensors": [],
+    "location_enabled": False,
+    "field_trace_enabled": False,
     "mqtt_connected": False,
     "ros_master_available": False,
     "ros_node_ready": False,

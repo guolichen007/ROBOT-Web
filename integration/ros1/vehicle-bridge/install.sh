@@ -40,10 +40,13 @@ fi
 # 3) 安装/同步代码到 /opt（需 sudo）；幂等：先清旧 firebot_bridge 避免残留已删除文件
 echo "  安装代码到 $INSTALL_DIR ..."
 sudo mkdir -p "$INSTALL_DIR" "$(dirname "$BRIDGE_ENV")"
-sudo rm -rf "$INSTALL_DIR/firebot_bridge"
+sudo rm -rf "$INSTALL_DIR/firebot_bridge" "$INSTALL_DIR/tools"
 sudo cp -r "$SCRIPT_DIR/firebot_bridge" "$INSTALL_DIR/"
+sudo cp -r "$SCRIPT_DIR/tools" "$INSTALL_DIR/"
 sudo cp "$SCRIPT_DIR/run_bridge.sh" "$INSTALL_DIR/"
+sudo cp "$SCRIPT_DIR/watch-bridge.sh" "$INSTALL_DIR/"
 sudo cp "$SCRIPT_DIR/requirements.txt" "$INSTALL_DIR/"
+sudo chmod 0755 "$INSTALL_DIR/watch-bridge.sh" "$INSTALL_DIR/run_bridge.sh"
 sudo chown -R "$BRIDGE_USER":"$(id -gn "$BRIDGE_USER" 2>/dev/null || echo "$BRIDGE_USER")" "$INSTALL_DIR"
 
 # 4) bridge.env 唯一真实位置（无密码）

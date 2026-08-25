@@ -98,6 +98,45 @@ sudo systemctl enable --now firebot-bridge
 cd vehicle-bridge && python3 tests/test_bridge.py
 ```
 
+## 现场实时通信控制台
+
+Bridge 输出无 ANSI 的结构化 `FBTRACE` 事件（journal），终端渲染由独立 viewer 完成。
+现场人员不需要懂 MQTT / rospy / Python，只看 `● ○ × RX TX` 就能判断信号卡在哪一段链路。
+
+```bash
+# 状态快照（一次性）
+FIREBOT_BRIDGE_ENV=/etc/firebot/bridge.env /opt/firebot/vehicle-bridge/verify.sh
+
+# 实时控制台（append-only，SSH 友好）
+/opt/firebot/vehicle-bridge/watch-bridge.sh
+
+# verbose / full id / raw
+/opt/firebot/vehicle-bridge/watch-bridge.sh --verbose
+/opt/firebot/vehicle-bridge/watch-bridge.sh --full-id
+/opt/firebot/vehicle-bridge/watch-bridge.sh --raw
+```
+
+现场 R0–R4 验证期间临时开启 trace（正常长期运行保持 false）：
+
+```text
+FIREBOT_FIELD_TRACE=true
+```
+
+`watch-bridge.sh` 只是观察者：Ctrl+C 只退出 viewer，**不会**停止 `firebot-bridge.service`。
+
+## ⚠️ 禁止双 Bridge
+
+不要在 `firebot-bridge` service 处于 `active` 时再手动运行 `./run_bridge.sh`——相同的
+MQTT client identity 会互相踢线。如确需 foreground 调试：
+
+```bash
+sudo systemctl stop firebot-bridge
+systemctl is-active firebot-bridge   # 确认不是 active 后
+./run_bridge.sh
+# 调试结束：
+sudo systemctl start firebot-bridge
+```
+
 ## 验收边界
 
 本轮正确结果：`REAL_PATROL/REAL_STOP/REAL_ESTOP/REAL_EXTINGUISH/REAL_MANUAL_CONTROL = NOT_IMPLEMENTED`。

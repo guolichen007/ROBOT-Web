@@ -39,6 +39,7 @@ class CommandProcessor:
         proto: Protocol,
         mqtt_client,
         placeholder,
+        trace=None,
     ) -> None:
         self.config = config
         self.state = state
@@ -46,6 +47,7 @@ class CommandProcessor:
         self.proto = proto
         self.client = mqtt_client
         self.placeholder = placeholder
+        self.trace = trace
         self.dedup = CommandDedup(state)
         self._pending: dict[str, _Pending] = {}
         self._lock = threading.Lock()
@@ -188,6 +190,17 @@ class CommandProcessor:
         )
         self.dedup.remember_ack(command.get("command_id"), msg)
         self._publish("command_ack", msg)
+        if self.trace:
+            self.trace.emit(
+                "mqtt.command_ack.tx",
+                level="tx",
+                cmd=command.get("cmd"),
+                status=status,
+                reason=reason_code,
+                command_id=command.get("command_id"),
+                task_id=command.get("task_id"),
+                latency_ms=self.trace.latency_ms(command.get("command_id")),
+            )
         LOG.info("↗ command_ack: cmd=%s status=%s reason=%s",
                  command.get("cmd"), status, reason_code)
 
@@ -213,6 +226,16 @@ class CommandProcessor:
         )
         self.dedup.remember_task_status(command_id, msg)
         self._publish("task_status", msg)
+        if self.trace:
+            self.trace.emit(
+                "mqtt.task_status.tx",
+                level="tx",
+                task_id=task_id,
+                status=status,
+                phase=phase,
+                progress=progress,
+                failure_code=feedback.get("reason_code"),
+            )
         LOG.info("↗ task_status: task=%s status=%s phase=%s progress=%s",
                  str(task_id)[:8], status, phase, progress)
 

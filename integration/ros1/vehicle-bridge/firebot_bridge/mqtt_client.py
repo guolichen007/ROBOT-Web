@@ -23,12 +23,13 @@ OnCommand = "callable[[dict], None]"
 
 
 class MqttClient:
-    def __init__(self, config: Config, identity: Identity, proto: Protocol, on_command, status=None) -> None:
+    def __init__(self, config: Config, identity: Identity, proto: Protocol, on_command, status=None, trace=None) -> None:
         self.config = config
         self.identity = identity
         self.proto = proto
         self.on_command = on_command
         self.status = status
+        self.trace = trace
 
         self.client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
@@ -68,7 +69,16 @@ class MqttClient:
                 self.status.set(mqtt_connected=False)
             return
         LOG.info("MQTT connected (boot=%s)", self.identity.boot_id[:8])
+        if self.trace:
+            self.trace.emit(
+                "mqtt.connected",
+                level="ok",
+                broker=f"{self.config.mqtt_host}:{self.config.mqtt_port}",
+                boot=self.identity.boot_id,
+            )
         client.subscribe(self.proto.topic("command"), qos=1)
+        if self.trace:
+            self.trace.emit("mqtt.subscribed", level="ok", topic=self.proto.topic("command"), qos=1)
         self.publish(
             self.proto.topic("availability"),
             avail_uplink.make_availability(self.proto, "online", reason="BRIDGE_START"),
@@ -87,11 +97,16 @@ class MqttClient:
 
     def _on_connect_fail(self, client, userdata) -> None:
         LOG.warning("MQTT connect fail（Paho 将按退避重试）")
+        if self.trace:
+            self.trace.emit("mqtt.connect_failed", level="warn",
+                            broker=f"{self.config.mqtt_host}:{self.config.mqtt_port}")
         if self.status:
             self.status.set(mqtt_connected=False)
 
     def _on_disconnect(self, client, userdata, flags, reason_code, properties=None) -> None:
         LOG.warning("MQTT disconnected rc=%s（Paho 自动重连）", reason_code)
+        if self.trace:
+            self.trace.emit("mqtt.disconnected", level="warn", rc=reason_code)
         if self.status:
             self.status.set(mqtt_connected=False)
 
@@ -99,11 +114,19 @@ class MqttClient:
         try:
             payload = json.loads(message.payload.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
+            if self.trace:
+                self.trace.emit("mqtt.command.ignored", level="debug", reason="INVALID_JSON")
             return
         if not isinstance(payload, dict) or payload.get("type") != "command":
+            if self.trace:
+                self.trace.emit("mqtt.command.ignored", level="debug", reason="NOT_COMMAND")
             return
         if payload.get("vehicle_id") != self.config.vehicle_id:
+            if self.trace:
+                self.trace.emit("mqtt.command.ignored", level="debug", reason="VEHICLE_MISMATCH")
             return
+        if self.trace:
+            self.trace.command_received(payload)
         try:
             self.on_command(payload)
         except Exception as exc:  # noqa: BLE001
@@ -111,7 +134,36 @@ class MqttClient:
 
     # ---- 发布 ----
     def publish(self, topic: str, payload: dict, qos: int = 0, retain: bool = False):
-        return self.client.publish(topic, json.dumps(payload, ensure_ascii=False), qos=qos, retain=retain)
+        result = self.client.publish(topic, json.dumps(payload, ensure_ascii=False), qos=qos, retain=retain)
+        self._trace_publish(payload)
+        return result
+
+    def _trace_publish(self, payload: dict) -> None:
+        if not self.trace:
+            return
+        try:
+            msg_type = payload.get("type")
+            if msg_type == "heartbeat":
+                self.trace.throttle("mqtt.heartbeat", 10.0, "mqtt.heartbeat.tx", level="debug",
+                                    seq=payload.get("seq"), uptime=payload.get("uptime_seconds"))
+            elif msg_type == "status":
+                self.trace.changed("mqtt.status.battery", payload.get("battery"), "mqtt.status.tx",
+                                   tolerance=0.1, battery=payload.get("battery"), mode=payload.get("mode"))
+            elif msg_type == "sensor":
+                self.trace.changed("mqtt.sensor.smoke", payload.get("smoke"), "mqtt.sensor.tx",
+                                   smoke=payload.get("smoke"))
+            elif msg_type == "location":
+                self.trace.throttle("mqtt.location", 5.0, "mqtt.location.tx", level="debug")
+            elif msg_type == "availability":
+                self.trace.emit("mqtt.availability.tx", level="tx",
+                                state=payload.get("state"), reason=payload.get("reason"))
+            elif msg_type == "capabilities":
+                self.trace.emit("mqtt.capabilities.tx", level="tx",
+                                commands=len(payload.get("supported_commands") or []),
+                                sensors=len(payload.get("sensors") or []))
+            # command_ack / task_status 的 TX 事件由 CommandProcessor 里 emit（带 latency），此处不重复
+        except Exception:  # noqa: BLE001 — trace 绝不能影响 publish
+            pass
 
     # ---- 生命周期 ----
     def loop_stop(self) -> None:
