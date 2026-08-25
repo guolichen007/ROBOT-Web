@@ -42,9 +42,9 @@ marker_hits: list[str] = []
 unpinned_actions: list[str] = []
 migration_metadata_hits: list[str] = []
 marker_allow = {
-    "CODEX_MASTER_SPEC_FIREBOT_V2_BASELINE_FINAL.md",
-    "CODEX_FINAL_INTEGRATION_READY_ITERATION.md",
-    "docs/深度加固跟踪表.md",
+    "docs/archive/历史基线/CODEX_MASTER_SPEC_FIREBOT_V2_BASELINE_FINAL.md",
+    "docs/archive/历史基线/CODEX_FINAL_INTEGRATION_READY_ITERATION.md",
+    "docs/archive/工程报告/深度加固跟踪表.md",
     "docs/协议待确认项.md",
     "integration/ros2/ROS2对接参数模板.yaml",
     "integration/ros2/现场对接说明.md",

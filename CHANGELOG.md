@@ -1,5 +1,12 @@
 # 变更日志
 
+## Vehicle Bridge 现场交接收尾（docs closeout）
+
+- Vehicle Bridge runtime 冻结于 `13c869247079b88da11b36666755906001a0041c`（Field Console / ROS-MQTT 生命周期隔离 / 现场交接文档完成）。
+- 新增现场文档：实车现场联调总览（SSOT）、车端Bridge部署与实车接口、服务器与Web现场配合。
+- 归档历史 UI 报告、CODEX 基线与工程报告；修正车端唯一配置路径与 CA 处理说明。
+- 当前状态：`FIELD_R0_R4=GO`、`REAL_CONTROL=NOT_IMPLEMENTED`（R0–R4 尚未执行，不声称 PASS）。
+
 ## 当前主线
 
 - 将实时监控重构为低干扰工业 HMI，首页突出二维停车场地图、车顶视频、活动报警和四个主控制动作。

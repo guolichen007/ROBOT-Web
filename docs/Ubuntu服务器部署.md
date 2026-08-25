@@ -1,5 +1,9 @@
 # Ubuntu SERVER 从零部署
 
+> ⚠️ **注意**：本文仅用于「**新服务器从零部署**」。
+> 当前已经运行的 Firebot 现场服务器，**不得**因为 Vehicle Bridge R0–R4 验证而按本文执行 checkout / update。
+> 当前现场服务器操作请使用 [服务器与Web现场配合.md](服务器与Web现场配合.md)。
+
 本说明以 Ubuntu Server 24.04 LTS、Docker Engine 与 Compose plugin 为推荐主线。执行结果只能声明 `SERVER_DEPLOYMENT_READY`；只有在目标第二台服务器真实完成后才能声明 deployed。
 
 ## 1. 系统与 Docker

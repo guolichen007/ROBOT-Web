@@ -14,11 +14,13 @@ ROBOT-Web 是智能灭火机器人项目的云端与 Web 平台。Robot Integrat
 
 ## 3. 当前版本与状态
 
-- 平台：`ui/youdao-light-hmi-v1`（approved release ref）
-- 合同：`1.2.0`（frozen legacy）
+- 平台分支：`ui/youdao-light-hmi-v1`
+- 合同：`1.2.0`（frozen legacy）；Vehicle Bridge Contract `1.3`（current）
 - Schema：`1.2`（frozen legacy）+ `1.3`（current bridge contract）
 - 本机 DEV/TEST：可运行
-- SERVER：部署就绪，未在第二台服务器实际部署
+- **当前现场服务器：已部署**（运行基线 `41bbaf4…`，R0–R4 期间不升级、不重新部署）
+- **Vehicle Bridge R0–R4：待现场验收**（Bridge 运行基线 `13c8692…`）
+- 真实车辆控制：`NOT_IMPLEMENTED`
 - 真车/真实视频：待现场接入
 
 ## 4. 架构
@@ -137,7 +139,7 @@ Mock R001 是独立 MQTT client，遵循 Schema 1.2；真车 Vehicle Bridge 上�
 
 输出 `dist/firebot-ros2-integration-1.2.0.zip` 与 `.sha256`。平台不会猜测现场 ROS topic、速度、量程、地图或视频地址。
 
-首台实车是 ROS1 Noetic。当前只读兼容接口、麦克纳姆 `vy` 安全处理、AMCL/odom 边界、缺失急停能力、`cmd_vel` 仲裁阻塞项及运行态清单见 [ROS1 Noetic 实车只读兼容接入说明](docs/ROS原生兼容接入说明.md) 和 [integration/ros1](integration/ros1/ROS1运行态只读验收清单.md)。该只读兼容路径保持 1.2。车端下行由 Vehicle Bridge（schema 1.3）承担，见 [integration/ros1/vehicle-bridge](integration/ros1/vehicle-bridge/README.md) 与 [真实车 Bridge 部署](docs/REAL_VEHICLE_BRIDGE_DEPLOYMENT.md)。
+首台实车是 ROS1 Noetic，主路径为 **Vehicle Bridge（schema 1.3）**。ROS1 只读兼容接口（麦克纳姆 `vy`、AMCL/odom 边界、`cmd_vel` 仲裁等）为 **legacy / compatibility 路径，保持 1.2**；ROS2 现场包是另一套正式集成资产，**不是当前首台实车主路径**。相关清单见 [ROS1 只读兼容接入说明](docs/ROS原生兼容接入说明.md) 与 [integration/ros1](integration/ros1/ROS1运行态只读验收清单.md)。车端下行由 Vehicle Bridge（schema 1.3）承担，见 [integration/ros1/vehicle-bridge](integration/ros1/vehicle-bridge/README.md) 与 [实车现场联调总览](docs/实车现场联调总览.md)。
 
 ## 16. 服务器部署
 
@@ -157,7 +159,14 @@ SERVER 公网默认只开放 80（跳转）、443（HTTPS/WSS/WebRTC gateway）�
 
 ## 20. 文档索引
 
-统一入口：[docs/文档索引.md](docs/文档索引.md)。API、数据库、运维、安全、协议、坐标、车辆安全合同和发布检查均从该索引进入。
+统一入口：[docs/文档索引.md](docs/文档索引.md)。
+
+现场优先阅读：
+
+- [实车现场联调总览](docs/实车现场联调总览.md)（当前状态真相源）
+- [车端Bridge部署与实车接口](docs/车端Bridge部署与实车接口.md)
+- [服务器与Web现场配合](docs/服务器与Web现场配合.md)
+- [FIREBOT_BRIDGE_CONTRACT_1.3](docs/FIREBOT_BRIDGE_CONTRACT_1.3.md)
 
 本轮工业中控、右侧检测、巡检计划/报告和首台真车只读兼容说明见 [工业中控与巡检升级说明.md](docs/工业中控与巡检升级说明.md)、[巡检与预设位置接口.md](docs/巡检与预设位置接口.md) 与 [ROS原生兼容接入说明.md](docs/ROS原生兼容接入说明.md)。Canonical MQTT 为 1.2（frozen legacy）+ 1.3（current bridge contract）；服务器同时接受 1.2/1.3，未知版本显式 reject。
 

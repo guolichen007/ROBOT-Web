@@ -32,6 +32,7 @@ vehicle-bridge/
 │   ├── protocol.py        # vehicleBase/seq/消息构造/命令校验（下行接受 1.2/1.3）
 │   ├── identity.py        # boot_id 生命周期
 │   ├── state.py           # 共享状态（任务锁/数据缓存/命令幂等重放）
+│   ├── field_trace.py     # FBTRACE 结构化事件（journal，无 ANSI）
 │   ├── uplink/            # 上行消息：availability/heartbeat/capabilities/status/sensor/location
 │   ├── downlink/          # 下行：command_receiver/validator/dedup/ros_placeholder
 │   └── ros/               # /firebot_bridge/* 冻结契约：interfaces/providers/feedback/ros_types
@@ -39,8 +40,10 @@ vehicle-bridge/
 ├── systemd/firebot-bridge.service.template  # systemd 模板（install.sh 生成实际 unit）
 ├── install.sh / uninstall.sh / verify.sh    # 安装 / 卸载 / 验收
 ├── run_bridge.sh               # 启动（ROS 路径经环境变量，不硬编码 /home/tl）
+├── watch-bridge.sh             # 现场实时控制台（观察者）
+├── tools/field_console.py      # 终端 viewer（渲染 FBTRACE，只观察不改状态）
 ├── requirements.txt            # paho-mqtt
-├── tests/test_bridge.py        # 协议/幂等/partial/命令生命周期单测
+├── tests/                      # test_bridge / test_reliability / test_field_console
 └── README.md
 ```
 
@@ -55,9 +58,9 @@ pip3 install -r requirements.txt          # paho-mqtt；rospy 随 ROS Noetic 自
 # 2) 安装（可配置：FIREBOT_INSTALL_DIR / FIREBOT_BRIDGE_USER / FIREBOT_ROS_SETUP / FIREBOT_ROS_WORKSPACE_SETUP）
 ./install.sh
 
-# 3) 确认 CA + 编辑配置（无密码）
-sudo cp production-ca.crt /etc/firebot/production-ca.crt
-nano /opt/firebot/vehicle-bridge/config/bridge.env   # SITE/MAP/频率/STUB；密码不写这里
+# 3) 确认 CA 存在 + 编辑配置（无密码；唯一配置 = /etc/firebot/bridge.env）
+test -f /etc/firebot/production-ca.crt || { echo "STOP: CA 不存在，向部署所有者索取"; exit 1; }
+nano /etc/firebot/bridge.env   # SITE/MAP/频率/STUB；密码不写这里
 
 # 4) secret（root:root 600，install.sh 会提示）
 sudo install -m 600 /dev/null /etc/firebot/bridge-secret.env
@@ -123,6 +126,8 @@ FIREBOT_FIELD_TRACE=true
 ```
 
 `watch-bridge.sh` 只是观察者：Ctrl+C 只退出 viewer，**不会**停止 `firebot-bridge.service`。
+
+现场部署与 R0–R4 完整操作见 [车端Bridge部署与实车接口](../../../docs/车端Bridge部署与实车接口.md)；当前状态真相源见 [实车现场联调总览](../../../docs/实车现场联调总览.md)。
 
 ## ⚠️ 禁止双 Bridge
 

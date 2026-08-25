@@ -91,10 +91,12 @@ cmd 枚举：`patrol / stop_motion / emergency_stop / reset_estop / return_dock 
 | topic | 类型 | 说明 |
 |---|---|---|
 | `/firebot_bridge/battery` | std_msgs/Float32 | 电量百分比（canonical 唯一来源） |
-| `/firebot_bridge/smoke` | std_msgs/Float32 | 烟雾浓度（**真实来源 Phase 0 确认：Modbus/standalone，非 ROS topic**，由车端提供方接入） |
+| `/firebot_bridge/smoke` | std_msgs/Float32 | 烟雾浓度（**canonical ROS 输入**；原始硬件可为 Modbus/standalone，由车端 provider 完成硬件协议→ROS 转换） |
 | `/firebot_bridge/status` | std_msgs/String(JSON) | mode/estop_active/active_task_id |
-| `/firebot_bridge/location` | std_msgs/String(JSON) | x/y/theta/linear/angular（map 系） |
-| `/firebot_bridge/alarm` | std_msgs/String(JSON) | 火警（冻结） |
+| `/firebot_bridge/location` | std_msgs/String(JSON) | x/y/theta/linear/angular（map 系）；亦由 `/odom` + `/amcl_pose` 生成 |
+| `/firebot_bridge/alarm` | std_msgs/String(JSON) | 火警（接口合同保留；**当前 13c8692 ros_adapter 未接入，CURRENT_STATUS=RESERVED**） |
+
+> alarm 是接口常量保留，不是当前已接线：`13c8692` 的 ros_adapter 未建立 `/firebot_bridge/alarm` subscriber，现场不能写“已支持”。
 
 ### 3.4 Bridge 固定流程
 ```
@@ -116,9 +118,9 @@ MQTT command → 校验(boot/过期/支持性) → 去重(command_id 幂等)
 | 数据 | 真实来源 | Bridge 处理 |
 |---|---|---|
 | battery | `/firebot_bridge/battery`（std_msgs/Float32，由车端 provider/adapter 发布） | status partial `{"battery": ...}` |
-| smoke | Modbus/standalone（非 ROS topic） | SmokeProvider 接真实来源 → sensor `{"smoke": ...}`；无真实源**不发布 sensor**，不伪造 0 |
+| smoke | 原始硬件（Modbus/standalone/其他车载数据源）→ 车端 provider → `/firebot_bridge/smoke`（canonical ROS 输入） | 有真实源才发 sensor `{"smoke": ...}`；无源**不发布 sensor**，不伪造 0；Bridge 不直接读 Modbus |
 | mode/estop | 车端未提供前**不伪造** | status 缺省，服务器保持 NULL/unknown |
-| location | `/odom`(速度) + `/amcl_pose`(map 位姿) | 以 amcl 为准；amcl 缺席不发（或标降级） |
+| location | canonical `/firebot_bridge/location`，或 `/odom`(速度) + `/amcl_pose`(map 位姿) | 以 amcl/map 为准；对外上行仍受 `FIREBOT_LOCATION_ENABLED` 控制，确认前不发 |
 
 ---
 
