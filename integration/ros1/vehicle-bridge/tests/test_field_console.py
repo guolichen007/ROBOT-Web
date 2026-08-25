@@ -2,6 +2,7 @@
 """Field trace + console 单测（无 ROS/MQTT 依赖）。"""
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import logging
@@ -335,6 +336,45 @@ def main() -> int:
     # install.sh 安装 verify.sh
     install_text = (ROOT / "install.sh").read_text(encoding="utf-8")
     check("install.sh 复制 verify.sh", 'verify.sh' in install_text)
+
+    print("=== 收口：safe_text / wall 进位 / watcher / raw ===")
+    # safe_text 显示层净化：控制字符不进入终端
+    check("CONTROL_CHAR_SANITIZED ESC 被替换", "\x1b" not in field_console.safe_text("\x1b[2Jclear"))
+    check("CONTROL_CHAR_SANITIZED C0 被替换", "\x07" not in field_console.safe_text("be\x07ep"))
+    check("NEWLINE_SANITIZED CR/LF/TAB -> space", field_console.safe_text("a\nb\rc\td") == "a b c d")
+    check("LONG_VALUE_BOUNDED 最大 160", len(field_console.safe_text("x" * 500)) == 160)
+    check("CHINESE_PRESERVED 中文保留", field_console.safe_text("中文巡检") == "中文巡检")
+
+    # wall 时间毫秒进位：.9996 应进位到下一秒 .000
+    c = field_console.FieldConsole()
+    carry = c.render({"event": "mqtt.connected", "level": "ok", "wall": 1700000000.9996, "broker": "x"})
+    exact = c.render({"event": "mqtt.connected", "level": "ok", "wall": 1700000001.000, "broker": "x"})
+    check("WALL_CARRY_CORRECT .9996 进位到下一秒",
+          carry is not None and exact is not None and carry.split()[0] == exact.split()[0])
+    check("WALL_CARRY_CORRECT 毫秒为 000", carry is not None and carry.split()[0].endswith(".000"))
+
+    # watcher：不重放历史事件 / inactive service 退出
+    watch_text = (ROOT / "watch-bridge.sh").read_text(encoding="utf-8")
+    check("WATCH_NO_HISTORY_REPLAY 无 -n 20", "-n 20" not in watch_text)
+    check("WATCH_NO_HISTORY_REPLAY 有 -n 0", "-n 0" in watch_text)
+    check("WATCH_INACTIVE_SERVICE_EXIT 有 exit 2", "exit 2" in watch_text)
+    check("WATCH_INACTIVE_SERVICE_EXIT 有 ERROR", "ERROR" in watch_text)
+
+    # raw 模式：只透传 journal，不输出 header/LINK
+    _stdin, _argv = sys.stdin, sys.argv
+    try:
+        sys.stdin = io.StringIO("RAW-LINE-1\nRAW-LINE-2\n")
+        sys.argv = ["field_console.py", "--raw"]
+        raw_buf = io.StringIO()
+        with contextlib.redirect_stdout(raw_buf):
+            rc = field_console.main()
+    finally:
+        sys.stdin, sys.argv = _stdin, _argv
+    raw_out = raw_buf.getvalue()
+    check("RAW_MODE_NO_HEADER 无 header", "FIREBOT VEHICLE BRIDGE" not in raw_out)
+    check("RAW_MODE_NO_HEADER 无 LINK", "LINK" not in raw_out)
+    check("RAW_MODE_NO_HEADER 纯透传", raw_out == "RAW-LINE-1\nRAW-LINE-2\n")
+    check("RAW_MODE_NO_HEADER rc=0", rc == 0)
 
     print(f"\n结果: PASS={PASS} FAIL={FAIL}")
     return 0 if FAIL == 0 else 1

@@ -84,6 +84,33 @@ def short_id(value, full=False):
     return s if full else s[:8]
 
 
+def safe_text(value, max_len=160):
+    """显示层净化：替换控制字符，防止外部字段破坏终端可信显示。
+
+    CR/LF/TAB -> 空格；其余 C0/DEL/C1 -> '?'；中文及其它可见字符保留。
+    只作用于 viewer 显示，绝不修改任何协议/数据。
+    """
+    if value is None:
+        return ""
+
+    out = []
+
+    for ch in str(value):
+        code = ord(ch)
+
+        if ch in "\r\n\t":
+            out.append(" ")
+        elif code < 32 or 127 <= code < 160:
+            out.append("?")
+        else:
+            out.append(ch)
+
+        if len(out) >= max_len:
+            break
+
+    return "".join(out)
+
+
 def effective_flag(name, ev, default):
     """按事件内容动态判定视觉状态：transition 到健康才绿，否则黄。"""
     if name == "ros.master.changed":
@@ -212,10 +239,10 @@ class FieldConsole:
         if flag == "debug" and not self.verbose:
             return None
         wall = float(event.get("wall", time.time()))
-        seconds = int(wall)
-        millis = int(round((wall - seconds) * 1000)) % 1000
+        total_ms = int(round(wall * 1000))
+        seconds, millis = divmod(total_ms, 1000)
         ts = f"{time.strftime('%H:%M:%S', time.localtime(seconds))}.{millis:03d}"
-        detail = self._detail(name, event)
+        detail = safe_text(self._detail(name, event))
         if self.compact:
             line = f"{ts} {self._flag(flag)} {path} {label} {detail}"
         else:
@@ -227,16 +254,16 @@ class FieldConsole:
 
     def header(self, status: dict):
         """渲染启动快照头。"""
-        boot = short_id(status.get("boot_id") or "?", self.full_id)
-        vehicle = status.get("vehicle_id") or "?"
-        proto = status.get("protocol_version") or "?"
-        pid = status.get("pid") or "?"
+        boot = safe_text(short_id(status.get("boot_id") or "?", self.full_id))
+        vehicle = safe_text(status.get("vehicle_id") or "?")
+        proto = safe_text(status.get("protocol_version") or "?")
+        pid = safe_text(status.get("pid") or "?")
         mqtt = "CONNECTED" if status.get("mqtt_connected") else "OFFLINE"
         master = "AVAILABLE" if status.get("ros_master_available") else "WAIT"
         adapter = "READY" if status.get("ros_adapter_ready") else "NOT READY"
         stub = status.get("stub_mode")
-        cmds = status.get("supported_commands") or []
-        sensors = status.get("sensors") or []
+        cmds = [safe_text(c) for c in (status.get("supported_commands") or [])]
+        sensors = [safe_text(s) for s in (status.get("sensors") or [])]
         loc = status.get("location_enabled")
 
         def row(left_k, left_v, right_k, right_v):
@@ -278,6 +305,13 @@ def main() -> int:
     parser.add_argument("--raw", action="store_true")
     args = parser.parse_args()
 
+    if args.raw:
+        # 纯透传：不读 status、不输出 header/LINK，只原样转发 journal 输入。
+        for line in sys.stdin:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+        return 0
+
     use_color = sys.stdout.isatty() and not args.no_color and "NO_COLOR" not in os.environ
     columns = shutil.get_terminal_size((120, 24)).columns
     console = FieldConsole(
@@ -301,10 +335,6 @@ def main() -> int:
     print(console._link_line())
 
     for line in sys.stdin:
-        if args.raw:
-            sys.stdout.write(line)
-            sys.stdout.flush()
-            continue
         event = parse_trace(line)
         if event is None:
             continue

@@ -14,12 +14,15 @@ echo
 
 SERVICE="$(systemctl is-active firebot-bridge 2>/dev/null || true)"
 if [[ "$SERVICE" != "active" ]]; then
-    echo "WARNING: firebot-bridge service is not active: ${SERVICE}"
-    echo
+    echo "ERROR: firebot-bridge service is not active: ${SERVICE}" >&2
+    echo "Start the service before using the live viewer." >&2
+    exit 2
 fi
 
+# -n 0：不重放历史事件。status.json 是当前状态，journal 只跟随未来 transition，
+# 避免历史 mqtt.disconnected 等旧事件覆盖当前真实链路状态。
 journalctl \
-    -n 20 \
+    -n 0 \
     -fu firebot-bridge \
     -o cat \
 | python3 "$SELF_DIR/tools/field_console.py" \
