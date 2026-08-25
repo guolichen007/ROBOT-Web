@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bridge 可靠性单测：MQTT 单一 owner、ROS 子进程生命周期、SIGTERM、readiness 真实性。
+"""Bridge 可靠性单测：MQTT 单一 owner、ROS 子进程 supervisor、IPC 隔离、SIGTERM。
 
 运行：cd vehicle-bridge && python3 tests/test_reliability.py
 """
@@ -10,6 +10,7 @@ import os
 import socket
 import sys
 import threading
+import time
 import types
 from pathlib import Path
 
@@ -125,11 +126,25 @@ class _Proto:
         }
 
 
+class _BlockingStdout:
+    """永不 EOF 的 stdout，避免 reader thread 在测试中立刻触发 _on_child_exit。"""
+
+    def __init__(self):
+        self._ev = threading.Event()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        self._ev.wait()
+        raise StopIteration
+
+
 class _FakeProc:
     def __init__(self):
         self.pid = 999
         self.stdin = io.StringIO()
-        self.stdout = io.StringIO()
+        self.stdout = _BlockingStdout()
         self.terminated = False
 
     def poll(self):
@@ -167,15 +182,15 @@ def main() -> int:
 
     mqtt = MqttClient(_Cfg(), _Identity(), _Proto(), lambda c: None, status=None)
     mqtt.start()
-    check("MQTT 用 connect_async（不手写 connect retry loop）", "connect_async" in rec)
-    check("MQTT 用 loop_start（Paho 单一 owner）", rec.get("loop_start") is True)
+    check("MQTT 用 connect_async", "connect_async" in rec)
+    check("MQTT 用 loop_start（单一 owner）", rec.get("loop_start") is True)
     check("MQTT reconnect_delay_set(1,30)", rec.get("reconnect_delay") == (1, 30))
 
-    print("=== T1/T2/T3/T7 ROS 子进程生命周期 ===")
+    print("=== T1/T2/T3/T7 ROS 子进程 supervisor ===")
     import firebot_bridge.ros.lifecycle as lc
     from firebot_bridge.state import BridgeState
 
-    # T1: 无 master（关闭端口探测为 False）→ 不 spawn、命令拒绝
+    # T1: 无 master（关闭端口探测 False）→ 不 spawn、命令拒绝
     probe = socket.socket()
     probe.bind(("127.0.0.1", 0))
     port = probe.getsockname()[1]
@@ -192,24 +207,23 @@ def main() -> int:
     fake_sp = _FakeSubprocess()
     lc.subprocess = fake_sp
     try:
-        # T2: master 出现 → spawn 子进程（fresh child）
+        # T2: master 出现 → spawn（fresh child）
         mgr._spawn()
         check("master 出现：Popen 被调用", len(fake_sp.calls) == 1)
         cmd = fake_sp.calls[0][0][0]
-        check("spawn 目标是 firebot_bridge.ros_adapter", any("firebot_bridge.ros_adapter" in str(x) for x in cmd))
+        check("spawn 目标 firebot_bridge.ros_adapter", any("firebot_bridge.ros_adapter" in str(x) for x in cmd))
 
-        # ready 上报 → adapter ready
         mgr._handle_event({"type": "ready", "ok": True, "command_publisher": True,
                            "feedback": True, "providers": {"battery": True, "smoke": True}})
         check("ready 后 node_ready=True", mgr.node_ready is True)
         check("ready 后 adapter_ready=True", mgr.adapter_ready is True)
 
-        # T7: battery provider 事件 → state.battery + provider_seen
+        # T7: battery provider 事件
         mgr._handle_event({"type": "provider", "channel": "battery", "value": 67.5})
-        check("provider battery 67.5 → state.battery", state.last_battery == 67.5)
-        check("provider battery → battery_provider_seen=True", mgr.battery_provider_seen is True)
+        check("provider battery → state.battery", state.last_battery == 67.5)
+        check("provider battery → battery_provider_seen", mgr.battery_provider_seen is True)
 
-        # T3: master flap → terminate + respawn（全新子进程，无 callback 累积）
+        # T3: master flap → terminate + respawn（fresh child，无 callback 累积）
         mgr._terminate_child()
         check("master 丢失：子进程被 terminate", fake_sp.procs[0].terminated is True)
         mgr._spawn()
@@ -217,20 +231,74 @@ def main() -> int:
     finally:
         lc.subprocess = _orig_sp
 
-    # T6 partial init：feedback 未就绪 → adapter_ready=False（禁止假 READY）
-    state2 = BridgeState()
-    mgr2 = lc.RosChildManager(_Cfg(), state2, status=None)
+    # T6 partial init：feedback 未就绪 → adapter_ready=False
+    mgr2 = lc.RosChildManager(_Cfg(), BridgeState(), status=None)
     mgr2._handle_event({"type": "ready", "ok": True, "command_publisher": True,
                         "feedback": False, "providers": {"battery": True}})
     check("feedback 未就绪 → adapter_ready=False", mgr2.adapter_ready is False)
-    check("compute_adapter_ready 要求两者都 true", lc.compute_adapter_ready(True, False) is False)
+    check("compute_adapter_ready 要求两者 true", lc.compute_adapter_ready(True, False) is False)
+
+    print("=== P0 补强：child 崩溃恢复 / READY 超时 / generation 隔离 ===")
+    # child EOF/crash → _on_child_exit：reap + _proc=None + 清 telemetry + backoff
+    crash_state = BridgeState()
+    crash_state.set_battery(88.0)
+    crash_mgr = lc.RosChildManager(_Cfg(), crash_state, status=None)
+    fp = _FakeProc()
+    crash_mgr._proc = fp
+    crash_mgr._stdin = fp.stdin
+    crash_mgr._on_child_exit(fp)
+    check("child crash：_proc 被清空", crash_mgr._proc is None)
+    check("child crash：子进程被 terminate", fp.terminated is True)
+    check("child crash：ROS telemetry 清空（不 stale）", crash_state.last_battery is None)
+    check("child crash：退避生效（_next_spawn_allowed 未来）", crash_mgr._next_spawn_allowed > time.monotonic())
+
+    # READY timeout
+    timeout_mgr = lc.RosChildManager(_Cfg(), BridgeState(), status=None)
+    timeout_mgr._proc = _FakeProc()
+    timeout_mgr._spawn_time = time.monotonic() - 20
+    check("READY 超时判定：未 ready 且超时 → True", timeout_mgr._ready_timed_out(time.monotonic()) is True)
+    timeout_mgr.node_ready = True
+    check("READY 超时判定：已 ready → False", timeout_mgr._ready_timed_out(time.monotonic()) is False)
+
+    # generation 隔离
+    gen_mgr = lc.RosChildManager(_Cfg(), BridgeState(), status=None)
+    pa = _FakeProc()
+    gen_mgr._proc = pa
+    gen_mgr._generation = 5
+    check("generation 匹配 → 当前", gen_mgr._is_current(pa, 5) is True)
+    check("旧 generation 事件被拒绝", gen_mgr._is_current(pa, 4) is False)
+    check("旧 proc 事件被拒绝", gen_mgr._is_current(_FakeProc(), 5) is False)
+
+    print("=== IPC 隔离 / 最小权限 ===")
+    from firebot_bridge.ros_adapter import normalize_status
+    import firebot_bridge.ros.lifecycle as lc2
+
+    ns = normalize_status({"type": "feedback", "feedback": {"state": "ACCEPTED"}})
+    check("status 白名单：type 不可被覆盖", ns.get("type") == "status" and "feedback" not in ns)
+    check("status 白名单：恶意 feedback 字段被丢弃", "feedback" not in ns)
+    ns2 = normalize_status({"mode": "idle"})
+    check("status mode uppercase", ns2.get("mode") == "IDLE")
+    ns3 = normalize_status({"mode": "WARP"})
+    check("status 非法 mode 被丢弃", "mode" not in ns3)
+    ns4 = normalize_status({"estop_active": True, "active_task_id": "t1"})
+    check("status estop/task 透传", ns4.get("estop_active") is True and ns4.get("active_task_id") == "t1")
+
+    saved_pw = os.environ.get("FIREBOT_MQTT_PASSWORD")
+    os.environ["FIREBOT_MQTT_PASSWORD"] = "super-secret"
+    try:
+        env = lc2.build_child_env()
+        check("child env 剥离 MQTT password", "FIREBOT_MQTT_PASSWORD" not in env)
+    finally:
+        if saved_pw is None:
+            os.environ.pop("FIREBOT_MQTT_PASSWORD", None)
+        else:
+            os.environ["FIREBOT_MQTT_PASSWORD"] = saved_pw
 
     print("=== T6 SIGTERM/SIGINT 优雅停机 ===")
     from firebot_bridge.main import make_stop_handler
 
     stop = threading.Event()
-    handler = make_stop_handler(stop)
-    handler(15, None)
+    make_stop_handler(stop)(15, None)
     check("SIGTERM handler 设置 stop", stop.is_set() is True)
 
     print(f"\n结果: PASS={PASS} FAIL={FAIL}")

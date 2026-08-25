@@ -114,6 +114,18 @@ class BridgeState:
             if "active_task_id" in fields:
                 self.active_task_id = fields["active_task_id"]
 
+    def clear_ros_telemetry(self) -> None:
+        """ROS 子进程丢失/降级时清空 ROS 来源数据，避免把旧数据包装成新消息上报。"""
+        with self._lock:
+            self.last_battery = None
+            self.last_smoke = None
+            self.last_bottom_ir = None
+            self.last_top_ir_max = None
+            self.last_location = None
+            self.mode = None
+            self.estop_active = None
+            self.active_task_id = None
+
     def snapshot_telemetry(self) -> dict:
         with self._lock:
             return {

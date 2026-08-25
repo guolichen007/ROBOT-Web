@@ -1,13 +1,13 @@
-"""ROS 子进程生命周期管理（父进程侧）。
+"""ROS 子进程生命周期管理（父进程侧 supervisor）。
 
 核心原则：MQTT/TLS 通信层必须独立于 ROS master 生死。ROS 全部 pub/sub 运行在独立的
 `firebot_bridge.ros_adapter` 子进程里：
 
 - 无 roscore：不 spawn 子进程，MQTT 仍在线，命令 rejected + BRIDGE_ADAPTER_NOT_CONNECTED。
-- roscore 出现：spawn 子进程，子进程 init_node + 建全部 pub/sub 后上报 ready。
-- roscore 死亡：terminate 子进程，MQTT 不断、父进程不退出。
-- roscore 恢复：spawn 全新子进程，向新 master 完整重新注册（规避 rospy 单次 init_node
-  与 _TopicImpl 重复订阅累积问题）。
+- roscore 出现：spawn 子进程，等待 READY handshake（超时 terminate 重试）。
+- roscore 死亡 / child 崩溃 / READY 超时：reap 子进程、清 readiness、清 ROS telemetry、
+  退避后重新 spawn 全新子进程（规避 rospy 单次 init_node 与 _TopicImpl 重复订阅累积）。
+- child generation 隔离：旧 child 残留事件不再作用于当前状态。
 """
 from __future__ import annotations
 
@@ -25,7 +25,11 @@ LOG = logging.getLogger("firebot-bridge")
 
 _PROBE_TIMEOUT_S = 1.0
 _POLL_INTERVAL_S = 2.0
+_READY_TIMEOUT_S = 8.0
+_SPAWN_BACKOFF_MIN_S = 1.0
+_SPAWN_BACKOFF_MAX_S = 30.0
 _EVENT_PREFIX = "FIREBOT_ROS_EVENT\t"
+_SECRET_ENV_KEYS = ("FIREBOT_MQTT_PASSWORD",)
 
 
 def ros_master_reachable(timeout: float = _PROBE_TIMEOUT_S) -> bool:
@@ -46,6 +50,14 @@ def compute_adapter_ready(command_publisher: bool, feedback: bool) -> bool:
     return bool(command_publisher and feedback)
 
 
+def build_child_env() -> dict:
+    """子进程环境：剥离 MQTT 密码等 secret（最小权限）。"""
+    env = os.environ.copy()
+    for key in _SECRET_ENV_KEYS:
+        env.pop(key, None)
+    return env
+
+
 class RosChildManager:
     def __init__(self, config, state, status=None) -> None:
         self.config = config
@@ -54,9 +66,14 @@ class RosChildManager:
         self._on_feedback = None
         self._proc = None
         self._stdin = None
-        self._reader = None
         self._stop = threading.Event()
         self._lock = threading.Lock()
+        self._stdin_lock = threading.Lock()
+
+        self._generation = 0
+        self._spawn_time = 0.0
+        self._spawn_backoff = _SPAWN_BACKOFF_MIN_S
+        self._next_spawn_allowed = 0.0
 
         self.master_available = False
         self.node_ready = False
@@ -82,29 +99,51 @@ class RosChildManager:
         self._terminate_child()
 
     def publish_command(self, command: dict) -> bool:
-        if not self.adapter_ready or self._stdin is None or self._proc is None or self._proc.poll() is not None:
+        if not self.adapter_ready or self._proc is None or self._proc.poll() is not None:
             LOG.info("ROS 未就绪（no child / not ready）：命令无法转发")
             return False
-        try:
-            self._stdin.write(json.dumps({"type": "command", "command": command}) + "\n")
-            self._stdin.flush()
-            return True
-        except Exception as exc:  # noqa: BLE001
-            LOG.warning("ROS 命令转发失败: %s", exc)
-            return False
+        with self._stdin_lock:
+            if self._stdin is None:
+                return False
+            try:
+                self._stdin.write(json.dumps({"type": "command", "command": command}) + "\n")
+                self._stdin.flush()
+                return True
+            except (BrokenPipeError, ValueError, OSError) as exc:
+                LOG.warning("ROS 命令转发失败: %s", exc)
+                return False
 
     # ---- 生命周期线程 ----
     def _run(self) -> None:
         while not self._stop.is_set():
+            now = time.monotonic()
             reachable = ros_master_reachable()
             self.master_available = reachable
-            if reachable and self._proc is None:
-                self._spawn()
-            elif not reachable and self._proc is not None:
-                LOG.warning("ROS master 丢失：terminate ROS 子进程")
-                self._terminate_child()
+            if not reachable:
+                if self._proc is not None:
+                    LOG.warning("ROS master 丢失：terminate ROS 子进程")
+                    self._terminate_child()
+            else:
+                if self._proc is None:
+                    if now >= self._next_spawn_allowed:
+                        self._spawn()
+                elif self._ready_timed_out(now):
+                    LOG.warning("ROS child READY 超时（%.1fs），terminate 后重试", _READY_TIMEOUT_S)
+                    self._bump_backoff()
+                    self._terminate_child()
             self._refresh_status()
             self._stop.wait(_POLL_INTERVAL_S)
+
+    def _ready_timed_out(self, now: float) -> bool:
+        return (
+            self._proc is not None
+            and not self.node_ready
+            and now - self._spawn_time > _READY_TIMEOUT_S
+        )
+
+    def _is_current(self, proc, generation: int) -> bool:
+        with self._lock:
+            return self._generation == generation and self._proc is proc
 
     def _spawn(self) -> None:
         try:
@@ -114,16 +153,32 @@ class RosChildManager:
                 stdout=subprocess.PIPE,
                 text=True,
                 bufsize=1,
+                env=build_child_env(),
             )
         except Exception as exc:  # noqa: BLE001
             LOG.error("ROS 子进程 spawn 失败: %s", exc)
+            self._bump_backoff()
             return
         with self._lock:
+            self._generation += 1
             self._proc = proc
             self._stdin = proc.stdin
+        self._spawn_time = time.monotonic()
+        self._spawn_backoff = _SPAWN_BACKOFF_MIN_S
+        self._next_spawn_allowed = self._spawn_time
         self._reset_ready()
-        threading.Thread(target=self._reader_loop, args=(proc,), name="ros-child-reader", daemon=True).start()
-        LOG.info("ROS 子进程已启动 pid=%s", proc.pid)
+        threading.Thread(
+            target=self._reader_loop,
+            args=(proc, self._generation),
+            name="ros-child-reader",
+            daemon=True,
+        ).start()
+        LOG.info("ROS 子进程已启动 pid=%s gen=%s", proc.pid, self._generation)
+
+    def _bump_backoff(self) -> None:
+        self._spawn_backoff = min(self._spawn_backoff * 2, _SPAWN_BACKOFF_MAX_S)
+        self._next_spawn_allowed = time.monotonic() + self._spawn_backoff
+        LOG.warning("ROS child 退避 %.1fs 后允许重启", self._spawn_backoff)
 
     def _terminate_child(self) -> None:
         with self._lock:
@@ -131,18 +186,40 @@ class RosChildManager:
             self._stdin = None
         if proc is None:
             return
-        try:
-            proc.terminate()
-        except Exception:  # noqa: BLE001
-            pass
-        try:
-            proc.wait(timeout=5)
-        except Exception:  # noqa: BLE001
+        self._reap(proc)
+        self._reset_ready()
+        self._clear_telemetry()
+        self._refresh_status()
+
+    def _reap(self, proc) -> None:
+        if proc.poll() is None:
             try:
-                proc.kill()
+                proc.terminate()
             except Exception:  # noqa: BLE001
                 pass
+            try:
+                proc.wait(timeout=5)
+            except Exception:  # noqa: BLE001
+                try:
+                    proc.kill()
+                except Exception:  # noqa: BLE001
+                    pass
+        try:
+            proc.wait(timeout=1)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _on_child_exit(self, proc) -> None:
+        """child EOF / 崩溃：reap + 清引用 + 清 readiness/telemetry + 退避。"""
+        self._reap(proc)
+        with self._lock:
+            if self._proc is proc:
+                self._proc = None
+                self._stdin = None
         self._reset_ready()
+        self._clear_telemetry()
+        self._bump_backoff()
+        self._refresh_status()
 
     def _reset_ready(self) -> None:
         self.node_ready = False
@@ -150,24 +227,31 @@ class RosChildManager:
         self.feedback_ready = False
         self.provider_ready = False
 
-    def _reader_loop(self, proc) -> None:
+    def _clear_telemetry(self) -> None:
+        self.state.clear_ros_telemetry()
+        self.battery_provider_seen = False
+        self.battery_last_update = None
+
+    def _reader_loop(self, proc, generation: int) -> None:
         try:
             assert proc.stdout is not None
             for line in proc.stdout:
+                if self._stop.is_set():
+                    break
                 line = line.strip()
-                if line.startswith(_EVENT_PREFIX):
-                    try:
-                        self._handle_event(json.loads(line[len(_EVENT_PREFIX):]))
-                    except (UnicodeDecodeError, json.JSONDecodeError):
-                        pass
+                if not line.startswith(_EVENT_PREFIX):
+                    continue
+                if not self._is_current(proc, generation):
+                    continue  # 旧 generation 残留事件丢弃
+                try:
+                    self._handle_event(json.loads(line[len(_EVENT_PREFIX):]))
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    pass
         except Exception:  # noqa: BLE001
             pass
         finally:
-            # stdout 关闭 = 子进程退出
-            with self._lock:
-                if self._proc is proc:
-                    self._reset_ready()
-            self._refresh_status()
+            if self._is_current(proc, generation):
+                self._on_child_exit(proc)
 
     def _handle_event(self, payload: dict) -> None:
         t = payload.get("type")
@@ -191,6 +275,7 @@ class RosChildManager:
             elif channel == "smoke":
                 self.state.set_smoke(payload.get("value"))
         elif t == "status":
+            # apply_status 只取 mode/estop_active/active_task_id，天然忽略 type 等其它字段
             self.state.apply_status(payload)
         elif t == "location":
             self.state.set_location(payload.get("location"))

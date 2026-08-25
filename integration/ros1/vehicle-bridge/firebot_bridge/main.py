@@ -135,12 +135,12 @@ def main() -> int:
             retain=True,
         )
         try:
-            info.wait_for_publish(timeout=2)
+            info.wait_for_publish(timeout=3)
         except Exception:  # noqa: BLE001
             pass
-        time.sleep(0.3)
-        mqtt.loop_stop()
+        # 先 disconnect 发送 MQTT DISCONNECT，再停 network loop（顺序不能反，否则 DISCONNECT 发不出去）
         mqtt.disconnect()
+        mqtt.loop_stop()
     return 0
 
 

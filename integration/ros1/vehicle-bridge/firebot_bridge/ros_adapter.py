@@ -26,10 +26,32 @@ import threading
 
 EVENT_PREFIX = "FIREBOT_ROS_EVENT\t"
 
+_STATUS_MODE_ENUM = {"IDLE", "MANUAL", "PATROL", "EXTINGUISH", "RETURN_DOCK", "ESTOP"}
+
+_emit_lock = threading.Lock()
+
 
 def _emit(payload: dict) -> None:
-    sys.stdout.write(EVENT_PREFIX + json.dumps(payload, ensure_ascii=False) + "\n")
-    sys.stdout.flush()
+    with _emit_lock:
+        sys.stdout.write(EVENT_PREFIX + json.dumps(payload, ensure_ascii=False) + "\n")
+        sys.stdout.flush()
+
+
+def normalize_status(data: dict) -> dict:
+    """status 字段白名单：只透传 mode/estop_active/active_task_id，绝不 `**data` 覆盖 type。
+
+    mode 一律 uppercase 且只允许 schema enum；非法 mode 丢弃。
+    """
+    out: dict = {"type": "status"}
+    if "mode" in data:
+        mode = str(data["mode"]).upper()
+        if mode in _STATUS_MODE_ENUM:
+            out["mode"] = mode
+    if "estop_active" in data:
+        out["estop_active"] = bool(data["estop_active"])
+    if "active_task_id" in data:
+        out["active_task_id"] = data["active_task_id"]
+    return out
 
 
 def _import_rospy():
@@ -42,7 +64,7 @@ def _import_rospy():
 
 
 def _build_components(rospy):
-    """创建全部 pub/sub，逐项捕获成败，返回 {flags, providers, publisher}。"""
+    """创建全部 pub/sub，逐项捕获成败，返回 {flags, providers, publish}。"""
     from .ros.interfaces import (
         TOPIC_ROS_BATTERY,
         TOPIC_ROS_COMMAND,
@@ -95,7 +117,7 @@ def _build_components(rospy):
         try:
             data = json.loads(msg.data)
             if isinstance(data, dict):
-                _emit({"type": "status", **data})
+                _emit(normalize_status(data))
         except (UnicodeDecodeError, json.JSONDecodeError):
             pass
 
@@ -147,10 +169,17 @@ def _build_components(rospy):
         except Exception:  # noqa: BLE001
             pass
 
-    if Odometry is not None:
-        rospy.Subscriber("/odom", Odometry, on_odom)
-    if PoseWithCovarianceStamped is not None:
-        rospy.Subscriber("/amcl_pose", PoseWithCovarianceStamped, on_amcl)
+    # /odom、/amcl_pose 订阅失败不能导致 child 异常退出
+    try:
+        if Odometry is not None:
+            rospy.Subscriber("/odom", Odometry, on_odom)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        if PoseWithCovarianceStamped is not None:
+            rospy.Subscriber("/amcl_pose", PoseWithCovarianceStamped, on_amcl)
+    except Exception:  # noqa: BLE001
+        pass
 
     def publish_command(command):
         payload = json.dumps(build_ros_command(command), ensure_ascii=False)
