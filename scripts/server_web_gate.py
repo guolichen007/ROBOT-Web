@@ -4,13 +4,23 @@
 两个模式：
 
   --mode local-sim      本地联调：允许注入事件、断 WS、replay / resync，做完整闭环。
-  --mode prod-readonly  现场只读：禁止任何 command / DB / Redis 写入 / source_kind /
-                        control flag 修改；只验证 HTTPS / auth / snapshot / WSS 读取链路。
+  --mode prod-readonly  现场只读：不修改 robot/task/command/source_kind/control flag 任何
+                        业务状态；认证 session / ws-ticket 等临时写入属于验收必要副作用，
+                        明确标记为 AUTH_SESSION_EPHEMERAL_WRITE=ALLOWED。
 
-输出固定 `KEY=PASS|FAIL|PENDING` 行，便于 CI / 现场脚本 grep。
+两个阶段：
+
+  --phase prefield      车端未上线前：REAL_VEHICLE_PRESENT / REAL_VEHICLE_EVENT 允许 PENDING。
+  --phase postfield     车端已上线后：两项必须 PASS，否则 exit 1，禁止用 PENDING 假通过。
+
+输出固定 `KEY=PASS|FAIL|PENDING|SKIP|YES|ALLOWED` 行，便于 CI / 现场脚本 grep。
 
 依赖：httpx、websockets、redis（与 scripts/ws_acceptance.py 相同）。
-环境变量：E2E_ADMIN_PASSWORD、E2E_BASE_URL、REDIS_URL（仅 local-sim 注入需要）。
+环境变量：
+  E2E_ADMIN_PASSWORD            必填
+  E2E_BASE_URL                  默认 http://nginx（prod-readonly 必须 https://）
+  REDIS_URL                     仅 local-sim 注入需要
+  REAL_VEHICLE_EVENT_WAIT_SECONDS  postfield 观察实车事件的最长等待秒数（默认 30）
 """
 from __future__ import annotations
 
@@ -19,12 +29,13 @@ import asyncio
 import json
 import os
 import sys
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import httpx
 import websockets
 
+REAL_VEHICLE_ID = "firebot-vehicle-01"
 RESULTS: list[tuple[str, str]] = []
 
 
@@ -72,7 +83,7 @@ async def _verify_replay(client: httpx.Client, ws_base: str, origin: str, token:
     r = redis_lib.Redis.from_url(redis_url, decode_responses=True)
     r.xadd("firebot:events", {"event": json.dumps({
         "event_type": "system.acceptance_marker",
-        "server_received_at": datetime.now(UTC).isoformat(),
+        "server_received_at": datetime.now(timezone.utc).isoformat(),
         "payload": {"marker": marker},
     })})
     ticket = client.post("/api/v1/auth/ws-ticket", headers=_headers(token, origin))
@@ -86,9 +97,46 @@ async def _verify_replay(client: httpx.Client, ws_base: str, origin: str, token:
     return False
 
 
+async def _verify_real_vehicle_event(client: httpx.Client, ws_base: str, origin: str,
+                                     token: str, watermark: str, wait: float) -> bool:
+    """只读观察：等一段实车 `vehicle.*`/`robot.*` 事件。不写任何状态。"""
+    ticket = client.post("/api/v1/auth/ws-ticket", headers=_headers(token, origin))
+    ticket.raise_for_status()
+    uri = f"{ws_base}/ws/v1/monitor?ticket={ticket.json()['ticket']}&after={watermark}"
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + wait
+    async with websockets.connect(uri, origin=origin) as socket:
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return False
+            try:
+                event = json.loads(await asyncio.wait_for(socket.recv(), timeout=remaining))
+            except asyncio.TimeoutError:
+                return False
+            event_type = event.get("event_type", "")
+            if event_type.startswith(("vehicle.", "robot.")) and str(
+                event.get("data", {}).get("vehicle_id")
+            ) == REAL_VEHICLE_ID:
+                return True
+
+
+def _exit_code(phase: str) -> int:
+    statuses = dict(RESULTS)
+    if any(status == "FAIL" for _, status in RESULTS):
+        return 1
+    if phase == "postfield":
+        if statuses.get("REAL_VEHICLE_PRESENT") != "PASS":
+            return 1
+        if statuses.get("REAL_VEHICLE_EVENT") != "PASS":
+            return 1
+    return 0
+
+
 async def run() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=["local-sim", "prod-readonly"], default="prod-readonly")
+    parser.add_argument("--phase", choices=["prefield", "postfield"], default="prefield")
     args = parser.parse_args()
 
     password = os.environ["E2E_ADMIN_PASSWORD"]
@@ -108,7 +156,7 @@ async def run() -> None:
             emit("AUTH_LOGIN", "PASS")
         except Exception:
             emit("AUTH_LOGIN", "FAIL")
-            return
+            sys.exit(_exit_code(args.phase))
         token = session["access_token"]
         headers = _headers(token, origin)
         try:
@@ -126,7 +174,18 @@ async def run() -> None:
         except Exception:
             emit("AUTH_REFRESH", "FAIL")
 
+        if args.mode == "prod-readonly":
+            # 只读边界：不修改任何 robot/task/command/source_kind/control flag 业务状态。
+            # 登录 / refresh / ws-ticket 产生的认证 session 与临时 ticket 属验收必要副作用。
+            emit("NO_ROBOT_STATE_WRITE", "YES")
+            emit("NO_COMMAND_WRITE", "YES")
+            emit("NO_TASK_WRITE", "YES")
+            emit("NO_SOURCE_KIND_WRITE", "YES")
+            emit("NO_CONTROL_FLAG_WRITE", "YES")
+            emit("AUTH_SESSION_EPHEMERAL_WRITE", "ALLOWED")
+
         # snapshot + multi-vehicle
+        watermark = "0-0"
         try:
             snap = client.get("/api/v1/monitor/snapshot", headers=headers)
             snap.raise_for_status()
@@ -138,11 +197,15 @@ async def run() -> None:
                 emit("MULTI_VEHICLE_SNAPSHOT", "PASS")
             else:
                 emit("MULTI_VEHICLE_SNAPSHOT", "FAIL")
-            real = next((r for r in robots if r.get("vehicle_id") == "firebot-vehicle-01"), None)
-            emit("REAL_VEHICLE_PRESENT", "PASS" if real else "PENDING")
+            real = next((r for r in robots if r.get("vehicle_id") == REAL_VEHICLE_ID), None)
+            if real:
+                emit("REAL_VEHICLE_PRESENT", "PASS")
+            else:
+                emit("REAL_VEHICLE_PRESENT", "PENDING" if args.phase == "prefield" else "FAIL")
         except Exception:
             emit("MONITOR_SNAPSHOT", "FAIL")
-            watermark = "0-0"
+            if args.phase == "postfield":
+                emit("REAL_VEHICLE_PRESENT", "FAIL")
 
         # WSS
         try:
@@ -166,11 +229,20 @@ async def run() -> None:
                 emit("REALTIME_EVENT", "PASS" if replayed else "FAIL")
             except Exception:
                 emit("REALTIME_EVENT", "FAIL")
-        else:
-            emit("NO_COMMAND_SENT", "YES")
             emit("REAL_VEHICLE_EVENT", "PENDING")
+        elif args.phase == "prefield":
+            emit("REAL_VEHICLE_EVENT", "PENDING")
+        else:
+            wait = float(os.getenv("REAL_VEHICLE_EVENT_WAIT_SECONDS", "30"))
+            try:
+                seen = await _verify_real_vehicle_event(
+                    client, ws_base, origin, token, watermark, wait
+                )
+                emit("REAL_VEHICLE_EVENT", "PASS" if seen else "FAIL")
+            except Exception:
+                emit("REAL_VEHICLE_EVENT", "FAIL")
 
-    sys.exit(0 if all(status in ("PASS", "PENDING", "YES", "SKIP") for _, status in RESULTS) else 1)
+    sys.exit(_exit_code(args.phase))
 
 
 if __name__ == "__main__":
