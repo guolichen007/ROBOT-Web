@@ -7,7 +7,9 @@ import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import DataTable from '@/components/DataTable.vue'
 import PageHeader from '@/components/PageHeader.vue'
 import { api } from '@/lib/api'
+import { useMonitorStore } from '@/stores/monitor'
 
+const monitor = useMonitorStore()
 const telemetry = ref<any[]>([]),
   tab = ref<'telemetry' | 'commands' | 'tasks'>('telemetry'),
   rows = ref<any[]>([])
@@ -21,7 +23,11 @@ async function changeTab(name: typeof tab.value): Promise<void> {
   else rows.value = (await api.get(`/history/${name}`, { params: { limit: 300 } })).data
 }
 onMounted(async () => {
-  telemetry.value = (await api.get('/history/telemetry', { params: { robot_id: 'R001', limit: 600 } })).data
+  if (!monitor.robot) await monitor.loadSnapshot()
+  const robotId = monitor.robot?.vehicle_id
+  telemetry.value = robotId
+    ? (await api.get('/history/telemetry', { params: { robot_id: robotId, limit: 600 } })).data
+    : []
   rows.value = telemetry.value
   await nextTick()
   chart = init(chartEl.value!)

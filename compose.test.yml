@@ -165,6 +165,19 @@ services:
       mosquitto: { condition: service_healthy }
       mqtt-ingress: { condition: service_started }
 
+  # 第二辆模拟车（R002）：多车隔离 / 切换验收用，与 R001 身份独立。
+  mock-robot-2:
+    <<: *python-service
+    command: ["python", "/workspace/services/mock-robot/main.py"]
+    environment:
+      <<: *test-environment
+      MOCK_VEHICLE_ID: R002
+      MOCK_MAP_CODE: parking_v1
+      MOCK_MAP_VERSION: ${TEST_MOCK_MAP_VERSION:-1}
+    depends_on:
+      mosquitto: { condition: service_healthy }
+      mqtt-ingress: { condition: service_started }
+
   web:
     build:
       context: .

@@ -16,6 +16,7 @@ let pulseTimer = 0
 let pointerHeld = false
 
 const supports = (command: string): boolean => Boolean(props.robot?.supported_commands?.includes(command))
+const safetyReady = (command: string): boolean => props.robot?.safety_command_ready?.[command] === true
 const available = computed(
   () =>
     props.robot?.online_state === 'ONLINE' &&
@@ -149,6 +150,10 @@ function keepaliveStopAndRelease(reason: string): void {
 }
 
 async function emergencyStop(): Promise<void> {
+  if (!safetyReady('emergency_stop')) {
+    emit('notice', '服务器未就绪：急停命令不可用', 'danger')
+    return
+  }
   window.clearInterval(pulseTimer)
   activeDirection.value = ''
   busy.value = true
@@ -176,6 +181,10 @@ async function emergencyStop(): Promise<void> {
 }
 
 async function resetEstop(): Promise<void> {
+  if (!safetyReady('reset_estop')) {
+    emit('notice', '服务器未就绪：急停复位不可用', 'danger')
+    return
+  }
   try {
     await api.post(
       `/robots/${props.robot?.vehicle_id}/commands/reset-estop`,
@@ -250,7 +259,7 @@ onUnmounted(() => {
       </button>
       <button
         class="direction stop"
-        :disabled="busy || !auth.can('robot.control.stop') || !supports('stop_motion')"
+        :disabled="busy || !auth.can('robot.control.stop') || !supports('stop_motion') || !safetyReady('stop_motion')"
         @click="stopAndRelease('停止并释放租约')"
       >
         ■<small>停止</small>
@@ -277,7 +286,7 @@ onUnmounted(() => {
       <button
         v-if="!robot?.estop_active"
         class="estop-button"
-        :disabled="busy || !auth.can('robot.control.estop') || !supports('emergency_stop')"
+        :disabled="busy || !auth.can('robot.control.estop') || !supports('emergency_stop') || !safetyReady('emergency_stop')"
         @click="emergencyStop"
       >
         软件急停
@@ -285,7 +294,7 @@ onUnmounted(() => {
       <button
         v-else
         class="reset-button"
-        :disabled="busy || !auth.can('robot.control.reset_estop') || !supports('reset_estop')"
+        :disabled="busy || !auth.can('robot.control.reset_estop') || !supports('reset_estop') || !safetyReady('reset_estop')"
         @click="resetEstop"
       >
         复位软件急停

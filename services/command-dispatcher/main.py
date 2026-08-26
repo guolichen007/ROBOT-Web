@@ -50,17 +50,52 @@ def publish_command(payload: dict, qos: int) -> None:
         raise RuntimeError("MQTT publish did not complete")
 
 
+def _manual_heartbeat() -> None:
+    try:
+        redis.setex(
+            "service:command-dispatcher:manual-heartbeat", 5, datetime.now(UTC).isoformat()
+        )
+    except Exception:
+        logger.exception("manual heartbeat failed")
+
+
 def manual_loop() -> None:
-    pubsub = redis.pubsub(ignore_subscribe_messages=True)
-    pubsub.subscribe("firebot:manual_commands")
-    for message in pubsub.listen():
+    """Manual-command pubsub consumer with supervisor.
+
+    A dropped Redis pubsub connection must never silently kill manual control
+    for the lifetime of the process: on any exception the subscription is
+    recreated with bounded exponential backoff, and a liveness heartbeat is
+    published so ops can observe the loop independently.
+    """
+    backoff = 0.5
+    while True:
+        pubsub = None
         try:
-            payload = json.loads(message["data"])
-            if datetime.fromisoformat(payload["expires_at"]) <= datetime.now(UTC):
-                continue
-            publish_command(payload, qos=0)
+            pubsub = redis.pubsub(ignore_subscribe_messages=True)
+            pubsub.subscribe("firebot:manual_commands")
+            while True:
+                _manual_heartbeat()
+                message = pubsub.get_message(timeout=1.0)
+                if message is None or message.get("type") != "message":
+                    continue
+                try:
+                    payload = json.loads(message["data"])
+                    if datetime.fromisoformat(payload["expires_at"]) <= datetime.now(UTC):
+                        continue
+                    publish_command(payload, qos=0)
+                    backoff = 0.5
+                except Exception:
+                    logger.warning("manual pulse dropped", exc_info=True)
         except Exception:
-            logger.warning("manual pulse dropped", exc_info=True)
+            logger.exception("manual loop failed; recreating subscription")
+        finally:
+            if pubsub is not None:
+                try:
+                    pubsub.close()
+                except Exception:
+                    pass
+        time.sleep(backoff)
+        backoff = min(30.0, backoff * 2)
 
 
 def safety_loop() -> None:

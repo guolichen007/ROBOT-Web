@@ -523,6 +523,110 @@ def seed() -> None:
                 },
             )
 
+        # 第二辆模拟车（R002）：仅用于多车隔离 / 切换验收，与 R001 身份完全独立。
+        robot2 = _get_or_create(
+            db,
+            Robot,
+            vehicle_id="R002",
+            defaults={
+                "site_id": site.id,
+                "name": "灭火机器人 R002",
+                "model": "FIREBOT-MOCK",
+                "current_map_id": map_row.id,
+                "current_map_version": "1",
+                "battery": 88,
+            },
+        )
+        _get_or_create(
+            db,
+            RobotCapability,
+            robot_id=robot2.id,
+            defaults={
+                "protocol_version": "1.2.0",
+                "supported_commands_json": [
+                    "manual_control",
+                    "stop_motion",
+                    "emergency_stop",
+                    "reset_estop",
+                    "return_dock",
+                    "patrol",
+                    "extinguish",
+                    "cancel_task",
+                ],
+                "sensors_json": ["smoke", "bottom_ir", "top_ir"],
+                "media_json": ["roof_rgb", "roof_thermal", "bottom_ir"],
+            },
+        )
+        _get_or_create(
+            db,
+            RobotIntegrationProfile,
+            robot_id=robot2.id,
+            defaults={
+                "source_kind": "MOCK",
+                "upstream_protocol": "canonical-mqtt-1.2",
+                "control_contract_verified": True,
+                "ack_contract_verified": True,
+                "map_contract_verified": True,
+                "bidirectional_bridge_verified": True,
+                "command_path_verified": True,
+                "cmd_vel_arbitration_verified": True,
+                "stale_seconds": 3,
+                "offline_seconds": 10,
+                "forward_only": True,
+                "reverse_precision_navigation": False,
+                "verified_at": datetime.now(UTC),
+            },
+        )
+        _get_or_create(
+            db,
+            RobotMotionProfile,
+            robot_id=robot2.id,
+            defaults={
+                "max_manual_forward_mps": 0.22,
+                "max_manual_reverse_mps": 0.16,
+                "max_manual_angular_radps": 0.65,
+                "manual_watchdog_verified": True,
+                "reverse_allowed": True,
+                "reverse_precision_verified": False,
+            },
+        )
+        for channel, state in {
+            "pose": "CONNECTED",
+            "odom": "CONNECTED",
+            "battery": "CONNECTED",
+            "heartbeat": "CONNECTED",
+            "smoke": "CONNECTED",
+            "top_ir": "CONNECTED",
+            "bottom_ir": "CONNECTED",
+            "estop": "CONNECTED",
+        }.items():
+            _get_or_create(
+                db,
+                RobotDataChannel,
+                robot_id=robot2.id,
+                channel=channel,
+                defaults={
+                    "support_state": state,
+                    "quality": "GOOD",
+                    "source_kind": "MOCK",
+                    "last_received_at": datetime.now(UTC),
+                },
+            )
+        for camera_type in ("roof_rgb", "roof_thermal", "bottom_ir"):
+            _get_or_create(
+                db,
+                StreamRegistry,
+                stream_id=f"R002-{camera_type}",
+                defaults={
+                    "robot_id": robot2.id,
+                    "camera_type": camera_type,
+                    "provider": "MEDIAMTX",
+                    "playback_url": f"/media/R002-{camera_type}/whep",
+                    "codec": "H264",
+                    "state": "OFFLINE",
+                },
+            )
+
         if not db.scalar(select(FireEvent).where(FireEvent.event_code == "FE-DEMO-RESOLVED")):
             now = datetime.now(UTC)
             db.add(
@@ -620,7 +724,7 @@ def seed() -> None:
                 db, AppSetting, key=key, defaults={"value_json": value, "updated_by": admin.id}
             )
 
-    print("seed completed: roles, bootstrap admin, DEMO_PARKING, parking_v1, R001")
+    print("seed completed: roles, bootstrap admin, DEMO_PARKING, parking_v1, R001, R002")
 
 
 if __name__ == "__main__":

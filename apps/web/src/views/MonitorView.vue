@@ -293,6 +293,10 @@ async function patrol() {
     toast('当前无机器人，无法开始巡检')
     return
   }
+  if (dockReason.value) {
+    toast(dockReason.value)
+    return
+  }
   busyCommand.value = 'patrol'
   try {
     const plans = (await api.get('/patrol-plans')).data as Array<{
@@ -354,6 +358,10 @@ async function stop() {
     toast('当前无机器人，无法停止')
     return
   }
+  if (dockReason.value) {
+    toast(dockReason.value)
+    return
+  }
   busyCommand.value = 'stop'
   try {
     stopOperation.value = (
@@ -376,6 +384,10 @@ async function home() {
     toast('当前无机器人，无法返回待命区')
     return
   }
+  if (dockReason.value) {
+    toast(dockReason.value)
+    return
+  }
   busyCommand.value = 'home'
   try {
     await api.post(
@@ -394,6 +406,10 @@ async function home() {
 async function estop() {
   if (!robot.value) {
     toast('当前无机器人，无法执行软件急停')
+    return
+  }
+  if (dockReason.value) {
+    toast(dockReason.value)
     return
   }
   busyCommand.value = 'estop'
@@ -435,6 +451,10 @@ async function waitForEstopCleared(commandId?: string): Promise<'cleared' | 'pen
 async function resetEstop() {
   if (!robot.value) {
     toast('当前无机器人，无法解除软件急停')
+    return
+  }
+  if (dockReason.value) {
+    toast(dockReason.value)
     return
   }
   busyCommand.value = 'reset-estop'

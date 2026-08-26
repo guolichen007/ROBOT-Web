@@ -18,6 +18,11 @@ async function load(): Promise<void> {
   rows.value = (await api.get('/tasks')).data
 }
 async function createPatrol(): Promise<void> {
+  const robot = monitor.robot
+  if (!robot) {
+    notice.value = '请先在车辆列表选择车辆'
+    return
+  }
   const slot = monitor.snapshot.parking_slots[0]
   if (!slot) {
     notice.value = '地图尚未加载'
@@ -28,7 +33,7 @@ async function createPatrol(): Promise<void> {
     await api.post(
       '/tasks/patrol',
       {
-        robot_id: 'R001',
+        robot_id: robot.vehicle_id,
         target_parking_slot_id: slot.id,
         trajectory_id: monitor.snapshot.trajectories[0]?.id,
         parameters: {},
