@@ -14,7 +14,7 @@ x-test-environment: &test-environment
   MOCK_ENABLED: "true"
   MEDIA_PUBLISH_TOKEN: test-media-publisher-token-2026
   MEDIA_TICKET_SECONDS: "2"
-  ALLOWED_ORIGINS: http://localhost:18080,http://127.0.0.1:18080,http://host.docker.internal:18080
+  ALLOWED_ORIGINS: http://localhost:${TEST_HTTP_PORT:-18080},http://127.0.0.1:${TEST_HTTP_PORT:-18080},http://host.docker.internal:${TEST_HTTP_PORT:-18080}
   ASSET_ROOT: /tmp/firebot-test-assets
 
 x-python-service: &python-service
@@ -192,7 +192,7 @@ services:
   nginx:
     image: nginx:1.30.4-alpine
     profiles: [full]
-    ports: ["18080:80"]
+    ports: ["${TEST_HTTP_PORT:-18080}:80"]
     volumes: ["./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro"]
     depends_on:
       api: { condition: service_healthy }
