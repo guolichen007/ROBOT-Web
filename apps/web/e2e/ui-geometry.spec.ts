@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
+import { getAccessToken as token, loginPage } from './helpers/auth'
 
-const password = process.env.E2E_ADMIN_PASSWORD || 'Firebot-Dev-2026!'
 const SHOT_DIR = 'screenshots/ui-gate2'
 
 // 100% browser zoom is enforced by Playwright defaults (deviceScaleFactor = 1,
@@ -13,22 +13,6 @@ async function captureMeta(page: Page) {
     scrollWidth: document.documentElement.scrollWidth,
     scrollHeight: document.documentElement.scrollHeight,
   }))
-}
-
-async function token(request: APIRequestContext): Promise<string> {
-  const response = await request.post('/api/v1/auth/login', {
-    data: { username: 'admin', password },
-  })
-  expect(response.ok()).toBeTruthy()
-  return (await response.json()).access_token
-}
-
-async function login(page: Page): Promise<void> {
-  await page.goto('/login')
-  await page.getByLabel('账号').fill('admin')
-  await page.getByLabel('密码').fill(password)
-  await page.getByRole('button', { name: '登录' }).click()
-  await expect(page.getByRole('heading', { name: '停车场巡检地图' })).toBeVisible()
 }
 
 async function createFire(request: APIRequestContext): Promise<string> {
@@ -75,9 +59,9 @@ test.describe('ui-gate2 viewport geometry', () => {
     { name: '1366x768', width: 1366, height: 768 },
     { name: '1280x800', width: 1280, height: 800 },
   ]) {
-    test(`normal ${viewport.name}`, async ({ page }) => {
+    test(`normal ${viewport.name}`, async ({ page, request }) => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height })
-      await login(page)
+      await loginPage(page, request)
 
       const meta = await captureMeta(page)
       expect(meta.devicePixelRatio).toBe(1)
@@ -134,7 +118,7 @@ test.describe('ui-gate2 viewport geometry', () => {
       const alarmId = await createFire(request)
       try {
         await page.setViewportSize({ width: viewport.width, height: viewport.height })
-        await login(page)
+        await loginPage(page, request)
 
         const meta = await captureMeta(page)
         expect(meta.devicePixelRatio).toBe(1)

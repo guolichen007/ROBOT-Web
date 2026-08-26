@@ -114,24 +114,47 @@ async def _verify_resync(client: httpx.Client, ws_base: str, origin: str, token:
 
 
 async def _verify_replay(client: httpx.Client, ws_base: str, origin: str, token: str,
-                         watermark: str, marker: str, redis_url: str) -> bool:
+                         marker: str, redis_url: str) -> bool:
+    """local-sim 专用：先取当前 stream 最新 id 作为 after，再注入 marker 并等待回放。
+
+    不能用 snapshot watermark：双 mock 持续写入会把它推到有限窗口之外，或早于
+    stream 保留窗口导致 resync_required，从而让 marker 永远读不到。
+    """
     import redis as redis_lib
 
     r = redis_lib.Redis.from_url(redis_url, decode_responses=True)
-    r.xadd("firebot:events", {"event": json.dumps({
+    fresh = "0-0"
+    try:
+        latest = r.xrevrange("firebot:events", count=1)
+        if latest:
+            fresh = str(latest[0][0])
+    except Exception as exc:  # noqa: BLE001
+        _diag("REPLAY_READ_WATERMARK", exc)
+    marker_id = r.xadd("firebot:events", {"event": json.dumps({
         "event_type": "system.acceptance_marker",
         "server_received_at": datetime.now(timezone.utc).isoformat(),
         "payload": {"marker": marker},
-    })})
+    }, default=str)})
+    # 安全诊断：只写 after 与 marker id，不写 auth ticket。
+    print(f"GATE_DIAG REPLAY_FROM_STREAM_ID after={fresh} marker_id={marker_id}", file=sys.stderr, flush=True)
     ticket = client.post("/api/v1/auth/ws-ticket", headers=_headers(token, origin))
     ticket.raise_for_status()
-    uri = f"{ws_base}/ws/v1/monitor?ticket={ticket.json()['ticket']}&after={watermark}"
+    uri = f"{ws_base}/ws/v1/monitor?ticket={ticket.json()['ticket']}&after={fresh}"
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + 15.0
     async with websockets.connect(uri, origin=origin) as socket:
-        for _ in range(20):
-            event = await _recv_event(socket)
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return False
+            try:
+                event = json.loads(await asyncio.wait_for(socket.recv(), timeout=remaining))
+            except asyncio.TimeoutError:
+                return False
+            if event.get("event_type") == "resync_required":
+                return False
             if event.get("data", {}).get("marker") == marker:
                 return True
-    return False
 
 
 async def _verify_real_vehicle_event(client: httpx.Client, ws_base: str, origin: str,
@@ -307,7 +330,7 @@ async def run() -> None:
             redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
             marker = str(uuid4())
             try:
-                replayed = await _verify_replay(client, ws_base, origin, token, watermark, marker, redis_url)
+                replayed = await _verify_replay(client, ws_base, origin, token, marker, redis_url)
                 emit("REALTIME_EVENT", "PASS" if replayed else "FAIL")
             except Exception as exc:
                 _diag("REALTIME_EVENT", exc)

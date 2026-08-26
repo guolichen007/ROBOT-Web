@@ -1,50 +1,5 @@
-import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
-
-const configuredPassword = process.env.E2E_ADMIN_PASSWORD
-const password = configuredPassword || 'Firebot-Dev-2026!'
-const changedPassword = process.env.E2E_CHANGED_PASSWORD || 'Firebot-E2E-Changed-2026!'
-
-async function workingPassword(request: APIRequestContext): Promise<{ value: string; mustChange: boolean }> {
-  // The first test rotates the bootstrap credential. Every later test in the
-  // same isolated profile must therefore try the changed password first even
-  // when CI explicitly supplied E2E_ADMIN_PASSWORD.
-  const candidates = [...new Set([changedPassword, configuredPassword, password].filter(Boolean))]
-  for (const candidate of candidates) {
-    const response = await request.post('/api/v1/auth/login', {
-      data: { username: 'admin', password: candidate },
-    })
-    if (response.ok())
-      return { value: candidate, mustChange: Boolean((await response.json()).user.must_change_password) }
-  }
-  throw new Error('No valid E2E admin password')
-}
-
-async function login(page: Page, request: APIRequestContext): Promise<void> {
-  const credentials = await workingPassword(request)
-  await page.goto('/login')
-  await page.getByLabel('账号').fill('admin')
-  await page.getByLabel('密码').fill(credentials.value)
-  await page.getByRole('button', { name: '登录' }).click()
-  if (credentials.mustChange) {
-    await page.getByLabel('当前密码').fill(credentials.value)
-    await page.getByLabel('新密码', { exact: true }).fill(changedPassword)
-    await page.getByLabel('确认新密码').fill(changedPassword)
-    await page.getByRole('button', { name: '修改并重新登录' }).click()
-    await expect(page).toHaveURL(/\/login$/)
-    await page.getByLabel('密码', { exact: true }).fill(changedPassword)
-    await page.getByRole('button', { name: '登录' }).click()
-  }
-  await expect(page.getByRole('heading', { name: '停车场巡检地图' })).toBeVisible()
-}
-
-async function token(request: APIRequestContext): Promise<string> {
-  const credentials = await workingPassword(request)
-  const response = await request.post('/api/v1/auth/login', {
-    data: { username: 'admin', password: credentials.value },
-  })
-  expect(response.ok()).toBeTruthy()
-  return (await response.json()).access_token
-}
+import { expect, test, type APIRequestContext } from '@playwright/test'
+import { getAccessToken as token, loginPage as login } from './helpers/auth'
 
 async function forceRelease(request: APIRequestContext): Promise<void> {
   const accessToken = await token(request)

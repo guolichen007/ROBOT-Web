@@ -1,4 +1,5 @@
 import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { ensurePasswordReady, loginPage } from './helpers/auth'
 
 // Multi-vehicle (R001 + R002) isolation and active-vehicle switch acceptance.
 // Runs against compose.test.yml --profile full where mock-robot (R001) and
@@ -10,68 +11,6 @@ import { expect, test, type APIRequestContext, type Locator, type Page } from '@
 //   因此本文件不伪造 ALARM_ISOLATION 测试。
 // - R002 OFFLINE：需要停止 mock-robot-2 并等待 offline TTL，属于 Docker/运维动作，
 //   Playwright 不能安全控制，故拆到 Windows host live acceptance，不在此伪造。
-
-const configuredPassword = process.env.E2E_ADMIN_PASSWORD
-const password = configuredPassword || 'Firebot-Dev-2026!'
-const changedPassword = process.env.E2E_CHANGED_PASSWORD || 'Firebot-E2E-Changed-2026!'
-
-async function workingPassword(request: APIRequestContext): Promise<{ value: string; mustChange: boolean }> {
-  const candidates = [...new Set([changedPassword, configuredPassword, password].filter(Boolean))]
-  for (const candidate of candidates) {
-    const response = await request.post('/api/v1/auth/login', {
-      data: { username: 'admin', password: candidate },
-    })
-    if (response.ok())
-      return { value: candidate, mustChange: Boolean((await response.json()).user.must_change_password) }
-  }
-  throw new Error('No valid E2E admin password')
-}
-
-// 统一语义：API-only 测试（token/snapshot）必须处理 bootstrap 首次改密，
-// 保证在全新 seed DB 上单独跑 multi-vehicle.spec.ts 也成立，不依赖 baseline 先改密。
-async function ensurePasswordReady(request: APIRequestContext): Promise<string> {
-  const credentials = await workingPassword(request)
-  if (!credentials.mustChange) {
-    const login = await request.post('/api/v1/auth/login', {
-      data: { username: 'admin', password: credentials.value },
-    })
-    expect(login.ok()).toBeTruthy()
-    return (await login.json()).access_token
-  }
-  const login = await request.post('/api/v1/auth/login', {
-    data: { username: 'admin', password: credentials.value },
-  })
-  expect(login.ok()).toBeTruthy()
-  const accessToken = (await login.json()).access_token
-  const change = await request.post('/api/v1/auth/change-password', {
-    headers: { Authorization: `Bearer ${accessToken}` },
-    data: { current_password: credentials.value, new_password: changedPassword },
-  })
-  expect(change.ok()).toBeTruthy()
-  const relogin = await request.post('/api/v1/auth/login', {
-    data: { username: 'admin', password: changedPassword },
-  })
-  expect(relogin.ok()).toBeTruthy()
-  return (await relogin.json()).access_token
-}
-
-async function login(page: Page, request: APIRequestContext): Promise<void> {
-  const credentials = await workingPassword(request)
-  await page.goto('/login')
-  await page.getByLabel('账号').fill('admin')
-  await page.getByLabel('密码').fill(credentials.value)
-  await page.getByRole('button', { name: '登录' }).click()
-  if (credentials.mustChange) {
-    await page.getByLabel('当前密码').fill(credentials.value)
-    await page.getByLabel('新密码', { exact: true }).fill(changedPassword)
-    await page.getByLabel('确认新密码').fill(changedPassword)
-    await page.getByRole('button', { name: '修改并重新登录' }).click()
-    await expect(page).toHaveURL(/\/login$/)
-    await page.getByLabel('密码', { exact: true }).fill(changedPassword)
-    await page.getByRole('button', { name: '登录' }).click()
-  }
-  await expect(page.getByRole('heading', { name: '停车场巡检地图' })).toBeVisible()
-}
 
 async function snapshot(request: APIRequestContext): Promise<{
   robots: Array<{ id?: string; vehicle_id: string }>
@@ -96,7 +35,7 @@ function deviceRow(page: Page, label: string): Locator {
 }
 
 async function switchToR002(page: Page, request: APIRequestContext): Promise<void> {
-  await login(page, request)
+  await loginPage(page, request)
   await page.goto('/robots')
   await page.locator('.vehicle-row').filter({ hasText: 'R002' }).getByRole('button', { name: '切换监控' }).click()
   await expect(page.getByText('已切换当前监控车辆：R002')).toBeVisible()
