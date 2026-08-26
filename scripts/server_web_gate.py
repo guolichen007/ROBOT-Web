@@ -4,23 +4,30 @@
 两个模式：
 
   --mode local-sim      本地联调：允许注入事件、断 WS、replay / resync，做完整闭环。
+                        bootstrap admin 若 must_change_password=true，会先改密再重登。
   --mode prod-readonly  现场只读：不修改 robot/task/command/source_kind/control flag 任何
                         业务状态；认证 session / ws-ticket 等临时写入属于验收必要副作用，
-                        明确标记为 AUTH_SESSION_EPHEMERAL_WRITE=ALLOWED。
+                        标记为 AUTH_SESSION_EPHEMERAL_WRITE=ALLOWED。绝不自动改生产密码：
+                        must_change_password=true 时直接 AUTH_PASSWORD_READY=FAIL 退出。
 
 两个阶段：
 
   --phase prefield      车端未上线前：REAL_VEHICLE_PRESENT / REAL_VEHICLE_EVENT 允许 PENDING。
   --phase postfield     车端已上线后：两项必须 PASS，否则 exit 1，禁止用 PENDING 假通过。
 
-输出固定 `KEY=PASS|FAIL|PENDING|SKIP|YES|ALLOWED` 行，便于 CI / 现场脚本 grep。
+输出固定 `KEY=PASS|FAIL|PENDING|SKIP|YES|ALLOWED` 行（stdout）；诊断走 stderr 的
+`GATE_DIAG <KEY> <exc> status=.. body=..`（已脱敏，绝不打印 token/password/cookie）。
 
 依赖：httpx、websockets、redis（与 scripts/ws_acceptance.py 相同）。
 环境变量：
-  E2E_ADMIN_PASSWORD            必填
-  E2E_BASE_URL                  默认 http://nginx（prod-readonly 必须 https://）
-  REDIS_URL                     仅 local-sim 注入需要
-  REAL_VEHICLE_EVENT_WAIT_SECONDS  postfield 观察实车事件的最长等待秒数（默认 30）
+  E2E_ADMIN_PASSWORD             必填（bootstrap 初始密码）
+  E2E_CHANGED_PASSWORD           可选（改密后的密码，默认 Firebot-E2E-Changed-2026!）
+  E2E_BASE_URL                   传输地址（local-sim 默认 http://nginx）
+  E2E_ORIGIN                     Browser Origin（未设置时从 E2E_BASE_URL 派生；
+                                 local-sim 必须显式设为 ALLOWED_ORIGINS 之一，如
+                                 http://127.0.0.1:18080）
+  REDIS_URL                      仅 local-sim 注入需要
+  REAL_VEHICLE_EVENT_WAIT_SECONDS postfield 观察实车事件的最长等待秒数（默认 30）
 """
 from __future__ import annotations
 
@@ -28,6 +35,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -36,12 +44,41 @@ import httpx
 import websockets
 
 REAL_VEHICLE_ID = "firebot-vehicle-01"
+DEFAULT_CHANGED_PASSWORD = "Firebot-E2E-Changed-2026!"
 RESULTS: list[tuple[str, str]] = []
+
+_SECRET_RE = re.compile(
+    r'(?i)(access_token|refresh_token|csrf_token|password|ticket)\s*["\']?\s*[:=]\s*["\'][^"\']*["\']'
+)
 
 
 def emit(key: str, status: str) -> None:
     RESULTS.append((key, status))
     print(f"{key}={status}", flush=True)
+
+
+def _redact(text: str) -> str:
+    return _SECRET_RE.sub(lambda m: f"{m.group(1)}=<redacted>", text)
+
+
+def _diag(key: str, exc: Exception) -> None:
+    response = getattr(exc, "response", None)
+    parts = [type(exc).__name__]
+    if response is not None:
+        parts.append(f"status={getattr(response, 'status_code', '?')}")
+        try:
+            parts.append(f"body={_redact(response.text[:300])!r}")
+        except Exception:
+            pass
+    print("GATE_DIAG " + key + " " + " ".join(parts), file=sys.stderr, flush=True)
+
+
+def _unique(items: list[str]) -> list[str]:
+    seen: list[str] = []
+    for item in items:
+        if item and item not in seen:
+            seen.append(item)
+    return seen
 
 
 def _login(client: httpx.Client, password: str) -> dict:
@@ -139,50 +176,92 @@ async def run() -> None:
     parser.add_argument("--phase", choices=["prefield", "postfield"], default="prefield")
     args = parser.parse_args()
 
-    password = os.environ["E2E_ADMIN_PASSWORD"]
+    admin_password = os.environ["E2E_ADMIN_PASSWORD"]
+    changed_password = os.getenv("E2E_CHANGED_PASSWORD") or DEFAULT_CHANGED_PASSWORD
     http_base = os.getenv("E2E_BASE_URL", "http://nginx")
+    origin = os.getenv("E2E_ORIGIN") or http_base.rstrip("/")
     ws_base = http_base.replace("http://", "ws://").replace("https://", "wss://")
-    origin = http_base.rstrip("/")
 
     with httpx.Client(base_url=http_base, timeout=10, cookies=httpx.Cookies()) as client:
-        # HTTPS / auth
         is_https = http_base.startswith("https://")
         if args.mode == "prod-readonly":
             emit("WEB_HTTPS", "PASS" if is_https else "FAIL")
         else:
             emit("WEB_HTTPS", "SKIP")
-        try:
-            session = _login(client, password)
-            emit("AUTH_LOGIN", "PASS")
-        except Exception:
+
+        # ---- auth：候选密码 + 首次改密 ----
+        token: str | None = None
+        used_password: str | None = None
+        for candidate in _unique([changed_password, admin_password]):
+            try:
+                session = _login(client, candidate)
+                token = session["access_token"]
+                used_password = candidate
+                break
+            except Exception:
+                continue
+        if token is None:
             emit("AUTH_LOGIN", "FAIL")
+            emit("AUTH_PASSWORD_READY", "FAIL")
             sys.exit(_exit_code(args.phase))
-        token = session["access_token"]
+
+        must_change = bool(session.get("user", {}).get("must_change_password"))
+        if must_change:
+            if args.mode == "prod-readonly":
+                emit("AUTH_LOGIN", "PASS")
+                emit("AUTH_PASSWORD_READY", "FAIL")
+                sys.exit(_exit_code(args.phase))
+            try:
+                change = client.post(
+                    "/api/v1/auth/change-password",
+                    json={"current_password": used_password, "new_password": changed_password},
+                    headers=_headers(token, origin),
+                )
+                change.raise_for_status()
+            except Exception as exc:
+                _diag("AUTH_CHANGE_PASSWORD", exc)
+                emit("AUTH_LOGIN", "PASS")
+                emit("AUTH_PASSWORD_READY", "FAIL")
+                sys.exit(_exit_code(args.phase))
+            try:
+                session = _login(client, changed_password)
+                token = session["access_token"]
+            except Exception as exc:
+                _diag("AUTH_RELOGIN", exc)
+                emit("AUTH_LOGIN", "PASS")
+                emit("AUTH_PASSWORD_READY", "FAIL")
+                sys.exit(_exit_code(args.phase))
+
+        emit("AUTH_LOGIN", "PASS")
+        emit("AUTH_PASSWORD_READY", "PASS")
         headers = _headers(token, origin)
-        try:
-            me = client.get("/api/v1/auth/me", headers=headers)
-            me.raise_for_status()
-            emit("AUTH_ME", "PASS")
-        except Exception:
-            emit("AUTH_ME", "FAIL")
-        try:
-            csrf = client.cookies.get("csrf_token")
-            refresh_headers = {**headers, "X-CSRF-Token": csrf} if csrf else headers
-            refresh = client.post("/api/v1/auth/refresh", headers=refresh_headers)
-            refresh.raise_for_status()
-            emit("AUTH_REFRESH", "PASS")
-        except Exception:
-            emit("AUTH_REFRESH", "FAIL")
 
         if args.mode == "prod-readonly":
-            # 只读边界：不修改任何 robot/task/command/source_kind/control flag 业务状态。
-            # 登录 / refresh / ws-ticket 产生的认证 session 与临时 ticket 属验收必要副作用。
             emit("NO_ROBOT_STATE_WRITE", "YES")
             emit("NO_COMMAND_WRITE", "YES")
             emit("NO_TASK_WRITE", "YES")
             emit("NO_SOURCE_KIND_WRITE", "YES")
             emit("NO_CONTROL_FLAG_WRITE", "YES")
             emit("AUTH_SESSION_EPHEMERAL_WRITE", "ALLOWED")
+
+        try:
+            me = client.get("/api/v1/auth/me", headers=headers)
+            me.raise_for_status()
+            emit("AUTH_ME", "PASS")
+        except Exception as exc:
+            _diag("AUTH_ME", exc)
+            emit("AUTH_ME", "FAIL")
+        try:
+            csrf = client.cookies.get("csrf_token")
+            refresh_headers = {**headers, "X-CSRF-Token": csrf} if csrf else headers
+            refresh = client.post("/api/v1/auth/refresh", headers=refresh_headers)
+            refresh.raise_for_status()
+            token = refresh.json()["access_token"]
+            headers = _headers(token, origin)
+            emit("AUTH_REFRESH", "PASS")
+        except Exception as exc:
+            _diag("AUTH_REFRESH", exc)
+            emit("AUTH_REFRESH", "FAIL")
 
         # snapshot + multi-vehicle
         watermark = "0-0"
@@ -202,7 +281,8 @@ async def run() -> None:
                 emit("REAL_VEHICLE_PRESENT", "PASS")
             else:
                 emit("REAL_VEHICLE_PRESENT", "PENDING" if args.phase == "prefield" else "FAIL")
-        except Exception:
+        except Exception as exc:
+            _diag("MONITOR_SNAPSHOT", exc)
             emit("MONITOR_SNAPSHOT", "FAIL")
             if args.phase == "postfield":
                 emit("REAL_VEHICLE_PRESENT", "FAIL")
@@ -212,13 +292,15 @@ async def run() -> None:
             await _verify_ticket(client, ws_base, origin, token)
             emit("WS_TICKET", "PASS")
             emit("WSS_CONNECT", "PASS")
-        except Exception:
+        except Exception as exc:
+            _diag("WS_TICKET", exc)
             emit("WS_TICKET", "FAIL")
             emit("WSS_CONNECT", "FAIL")
         try:
             await _verify_resync(client, ws_base, origin, token)
             emit("RESYNC", "PASS")
-        except Exception:
+        except Exception as exc:
+            _diag("RESYNC", exc)
             emit("RESYNC", "FAIL")
 
         if args.mode == "local-sim":
@@ -227,7 +309,8 @@ async def run() -> None:
             try:
                 replayed = await _verify_replay(client, ws_base, origin, token, watermark, marker, redis_url)
                 emit("REALTIME_EVENT", "PASS" if replayed else "FAIL")
-            except Exception:
+            except Exception as exc:
+                _diag("REALTIME_EVENT", exc)
                 emit("REALTIME_EVENT", "FAIL")
             emit("REAL_VEHICLE_EVENT", "PENDING")
         elif args.phase == "prefield":
@@ -235,11 +318,10 @@ async def run() -> None:
         else:
             wait = float(os.getenv("REAL_VEHICLE_EVENT_WAIT_SECONDS", "30"))
             try:
-                seen = await _verify_real_vehicle_event(
-                    client, ws_base, origin, token, watermark, wait
-                )
+                seen = await _verify_real_vehicle_event(client, ws_base, origin, token, watermark, wait)
                 emit("REAL_VEHICLE_EVENT", "PASS" if seen else "FAIL")
-            except Exception:
+            except Exception as exc:
+                _diag("REAL_VEHICLE_EVENT", exc)
                 emit("REAL_VEHICLE_EVENT", "FAIL")
 
     sys.exit(_exit_code(args.phase))
