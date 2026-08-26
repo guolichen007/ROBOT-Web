@@ -4,6 +4,21 @@
 > 边界：**只做 Bridge 通信层**。不实现任何真实车辆运动/巡航/急停/灭火/回充/手动控制。真实执行由车端 ROS 控制程序后续实现。
 > 协议契约见 [`docs/FIREBOT_BRIDGE_CONTRACT_1.3.md`](../../../docs/FIREBOT_BRIDGE_CONTRACT_1.3.md)。
 
+## 当前首车现场状态（2026-08-26）
+
+```text
+批准 runtime = 13c869247079b88da11b36666755906001a0041c
+现场运行路径 = /home/tl/vehicle-bridge（非 /opt 标准安装形态）
+运行方式     = systemd firebot-bridge.service → /usr/bin/python3 -m firebot_bridge.main
+ROS isolation = process-local，ROS_MASTER_URI=http://127.0.0.1:1
+
+当前安全态：commands=[]、sensors=[]、location_enabled=false、REAL_CONTROL=NOT_IMPLEMENTED
+当前 Gate：Bridge communication/operation、broker reconnect、graceful stop、LWT、
+          systemd recovery、short soak 均 PASS；long soak DEFERRED；Web UI NOT_CHECKED。
+
+现场日常启停/状态/大屏见 HANDOFF/：`HANDOFF/README.md`
+```
+
 ## 职责
 
 ```
