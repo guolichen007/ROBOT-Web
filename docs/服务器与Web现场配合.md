@@ -1,8 +1,39 @@
 # 服务器与 Web 现场配合
 
 > 面向服务器 / Web 现场人员。**当前已经运行的服务器**与“新服务器从零部署”是两件事：
-> 从零部署见 [Ubuntu服务器部署.md](Ubuntu服务器部署.md)；本文件是**当前现场服务器**在 Vehicle R0–R4 期间唯一允许的操作依据。
+> 从零部署见 [Ubuntu服务器部署.md](Ubuntu服务器部署.md)；本文件是**当前现场服务器**在实车接入阶段的唯一操作依据。
 > 状态真相源见 [实车现场联调总览.md](实车现场联调总览.md)。
+
+---
+
+## 0. 当前阶段与版本双轨
+
+Completed：
+
+```text
+Bridge initial connect
+broker reconnect
+graceful stop
+systemd
+LWT
+recovery
+short soak
+```
+
+Current：
+
+```text
+Phase E0 completed / Phase E1 preparing
+```
+
+版本双轨（必须分开）：
+
+```text
+DEPLOYED_SERVER=41bbaf4398711fd940dde1818193a67d34e355c8
+SERVER_WEB_CANDIDATE=8e63d5d8def6c60c0244505685e6305422f0cccc
+```
+
+> 本轮文档同步不触发 server redeploy。
 
 ---
 
@@ -22,7 +53,7 @@ git rev-parse HEAD   # 预期 41bbaf4398711fd940dde1818193a67d34e355c8
 
 ---
 
-## 2. R0–R4 期间：禁止 / 允许
+## 2. 现场期间：禁止 / 允许（R0–R4 已完成，纪律仍适用）
 
 禁止：
 

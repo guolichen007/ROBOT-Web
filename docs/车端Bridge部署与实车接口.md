@@ -1,7 +1,42 @@
 # 车端 Bridge 部署与实车接口
 
-> 面向 ROS / 车端人员。现场安装与 R0–R4 验收的唯一操作依据。
+> 面向 ROS / 车端人员。现场安装与验收的唯一操作依据。
 > 当前状态真相源见 [实车现场联调总览.md](实车现场联调总览.md)；技术协议见 [FIREBOT_BRIDGE_CONTRACT_1.3.md](FIREBOT_BRIDGE_CONTRACT_1.3.md)。
+> 现场日常启停/状态查看见 [HANDOFF/](../integration/ros1/vehicle-bridge/HANDOFF/README.md)。
+
+---
+
+## 0. 当前首车现场状态（Bridge-only 隔离运行）
+
+当前首车**不是** `/opt` 标准安装形态，而是 `/home/tl/vehicle-bridge` + systemd 直接运行 Python 包：
+
+```text
+VEHICLE_OS=Ubuntu 20.04
+BRIDGE_FIELD_PATH=/home/tl/vehicle-bridge
+SYSTEMD_UNIT=/etc/systemd/system/firebot-bridge.service
+WorkingDirectory=/home/tl/vehicle-bridge
+ExecStart=/usr/bin/python3 -m firebot_bridge.main
+ROS_MASTER_URI=http://127.0.0.1:1   （process-local ROS isolation）
+```
+
+当前：
+
+```text
+commands=[]
+sensors=[]
+location_enabled=false
+real control=NOT_IMPLEMENTED
+```
+
+R0–R4 已完成，**不再把“R2 启动 roscore”当成当前下一步**。当前下一步是：
+
+```text
+Phase E1 = read-only ROS source discovery
+```
+
+> 本次任务**禁止**执行 Phase E1。
+
+标准 `/opt/install.sh` 部署路线见下方第 2–3 节，继续保留为通用部署资产（第二台车从零部署仍按它走）。
 
 ---
 
