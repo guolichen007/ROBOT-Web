@@ -96,8 +96,13 @@ async def run() -> None:
     ws_base = http_base.replace("http://", "ws://").replace("https://", "wss://")
     origin = http_base.rstrip("/")
 
-    with httpx.Client(base_url=http_base, timeout=10) as client:
+    with httpx.Client(base_url=http_base, timeout=10, cookies=httpx.Cookies()) as client:
         # HTTPS / auth
+        is_https = http_base.startswith("https://")
+        if args.mode == "prod-readonly":
+            emit("WEB_HTTPS", "PASS" if is_https else "FAIL")
+        else:
+            emit("WEB_HTTPS", "SKIP")
         try:
             session = _login(client, password)
             emit("AUTH_LOGIN", "PASS")
@@ -113,7 +118,9 @@ async def run() -> None:
         except Exception:
             emit("AUTH_ME", "FAIL")
         try:
-            refresh = client.post("/api/v1/auth/refresh", headers=headers)
+            csrf = client.cookies.get("csrf_token")
+            refresh_headers = {**headers, "X-CSRF-Token": csrf} if csrf else headers
+            refresh = client.post("/api/v1/auth/refresh", headers=refresh_headers)
             refresh.raise_for_status()
             emit("AUTH_REFRESH", "PASS")
         except Exception:
@@ -163,7 +170,7 @@ async def run() -> None:
             emit("NO_COMMAND_SENT", "YES")
             emit("REAL_VEHICLE_EVENT", "PENDING")
 
-    sys.exit(0 if all(status in ("PASS", "PENDING", "YES") for _, status in RESULTS) else 1)
+    sys.exit(0 if all(status in ("PASS", "PENDING", "YES", "SKIP") for _, status in RESULTS) else 1)
 
 
 if __name__ == "__main__":

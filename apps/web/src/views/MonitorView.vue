@@ -78,6 +78,11 @@ const trajectory = computed(() => {
   )
 })
 const readOnly = computed(() => robot.value?.integration?.source_kind === 'ROS_COMPAT')
+const patrolReady = computed(() => robot.value?.autonomous_task_ready?.patrol === true)
+const returnReady = computed(() => robot.value?.autonomous_task_ready?.return_dock === true)
+const stopReady = computed(() => robot.value?.safety_command_ready?.stop_motion === true)
+const estopReady = computed(() => robot.value?.safety_command_ready?.emergency_stop === true)
+const resetEstopReady = computed(() => robot.value?.safety_command_ready?.reset_estop === true)
 const readinessText = computed(() => {
   const labels = [
     ...new Set((robot.value?.readiness_reasons || []).map((code) => reasonCodeLabel(code) || '控制链路尚未就绪')),
@@ -182,6 +187,12 @@ function friendlyError(reason: unknown): string {
   if (messageLabel) return messageLabel
   return message
 }
+// 每个命令用自己的服务器 readiness 做二次防护；reason 只负责展示，不再作为统一真值。
+function requireControl(ready: boolean, label: string): boolean {
+  if (ready) return true
+  toast(dockReason.value || `${label}未就绪`)
+  return false
+}
 async function refreshCoverage() {
   if (!robot.value) return
   try {
@@ -222,6 +233,10 @@ async function dispatch(mode: string) {
   if (!primaryAlarm.value) return
   if (!robot.value) {
     toast('当前无机器人，无法执行灭火动作')
+    return
+  }
+  if (extinguishReason.value) {
+    toast(extinguishReason.value)
     return
   }
   busyMode.value = mode
@@ -293,10 +308,7 @@ async function patrol() {
     toast('当前无机器人，无法开始巡检')
     return
   }
-  if (dockReason.value) {
-    toast(dockReason.value)
-    return
-  }
+  if (!requireControl(patrolReady.value, '巡检')) return
   busyCommand.value = 'patrol'
   try {
     const plans = (await api.get('/patrol-plans')).data as Array<{
@@ -358,10 +370,7 @@ async function stop() {
     toast('当前无机器人，无法停止')
     return
   }
-  if (dockReason.value) {
-    toast(dockReason.value)
-    return
-  }
+  if (!requireControl(stopReady.value, '停止')) return
   busyCommand.value = 'stop'
   try {
     stopOperation.value = (
@@ -384,10 +393,7 @@ async function home() {
     toast('当前无机器人，无法返回待命区')
     return
   }
-  if (dockReason.value) {
-    toast(dockReason.value)
-    return
-  }
+  if (!requireControl(returnReady.value, '返航')) return
   busyCommand.value = 'home'
   try {
     await api.post(
@@ -408,10 +414,7 @@ async function estop() {
     toast('当前无机器人，无法执行软件急停')
     return
   }
-  if (dockReason.value) {
-    toast(dockReason.value)
-    return
-  }
+  if (!requireControl(estopReady.value, '软件急停')) return
   busyCommand.value = 'estop'
   try {
     await api.post(
@@ -453,10 +456,7 @@ async function resetEstop() {
     toast('当前无机器人，无法解除软件急停')
     return
   }
-  if (dockReason.value) {
-    toast(dockReason.value)
-    return
-  }
+  if (!requireControl(resetEstopReady.value, '急停复位')) return
   busyCommand.value = 'reset-estop'
   try {
     const { data } = await api.post(
@@ -664,6 +664,11 @@ onUnmounted(() => {
         :estop-active="Boolean(robot?.estop_active)"
         :at-waiting-area="atWaitingArea"
         :resume-options="resumeOptions"
+        :patrol-ready="patrolReady"
+        :return-ready="returnReady"
+        :stop-ready="stopReady"
+        :estop-ready="estopReady"
+        :reset-estop-ready="resetEstopReady"
         @patrol="patrol"
         @stop="stop"
         @home="home"

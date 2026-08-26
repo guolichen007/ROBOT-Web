@@ -11,6 +11,11 @@ const props = defineProps<{
   vehicleState: VehicleOperationState
   atWaitingArea: boolean
   resumeOptions: ResumeOptions
+  patrolReady: boolean
+  returnReady: boolean
+  stopReady: boolean
+  estopReady: boolean
+  resetEstopReady: boolean
 }>()
 const emit = defineEmits<{ patrol: []; stop: []; home: []; estop: []; resetEstop: [] }>()
 const hold = useHoldToConfirm(() => {
@@ -22,8 +27,10 @@ function keyDown(event: KeyboardEvent): void {
 }
 
 const motionLocked = computed(() => props.estopActive || props.vehicleState === 'ERROR_STOP_UNCONFIRMED')
-// 服务器未就绪 / 只读接入 / 控制未开放时，所有控制按钮必须 fail-closed（reason 非空即锁定）。
-const controlLocked = computed(() => Boolean(props.reason))
+// reason 只负责展示；每个按钮使用自己的服务器 readiness，避免一个原因锁死全部控制。
+const holdDisabled = computed(
+  () => Boolean(props.busy) || (props.estopActive ? !props.resetEstopReady : !props.estopReady),
+)
 
 const patrolLabel = computed(() => {
   if (props.busy === 'patrol') return '正在启动…'
@@ -33,7 +40,7 @@ const patrolLabel = computed(() => {
 })
 const patrolDisabled = computed(
   () =>
-    controlLocked.value ||
+    !props.patrolReady ||
     Boolean(props.busy) ||
     motionLocked.value ||
     ['PATROLLING', 'STOPPING', 'RETURNING', 'RETURN_STARTING'].includes(props.vehicleState) ||
@@ -49,7 +56,7 @@ const stopLabel = computed(() => {
 })
 const stopDisabled = computed(
   () =>
-    controlLocked.value ||
+    !props.stopReady ||
     Boolean(props.busy) ||
     motionLocked.value ||
     ['IDLE', 'PAUSED_SAFE', 'ERROR_STOP_UNCONFIRMED'].includes(props.vehicleState),
@@ -64,7 +71,7 @@ const homeLabel = computed(() => {
 })
 const homeDisabled = computed(
   () =>
-    controlLocked.value ||
+    !props.returnReady ||
     Boolean(props.busy) ||
     motionLocked.value ||
     (props.atWaitingArea && props.vehicleState === 'IDLE') ||
@@ -100,7 +107,7 @@ const homeDisabled = computed(
         class="hold-estop"
         :class="{ 'hold-estop--active': estopActive, 'is-resetting': busy === 'reset-estop' }"
         :aria-label="estopActive ? '解除急停' : '软件急停'"
-        :disabled="controlLocked || Boolean(busy)"
+        :disabled="holdDisabled"
         :title="
           estopActive
             ? '解除软件急停锁存，不替代物理急停按钮的人工复位'
