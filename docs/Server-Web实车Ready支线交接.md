@@ -9,24 +9,23 @@
 
 ```text
 DEPLOYED_SERVER=41bbaf4398711fd940dde1818193a67d34e355c8   （服务器现场当前实际运行）
-SERVER_WEB_CANDIDATE=8e63d5d8def6c60c0244505685e6305422f0cccc （开发候选，未部署）
+SERVER_WEB_CODE_BASE=8e63d5d8def6c60c0244505685e6305422f0cccc （最后含 Server/Web 功能代码的 commit，未部署）
 ```
 
 - 现场服务器当前仍运行 `41bbaf4`。
 - **不要部署 `8e63d5d`。**
-- 本轮文档同步不触发 server redeploy。
+- `8e63d5d` 是 **CODE BASE**，不是 branch HEAD；branch HEAD 用 `git rev-parse HEAD` 动态取得，不硬编码。
 
 ---
 
 ## 支线历史
 
 ```text
-BASE=675b1a6ee9259e669b175e49e65f94462548690b
-CURRENT=8e63d5d8def6c60c0244505685e6305422f0cccc
-AHEAD_BY=7
+675b1a6 → 8e63d5d = 7 个 Server/Web code commits
+2a9591a / 3defe96 / 最终 closeout fix = docs + HANDOFF closeout layer
 ```
 
-依序（旧→新）：
+依序（旧→新，code 层）：
 
 ```text
 d1bbb2f feat(server-web): real-vehicle-ready fail-closed + multi-vehicle isolation
@@ -58,19 +57,33 @@ BRIDGE_RUNTIME_CHANGED=NO
 PROTOCOL_CHANGED=NO
 MIGRATION_CHANGED=NO
 REAL_CONTROL=NOT_IMPLEMENTED
+GITHUB_CI=NOT_TRIGGERED_BY_BRANCH_POLICY   （CI 不监听 integration/**，非失败）
 ```
 
 ---
 
-## 下一步（不要在本次任务内执行）
+## 支线冻结（本次 closeout 后）
 
 ```text
-1. 宿主验证 18080/18081 端口后跑 docker 双车 + server_web_gate local-sim + Playwright
-2. command-dispatcher Redis 断连 live 实测
-3. 等车端 R0-R4 完整 PASS
-4. PR-A：ui/youdao-light-hmi-v1 → develop（CI，暂不 merge）
-5. 本支线 rebase 最新 develop 后再跑全 CI
-6. 产出不可变 SERVER_WEB_READY_RC_SHA 才进入部署候选
+CURRENT_BRANCH_CLOSEOUT=FROZEN
+NO_MORE_CLOSEOUT_COMMITS=YES
+```
+
+以后所有现场测试 / Phase E1 数据接入都**新开分支**：
+
+```text
+NEXT_DEVELOPMENT_BRANCH=integration/vehicle-data-readonly-v1
+```
+
+本任务**不创建**该分支，也不执行 Phase E1。
+
+未来在新分支从最终 closeout SHA 开始：
+
+```text
+手动 patrol transport
+ROS topic discovery（read-only）
+battery / status / location / smoke provider
+Web real vehicle UI
 ```
 
 当前状态：

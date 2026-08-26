@@ -32,7 +32,12 @@ Bridge 只做 5 件事：MQTT 连接、协议校验、上行数据封装、下�
 **MQTT 与 ROS master 解耦**：MQTT/TLS 生命周期不依赖 roscore——无 roscore 时 MQTT 仍在线；
 production 默认 `supported_commands=[]`，此时任何命令都在 validator 回 `COMMAND_UNSUPPORTED`
 （不会转发 ROS）；只有命令已通过 capability 校验并成功转发 ROS 后无 feedback，才回 `BRIDGE_ADAPTER_NOT_CONNECTED`。
-roscore 出现后自动初始化，进程/boot_id 不变；初始 MQTT 连接失败在进程内指数退避重试，不靠 systemd 重启。
+初始 MQTT 连接失败在进程内指数退避重试，不靠 systemd 重启。
+
+**STANDARD_RUNTIME_BEHAVIOR**：真实 ROS_MASTER_URI 可达时 adapter 可自动初始化。
+
+**CURRENT_FIRST_VEHICLE**：`ROS_MASTER_URI=http://127.0.0.1:1`，因此即使真实 roscore 存在，
+当前 Bridge 也故意不会自动连接；进入 Phase E1 前不得改变。
 
 **battery canonical 来源**：`/firebot_bridge/battery`（std_msgs/Float32），由车端 provider/adapter 发布；
 没有 provider 时不伪造电量（`BATTERY_PROVIDER=NOT_AVAILABLE`）。

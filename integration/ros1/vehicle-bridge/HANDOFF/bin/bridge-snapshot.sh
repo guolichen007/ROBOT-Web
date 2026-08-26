@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Write a non-secret snapshot to logs/. Never dumps env/secret/token.
+# Status fields are tri-state (YES/NO/UNKNOWN).
 set -uo pipefail
 
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,12 +11,18 @@ TS="$(date +%Y%m%d-%H%M%S)"
 OUT="$LOG_DIR/bridge-snapshot-$TS.txt"
 
 {
+  echo "SNAPSHOT_SCHEMA=1"
   echo "date=$(date -Is)"
   echo "hostname=$(hostname)"
-  echo "service=$(systemctl is-active firebot-bridge 2>/dev/null || echo unknown)"
+  case "$(systemctl is-active firebot-bridge 2>/dev/null || true)" in
+    active)   echo "service=active" ;;
+    inactive) echo "service=inactive" ;;
+    failed)   echo "service=failed" ;;
+    *)        echo "service=unknown" ;;
+  esac
   echo "pid=$(systemctl show firebot-bridge -p MainPID --value 2>/dev/null || echo unknown)"
   echo "nrestarts=$(systemctl show firebot-bridge -p NRestarts --value 2>/dev/null || echo unknown)"
-  echo "--- status.json (non-secret fields) ---"
+  echo "--- status.json (non-secret, tri-state) ---"
   if [ -f /run/firebot-bridge/status.json ] && command -v python3 >/dev/null 2>&1; then
     python3 - <<'PY' 2>/dev/null || echo "status.json unreadable"
 import json
@@ -23,10 +30,22 @@ try:
     d = json.load(open("/run/firebot-bridge/status.json", encoding="utf-8"))
 except Exception:
     d = {}
-for k in ("vehicle_id", "protocol_version", "boot_id", "pid", "mqtt_connected",
-          "ros_master_available", "ros_adapter_ready", "stub_mode",
-          "field_trace_enabled", "location_enabled", "supported_commands", "sensors"):
-    print(k + "=" + str(d.get(k)))
+def tri(k):
+    if k not in d:
+        return "UNKNOWN"
+    v = d[k]
+    if v is True:
+        return "YES"
+    if v is False:
+        return "NO"
+    return "UNKNOWN"
+for k in ("vehicle_id", "protocol_version", "boot_id", "pid"):
+    print(k + "=" + str(d.get(k) if d.get(k) is not None else "UNKNOWN"))
+for k in ("mqtt_connected", "ros_master_available", "ros_adapter_ready",
+          "stub_mode", "field_trace_enabled", "location_enabled"):
+    print(k + "=" + tri(k))
+print("supported_commands=" + (",".join(str(x) for x in d["supported_commands"]) if isinstance(d.get("supported_commands"), list) else "UNKNOWN"))
+print("sensors=" + (",".join(str(x) for x in d["sensors"]) if isinstance(d.get("sensors"), list) else "UNKNOWN"))
 PY
   else
     echo "status.json not found"

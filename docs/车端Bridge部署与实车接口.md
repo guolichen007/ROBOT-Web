@@ -100,31 +100,33 @@ FIREBOT_ROS_WORKSPACE_SETUP=/home/tl/firerobot_ws/devel/setup.bash \
 
 ---
 
-## 4. R0–R4 安全配置
+## 4. 当前安全配置（长期运行）
 
-`/etc/firebot/bridge.env` 关键项（R0–R4 期间）：
+`/etc/firebot/bridge.env` 关键项：
 
 ```text
 BRIDGE_STUB_MODE=false
 FIREBOT_SUPPORTED_COMMANDS=
 FIREBOT_SENSORS=
 FIREBOT_LOCATION_ENABLED=false
-FIREBOT_FIELD_TRACE=true
+FIREBOT_FIELD_TRACE=false
 ```
 
-`FIREBOT_FIELD_TRACE=true` 只在 R0–R4 期间临时开启；结束后改回 `false`。
+`FIREBOT_FIELD_TRACE=false` 是长期运行状态；R0–R4 期间的临时 `true` 已结束。
 
 ---
 
-## 5. R0–R4 现场验收
+## 5. R0–R4 现场验收（LEGACY 历史记录，非当前下一步）
+
+以下 R0–R4 是历史验收记录，保留技术内容仅供复验。当前 Bridge-only 周期不执行 ROS 相关项：
 
 | 项 | 内容 | 关键约束 |
 | --- | --- | --- |
 | R0 | 安全 capability：看到 vehicle online、capabilities 收到、`commands=[]`、`sensors=[]` | 不声明任何真实控制能力 |
 | R1 | 无 roscore：Bridge MQTT 仍在线、heartbeat 持续、`ros.master=unavailable`、adapter=not ready、boot_id/PID 不变 | 因 `supported_commands=[]`，不进行合法控制命令的 ROS 转发验证；此时发 patrol 正确结果是 `COMMAND_UNSUPPORTED` |
-| R2 | Bridge 在线后启动 roscore：adapter 自动初始化，boot_id / 进程不变 | ROS master 出现后自动接入 |
+| R2 | Bridge 在线后启动 roscore：adapter 自动初始化，boot_id / 进程不变 | `NOT_EXECUTED_IN_CURRENT_BRIDGE_ONLY_CYCLE`（当前 ROS 被故意隔离） |
 | R3 | broker 受控断开/恢复 | **OWNER_APPROVAL_REQUIRED**，车端人员不得私自重启服务器 Mosquitto |
-| R4 | `MANUAL_ROSTOPIC` 手工发布 battery=67.5，验证链路到 Web | `BATTERY_TEST_SOURCE=MANUAL_ROSTOPIC`；`REAL_BATTERY_PROVIDER=NOT_VERIFIED` |
+| R4 | `MANUAL_ROSTOPIC` 手工发布 battery=67.5，验证链路到 Web | `NOT_EXECUTED_IN_CURRENT_BRIDGE_ONLY_CYCLE`；`REAL_BATTERY_PROVIDER=NOT_VERIFIED` |
 
 R3 受控故障注入必须由 owner 批准执行；车端人员不得私自修改服务器 / 网络 / firewall。
 

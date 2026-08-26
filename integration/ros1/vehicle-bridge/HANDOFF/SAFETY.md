@@ -28,7 +28,15 @@ supported_commands=[] 时任何命令在 validator 回 COMMAND_UNSUPPORTED，不
 ## 最终防线
 
 ```text
-本地物理急停 + LWT offline。
+PHYSICAL / VEHICLE SAFETY：
+  本地物理急停
+  车端安全控制链
+
+LWT：
+  只做 offline observability
+  不停车
+  不制动
+  不替代物理急停
 ```
 
 软件急停不等于物理急停。
