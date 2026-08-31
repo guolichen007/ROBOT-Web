@@ -1,6 +1,6 @@
 # Vehicle Bridge 现场运维交接（HANDOFF）
 
-> 这是**运维交接资产**，不是 Bridge runtime `13c8692` 的一部分。
+> 这是**运维交接资产**，不是 Bridge runtime `169dcc3` 的一部分。
 > 本目录里的 SHA 固定为批准 runtime，绝不随 Server/Web 开发支线 HEAD 前移。
 
 ## 当前正式日常运行方式
@@ -46,6 +46,6 @@ HANDOFF/bin/bridge-snapshot.sh
 | `CURRENT_STATE.md` | 当前首车现场运行形态与 Gate |
 | `RUNBOOK.md` | 启停/状态/排障 |
 | `SAFETY.md` | 安全边界 |
-| `NEXT_PHASE.md` | 下一阶段（Phase E1，需另行批准） |
+| `NEXT_PHASE.md` | 下一阶段（真实数据 provider + 真实导航验证，需另行批准） |
 | `APPROVED_RUNTIME.txt` | 批准 runtime SHA |
 | `bin/*.sh` | 现场运维脚本 |

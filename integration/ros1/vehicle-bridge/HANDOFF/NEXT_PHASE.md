@@ -1,52 +1,45 @@
 # 下一阶段（需用户另行批准后才能执行）
 
-## Phase E1 = read-only ROS source discovery
-
-只在用户再次批准后执行。
-
-允许候选：
+## 已完成（2026-08-31）
 
 ```text
-rostopic list
-rostopic info
-rostopic type
-rostopic hz
-少量 rostopic echo
+patrol 下行信号链：服务器 → MQTT → Bridge → ROS adapter → fail-closed feedback → ACK = PASS
+（真实导航当时未就绪，REJECTED / NAV_EXECUTION_NOT_READY，属正确 fail-closed）
 ```
 
-禁止：
+## 下一阶段 = 真实数据 provider + 真实导航运动验证
+
+只做 read-only 数据接入与受控验证，一次一个 provider。
+
+目标：
 
 ```text
-rostopic pub
-rosservice call
-roslaunch
-restart ROS
-kill ROS
-修改 ROS code
-vehicle control
+真实 battery  → /firebot_bridge/battery
+真实 status   → /firebot_bridge/status
+真实 location/odom → /firebot_bridge/location
+真实 smoke    → /firebot_bridge/smoke（若有真实源）
 ```
 
-## 目标
-
-寻找真实：
-
-```text
-battery
-status
-location / odom
-smoke
-```
-
-## 原则
+原则：
 
 ```text
 真实数据优先。
 不造 0。
 不造假 battery。
 一次只接一个 provider。
+真实运动（navigation execution）单独受控验证，默认 fail-closed。
 ```
 
-## 数据路线
+禁止：
+
+```text
+rostopic pub / rosservice call / roslaunch 手动控制
+伪造 provider 数据
+一次验证中同时切换多个变量
+source_kind 迁移（先隔离旧 compat 通道）
+```
+
+数据路线：
 
 ```text
 real ROS source
@@ -57,4 +50,4 @@ real ROS source
 → Web
 ```
 
-控制（下行 real control）最后处理，不属于本阶段。
+控制（下行 real motion）最后处理，且在真实硬件 + fail-closed gate 下单独验证。
