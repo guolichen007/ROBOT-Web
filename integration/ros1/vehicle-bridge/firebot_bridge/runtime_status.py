@@ -25,6 +25,14 @@ _DEFAULT_FIELDS = {
     "ros_adapter_ready": False,
     "battery_provider_seen": False,
     "battery_last_update": None,
+    # 事件日志健康（只进本地 status，不进 MQTT 协议）
+    "event_logger_ready": False,
+    "event_queue_depth": 0,
+    "event_dropped": 0,
+    "telemetry_dropped": 0,
+    "write_errors": 0,
+    "disk_log_available": True,
+    "battery_source": "UNKNOWN",
 }
 
 

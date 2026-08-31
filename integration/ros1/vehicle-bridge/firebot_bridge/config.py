@@ -19,6 +19,14 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return val.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_int(name: str, default: int) -> int:
+    """安全 int 解析：非法值（字母 O、空串等）回落默认，绝不抛异常影响启动。"""
+    try:
+        return int(os.environ.get(name, str(default)))
+    except (ValueError, TypeError):
+        return default
+
+
 class Config:
     """车端 Bridge 全部配置，均来自环境变量（见 config/bridge.env.example）。"""
 
@@ -78,8 +86,22 @@ class Config:
     protocol_version: str = os.environ.get("FIREBOT_PROTOCOL_VERSION", "1.3.0")
 
     # ---- 现场通信链路追踪（纯 observability，不参与任何业务/协议/控制）----
-    # 生产长期运行默认 false；R0-R4 现场验证临时 true。
+    # 只控制 telemetry 是否刷 journal/verbose；critical/important 事件恒记录，不受此开关影响。
     field_trace_enabled: bool = _env_bool("FIREBOT_FIELD_TRACE", False)
+
+    # ---- 可观测事件持久化（Event/Audit/Telemetry）----
+    # events.jsonl / telemetry.jsonl 落盘目录；空则禁用文件持久化（fail-open，不影响控制）。
+    events_dir: str = os.environ.get("FIREBOT_EVENTS_DIR", "")
+    # telemetry 持久化开关（默认 true）；与 FIREBOT_FIELD_TRACE（journal 刷屏）解耦。
+    telemetry_log_enabled: bool = _env_bool("FIREBOT_TELEMETRY_LOG_ENABLED", True)
+    event_log_max_bytes: int = _env_int("FIREBOT_EVENT_LOG_MAX_BYTES", 10 * 1024 * 1024)
+    event_log_max_age_hours: float = _env_float("FIREBOT_EVENT_LOG_MAX_AGE_HOURS", 24.0)
+    event_log_keep: int = _env_int("FIREBOT_EVENT_LOG_KEEP", 14)
+    telemetry_log_keep: int = _env_int("FIREBOT_TELEMETRY_LOG_KEEP", 7)
+    event_log_max_total_bytes: int = _env_int("FIREBOT_EVENT_LOG_MAX_TOTAL_BYTES", 2 * 1024 * 1024 * 1024)
+    event_log_min_free_bytes: int = _env_int("FIREBOT_EVENT_LOG_MIN_FREE_BYTES", 1 * 1024 * 1024 * 1024)
+    event_queue_size: int = _env_int("FIREBOT_EVENT_QUEUE_SIZE", 20000)
+    battery_source: str = os.environ.get("FIREBOT_BATTERY_SOURCE", "UNKNOWN")
 
     # ---- 密码缺失即退出 ----
     def validate(self) -> None:

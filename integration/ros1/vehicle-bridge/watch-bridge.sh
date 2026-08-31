@@ -19,12 +19,11 @@ if [[ "$SERVICE" != "active" ]]; then
     exit 2
 fi
 
-# -n 0：不重放历史事件。status.json 是当前状态，journal 只跟随未来 transition，
-# 避免历史 mqtt.disconnected 等旧事件覆盖当前真实链路状态。
-journalctl \
-    -n 0 \
-    -fu firebot-bridge \
-    -o cat \
-| python3 "$SELF_DIR/tools/field_console.py" \
-    --status-file "$STATUS" \
+# 单一事实源：events.jsonl（与 r1_vehicle.sh watch 完全一致）。
+# 历史回放最近 15 条 + 实时跟随（tail -F 跨轮转跟随，天然无重复）。
+# journalctl 仅作为技术诊断日志，不再作为正常 watch 数据源。
+EVENTS_FILE="${FIREBOT_EVENTS_DIR:-/home/tl/vehicle-bridge/logs}/events.jsonl"
+tail -n 15 -F "$EVENTS_FILE" 2>/dev/null \
+| python3 "$SELF_DIR/tools/field_console.py" --jsonl \
+    --status-file "$STATUS" --lang zh \
     "$@"

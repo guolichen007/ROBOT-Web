@@ -20,6 +20,7 @@ import threading
 import time
 
 from .config import get_config
+from .event_recorder import EventRecorder
 from .field_trace import FieldTrace
 from .identity import Identity
 from .protocol import Protocol
@@ -106,9 +107,26 @@ def main() -> int:
         sensors=config.sensors,
         location_enabled=config.location_enabled,
         field_trace_enabled=config.field_trace_enabled,
+        battery_source=config.battery_source,
     )
 
-    trace = FieldTrace(config.field_trace_enabled)
+    # 异步事件 recorder（fail-open：任何失败都不影响 Bridge 启动/运行）
+    recorder = None
+    try:
+        recorder = EventRecorder(config, status=status)
+    except Exception as exc:  # noqa: BLE001
+        LOG.warning("EventRecorder 构造异常（fail-open，不影响控制）: %s", exc)
+        recorder = None
+
+    trace = FieldTrace(
+        config.field_trace_enabled,
+        config.telemetry_log_enabled,
+        config.vehicle_id,
+        identity.boot_id,
+        recorder,
+    )
+    if recorder is not None:
+        recorder.start()
     trace.emit(
         "bridge.started",
         level="ok",
@@ -166,6 +184,8 @@ def main() -> int:
         # 先 disconnect 发送 MQTT DISCONNECT，再停 network loop（顺序不能反，否则 DISCONNECT 发不出去）
         mqtt.disconnect()
         mqtt.loop_stop()
+        if recorder is not None:
+            recorder.stop()
     return 0
 
 

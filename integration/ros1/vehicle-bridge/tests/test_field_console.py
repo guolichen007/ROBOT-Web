@@ -125,10 +125,15 @@ class _Proto:
 
 def main() -> int:
     print("=== TRACE：runtime 事件层 ===")
-    # TRACE-01 disabled 不输出
+    # TRACE-01 critical 恒记录（disabled 仍输出）；telemetry 受 enabled 门控
     buf, handler, ft = _capture()
     FieldTrace(False).emit("mqtt.connected", broker="x")
-    check("TRACE-01 disabled 不输出 FBTRACE", _trace_lines(buf) == [])
+    check("TRACE-01a critical disabled 仍输出", len(_trace_lines(buf)) == 1)
+    _release(handler, ft)
+
+    buf, handler, ft = _capture()
+    FieldTrace(False).emit("ros.battery.rx", battery=67.5)
+    check("TRACE-01b telemetry disabled 无输出", _trace_lines(buf) == [])
     _release(handler, ft)
 
     # TRACE-02 enabled 单行合法 JSON
@@ -353,10 +358,11 @@ def main() -> int:
           carry is not None and exact is not None and carry.split()[0] == exact.split()[0])
     check("WALL_CARRY_CORRECT 毫秒为 000", carry is not None and carry.split()[0].endswith(".000"))
 
-    # watcher：不重放历史事件 / inactive service 退出
+    # watcher：单一事实源 events.jsonl（历史回放 + 实时跟随），不重放 journal 历史；inactive service 退出
     watch_text = (ROOT / "watch-bridge.sh").read_text(encoding="utf-8")
-    check("WATCH_NO_HISTORY_REPLAY 无 -n 20", "-n 20" not in watch_text)
-    check("WATCH_NO_HISTORY_REPLAY 有 -n 0", "-n 0" in watch_text)
+    check("WATCH 单一事实源 events.jsonl", "events.jsonl" in watch_text)
+    check("WATCH 历史+实时 tail -F --jsonl", "-F" in watch_text and "--jsonl" in watch_text)
+    check("WATCH 无 journalctl 命令（仅注释）", "journalctl -" not in watch_text)
     check("WATCH_INACTIVE_SERVICE_EXIT 有 exit 2", "exit 2" in watch_text)
     check("WATCH_INACTIVE_SERVICE_EXIT 有 ERROR", "ERROR" in watch_text)
 
@@ -375,6 +381,110 @@ def main() -> int:
     check("RAW_MODE_NO_HEADER 无 LINK", "LINK" not in raw_out)
     check("RAW_MODE_NO_HEADER 纯透传", raw_out == "RAW-LINE-1\nRAW-LINE-2\n")
     check("RAW_MODE_NO_HEADER rc=0", rc == 0)
+
+    print("=== 2026-08-31 现场验证回归 ===")
+    # ros.feedback.rx 关联 cmd：lifecycle 用 command_id → cmd 补观测事件（不改协议）
+    buf, handler, ft = _capture()
+    trace = FieldTrace(True)
+    state = BridgeState()
+    mgr = lc.RosChildManager(_Cfg(), state, status=None, trace=trace)
+    mgr.command_publisher_ready = True
+    mgr.feedback_ready = True
+
+    class _FakeStdin:
+        def __init__(self):
+            self.writes = []
+
+        def write(self, s):
+            self.writes.append(s)
+
+        def flush(self):
+            pass
+
+    class _FakeProc:
+        def __init__(self):
+            self.stdin = _FakeStdin()
+            self.pid = 123
+
+        def poll(self):
+            return None
+
+    proc = _FakeProc()
+    mgr._proc = proc
+    mgr._stdin = proc.stdin
+    ok = mgr.publish_command({"cmd": "patrol", "command_id": "c1", "task_id": "t1"})
+    check("publish_command 成功且记录 cmd", ok is True and mgr._cmd_by_id.get("c1") == "patrol")
+    mgr._handle_event({"type": "feedback", "feedback": {
+        "command_id": "c1", "state": "REJECTED",
+        "reason_code": "COMMAND_REJECTED", "message": "NAV_EXECUTION_NOT_READY",
+    }})
+    lines = _trace_lines(buf)
+    rx = next((i for i, l in enumerate(lines) if "ros.feedback.rx" in l), None)
+    check("ros.feedback.rx 事件存在", rx is not None)
+    fb_payload = json.loads(lines[rx].split(TRACE_PREFIX, 1)[1])
+    check("ros.feedback.rx 含 cmd", fb_payload.get("cmd") == "patrol")
+    check("ros.feedback.rx 含 message（不丢失）", fb_payload.get("message") == "NAV_EXECUTION_NOT_READY")
+    check("ros.feedback.rx 含 reason_code", fb_payload.get("reason_code") == "COMMAND_REJECTED")
+    _release(handler, ft)
+
+    # field_console 中文：PATROL_START + REJECTED + NAV_EXECUTION_NOT_READY → 完整中文
+    c = field_console.FieldConsole(lang="zh")
+    out = c.render({"event": "ros.feedback.rx", "level": "rx", "cmd": "patrol", "state": "REJECTED",
+                    "command_id": "c1", "reason_code": "COMMAND_REJECTED", "message": "NAV_EXECUTION_NOT_READY"})
+    check("zh 显示 开始巡检：已拒绝", out is not None and "开始巡检：已拒绝" in out)
+    check("zh 显示 导航执行环境未就绪", out is not None and "导航执行环境未就绪" in out)
+
+    # FieldTrace 三级解耦：critical 恒记录；telemetry 落盘受 telemetry_log_enabled、刷屏受 enabled
+    class _FakeRecorder:
+        def __init__(self):
+            self.records = []
+
+        def enqueue(self, record, imp):
+            self.records.append((record, imp))
+
+    rec = _FakeRecorder()
+    tr = FieldTrace(False, telemetry_log_enabled=True, recorder=rec)
+    buf, handler, ft = _capture()
+    tr.emit("ros.battery.rx", battery=67.5)
+    check("telemetry enabled=False 不刷屏但仍落盘", _trace_lines(buf) == [] and len(rec.records) == 1)
+    _release(handler, ft)
+
+    rec2 = _FakeRecorder()
+    tr2 = FieldTrace(True, telemetry_log_enabled=False, recorder=rec2)
+    buf, handler, ft = _capture()
+    tr2.emit("ros.battery.rx", battery=67.5)
+    check("telemetry_log_enabled=False 不落盘", len(rec2.records) == 0)
+    _release(handler, ft)
+
+    rec3 = _FakeRecorder()
+    tr3 = FieldTrace(False, telemetry_log_enabled=False, recorder=rec3)
+    buf, handler, ft = _capture()
+    tr3.emit("mqtt.connected", broker="x")
+    check("critical 恒记录+刷屏（不受两开关影响）", len(rec3.records) == 1 and len(_trace_lines(buf)) == 1)
+    _release(handler, ft)
+
+    # EventRecorder 双队列分离：critical → event 队列；telemetry → telemetry 队列
+    import tempfile as _tempfile
+
+    from firebot_bridge.event_recorder import EventRecorder
+
+    cfg = _Cfg()
+    cfg.events_dir = _tempfile.mkdtemp()
+    cfg.event_queue_size = 100
+    rec4 = EventRecorder(cfg)
+    rec4.enqueue({"event": "mqtt.command.rx"}, "critical")
+    rec4.enqueue({"event": "ros.battery.rx"}, "telemetry")
+    check("event/telemetry 队列分离", rec4._event_queue.qsize() == 1 and rec4._telemetry_queue.qsize() == 1)
+
+    # state.py：task_lock_id 与 reported_active_task_id 分离，clear 不清 task_lock
+    state2 = BridgeState()
+    state2.acquire_task("task-lock-1")
+    state2.apply_status({"mode": "PATROL", "estop_active": False, "active_task_id": "reported-task-9"})
+    snap = state2.snapshot_telemetry()
+    check("snapshot active_task_id = reported（非 task_lock）", snap["active_task_id"] == "reported-task-9")
+    state2.clear_ros_telemetry()
+    check("clear 清 reported_active_task_id", state2.reported_active_task_id is None)
+    check("clear 不清 task_lock_id", state2.task_lock_id == "task-lock-1")
 
     print(f"\n结果: PASS={PASS} FAIL={FAIL}")
     return 0 if FAIL == 0 else 1

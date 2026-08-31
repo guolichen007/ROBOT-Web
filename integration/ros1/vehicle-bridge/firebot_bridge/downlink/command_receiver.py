@@ -196,7 +196,7 @@ class CommandProcessor:
                 level="tx",
                 cmd=command.get("cmd"),
                 status=status,
-                reason=reason_code,
+                reason_code=reason_code,
                 command_id=command.get("command_id"),
                 task_id=command.get("task_id"),
                 latency_ms=self.trace.latency_ms(command.get("command_id")),

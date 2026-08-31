@@ -70,6 +70,9 @@ class RosChildManager:
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._stdin_lock = threading.Lock()
+        # command_id → 原命令 cmd 的观测关联（只用于 ros.feedback.rx 补 cmd，绝不进协议/状态）
+        self._cmd_lock = threading.Lock()
+        self._cmd_by_id: dict = {}
 
         self._generation = 0
         self._spawn_time = 0.0
@@ -118,6 +121,12 @@ class RosChildManager:
             try:
                 self._stdin.write(json.dumps({"type": "command", "command": command}) + "\n")
                 self._stdin.flush()
+                cid = command.get("command_id")
+                if cid:
+                    with self._cmd_lock:
+                        self._cmd_by_id[cid] = command.get("cmd")
+                        while len(self._cmd_by_id) > 256:
+                            self._cmd_by_id.pop(next(iter(self._cmd_by_id)), None)
                 if self.trace:
                     self.trace.emit(
                         "ros.command.tx",
@@ -318,13 +327,17 @@ class RosChildManager:
             fb = payload.get("feedback") or {}
             # 必须先 trace「ROS 已收到」，再进入状态机（否则 ACK trace 会先于 feedback trace）
             if self.trace:
+                with self._cmd_lock:
+                    cmd = self._cmd_by_id.get(fb.get("command_id"))
                 self.trace.emit(
                     "ros.feedback.rx",
                     level="rx",
+                    cmd=cmd,
                     state=fb.get("state"),
                     command_id=fb.get("command_id"),
                     task_id=fb.get("task_id"),
                     reason_code=fb.get("reason_code"),
+                    message=fb.get("message"),
                     phase=fb.get("phase"),
                     progress=fb.get("progress"),
                     latency_ms=self.trace.latency_ms(fb.get("command_id")),
@@ -339,7 +352,15 @@ class RosChildManager:
                 self.battery_provider_seen = True
                 self.battery_last_update = time.time()
                 if self.trace:
-                    self.trace.changed("ros.battery", value, "ros.battery.rx", tolerance=0.1, battery=value)
+                    # 变化 ≥0.1% 立即记；同时每 30s 至少一个快照（独立 key，互不干扰）
+                    self.trace.changed(
+                        "ros.battery", value, "ros.battery.rx",
+                        tolerance=0.1, battery=value, source=self.config.battery_source,
+                    )
+                    self.trace.throttle(
+                        "ros.battery.snapshot", 30.0, "ros.battery.rx",
+                        battery=value, source=self.config.battery_source,
+                    )
             elif channel == "smoke":
                 value = payload.get("value")
                 self.state.set_smoke(value)
@@ -370,6 +391,7 @@ class RosChildManager:
                     y=pos.get("y"),
                     theta=pos.get("theta"),
                     localization_status=loc.get("localization_status"),
+                    enabled=self.config.location_enabled,
                 )
         self._refresh_status()
 
