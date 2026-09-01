@@ -5,6 +5,14 @@
 ```text
 patrol 下行信号链：服务器 → MQTT → Bridge → ROS adapter → fail-closed feedback → ACK = PASS
 （真实导航当时未就绪，REJECTED / NAV_EXECUTION_NOT_READY，属正确 fail-closed）
+
+U2 Telemetry Freshness（车端）：
+Battery/Smoke FRESH → STALE → RECOVERED → STALE = PASS
+stale 旧值停止 MQTT 重发 = PASS；smoke_provider_seen 现场修复 = PASS
+（TTL=5s 为 02 测试值，生产 TTL = PENDING_REAL_PROVIDER_RATE）
+
+Server U2B 字段级 freshness + Web STALE 语义：
+已完成代码实现（未部署；真实页面验收待服务器 U2B 部署后单独做）
 ```
 
 ## 下一阶段 = 真实数据 provider + 真实导航运动验证

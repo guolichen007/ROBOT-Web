@@ -191,4 +191,4 @@ ROS 命名空间统一为 `/firebot_bridge`。
 - Bridge 日志（连接后走 rospy → rosout）：`/home/tl/.ros/log/firebot_bridge_*.log`（journalctl 看不到 MQTT connected）
 - 验收脚本：`FIREBOT_BRIDGE_ENV=/etc/firebot/bridge.env bash verify.sh`
 - ROS 工作区：`/home/tl/firerobot_ws`（`devel/setup.bash`）
-- 源分支/SHA：`ui/youdao-light-hmi-v1` @ `41bbaf4398711fd940dde1818193a67d34e355c8`
+- 源分支/SHA：`ui/youdao-light-hmi-v1` @ `13c869247079b88da11b36666755906001a0041c`（Bridge runtime；`41bbaf4` 为服务器 runtime，非 Bridge 源）
