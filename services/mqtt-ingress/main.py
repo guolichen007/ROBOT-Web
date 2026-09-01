@@ -304,11 +304,12 @@ def handle_location(
 
 def touch_field_channel(
     db, robot: Robot, channel_name: str, source_ts: datetime, received: datetime, source_kind: str
-) -> None:
+) -> dict:
     """字段级 channel：仅当消息确实包含该字段时才 touch/update。
 
     battery / smoke 的 freshness 独立于 heartbeat / availability / status 其它字段；
     心跳或 status 不含 battery 时绝不刷新 battery.last_received_at。
+    返回一个用于 realtime event 的最小投影（不含 DB/Redis 业务投影）。
     """
     channel = db.scalar(
         select(RobotDataChannel).where(
@@ -324,6 +325,14 @@ def touch_field_channel(
     channel.source_kind = source_kind
     channel.last_source_timestamp = source_ts
     channel.last_received_at = received
+    return {
+        "channel": channel_name,
+        "support_state": "CONNECTED",
+        "quality": "GOOD",
+        "source_kind": source_kind,
+        "last_source_timestamp": source_ts.isoformat(),
+        "last_received_at": received.isoformat(),
+    }
 
 
 def handle_status(
@@ -334,11 +343,14 @@ def handle_status(
     v1.3 allows partial status (only the fields the vehicle really has), so
     missing fields are left untouched / NULL instead of being fabricated.
     """
+    channel_delta: dict = {}
     if "mode" in msg:
         robot.current_mode = msg["mode"]
     if "battery" in msg:
         robot.battery = msg["battery"]
-        touch_field_channel(db, robot, "battery", source_ts, received, source_kind)
+        channel_delta["battery"] = touch_field_channel(
+            db, robot, "battery", source_ts, received, source_kind
+        )
     if "estop_active" in msg:
         robot.estop_active = bool(msg["estop_active"])
     if "active_task_id" in msg:
@@ -355,8 +367,12 @@ def handle_status(
     if "active_task_id" in msg:
         updates["active_task_id"] = robot.current_task_id
     latest.update(updates)
+    # Redis latest 保持业务值投影合同；data_channels 只进 realtime event，不进 Redis latest
     queue_redis_set(db, f"robot:{robot.vehicle_id}:latest", json.dumps(latest, ensure_ascii=False))
-    queue_event(db, "vehicle.status", latest)
+    event_payload = dict(latest)
+    if channel_delta:
+        event_payload["data_channels"] = channel_delta
+    queue_event(db, "vehicle.status", event_payload)
 
 
 def handle_sensor(
@@ -370,8 +386,9 @@ def handle_sensor(
     smoke = msg.get("smoke")
     bottom_ir = msg.get("bottom_ir")
     top_ir_max = msg.get("top_ir_max")
+    channel_delta: dict = {}
     if smoke is not None:
-        touch_field_channel(db, robot, "smoke", source_ts, received, source_kind)
+        channel_delta["smoke"] = touch_field_channel(db, robot, "smoke", source_ts, received, source_kind)
     db.add(
         SensorSample(
             robot_id=robot.id,
@@ -396,8 +413,12 @@ def handle_sensor(
         updates["top_ir"] = top_ir_max
         updates["top_ir_max"] = top_ir_max
     latest.update(updates)
+    # Redis latest 保持业务值投影合同；data_channels 只进 realtime event
     queue_redis_set(db, f"robot:{robot.vehicle_id}:latest", json.dumps(latest, ensure_ascii=False))
-    queue_event(db, "vehicle.sensor", latest)
+    event_payload = dict(latest)
+    if channel_delta:
+        event_payload["data_channels"] = channel_delta
+    queue_event(db, "vehicle.sensor", event_payload)
 
 
 def process_internal_compat(topic: str, payload: bytes, received: datetime) -> bool:

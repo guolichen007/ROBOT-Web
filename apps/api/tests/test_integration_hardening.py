@@ -655,3 +655,60 @@ def test_ros1_internal_status_removes_stale_estop_and_marks_missing_channels() -
         assert robot and robot.estop_active is None
         assert estop and estop.support_state == "UNSUPPORTED"
         assert capability and capability.supported_commands_json == []
+
+
+def test_ingress_field_channel_realtime_delta() -> None:
+    """U2B：vehicle.status/sensor realtime event 携带字段级 data_channels freshness delta。
+
+    合同：status 含 battery 才携带 battery delta；sensor 含 smoke 才携带 smoke delta；
+    其它消息类型（heartbeat/status 其它字段）不得刷新 battery/smoke freshness。
+    """
+    ingress = load_service("firebot_mqtt_ingress_field_delta", "services/mqtt-ingress/main.py")
+    received = datetime.now(UTC)
+    source_ts = received - timedelta(milliseconds=200)
+
+    def _payloads(db, event_type: str) -> list[dict]:
+        return [p for (t, p) in db.info.get("firebot_realtime_events", []) if t == event_type]
+
+    with SessionLocal.begin() as db:
+        robot = db.scalar(select(Robot).where(Robot.vehicle_id == "R001"))
+        assert robot
+
+        # CASE 1: status 含 battery → event 含 data_channels.battery
+        ingress.handle_status(
+            db, robot, {"battery": 63.1}, source_ts, received, "CANONICAL_MQTT"
+        )
+        battery = _payloads(db, "vehicle.status")[-1].get("data_channels", {}).get("battery")
+        assert battery and battery["support_state"] == "CONNECTED"
+        assert battery["source_kind"] == "CANONICAL_MQTT"
+        assert battery["last_received_at"] == received.isoformat()
+
+        # CASE 2: status 不含 battery → event 不得伪造 battery freshness
+        ingress.handle_status(
+            db, robot, {"mode": "IDLE"}, source_ts, received, "CANONICAL_MQTT"
+        )
+        assert "battery" not in _payloads(db, "vehicle.status")[-1].get("data_channels", {})
+
+        # CASE 3: sensor 含 smoke → event 含 data_channels.smoke
+        ingress.handle_sensor(
+            db,
+            robot,
+            {"smoke": 0.345, "boot_id": robot.boot_id, "seq": 1},
+            source_ts,
+            received,
+            "CANONICAL_MQTT",
+        )
+        smoke = _payloads(db, "vehicle.sensor")[-1].get("data_channels", {}).get("smoke")
+        assert smoke and smoke["support_state"] == "CONNECTED"
+        assert smoke["last_received_at"] == received.isoformat()
+
+        # CASE 4: sensor 不含 smoke → 不得伪造 smoke freshness
+        ingress.handle_sensor(
+            db,
+            robot,
+            {"bottom_ir": 1.0, "boot_id": robot.boot_id, "seq": 2},
+            source_ts,
+            received,
+            "CANONICAL_MQTT",
+        )
+        assert "smoke" not in _payloads(db, "vehicle.sensor")[-1].get("data_channels", {})

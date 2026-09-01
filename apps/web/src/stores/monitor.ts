@@ -116,7 +116,17 @@ export const useMonitorStore = defineStore('monitor', () => {
       // Events for OTHER vehicles update their cache but must never switch the
       // active vehicle away from what the operator is looking at.
       if (index >= 0) {
-        snapshot.value.robots[index] = { ...snapshot.value.robots[index], ...event.data }
+        const current = snapshot.value.robots[index]
+        const incomingChannels = event.data.data_channels
+        // data_channels 是部分 channel delta，必须深合并，绝不能整对象覆盖
+        // （否则 battery 更新会把 heartbeat/smoke 等其它 channel 全部丢掉）
+        snapshot.value.robots[index] = {
+          ...current,
+          ...event.data,
+          ...(incomingChannels
+            ? { data_channels: { ...(current.data_channels || {}), ...incomingChannels } }
+            : {}),
+        }
         // Another client may disable the active vehicle in real time via
         // robot.updated; fall back immediately to the first enabled vehicle.
         if (event.data.enabled === false) {

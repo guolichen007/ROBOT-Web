@@ -1,6 +1,7 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useMonitorStore } from '@/stores/monitor'
+import type { DataChannel, MonitorSnapshot, RobotState } from '@/types'
 
 describe('monitor realtime state', () => {
   beforeEach(() => setActivePinia(createPinia()))
@@ -47,5 +48,114 @@ describe('monitor realtime state', () => {
     })
     expect(store.activeRobotId).toBe('FIRE-02')
     expect(store.robot?.vehicle_id).toBe('FIRE-02')
+  })
+})
+
+describe('data_channels partial deep merge', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+
+  function makeSnapshot(robots: RobotState[]): MonitorSnapshot {
+    return {
+      snapshot_watermark: '1-0',
+      site: null,
+      map: null,
+      map_version: null,
+      parking_slots: [],
+      inspection_points: [],
+      extinguish_points: [],
+      trajectories: [],
+      robots,
+      alarms: [],
+      tasks: [],
+      streams: [],
+      navigation_presets: [],
+    }
+  }
+
+  function ch(channel: string, last: string): DataChannel {
+    return {
+      channel,
+      support_state: 'CONNECTED',
+      quality: 'GOOD',
+      source_kind: 'CANONICAL_MQTT',
+      last_received_at: last,
+    }
+  }
+
+  it('battery delta deep-merges and preserves smoke/heartbeat', () => {
+    const store = useMonitorStore()
+    store.snapshot = makeSnapshot([
+      {
+        id: 'r1',
+        vehicle_id: 'firebot-vehicle-02',
+        enabled: true,
+        data_channels: {
+          heartbeat: ch('heartbeat', 't0'),
+          smoke: ch('smoke', 't0'),
+          battery: ch('battery', 't0'),
+        },
+      },
+    ])
+    store.applyEvent({
+      stream_id: '200-0',
+      event_type: 'vehicle.status',
+      data: {
+        vehicle_id: 'firebot-vehicle-02',
+        battery: 63.1,
+        data_channels: { battery: ch('battery', 't1') },
+      },
+    })
+    const dc = store.snapshot.robots[0].data_channels
+    expect(dc?.battery?.last_received_at).toBe('t1')
+    expect(dc?.smoke?.last_received_at).toBe('t0')
+    expect(dc?.heartbeat?.last_received_at).toBe('t0')
+  })
+
+  it('first battery channel is created when snapshot lacked it', () => {
+    const store = useMonitorStore()
+    store.snapshot = makeSnapshot([
+      {
+        id: 'r1',
+        vehicle_id: 'firebot-vehicle-02',
+        enabled: true,
+        data_channels: { heartbeat: ch('heartbeat', 't0') },
+      },
+    ])
+    store.applyEvent({
+      stream_id: '201-0',
+      event_type: 'vehicle.status',
+      data: {
+        vehicle_id: 'firebot-vehicle-02',
+        battery: 63.1,
+        data_channels: { battery: ch('battery', 't1') },
+      },
+    })
+    const dc = store.snapshot.robots[0].data_channels
+    expect(dc?.battery?.last_received_at).toBe('t1')
+    expect(dc?.heartbeat?.last_received_at).toBe('t0')
+  })
+
+  it('smoke delta does not drop battery', () => {
+    const store = useMonitorStore()
+    store.snapshot = makeSnapshot([
+      {
+        id: 'r1',
+        vehicle_id: 'firebot-vehicle-02',
+        enabled: true,
+        data_channels: { battery: ch('battery', 't0') },
+      },
+    ])
+    store.applyEvent({
+      stream_id: '202-0',
+      event_type: 'vehicle.sensor',
+      data: {
+        vehicle_id: 'firebot-vehicle-02',
+        smoke: 0.345,
+        data_channels: { smoke: ch('smoke', 't1') },
+      },
+    })
+    const dc = store.snapshot.robots[0].data_channels
+    expect(dc?.smoke?.last_received_at).toBe('t1')
+    expect(dc?.battery?.last_received_at).toBe('t0')
   })
 })
