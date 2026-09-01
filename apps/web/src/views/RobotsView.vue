@@ -6,7 +6,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useMonitorStore } from '@/stores/monitor'
 import { api, errorMessage } from '@/lib/api'
 import { localizationLabel, sourceKindLabel, supportStateLabel } from '@/lib/ui-labels'
-import { telemetryValueLabel } from '@/lib/telemetry-health'
+import { effectiveChannelSupportState, telemetryValueLabel } from '@/lib/telemetry-health'
+import { useSystemClock } from '@/composables/useSystemClock'
 import type { RobotState } from '@/types'
 
 const auth = useAuthStore()
@@ -64,8 +65,20 @@ function lastComm(robot: RobotState): string {
   return relativeTime(robot.server_received_at || robot.last_seen_at)
 }
 
+const { now } = useSystemClock()
+const nowMs = computed(() => now.value?.getTime() ?? Date.now())
+// 字段级 effective state 随 now 每秒重派生（与 server channel_freshness.py 一致）
+function channelState(robot: RobotState, key: string): string | undefined {
+  return effectiveChannelSupportState(
+    robot.data_channels?.[key],
+    robot.integration?.stale_seconds ?? null,
+    robot.integration?.offline_seconds ?? null,
+    nowMs.value,
+  )
+}
+
 function batteryLabel(robot: RobotState): string {
-  return telemetryValueLabel(robot.battery, robot.data_channels?.battery?.support_state, (v) => `${v.toFixed(0)}%`)
+  return telemetryValueLabel(robot.battery, channelState(robot, 'battery'), (v) => `${v.toFixed(0)}%`)
 }
 
 function modeLabel(robot: RobotState): string {
@@ -197,8 +210,8 @@ onMounted(() => {
             <dl>
               <div v-for="[key, label] in CHANNEL_LABELS" :key="key">
                 <dt>{{ label }}</dt>
-                <dd :data-support="robot.data_channels?.[key]?.support_state">
-                  {{ supportStateLabel(robot.data_channels?.[key]?.support_state) }}
+                <dd :data-support="channelState(robot, key)">
+                  {{ supportStateLabel(channelState(robot, key)) }}
                 </dd>
               </div>
             </dl>

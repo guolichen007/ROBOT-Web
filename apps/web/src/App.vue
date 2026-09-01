@@ -23,6 +23,7 @@ import { localizationLabel, taskTypeLabel } from '@/lib/ui-labels'
 import {
   batterySeverity,
   channelSeverity,
+  effectiveChannelSupportState,
   freshnessSeverity,
   linkSeverity,
   localizationSeverity,
@@ -111,16 +112,35 @@ const clock = computed(() =>
     now.value,
   ),
 )
+const staleThreshold = computed(() => robot.value?.integration?.stale_seconds ?? null)
+const offlineThreshold = computed(() => robot.value?.integration?.offline_seconds ?? null)
+const nowMs = computed(() => now.value?.getTime() ?? Date.now())
+
+// 字段级 effective state：随 now 每秒重派生，与 server channel_freshness.py 一致
+function effectiveChannelState(channelName: string): string | undefined {
+  return effectiveChannelSupportState(
+    robot.value?.data_channels?.[channelName],
+    staleThreshold.value,
+    offlineThreshold.value,
+    nowMs.value,
+  )
+}
+
 const batteryLevel = computed(() => {
   const value = robot.value?.battery
   if (value == null) return 0
   return Math.max(0, Math.min(100, value))
 })
-const batteryBars = computed(() => Array.from({ length: 4 }, (_, index) => index + 1 <= Math.ceil(batteryLevel.value / 25)))
+// CONNECTED 才显示实时电量条；STALE / ERROR / NOT_CONNECTED / UNSUPPORTED 弱化（清空条）
+const batteryBars = computed(() => {
+  const state = effectiveChannelState('battery')
+  const level = state === 'CONNECTED' ? batteryLevel.value : 0
+  return Array.from({ length: 4 }, (_, index) => index + 1 <= Math.ceil(level / 25))
+})
 
 const freshnessAge = computed(() => {
   if (!robot.value?.server_received_at) return null
-  return Math.max(0, (Date.now() - Date.parse(robot.value.server_received_at)) / 1000)
+  return Math.max(0, (nowMs.value - Date.parse(robot.value.server_received_at)) / 1000)
 })
 const freshness = computed(() => {
   const age = freshnessAge.value
@@ -131,23 +151,30 @@ const freshness = computed(() => {
   if (age >= stale) return `数据陈旧 ${age.toFixed(1)}s`
   return '数据实时'
 })
+// 电量 severity：CONNECTED 按数值；STALE→warning；NOT_CONNECTED/UNSUPPORTED→unknown；ERROR→danger
+const batterySeverityClass = computed(() => {
+  const state = effectiveChannelState('battery')
+  return state === 'CONNECTED' ? batterySeverity(robot.value?.battery) : channelSeverity(state)
+})
 const sevClass = computed(() => ({
   link: linkSeverity(monitor.connected),
   robot: robotSeverity(robot.value?.online_state),
-  battery: batterySeverity(robot.value?.battery),
+  battery: batterySeverityClass.value,
   task: taskSeverity(activeTask.value?.type),
   localization: localizationSeverity(robot.value?.localization_status),
-  topIr: channelSeverity(robot.value?.data_channels?.top_ir?.support_state),
-  bottomIr: channelSeverity(robot.value?.data_channels?.bottom_ir?.support_state),
-  smoke: channelSeverity(robot.value?.data_channels?.smoke?.support_state),
+  topIr: channelSeverity(effectiveChannelState('top_ir')),
+  bottomIr: channelSeverity(effectiveChannelState('bottom_ir')),
+  smoke: channelSeverity(effectiveChannelState('smoke')),
   freshness: freshnessAge.value == null ? 'danger' : freshnessSeverity(freshnessAge.value, robot.value?.integration?.stale_seconds ?? 3, robot.value?.integration?.offline_seconds ?? 10),
 }))
 function sevLabel(severity: string): string {
   return ({ normal: 'ok', active: 'active', warning: 'warn', danger: 'danger', unknown: 'muted' })[severity] || ''
 }
+function batteryText(): string {
+  return telemetryValueLabel(robot.value?.battery, effectiveChannelState('battery'), (v) => `${v.toFixed(0)}%`)
+}
 function metricValue(value: number | null | undefined, channel: string, unit: string): string {
-  const state = robot.value?.data_channels?.[channel]?.support_state
-  return telemetryValueLabel(value, state, (v) => `${v.toFixed(channel === 'smoke' ? 2 : 1)} ${unit}`)
+  return telemetryValueLabel(value, effectiveChannelState(channel), (v) => `${v.toFixed(channel === 'smoke' ? 2 : 1)} ${unit}`)
 }
 
 const userInitial = computed(() => (auth.user?.display_name || auth.user?.username || '?').slice(0, 1))
@@ -245,7 +272,7 @@ function onUserMenuClick(data: { value?: unknown }): void {
             >
             <span class="status-cell"
               ><BatteryIcon class="status-icon" /><span>电量</span
-              ><b :class="sevLabel(sevClass.battery)">{{ robot?.battery == null ? '--' : `${robot.battery.toFixed(0)}%` }}</b>
+              ><b :class="sevLabel(sevClass.battery)">{{ batteryText() }}</b>
               <span class="battery-bars"
                 ><i v-for="(on, index) in batteryBars" :key="index" :class="{ full: on }"></i
               ></span>

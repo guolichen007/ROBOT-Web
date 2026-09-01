@@ -62,3 +62,32 @@ export function telemetryValueLabel(
   if (supportState === 'NOT_CONNECTED') return '--'
   return format(value)
 }
+
+// 字段级 freshness 退化（与 server apps/api/app/modules/robots/channel_freshness.py 一致）。
+// 浏览器拿到 snapshot 后 support_state 不会自行变化，因此必须按当前时间实时重派生。
+export interface ChannelFreshnessInput {
+  support_state?: string
+  last_received_at?: string | null
+}
+
+export function effectiveChannelSupportState(
+  channel: ChannelFreshnessInput | null | undefined,
+  staleSeconds: number | null | undefined,
+  offlineSeconds: number | null | undefined,
+  nowMs: number,
+): string | undefined {
+  if (!channel) return undefined
+  const state = channel.support_state
+  // 显式 ERROR / UNSUPPORTED 等状态不得被时间退化逻辑覆盖
+  if (state === 'ERROR' || state === 'UNSUPPORTED') return state
+  if (state !== 'CONNECTED' && state !== 'STALE' && state !== 'NOT_CONNECTED') return state
+  const last = channel.last_received_at
+  if (!last) return state
+  const lastMs = Date.parse(last)
+  if (!Number.isFinite(lastMs)) return state
+  if (staleSeconds == null && offlineSeconds == null) return state
+  const ageSeconds = (nowMs - lastMs) / 1000
+  if (offlineSeconds != null && ageSeconds >= offlineSeconds) return 'NOT_CONNECTED'
+  if (staleSeconds != null && ageSeconds >= staleSeconds) return 'STALE'
+  return 'CONNECTED'
+}
