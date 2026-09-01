@@ -28,6 +28,7 @@ import {
   localizationSeverity,
   robotSeverity,
   taskSeverity,
+  telemetryValueLabel,
 } from '@/lib/telemetry-health'
 import brandLogo from '@/assets/yd/brand/youdao_brand_logo.png'
 import techWave from '@/assets/yd/decorative/tech_wave.svg'
@@ -146,8 +147,7 @@ function sevLabel(severity: string): string {
 }
 function metricValue(value: number | null | undefined, channel: string, unit: string): string {
   const state = robot.value?.data_channels?.[channel]?.support_state
-  if (state !== 'CONNECTED' || value == null) return '--'
-  return `${value.toFixed(channel === 'smoke' ? 2 : 1)} ${unit}`
+  return telemetryValueLabel(value, state, (v) => `${v.toFixed(channel === 'smoke' ? 2 : 1)} ${unit}`)
 }
 
 const userInitial = computed(() => (auth.user?.display_name || auth.user?.username || '?').slice(0, 1))

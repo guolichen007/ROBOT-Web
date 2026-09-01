@@ -4,6 +4,7 @@ import json
 import socket
 import threading
 import time
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -40,6 +41,7 @@ from app.db.models import (
     Trajectory,
 )
 from app.modules.commands.readiness import robot_readiness
+from app.modules.robots.channel_freshness import effective_channel_state
 
 router = APIRouter(tags=["system"])
 
@@ -338,12 +340,15 @@ def monitor_snapshot(
             if state["control_enabled"]
             else (integration.read_only_reason if integration else "未建立集成配置")
         )
-        state["data_channels"] = {
-            row.channel: serialize_model(row)
-            for row in db.scalars(
-                select(RobotDataChannel).where(RobotDataChannel.robot_id == robot.id)
-            ).all()
-        }
+        now = datetime.now(UTC)
+        data_channels = {}
+        for row in db.scalars(
+            select(RobotDataChannel).where(RobotDataChannel.robot_id == robot.id)
+        ).all():
+            serialized = serialize_model(row)
+            serialized["support_state"] = effective_channel_state(row, integration, now)
+            data_channels[row.channel] = serialized
+        state["data_channels"] = data_channels
         state["sensor_profiles"] = [
             serialize_model(row)
             for row in db.scalars(

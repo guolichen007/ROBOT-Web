@@ -302,7 +302,33 @@ def handle_location(
     queue_event(db, "vehicle.location", latest)
 
 
-def handle_status(db, robot: Robot, msg: dict) -> None:
+def touch_field_channel(
+    db, robot: Robot, channel_name: str, source_ts: datetime, received: datetime, source_kind: str
+) -> None:
+    """字段级 channel：仅当消息确实包含该字段时才 touch/update。
+
+    battery / smoke 的 freshness 独立于 heartbeat / availability / status 其它字段；
+    心跳或 status 不含 battery 时绝不刷新 battery.last_received_at。
+    """
+    channel = db.scalar(
+        select(RobotDataChannel).where(
+            RobotDataChannel.robot_id == robot.id,
+            RobotDataChannel.channel == channel_name,
+        )
+    )
+    if not channel:
+        channel = RobotDataChannel(robot_id=robot.id, channel=channel_name)
+        db.add(channel)
+    channel.support_state = "CONNECTED"
+    channel.quality = "GOOD"
+    channel.source_kind = source_kind
+    channel.last_source_timestamp = source_ts
+    channel.last_received_at = received
+
+
+def handle_status(
+    db, robot: Robot, msg: dict, source_ts: datetime, received: datetime, source_kind: str
+) -> None:
     """Update robot snapshot from a status message.
 
     v1.3 allows partial status (only the fields the vehicle really has), so
@@ -312,6 +338,7 @@ def handle_status(db, robot: Robot, msg: dict) -> None:
         robot.current_mode = msg["mode"]
     if "battery" in msg:
         robot.battery = msg["battery"]
+        touch_field_channel(db, robot, "battery", source_ts, received, source_kind)
     if "estop_active" in msg:
         robot.estop_active = bool(msg["estop_active"])
     if "active_task_id" in msg:
@@ -332,7 +359,9 @@ def handle_status(db, robot: Robot, msg: dict) -> None:
     queue_event(db, "vehicle.status", latest)
 
 
-def handle_sensor(db, robot: Robot, msg: dict, source_ts: datetime, received: datetime) -> None:
+def handle_sensor(
+    db, robot: Robot, msg: dict, source_ts: datetime, received: datetime, source_kind: str
+) -> None:
     """Store a sensor sample.
 
     v1.3 sensor is capability-driven: ``smoke`` is required, bottom_ir/top_ir_max
@@ -341,6 +370,8 @@ def handle_sensor(db, robot: Robot, msg: dict, source_ts: datetime, received: da
     smoke = msg.get("smoke")
     bottom_ir = msg.get("bottom_ir")
     top_ir_max = msg.get("top_ir_max")
+    if smoke is not None:
+        touch_field_channel(db, robot, "smoke", source_ts, received, source_kind)
     db.add(
         SensorSample(
             robot_id=robot.id,
@@ -972,8 +1003,8 @@ def process(topic: str, payload: bytes) -> None:
                             profile.map_contract_verified if source_kind == "ROS_COMPAT" else True
                         ),
                     ),
-                    "status": lambda: handle_status(db, robot, msg),
-                    "sensor": lambda: handle_sensor(db, robot, msg, source_ts, received),
+                    "status": lambda: handle_status(db, robot, msg, source_ts, received, source_kind),
+                    "sensor": lambda: handle_sensor(db, robot, msg, source_ts, received, source_kind),
                     "alarm": lambda: handle_alarm(db, robot, msg, received),
                     "capabilities": lambda: handle_capabilities(db, robot, msg, received),
                     "command_ack": lambda: handle_ack(db, robot, msg, received),

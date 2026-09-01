@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useMonitorStore } from '@/stores/monitor'
 import { api, errorMessage } from '@/lib/api'
 import { localizationLabel, sourceKindLabel, supportStateLabel } from '@/lib/ui-labels'
+import { telemetryValueLabel } from '@/lib/telemetry-health'
 import type { RobotState } from '@/types'
 
 const auth = useAuthStore()
@@ -64,7 +65,7 @@ function lastComm(robot: RobotState): string {
 }
 
 function batteryLabel(robot: RobotState): string {
-  return robot.battery == null ? '--' : `${robot.battery.toFixed(0)}%`
+  return telemetryValueLabel(robot.battery, robot.data_channels?.battery?.support_state, (v) => `${v.toFixed(0)}%`)
 }
 
 function modeLabel(robot: RobotState): string {
