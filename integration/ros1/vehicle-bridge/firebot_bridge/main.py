@@ -58,10 +58,24 @@ def heartbeat_loop(proto, mqtt, stop: threading.Event) -> None:
         stop.wait(period)
 
 
-def telemetry_loop(proto, mqtt, state, stop: threading.Event) -> None:
+def telemetry_loop(proto, mqtt, state, status, trace, stop: threading.Event) -> None:
     config = get_config()
     period = 1.0 / config.status_hz
     while not stop.is_set():
+        # 先执行 provider freshness 过期：断源超过 TTL 即清除旧值，避免旧值永久续命重发
+        stale = state.expire_stale_telemetry(
+            config.battery_stale_seconds, config.smoke_stale_seconds
+        )
+        if stale.get("battery_stale"):
+            if status:
+                status.set(battery_fresh=False)
+            if trace:
+                trace.emit("ros.battery.stale", level="warn", source=config.battery_source)
+        if stale.get("smoke_stale"):
+            if status:
+                status.set(smoke_fresh=False)
+            if trace:
+                trace.emit("ros.smoke.stale", level="warn", source=config.smoke_source)
         status_msg = status_uplink.make_status(proto, state)
         if status_msg is not None:
             # status 为业务遥测，契约 QoS1；heartbeat/sensor/location 为 QoS0。
@@ -159,7 +173,7 @@ def main() -> int:
     # 4) 周期上报线程
     threads = [
         threading.Thread(target=heartbeat_loop, args=(proto, mqtt, stop), daemon=True),
-        threading.Thread(target=telemetry_loop, args=(proto, mqtt, state, stop), daemon=True),
+        threading.Thread(target=telemetry_loop, args=(proto, mqtt, state, status, trace, stop), daemon=True),
         threading.Thread(target=location_loop, args=(proto, mqtt, state, stop), daemon=True),
     ]
     for t in threads:

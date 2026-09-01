@@ -59,6 +59,10 @@ _IMPORTANCE = {
     "ros.smoke.rx": "telemetry",
     "ros.status.rx": "telemetry",
     "ros.location.rx": "telemetry",
+    "ros.battery.stale": "important",
+    "ros.battery.recovered": "important",
+    "ros.smoke.stale": "important",
+    "ros.smoke.recovered": "important",
 }
 
 # ---- 字段白名单：每个事件只允许这些业务键进入结构化日志 ----
@@ -96,9 +100,13 @@ _EVENT_ALLOWED_KEYS = {
     "ros.command.tx_failed": {"reason", "cmd", "command_id", "task_id"},
     "ros.feedback.rx": {"cmd", "state", "command_id", "task_id", "reason_code", "message", "phase", "progress"},
     "ros.battery.rx": {"battery", "source"},
-    "ros.smoke.rx": {"smoke"},
+    "ros.smoke.rx": {"smoke", "source"},
     "ros.status.rx": {"mode", "estop_active", "active_task_id"},
     "ros.location.rx": {"x", "y", "theta", "localization_status", "enabled"},
+    "ros.battery.stale": {"source", "age_seconds"},
+    "ros.battery.recovered": {"source", "age_seconds"},
+    "ros.smoke.stale": {"source", "age_seconds"},
+    "ros.smoke.recovered": {"source", "age_seconds"},
 }
 
 

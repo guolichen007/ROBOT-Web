@@ -58,6 +58,10 @@ _EVENT_TABLE = {
     "ros.smoke.rx": ("ROS", "SMOKE", "rx"),
     "ros.status.rx": ("ROS", "STATUS", "rx"),
     "ros.location.rx": ("ROS", "LOCATION", "rx"),
+    "ros.battery.stale": ("ROS", "BATTERY_STALE", "warn"),
+    "ros.battery.recovered": ("ROS", "BATTERY_RECOVERED", "ok"),
+    "ros.smoke.stale": ("ROS", "SMOKE_STALE", "warn"),
+    "ros.smoke.recovered": ("ROS", "SMOKE_RECOVERED", "ok"),
 }
 
 # 默认隐藏（仅 --verbose 显示）的事件：技术细节 + telemetry
@@ -110,6 +114,10 @@ _ZH_PATH = {
     "ros.adapter.changed": "ROS适配器",
     "bridge.started": "Bridge",
     "bridge.stopping": "Bridge",
+    "ros.battery.stale": "电量数据源",
+    "ros.battery.recovered": "电量数据源",
+    "ros.smoke.stale": "烟雾数据源",
+    "ros.smoke.recovered": "烟雾数据源",
 }
 
 _ZH_LABEL = {
@@ -126,6 +134,10 @@ _ZH_LABEL = {
     "ros.adapter.changed": "变化",
     "bridge.started": "启动",
     "bridge.stopping": "停止",
+    "ros.battery.stale": "已超时",
+    "ros.battery.recovered": "已恢复",
+    "ros.smoke.stale": "已超时",
+    "ros.smoke.recovered": "已恢复",
 }
 
 _ZH_STATE = {
@@ -532,8 +544,8 @@ class FieldConsole:
             f"设备：{vehicle}",
             f"服务器：{mqtt}",
             f"Bridge：{bridge}",
-            f"ROS：{ros}",
-            f"控制适配器：{adapter}",
+            f"ROS主节点：{ros}",
+            f"Bridge ROS适配器：{adapter}",
             f"启动编号：{boot}",
             f"事件日志：{event_log}",
             "----------------------------------------",

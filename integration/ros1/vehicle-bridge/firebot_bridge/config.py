@@ -102,6 +102,11 @@ class Config:
     event_log_min_free_bytes: int = _env_int("FIREBOT_EVENT_LOG_MIN_FREE_BYTES", 1 * 1024 * 1024 * 1024)
     event_queue_size: int = _env_int("FIREBOT_EVENT_QUEUE_SIZE", 20000)
     battery_source: str = os.environ.get("FIREBOT_BATTERY_SOURCE", "UNKNOWN")
+    smoke_source: str = os.environ.get("FIREBOT_SMOKE_SOURCE", "UNKNOWN")
+    # freshness guard：provider 断源后 stale 清除的 TTL（秒）。0 或空 = 未启用（不清除）。
+    # 真实 provider 发布周期尚未知，此处仅测试 TTL，不是 01 实车生产最终值。
+    battery_stale_seconds: float = _env_float("FIREBOT_BATTERY_STALE_SECONDS", 0.0)
+    smoke_stale_seconds: float = _env_float("FIREBOT_SMOKE_STALE_SECONDS", 0.0)
 
     # ---- 密码缺失即退出 ----
     def validate(self) -> None:

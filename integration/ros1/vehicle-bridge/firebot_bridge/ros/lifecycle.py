@@ -86,6 +86,8 @@ class RosChildManager:
         self.provider_ready = False
         self.battery_provider_seen = False
         self.battery_last_update = None
+        self.smoke_provider_seen = False
+        self.smoke_last_update = None
 
     # ---- 对外接口 ----
     def set_on_feedback(self, handler) -> None:
@@ -288,6 +290,13 @@ class RosChildManager:
         self.state.clear_ros_telemetry()
         self.battery_provider_seen = False
         self.battery_last_update = None
+        self.smoke_provider_seen = False
+        self.smoke_last_update = None
+        if self.status:
+            self.status.set(
+                battery_fresh=False, smoke_fresh=False,
+                battery_last_update=None, smoke_last_update=None,
+            )
 
     def _reader_loop(self, proc, generation: int) -> None:
         try:
@@ -348,9 +357,11 @@ class RosChildManager:
             channel = payload.get("channel")
             if channel == "battery":
                 value = payload.get("value")
-                self.state.set_battery(value)
+                recovered = self.state.set_battery(value)
                 self.battery_provider_seen = True
                 self.battery_last_update = time.time()
+                if self.status:
+                    self.status.set(battery_fresh=True, battery_last_update=self.battery_last_update)
                 if self.trace:
                     # 变化 ≥0.1% 立即记；同时每 30s 至少一个快照（独立 key，互不干扰）
                     self.trace.changed(
@@ -361,11 +372,28 @@ class RosChildManager:
                         "ros.battery.snapshot", 30.0, "ros.battery.rx",
                         battery=value, source=self.config.battery_source,
                     )
+                    if recovered:
+                        self.trace.emit(
+                            "ros.battery.recovered", level="ok",
+                            source=self.config.battery_source,
+                        )
             elif channel == "smoke":
                 value = payload.get("value")
-                self.state.set_smoke(value)
+                recovered = self.state.set_smoke(value)
+                self.smoke_provider_seen = True
+                self.smoke_last_update = time.time()
+                if self.status:
+                    self.status.set(smoke_fresh=True, smoke_last_update=self.smoke_last_update)
                 if self.trace:
-                    self.trace.changed("ros.smoke", value, "ros.smoke.rx", smoke=value)
+                    self.trace.changed(
+                        "ros.smoke", value, "ros.smoke.rx",
+                        smoke=value, source=self.config.smoke_source,
+                    )
+                    if recovered:
+                        self.trace.emit(
+                            "ros.smoke.recovered", level="ok",
+                            source=self.config.smoke_source,
+                        )
         elif t == "status":
             # apply_status 只取 mode/estop_active/active_task_id，天然忽略 type 等其它字段
             self.state.apply_status(payload)
@@ -423,4 +451,6 @@ class RosChildManager:
             ros_adapter_ready=self.adapter_ready,
             battery_provider_seen=self.battery_provider_seen,
             battery_last_update=self.battery_last_update,
+            smoke_provider_seen=self.smoke_provider_seen,
+            smoke_last_update=self.smoke_last_update,
         )

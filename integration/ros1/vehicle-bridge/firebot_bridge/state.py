@@ -26,6 +26,12 @@ class BridgeState:
         self.last_bottom_ir: float | None = None
         self.last_top_ir_max: float | None = None
         self.last_location: dict | None = None
+        # freshness 时间戳（monotonic）：freshness 依据 = 消息是否持续到达，非数值是否变化
+        self.battery_updated_monotonic: float | None = None
+        self.smoke_updated_monotonic: float | None = None
+        # 内部 stale 标记（只用于 recovered 判断，绝不进 MQTT/协议）
+        self._battery_was_stale: bool = False
+        self._smoke_was_stale: bool = False
         # command_id 幂等缓存：command + 最新 ACK + 最新 task_status + 是否终态
         self._processed: dict[str, dict] = {}
 
@@ -95,13 +101,26 @@ class BridgeState:
             self.cancel_requested = True
 
     # ---- 数据缓存 ----
-    def set_battery(self, value: float | None) -> None:
-        with self._lock:
-            self.last_battery = value
+    def set_battery(self, value: float | None) -> bool:
+        """记录 battery 值并刷新 freshness（同值也刷新时间戳）。
 
-    def set_smoke(self, value: float | None) -> None:
+        返回 True 表示之前已经 stale（即本次是 recovered）。
+        """
         with self._lock:
+            was_stale = self._battery_was_stale
+            self.last_battery = value
+            self.battery_updated_monotonic = time.monotonic()
+            self._battery_was_stale = False
+            return was_stale
+
+    def set_smoke(self, value: float | None) -> bool:
+        """记录 smoke 值并刷新 freshness（同值也刷新时间戳）。返回 True 表示 recovered。"""
+        with self._lock:
+            was_stale = self._smoke_was_stale
             self.last_smoke = value
+            self.smoke_updated_monotonic = time.monotonic()
+            self._smoke_was_stale = False
+            return was_stale
 
     def set_location(self, value: dict | None) -> None:
         with self._lock:
@@ -128,9 +147,48 @@ class BridgeState:
             self.last_bottom_ir = None
             self.last_top_ir_max = None
             self.last_location = None
+            self.battery_updated_monotonic = None
+            self.smoke_updated_monotonic = None
+            self._battery_was_stale = False
+            self._smoke_was_stale = False
             self.mode = None
             self.estop_active = None
             self.reported_active_task_id = None
+
+    def expire_stale_telemetry(
+        self,
+        battery_stale_seconds: float,
+        smoke_stale_seconds: float,
+        now: float | None = None,
+    ) -> dict:
+        """超时清除 stale 数据；返回本次变为 stale 的 channel。
+
+        freshness 依据 = 消息是否持续到达（monotonic 时间），不是数值是否变化。
+        同一 stale 周期只触发一次（清除后 last_* 为 None，后续不再匹配）。
+        TTL <= 0 表示 freshness guard 未启用，不清理。
+        """
+        now = time.monotonic() if now is None else now
+        result = {"battery_stale": False, "smoke_stale": False}
+        with self._lock:
+            if (
+                self.last_battery is not None
+                and self.battery_updated_monotonic is not None
+                and battery_stale_seconds > 0
+                and now - self.battery_updated_monotonic > battery_stale_seconds
+            ):
+                self.last_battery = None
+                self._battery_was_stale = True
+                result["battery_stale"] = True
+            if (
+                self.last_smoke is not None
+                and self.smoke_updated_monotonic is not None
+                and smoke_stale_seconds > 0
+                and now - self.smoke_updated_monotonic > smoke_stale_seconds
+            ):
+                self.last_smoke = None
+                self._smoke_was_stale = True
+                result["smoke_stale"] = True
+        return result
 
     def snapshot_telemetry(self) -> dict:
         with self._lock:
