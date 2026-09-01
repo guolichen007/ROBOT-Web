@@ -51,16 +51,18 @@ export function freshnessSeverity(ageSeconds: number, staleSeconds: number, offl
   return 'normal'
 }
 
-// 字段级遥测显示：历史值可以保留，但 STALE / NOT_CONNECTED 绝不能冒充实时正常值。
+// 字段级遥测显示：fail-closed。只有明确 CONNECTED 才允许纯正常实时值显示；
+// NOT_CONNECTED / UNSUPPORTED / undefined / 其它未知状态一律 --，绝不把历史值当实时值。
 export function telemetryValueLabel(
   value: number | null | undefined,
   supportState: string | undefined,
   format: (v: number) => string,
 ): string {
   if (value == null) return '--'
+  if (supportState === 'CONNECTED') return format(value)
   if (supportState === 'STALE') return `数据陈旧 · ${format(value)}`
-  if (supportState === 'NOT_CONNECTED') return '--'
-  return format(value)
+  if (supportState === 'ERROR') return `数据异常 · ${format(value)}`
+  return '--'
 }
 
 // 字段级 freshness 退化（与 server apps/api/app/modules/robots/channel_freshness.py 一致）。

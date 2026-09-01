@@ -1,19 +1,36 @@
 import { describe, expect, it } from 'vitest'
 import { effectiveChannelSupportState, telemetryValueLabel } from './telemetry-health'
 
-describe('telemetryValueLabel（字段级 freshness 显示语义）', () => {
+describe('telemetryValueLabel（字段级 freshness 显示语义，fail-closed）', () => {
   const pct = (v: number) => `${v.toFixed(0)}%`
+  const smoke = (v: number) => `${v.toFixed(3)}`
 
   it('CONNECTED 显示实时值', () => {
     expect(telemetryValueLabel(62.3, 'CONNECTED', pct)).toBe('62%')
   })
 
-  it('STALE 明确标记陈旧，绝不冒充实时正常值', () => {
+  it('STALE 明确标记陈旧', () => {
     expect(telemetryValueLabel(62.3, 'STALE', pct)).toBe('数据陈旧 · 62%')
+  })
+
+  it('ERROR 明确标记异常', () => {
+    expect(telemetryValueLabel(62.3, 'ERROR', pct)).toBe('数据异常 · 62%')
   })
 
   it('NOT_CONNECTED 不显示历史数值', () => {
     expect(telemetryValueLabel(62.3, 'NOT_CONNECTED', pct)).toBe('--')
+  })
+
+  it('UNSUPPORTED 不显示历史数值', () => {
+    expect(telemetryValueLabel(62.3, 'UNSUPPORTED', pct)).toBe('--')
+  })
+
+  it('supportState undefined（channel 未建立）不显示历史数值', () => {
+    expect(telemetryValueLabel(62.3, undefined, pct)).toBe('--')
+  })
+
+  it('未知状态不显示历史数值', () => {
+    expect(telemetryValueLabel(62.3, 'SOMETHING_ELSE', pct)).toBe('--')
   })
 
   it('null 值无论状态都显示 --', () => {
@@ -21,8 +38,12 @@ describe('telemetryValueLabel（字段级 freshness 显示语义）', () => {
     expect(telemetryValueLabel(undefined, 'STALE', pct)).toBe('--')
   })
 
-  it('channel 尚未建立（无 freshness 信息）仍显示值', () => {
-    expect(telemetryValueLabel(62.3, undefined, pct)).toBe('62%')
+  it('Smoke STALE → 数据陈旧', () => {
+    expect(telemetryValueLabel(0.123, 'STALE', smoke)).toBe('数据陈旧 · 0.123')
+  })
+
+  it('Smoke undefined → --（fail-closed）', () => {
+    expect(telemetryValueLabel(0.123, undefined, smoke)).toBe('--')
   })
 })
 
@@ -102,17 +123,5 @@ describe('effectiveChannelSupportState（与 server channel_freshness.py 一致�
         now,
       ),
     ).toBe('CONNECTED')
-  })
-
-  it('STALE historical battery → 数据陈旧 · 62%', () => {
-    expect(telemetryValueLabel(62.3, 'STALE', (v) => `${v.toFixed(0)}%`)).toBe('数据陈旧 · 62%')
-  })
-
-  it('NOT_CONNECTED historical battery → --', () => {
-    expect(telemetryValueLabel(62.3, 'NOT_CONNECTED', (v) => `${v.toFixed(0)}%`)).toBe('--')
-  })
-
-  it('Smoke STALE → 数据陈旧', () => {
-    expect(telemetryValueLabel(0.123, 'STALE', (v) => `${v.toFixed(3)}`)).toBe('数据陈旧 · 0.123')
   })
 })
