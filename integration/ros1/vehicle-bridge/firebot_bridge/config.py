@@ -27,6 +27,20 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_location_stale_seconds() -> float:
+    """location freshness TTL（fail-closed）：0/空/非法一律回落到安全默认 3.0s。
+
+    绝不落入「0=永不过期旧 location」的危险默认——旧位置必须能被清理，
+    否则会被重新包装成新 timestamp 上行，污染服务器静止判定。
+    """
+    raw = os.environ.get("FIREBOT_LOCATION_STALE_SECONDS", "").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return 3.0
+    return value if value > 0 else 3.0
+
+
 class Config:
     """车端 Bridge 全部配置，均来自环境变量（见 config/bridge.env.example）。"""
 
@@ -107,6 +121,8 @@ class Config:
     # 真实 provider 发布周期尚未知，此处仅测试 TTL，不是 01 实车生产最终值。
     battery_stale_seconds: float = _env_float("FIREBOT_BATTERY_STALE_SECONDS", 0.0)
     smoke_stale_seconds: float = _env_float("FIREBOT_SMOKE_STALE_SECONDS", 0.0)
+    # location freshness TTL（fail-closed）：0/空/非法 → 3.0s，绝不允许「永不过期旧 location」。
+    location_stale_seconds: float = _env_location_stale_seconds()
 
     # ---- 密码缺失即退出 ----
     def validate(self) -> None:

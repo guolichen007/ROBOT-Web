@@ -37,6 +37,14 @@ FIREBOT_ROS_WORKSPACE_SETUP=/home/tl/firerobot_ws/devel/setup.bash \
 cat /opt/firebot/vehicle-bridge/APPROVED_RUNTIME.txt   # 应等于 FIREBOT_REQUIRE_SHA
 ```
 
+安装是**原子切换**：staging → 校验 → 旧版本保留到 `/opt/firebot/.vehicle-bridge.previous` → 原子替换，失败自动回滚。快速回滚（不动 Git）：
+
+```bash
+sudo mv /opt/firebot/vehicle-bridge /opt/firebot/_bad \
+  && sudo mv /opt/firebot/.vehicle-bridge.previous /opt/firebot/vehicle-bridge \
+  && sudo systemctl restart firebot-bridge
+```
+
 ## 三、回滚到指定 SHA
 
 ```bash
@@ -67,7 +75,7 @@ cd /home/tl/firerobot_ws && catkin_make && source devel/setup.bash
 cat /home/tl/firerobot_ws/src/firebot_control/APPROVED_RUNTIME.txt
 ```
 
-回滚同理：`git checkout <目标SHA>` 后重新跑上面 install.sh，APPROVED_RUNTIME.txt 会同步更新。
+回滚同理：`git checkout <目标SHA>` 后重新跑上面 install.sh，APPROVED_RUNTIME.txt 会同步更新。安装同样原子切换，旧版本保留在 `/home/tl/firerobot_ws/.firebot_control.previous`。
 
 ## 五、安装后验收
 

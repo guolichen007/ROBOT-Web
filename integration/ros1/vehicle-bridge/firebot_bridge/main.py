@@ -90,13 +90,20 @@ def location_loop(proto, mqtt, state, stop: threading.Event) -> None:
     config = get_config()
     min_interval = 1.0 / max(config.location_max_hz, 0.5)
     last_sent = 0.0
+    last_sent_revision = 0
     while not stop.is_set():
         now = time.monotonic()
-        if now - last_sent >= min_interval:
+        # 1) freshness：provider 断源超过 TTL 即清除，绝不把旧位置重新包装成新消息
+        if state.expire_stale_location(config.location_stale_seconds, now):
+            LOG.warning("location provider stale：清除旧位置，暂停上行 location")
+        # 2) 只发布尚未发送过的新 revision（没有新 ROS 观测就不发）
+        revision = state.get_location_revision()
+        if revision > last_sent_revision and now - last_sent >= min_interval:
             loc_msg = loc_uplink.make_location(proto, state, config)
             if loc_msg is not None:
                 mqtt.publish(proto.topic("location"), loc_msg, qos=0)
                 last_sent = now
+                last_sent_revision = revision
         stop.wait(0.1)
 
 

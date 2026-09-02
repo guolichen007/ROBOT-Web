@@ -37,16 +37,38 @@ else
   fi
 fi
 
-# 安装：只重建 firebot_control 包目录，不影响 src 下其它包。
+# 安装：staging → 校验 → previous → atomic swap，只重建 firebot_control 包目录，
+# 不影响 src 下其它包，也不在运行目录逐文件覆盖。
 mkdir -p "$ROS_SRC_DIR"
-rm -rf "$PKG_DIR"
-cp -r "$SCRIPT_DIR" "$PKG_DIR"
+WORKSPACE_DIR="$(cd "$(dirname "$ROS_SRC_DIR")" && pwd)"
+STAGING_DIR="$WORKSPACE_DIR/.firebot_control.staging"
+PREVIOUS_DIR="$WORKSPACE_DIR/.firebot_control.previous"
+
+# staging 构建（放 workspace 根：catkin 只扫 src/，不会误扫 hidden staging/previous）
+rm -rf "$STAGING_DIR"
+mkdir -p "$STAGING_DIR"
+cp -r "$SCRIPT_DIR" "$STAGING_DIR"
 # install.sh 属于仓库交付工具，不放进 catkin 包目录。
-rm -f "$PKG_DIR/install.sh"
+rm -f "$STAGING_DIR/install.sh"
+
+# staging 完整性校验（关键文件缺失即中止，不做半安装）
+[ -f "$STAGING_DIR/package.xml" ] || { echo "ERROR: staging 缺少 package.xml（中止安装）" >&2; exit 1; }
+[ -f "$STAGING_DIR/CMakeLists.txt" ] || { echo "ERROR: staging 缺少 CMakeLists.txt（中止安装）" >&2; exit 1; }
 
 if [ -n "$SOURCE_SHA" ]; then
-  echo "$SOURCE_SHA" > "$PKG_DIR/APPROVED_RUNTIME.txt"
+  echo "$SOURCE_SHA" > "$STAGING_DIR/APPROVED_RUNTIME.txt"
   echo "  已记录来源 SHA: $SOURCE_SHA"
+fi
+
+# swap：旧版本保留为 previous，staging 原子替换为 current；失败自动回滚
+rm -rf "$PREVIOUS_DIR"
+if [ -d "$PKG_DIR" ]; then
+  mv "$PKG_DIR" "$PREVIOUS_DIR"
+fi
+if ! mv "$STAGING_DIR" "$PKG_DIR"; then
+  echo "ERROR: swap 失败，回滚到 previous" >&2
+  [ -d "$PREVIOUS_DIR" ] && mv "$PREVIOUS_DIR" "$PKG_DIR"
+  exit 1
 fi
 
 echo ""
@@ -54,3 +76,5 @@ echo "  完成。下一步："
 echo "    cd $(dirname "$ROS_SRC_DIR") && catkin_make && source devel/setup.bash"
 echo "  核对来源 SHA："
 echo "    cat $PKG_DIR/APPROVED_RUNTIME.txt"
+echo "  回滚：上一版本保留在 $PREVIOUS_DIR；"
+echo "    mv $PKG_DIR /tmp/firebot_control.bad && mv $PREVIOUS_DIR $PKG_DIR && cd $(dirname "$ROS_SRC_DIR") && catkin_make"

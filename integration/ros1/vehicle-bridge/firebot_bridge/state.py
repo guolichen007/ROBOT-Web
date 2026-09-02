@@ -26,6 +26,10 @@ class BridgeState:
         self.last_bottom_ir: float | None = None
         self.last_top_ir_max: float | None = None
         self.last_location: dict | None = None
+        # location 只发布「新 revision」：set_location 递增 revision + 刷新更新时间，
+        # location_loop 只发布尚未发送过的新 revision，避免旧位置被重新包装成新 MQTT。
+        self.location_revision: int = 0
+        self.location_updated_monotonic: float | None = None
         # freshness 时间戳（monotonic）：freshness 依据 = 消息是否持续到达，非数值是否变化
         self.battery_updated_monotonic: float | None = None
         self.smoke_updated_monotonic: float | None = None
@@ -123,8 +127,34 @@ class BridgeState:
             return was_stale
 
     def set_location(self, value: dict | None) -> None:
+        """记录 ROS location 并递增 revision；仅真实观测产生新的可发布 revision。"""
         with self._lock:
             self.last_location = value
+            if value is not None:
+                self.location_revision += 1
+                self.location_updated_monotonic = time.monotonic()
+
+    def get_location_revision(self) -> int:
+        with self._lock:
+            return self.location_revision
+
+    def expire_stale_location(self, location_stale_seconds: float, now: float | None = None) -> bool:
+        """location provider 断源超过 TTL 即清除，避免旧位置被重新包装成新消息。
+
+        TTL <= 0 视为未启用（不清理）——但 Config 层对 location 的默认值是 fail-closed
+        正数，不会落入「永不过期旧 location」的危险默认。
+        """
+        now = time.monotonic() if now is None else now
+        with self._lock:
+            if (
+                self.last_location is not None
+                and self.location_updated_monotonic is not None
+                and location_stale_seconds > 0
+                and now - self.location_updated_monotonic > location_stale_seconds
+            ):
+                self.last_location = None
+                return True
+            return False
 
     def apply_status(self, fields: dict) -> None:
         """只应用真实出现的 status 字段（partial），不伪造缺失字段。"""
@@ -147,6 +177,7 @@ class BridgeState:
             self.last_bottom_ir = None
             self.last_top_ir_max = None
             self.last_location = None
+            self.location_updated_monotonic = None
             self.battery_updated_monotonic = None
             self.smoke_updated_monotonic = None
             self._battery_was_stale = False
