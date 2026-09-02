@@ -10,7 +10,7 @@ set -euo pipefail
 
 WS="${FIREBOT_ROS_WORKSPACE:-/home/tl/firerobot_ws}"
 LOG_DIR="$WS/logs/r1"
-BRIDGE_DIR="${FIREBOT_BRIDGE_DIR:-/home/tl/vehicle-bridge}"
+BRIDGE_DIR="${FIREBOT_BRIDGE_DIR:-/opt/firebot/vehicle-bridge}"
 BRIDGE_ENV="${FIREBOT_BRIDGE_ENV:-/etc/firebot/bridge.env}"
 # 现场 sudo 密码只经环境变量注入，绝不写死进仓库（原现场值已脱敏）
 SUDO_PW="${FIREBOT_SUDO_PW:-}"

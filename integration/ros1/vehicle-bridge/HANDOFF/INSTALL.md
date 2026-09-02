@@ -75,4 +75,4 @@ cat /home/tl/firerobot_ws/src/firebot_control/APPROVED_RUNTIME.txt
 FIREBOT_BRIDGE_ENV=/etc/firebot/bridge.env /opt/firebot/vehicle-bridge/verify.sh
 ```
 
-重点核对：`SECRET_PRESENT=YES`、`SUPPORTED_COMMANDS=`（生产不开放控制）、`REAL_CONTROL=NOT_IMPLEMENTED`。
+重点核对：`SECRET_PRESENT=YES`、`SUPPORTED_COMMANDS=`（生产不开放控制）、`CONTROL_CODE=PATROL_START,STOP_MOTION`、`CONTROL_FIELD_VERIFIED=NO`（代码已实现，但现场下行闸未开放、实车控制尚未验收）。
