@@ -2,7 +2,7 @@ name: Firebot V2 CI
 
 on:
   push:
-    branches: [develop, main, "hardening/**"]
+    branches: [develop, main, "hardening/**", "integration/**"]
   pull_request:
     branches: [develop, main]
 
@@ -91,6 +91,44 @@ jobs:
       - run: pip install -r requirements.lock pytest==8.4.1
       - run: python scripts/check_protocol_drift.py
       - run: pytest services/protocol-tester/tests
+
+  ros1-vehicle:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        with:
+          python-version: "3.12"
+      - name: Bridge 单测（无 ROS 依赖）
+        working-directory: integration/ros1/vehicle-bridge
+        run: |
+          python3 tests/test_bridge.py
+          python3 tests/test_reliability.py
+          python3 tests/test_field_console.py
+          python3 tests/test_u2_freshness.py
+          python3 tests/test_mecanum_odom.py
+          python3 tests/test_location_freshness.py
+      - name: Control STOP 安全测试
+        run: python3 integration/ros1/vehicle-control/tests/test_stop_motion_safety.py
+      - name: py_compile 车端 Python
+        run: |
+          python3 -m compileall -q \
+            integration/ros1/vehicle-bridge/firebot_bridge \
+            integration/ros1/vehicle-bridge/tools \
+            integration/ros1/vehicle-bridge/tests \
+            integration/ros1/vehicle-control/scripts \
+            integration/ros1/vehicle-control/tests
+      - name: bash -n 车端脚本
+        run: |
+          set -euo pipefail
+          for f in $(find integration/ros1 -name '*.sh' -type f | sort); do
+            echo "bash -n $f"
+            bash -n "$f"
+          done
+      - name: 明确 catkin/Noetic 为 FIELD gate（不伪造 PASS）
+        run: |
+          echo "catkin_make 需 ROS Noetic 环境；本 job 不伪造 catkin PASS。"
+          echo "catkin/Noetic gate = FIELD/ROS_RUNNER gate（后续 self-hosted runner 补）。"
 
   docs:
     runs-on: ubuntu-24.04

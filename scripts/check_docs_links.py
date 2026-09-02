@@ -10,6 +10,7 @@ docs.extend((ROOT / "docs").glob("*.md"))
 docs.extend(
     (ROOT / "integration/ros2").glob("*.md") if (ROOT / "integration/ros2").exists() else []
 )
+docs.extend((ROOT / "integration" / "ros1").rglob("*.md"))
 broken: list[str] = []
 pattern = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 for document in docs:
