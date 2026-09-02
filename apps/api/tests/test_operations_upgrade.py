@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from math import pi
 from pathlib import Path
 from types import ModuleType
@@ -292,7 +292,9 @@ def test_stationary_observation_token_and_frame_dedup() -> None:
     assert (frames, last) == (0, t3)
 
     # stale：帧清零且 last_token 保持不变
-    frames, last = worker.advance_stationary_frames(False, False, base + timedelta(seconds=3), last, 4)
+    frames, last = worker.advance_stationary_frames(
+        False, False, base + timedelta(seconds=3), last, 4
+    )
     assert (frames, last) == (0, t3)
 
 

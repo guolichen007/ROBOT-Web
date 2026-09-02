@@ -205,6 +205,35 @@ def expire_sessions_and_commands(db, now: datetime) -> None:
         queue_event(db, "command.updated", serialize_model(command))
 
 
+def _terminate_stop_operation(
+    db,
+    operation: StopOperation,
+    now: datetime,
+    state: str,
+    motion_state: str,
+    failure_reason: str | None = None,
+) -> None:
+    """落定 STOP operation 终态并写审计事件（不改变状态机判定逻辑）。"""
+    operation.state = state
+    operation.motion_stop_state = motion_state
+    operation.terminal_at = now
+    if failure_reason:
+        operation.failure_reason = failure_reason
+    db.add(
+        RobotOperationEvent(
+            robot_id=operation.robot_id,
+            task_id=operation.task_id,
+            operation_type="STOP_PATROL",
+            state=motion_state,
+            payload_json={
+                "stationary_frames": operation.stationary_frames,
+                "mission_cancel_state": operation.mission_cancel_state,
+            },
+        )
+    )
+    queue_event(db, "operation.stop.updated", serialize_model(operation))
+
+
 def reconcile_stop_operations(db, now: datetime) -> None:
     operations = db.scalars(
         select(StopOperation).where(
@@ -223,25 +252,24 @@ def reconcile_stop_operations(db, now: datetime) -> None:
         task = db.get(Task, operation.task_id) if operation.task_id else None
 
         # --- mission cancel truth (independent of motion stop) ---
-        if operation.mission_cancel_state not in {"NOT_REQUIRED", "CANCELLED_CONFIRMED", "UNCONFIRMED", "UNAVAILABLE"}:
+        if operation.mission_cancel_state not in {
+            "NOT_REQUIRED",
+            "CANCELLED_CONFIRMED",
+            "UNCONFIRMED",
+            "UNAVAILABLE",
+        }:
             if task and task.status == "CANCELLED":
                 operation.mission_cancel_state = "CANCELLED_CONFIRMED"
             elif cancel and cancel.ack_status == "accepted":
                 operation.mission_cancel_state = "ACK_ACCEPTED"
             if (
-                operation.mission_cancel_state not in {"CANCELLED_CONFIRMED", "UNCONFIRMED", "UNAVAILABLE"}
+                operation.mission_cancel_state
+                not in {"CANCELLED_CONFIRMED", "UNCONFIRMED", "UNAVAILABLE"}
                 and operation.cancel_deadline_at
                 and now >= operation.cancel_deadline_at
             ):
                 operation.mission_cancel_state = "UNCONFIRMED"
                 operation.failure_reason = "TASK_CANCEL_TIMEOUT"
-
-        cancel_terminal = operation.mission_cancel_state in {
-            "NOT_REQUIRED",
-            "UNAVAILABLE",
-            "CANCELLED_CONFIRMED",
-            "UNCONFIRMED",
-        }
 
         # --- stop ACK truth (independent of physical stationary) ---
         stop_ack_confirmed = bool(stop and stop.ack_status == "accepted")
@@ -278,36 +306,27 @@ def reconcile_stop_operations(db, now: datetime) -> None:
             )
             physically_stationary = operation.stationary_frames >= 5
 
-        def terminal(state: str, motion_state: str, failure_reason: str | None = None) -> None:
-            operation.state = state
-            operation.motion_stop_state = motion_state
-            operation.terminal_at = now
-            if failure_reason:
-                operation.failure_reason = failure_reason
-            db.add(
-                RobotOperationEvent(
-                    robot_id=operation.robot_id,
-                    task_id=operation.task_id,
-                    operation_type="STOP_PATROL",
-                    state=motion_state,
-                    payload_json={
-                        "stationary_frames": operation.stationary_frames,
-                        "mission_cancel_state": operation.mission_cancel_state,
-                    },
-                )
-            )
-            queue_event(db, "operation.stop.updated", serialize_model(operation))
-
         if physically_stationary:
             if operation.mission_cancel_state in {"NOT_REQUIRED", "CANCELLED_CONFIRMED"}:
                 if stop_ack_confirmed:
-                    terminal("VEHICLE_STATIONARY_CONFIRMED", "STATIONARY_CONFIRMED")
+                    _terminate_stop_operation(
+                        db, operation, now, "VEHICLE_STATIONARY_CONFIRMED", "STATIONARY_CONFIRMED"
+                    )
                 else:
-                    terminal("PARTIAL_UNCONFIRMED", "STATIONARY_CONFIRMED", "STOP_ACK_UNCONFIRMED")
+                    _terminate_stop_operation(
+                        db,
+                        operation,
+                        now,
+                        "PARTIAL_UNCONFIRMED",
+                        "STATIONARY_CONFIRMED",
+                        "STOP_ACK_UNCONFIRMED",
+                    )
             elif operation.mission_cancel_state in {"UNAVAILABLE", "UNCONFIRMED"}:
                 # 保留已设置的 failure_reason（如 TASK_CANCEL_TIMEOUT），不要用统一值覆盖
                 reason = operation.failure_reason or "TASK_CANCEL_UNCONFIRMED"
-                terminal("PARTIAL_UNCONFIRMED", "STATIONARY_CONFIRMED", reason)
+                _terminate_stop_operation(
+                    db, operation, now, "PARTIAL_UNCONFIRMED", "STATIONARY_CONFIRMED", reason
+                )
             else:
                 operation.motion_stop_state = "STATIONARY_CONFIRMED"
                 operation.state = "STATIONARY_CONFIRMED_CANCEL_PENDING"
@@ -316,10 +335,14 @@ def reconcile_stop_operations(db, now: datetime) -> None:
 
         # Not yet physically stationary.
         if not fresh and (stop_ack_unconfirmed or now >= operation.stationary_verify_deadline_at):
-            terminal("UNCONFIRMED", "UNCONFIRMED", "TELEMETRY_STALE")
+            _terminate_stop_operation(
+                db, operation, now, "UNCONFIRMED", "UNCONFIRMED", "TELEMETRY_STALE"
+            )
             continue
         if now >= operation.stationary_verify_deadline_at:
-            terminal("UNCONFIRMED", "UNCONFIRMED", "VELOCITY_NOT_ZERO")
+            _terminate_stop_operation(
+                db, operation, now, "UNCONFIRMED", "UNCONFIRMED", "VELOCITY_NOT_ZERO"
+            )
             continue
 
         # Still verifying: keep a descriptive motion state for the UI.

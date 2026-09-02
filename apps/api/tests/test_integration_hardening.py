@@ -759,7 +759,12 @@ def test_stop_operation_stale_telemetry_terminates_unconfirmed() -> None:
         assert operation.failure_reason == "TELEMETRY_STALE"
 
 
-def test_stop_operation_ack_deadline_terminates_unconfirmed() -> None:
+def test_stop_operation_ack_timeout_with_stale_telemetry_is_unconfirmed() -> None:
+    """ACK 未收到 + ACK deadline 已过 + telemetry 缺失/stale → UNCONFIRMED/TELEMETRY_STALE。
+
+    ACK truth 与 physical stationary truth 相互独立：没有 fresh velocity evidence 时
+    不能确认物理停车，失败原因应是 TELEMETRY_STALE 而非 STOP_ACK_TIMEOUT。
+    """
     worker = load_service("firebot_stop_ack_timeout_test", "services/task-worker/main.py")
     now = datetime.now(UTC)
     with SessionLocal.begin() as db:
@@ -786,8 +791,114 @@ def test_stop_operation_ack_deadline_terminates_unconfirmed() -> None:
         worker.reconcile_stop_operations(db, now)
     with SessionLocal() as db:
         operation = db.get(StopOperation, operation_id)
-        assert operation and operation.state == "UNCONFIRMED"
-        assert operation.failure_reason == "STOP_ACK_TIMEOUT"
+        assert operation
+        assert operation.state == "UNCONFIRMED"
+        assert operation.motion_stop_state == "UNCONFIRMED"
+        assert operation.failure_reason == "TELEMETRY_STALE"
+
+
+def test_stop_operation_ack_missing_with_fresh_zero_velocity_confirms_stationary_partial() -> None:
+    """ACK 未收到 + ACK deadline 已过 + 持续 5 条独立 fresh zero telemetry。
+
+    ACK timeout 不得阻止独立物理静止验证：最终 motion_stop_state=STATIONARY_CONFIRMED，
+    但因 STOP ACK 未确认 → state=PARTIAL_UNCONFIRMED、failure_reason=STOP_ACK_UNCONFIRMED，
+    不能变成 VEHICLE_STATIONARY_CONFIRMED。
+    """
+    worker = load_service("firebot_stop_ack_missing_partial", "services/task-worker/main.py")
+    now = datetime.now(UTC)
+    with SessionLocal.begin() as db:
+        robot = db.scalar(select(Robot).where(Robot.vehicle_id == "R001"))
+        user = db.scalar(select(User).where(User.username == "admin"))
+        assert robot and user
+        stop = _command_for_stop(
+            db, robot=robot, user=user, cmd="stop_motion", task=None, ack_status=None
+        )
+        operation = StopOperation(
+            robot_id=robot.id,
+            stop_command_id=stop.command_id,
+            state="STOP_REQUESTED",
+            motion_stop_state="WAITING_ACK",
+            mission_cancel_state="NOT_REQUIRED",
+            requested_by=user.id,
+            stop_ack_deadline_at=now - timedelta(milliseconds=1),
+            stationary_verify_deadline_at=now + timedelta(seconds=60),
+        )
+        db.add(operation)
+        db.flush()
+        operation_id = operation.id
+        vehicle_id = robot.vehicle_id
+    for i in range(5):
+        get_redis().set(
+            f"robot:{vehicle_id}:latest",
+            json.dumps(
+                {
+                    "server_received_at": (now + timedelta(milliseconds=i)).isoformat(),
+                    "source_timestamp": (now + timedelta(milliseconds=i)).isoformat(),
+                    "linear_x": 0,
+                    "linear_y": 0,
+                    "angular_z": 0,
+                }
+            ),
+        )
+        with SessionLocal.begin() as db:
+            worker.reconcile_stop_operations(db, now)
+    with SessionLocal() as db:
+        operation = db.get(StopOperation, operation_id)
+        assert operation
+        assert operation.motion_stop_state == "STATIONARY_CONFIRMED"
+        assert operation.state == "PARTIAL_UNCONFIRMED"
+        assert operation.failure_reason == "STOP_ACK_UNCONFIRMED"
+        assert operation.state != "VEHICLE_STATIONARY_CONFIRMED"
+
+
+def test_resumed_patrol_uses_route_cursor_as_resume_waypoint_index() -> None:
+    """build_resumed_patrol_task 用最终 route_cursor 作为 resume_waypoint_index。
+
+    回归此前 cursor_index NameError：target_waypoint_index / waypoint_index 回退 / None
+    三种情况下，command params 的 resume_waypoint_index 必须等于最终 route_cursor。
+    """
+    from app.modules.tasks.patrol import build_resumed_patrol_task
+
+    cases = [
+        ({"target_waypoint_index": 3}, 3),
+        ({"waypoint_index": 2}, 2),
+        ({}, None),
+    ]
+    for cursor, expected in cases:
+        with SessionLocal.begin() as db:
+            robot = db.scalar(select(Robot).where(Robot.vehicle_id == "R001"))
+            user = db.scalar(select(User).where(User.username == "admin"))
+            plan = db.scalar(select(PatrolPlan).where(PatrolPlan.enabled.is_(True)))
+            assert robot and user and plan
+            version = db.get(MapVersion, plan.map_version_id)
+            assert version
+            previous = Task(
+                task_code=f"RESUME-TEST-{uuid4()}",
+                robot_id=robot.id,
+                type="PATROL",
+                status="CANCELLED",
+                phase="PATROL_CANCELLED",
+                progress=100,
+                target_pose_snapshot_json={"x": 1, "y": 1, "theta": 0},
+                map_id_snapshot=version.map_id,
+                map_version_snapshot=version.version,
+                semantic_revision_snapshot=version.semantic_revision,
+                parameters_json={"live_route_cursor": cursor},
+                created_by=user.id,
+            )
+            db.add(previous)
+            db.flush()
+            get_redis().set(
+                f"robot:{robot.vehicle_id}:latest",
+                json.dumps({"x": 1.0, "y": 1.0, "theta": 0.0}),
+            )
+            task, command_id = build_resumed_patrol_task(
+                db, plan=plan, robot=robot, actor_id=user.id, source="TEST", previous_task=previous
+            )
+            command = db.scalar(select(Command).where(Command.command_id == command_id))
+            assert command is not None
+            assert command.payload_json["params"]["resume_waypoint_index"] == expected
+            assert task.parameters_json["resume_waypoint_index"] == expected
 
 
 def test_expired_queued_patrol_occurrence_is_never_dispatched() -> None:
@@ -984,18 +1095,14 @@ def test_ingress_field_channel_realtime_delta() -> None:
         assert robot
 
         # CASE 1: status 含 battery → event 含 data_channels.battery
-        ingress.handle_status(
-            db, robot, {"battery": 63.1}, source_ts, received, "CANONICAL_MQTT"
-        )
+        ingress.handle_status(db, robot, {"battery": 63.1}, source_ts, received, "CANONICAL_MQTT")
         battery = _payloads(db, "vehicle.status")[-1].get("data_channels", {}).get("battery")
         assert battery and battery["support_state"] == "CONNECTED"
         assert battery["source_kind"] == "CANONICAL_MQTT"
         assert battery["last_received_at"] == received.isoformat()
 
         # CASE 2: status 不含 battery → event 不得伪造 battery freshness
-        ingress.handle_status(
-            db, robot, {"mode": "IDLE"}, source_ts, received, "CANONICAL_MQTT"
-        )
+        ingress.handle_status(db, robot, {"mode": "IDLE"}, source_ts, received, "CANONICAL_MQTT")
         assert "battery" not in _payloads(db, "vehicle.status")[-1].get("data_channels", {})
 
         # CASE 3: sensor 含 smoke → event 含 data_channels.smoke

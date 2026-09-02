@@ -151,7 +151,11 @@ def build_resumed_patrol_task(
     latest = json.loads(raw) if raw else {}
     if not all(key in latest for key in ("x", "y", "theta")):
         raise PlatformError("ROBOT_POSE_UNKNOWN", "无法确定机器人当前位置，不能安全恢复巡检")
-    current_pose = {"x": float(latest["x"]), "y": float(latest["y"]), "theta": float(latest["theta"])}
+    current_pose = {
+        "x": float(latest["x"]),
+        "y": float(latest["y"]),
+        "theta": float(latest["theta"]),
+    }
 
     route_cursor = int(target_index) if target_index is not None else None
     resumed = build_resumed_cruise_waypoints(current_pose, full_waypoints, route_cursor)
@@ -192,7 +196,7 @@ def build_resumed_patrol_task(
             "map_version": version.version,
             "semantic_revision": version.semantic_revision,
             "trajectory": resumed,
-            "resume_waypoint_index": cursor_index,
+            "resume_waypoint_index": route_cursor,
         },
     )
     task.status = "QUEUED"
