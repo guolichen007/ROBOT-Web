@@ -293,8 +293,9 @@ def assemble_robot_state(robot: Robot, raw: str | None) -> dict:
             "current_map_version": robot.current_map_version,
         }
     )
-    # Realtime fields fall back to the database when Redis has no value yet.
-    state.setdefault("online_state", robot.online_state)
+    # online_state 是 DB 权威字段：Redis projection 只是缓存，绝不能覆盖 DB 状态。
+    state["online_state"] = robot.online_state
+    # 其它 realtime 字段仍从 DB fallback（Redis 有值则用 Redis）
     state.setdefault("mode", robot.current_mode)
     state.setdefault("current_mode", robot.current_mode)
     state.setdefault("battery", robot.battery)

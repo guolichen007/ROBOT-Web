@@ -202,6 +202,11 @@ def update_online(db, robot: Robot, state: str, message: dict, reason: str | Non
     previous = robot.online_state
     robot.online_state = state
     robot.last_seen_at = datetime.now(UTC)
+    # 同步 Redis latest 的 online_state：DB 是权威，Redis 只作缓存投影。
+    raw = redis.get(f"robot:{robot.vehicle_id}:latest")
+    latest = json.loads(raw) if raw else {"vehicle_id": robot.vehicle_id, "robot_id": robot.id}
+    latest["online_state"] = state
+    queue_redis_set(db, f"robot:{robot.vehicle_id}:latest", json.dumps(latest, ensure_ascii=False))
     if previous != state:
         db.add(
             RobotConnectionLog(

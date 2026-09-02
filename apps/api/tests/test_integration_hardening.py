@@ -657,6 +657,48 @@ def test_ros1_internal_status_removes_stale_estop_and_marks_missing_channels() -
         assert capability and capability.supported_commands_json == []
 
 
+def test_monitor_snapshot_online_state_is_db_authoritative() -> None:
+    """DB online_state 是权威：Redis projection STALE 不得覆盖 DB ONLINE。"""
+    client = TestClient(app)
+    token = login(client)
+    with SessionLocal.begin() as db:
+        robot = db.scalar(select(Robot).where(Robot.vehicle_id == "R001"))
+        assert robot
+        robot.online_state = "ONLINE"
+        get_redis().set(
+            f"robot:{robot.vehicle_id}:latest",
+            json.dumps(
+                {
+                    "vehicle_id": robot.vehicle_id,
+                    "robot_id": robot.id,
+                    "online_state": "STALE",
+                    "battery": 63.1,
+                }
+            ),
+        )
+    response = client.get("/api/v1/monitor/snapshot", headers=bearer(token))
+    assert response.status_code == 200
+    row = next(r for r in response.json()["robots"] if r["vehicle_id"] == "R001")
+    assert row["online_state"] == "ONLINE"
+
+
+def test_update_online_syncs_redis_latest() -> None:
+    """update_online 更新 DB 后同步 Redis latest online_state（DB/Redis/API 一致）。"""
+    ingress = load_service("firebot_mqtt_ingress_online_sync", "services/mqtt-ingress/main.py")
+    with SessionLocal.begin() as db:
+        robot = db.scalar(select(Robot).where(Robot.vehicle_id == "R001"))
+        assert robot
+        ingress.update_online(db, robot, "ONLINE", {"boot_id": robot.boot_id}, None)
+        ops = db.info.get("firebot_redis_after_commit", [])
+        latest_sets = [
+            value
+            for (op, key, value, _ttl) in ops
+            if op == "set" and key == f"robot:{robot.vehicle_id}:latest"
+        ]
+        assert latest_sets
+        assert json.loads(latest_sets[-1])["online_state"] == "ONLINE"
+
+
 def test_ingress_field_channel_realtime_delta() -> None:
     """U2B：vehicle.status/sensor realtime event 携带字段级 data_channels freshness delta。
 

@@ -11,6 +11,9 @@ from __future__ import annotations
 from datetime import datetime
 
 _TIME_DECAYABLE = {"CONNECTED", "STALE", "NOT_CONNECTED"}
+# availability / capabilities 是事件/声明状态，不是周期数据，不随时间衰减：
+# 收到一次 CONNECTED 就保持 CONNECTED，直到显式 offline / 能力声明变化。
+_EVENT_STATE_CHANNELS = {"availability", "capabilities"}
 
 
 def effective_channel_state(channel, profile, now: datetime) -> str:
@@ -23,6 +26,10 @@ def effective_channel_state(channel, profile, now: datetime) -> str:
     state = getattr(channel, "support_state", None)
     if state not in _TIME_DECAYABLE:
         # 显式 ERROR / UNSUPPORTED 等状态不允许被时间逻辑覆盖
+        return state
+    channel_name = getattr(channel, "channel", None)
+    if channel_name in _EVENT_STATE_CHANNELS:
+        # availability / capabilities 不随时间衰减，保持显式状态
         return state
     last = getattr(channel, "last_received_at", None)
     if last is None:
