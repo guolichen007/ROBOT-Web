@@ -48,14 +48,26 @@ sudo systemctl restart firebot-bridge
 ./verify.sh
 ```
 
-## 四、firebot_control ROS 包部署
+## 四、firebot_control ROS 包部署（同样有 SHA 留痕）
 
-`firebot_control` 是 catkin 包，部署到 ROS 工作区 `src` 后重新 catkin_make：
+`firebot_control` 是 catkin 包，通过它自带的 `install.sh` 部署（同样支持 SHA 校验与留痕）：
 
 ```bash
-cp -r integration/ros1/vehicle-control /home/tl/firerobot_ws/src/firebot_control
+cd integration/ros1/vehicle-control
+FIREBOT_REQUIRE_SHA=<上面记录的40位SHA> \
+FIREBOT_ROS_SRC_DIR=/home/tl/firerobot_ws/src \
+./install.sh
+
 cd /home/tl/firerobot_ws && catkin_make && source devel/setup.bash
 ```
+
+安装后确认来源 SHA（与 Bridge 同一 ROBOT-Web SHA）：
+
+```bash
+cat /home/tl/firerobot_ws/src/firebot_control/APPROVED_RUNTIME.txt
+```
+
+回滚同理：`git checkout <目标SHA>` 后重新跑上面 install.sh，APPROVED_RUNTIME.txt 会同步更新。
 
 ## 五、安装后验收
 

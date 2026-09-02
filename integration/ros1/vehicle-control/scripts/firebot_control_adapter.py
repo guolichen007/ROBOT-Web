@@ -125,28 +125,56 @@ class FirebotControlAdapter:
             )
 
     def _handle_stop_motion(self, cmd):
-        """STOP_MOTION：取消导航目标 + 输出零速度，回 ACCEPTED。
+        """STOP_MOTION：取消导航目标 + 短时零速度 burst，全部成功后才回 ACCEPTED。
 
-        注意：ACK 只表示「控制层接受并执行停止动作」；物理静止由服务器 telemetry
-        状态机独立确认，本节点不把「命令收到」等同于「车辆已静止」。
+        ACK 只表示「控制层已成功执行停车动作请求」；绝不表示「车辆已物理静止」。
+        如果停车动作本身无法可靠下发（无 /cmd_vel 接收者、cancel 异常、零速度输出异常），
+        一律 REJECTED，不伪装成功。
         """
         command_id = cmd.get("command_id")
         task_id = cmd.get("task_id")
         if self._expired(cmd.get("expires_at")):
             self._feedback(command_id, task_id, "REJECTED", reason_code="COMMAND_EXPIRED")
             return
-        # 1) 取消 move_base 当前导航目标
+
+        # 1) 前置：/cmd_vel 必须存在实际底盘接收者，否则停车动作无处可去。
+        if not self._cmd_vel_has_receiver():
+            self._feedback(
+                command_id, task_id, "REJECTED",
+                reason_code="COMMAND_REJECTED", message="CMD_VEL_NO_RECEIVER",
+            )
+            return
+
+        # 2) 取消 move_base 当前导航目标；异常不得继续伪装成功。
         try:
             self._mb_client.cancel_all_goals()
-            rospy.loginfo("STOP_MOTION cancel_all_goals 已调用")
         except Exception as exc:  # noqa: BLE001
             rospy.logwarn("STOP_MOTION cancel_all_goals 失败: %s", exc)
-        # 2) 通过 /cmd_vel 输出零速度停车
-        self._publish_zero_velocity()
-        # 3) 回 ACCEPTED（表示控制层接受并执行停止动作）
+            self._feedback(
+                command_id, task_id, "REJECTED",
+                reason_code="COMMAND_REJECTED", message="CANCEL_GOALS_FAILED",
+            )
+            return
+
+        # 3) 短时有限零速度 burst，覆盖 move_base cancel 竞争窗口；异常不得继续。
+        if not self._publish_zero_velocity_burst():
+            self._feedback(
+                command_id, task_id, "REJECTED",
+                reason_code="COMMAND_REJECTED", message="ZERO_VELOCITY_FAILED",
+            )
+            return
+
+        # 4) 全部停车动作成功下发 → ACCEPTED（仅表示动作已可靠执行）。
         self._feedback(command_id, task_id, "ACCEPTED")
 
-    def _publish_zero_velocity(self):
+    def _cmd_vel_has_receiver(self) -> bool:
+        try:
+            return self.cmd_vel_pub.get_num_connections() > 0
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _publish_zero_velocity_burst(self, rate_hz: float = 10.0, duration_s: float = 0.5) -> bool:
+        """10Hz 持续 0.5s 的零速度 burst，覆盖 move_base cancel 的短暂竞争窗口。"""
         twist = Twist()
         twist.linear.x = 0.0
         twist.linear.y = 0.0
@@ -154,11 +182,17 @@ class FirebotControlAdapter:
         twist.angular.x = 0.0
         twist.angular.y = 0.0
         twist.angular.z = 0.0
+        count = int(rate_hz * duration_s)
         try:
-            self.cmd_vel_pub.publish(twist)
-            rospy.loginfo("STOP_MOTION 零速度已输出到 %s", CMD_VEL_TOPIC)
+            rate = rospy.Rate(rate_hz)
+            for _ in range(count):
+                self.cmd_vel_pub.publish(twist)
+                rate.sleep()
+            rospy.loginfo("STOP_MOTION 零速度 burst 已输出到 %s", CMD_VEL_TOPIC)
+            return True
         except Exception as exc:  # noqa: BLE001
-            rospy.logwarn("STOP_MOTION 零速度输出失败: %s", exc)
+            rospy.logwarn("STOP_MOTION 零速度 burst 失败: %s", exc)
+            return False
 
     # ---- downstream readiness ----
     def _downstream_ready(self):

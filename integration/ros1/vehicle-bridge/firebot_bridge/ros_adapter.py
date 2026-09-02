@@ -20,6 +20,7 @@ IPC（newline-delimited JSON）：
 from __future__ import annotations
 
 import json
+import math
 import signal
 import sys
 import threading
@@ -146,7 +147,10 @@ def _build_components(rospy):
 
     def on_odom(msg):
         try:
-            speed["linear"] = msg.twist.twist.linear.x
+            # Mecanum：平面速度模长 = hypot(vx, vy)，纯横移不能被视为零线速度。
+            vx = msg.twist.twist.linear.x
+            vy = msg.twist.twist.linear.y
+            speed["linear"] = math.hypot(vx, vy)
             speed["angular"] = msg.twist.twist.angular.z
         except Exception:  # noqa: BLE001
             pass
