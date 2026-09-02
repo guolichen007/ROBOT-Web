@@ -26,6 +26,27 @@ echo "  ROS_SETUP=$ROS_SETUP"
 echo "  ROS_WORKSPACE_SETUP=${ROS_WORKSPACE_SETUP:-<空>}"
 echo "  BRIDGE_ENV=$BRIDGE_ENV"
 
+# 0) 源码 SHA：GitHub 是唯一交付源；支持强制校验 + 安装后记录来源。
+#    FIREBOT_REQUIRE_SHA=<40位SHA> 可强制校验当前源码 HEAD，防止装错版本。
+if [ -n "${FIREBOT_REQUIRE_SHA:-}" ]; then
+  SOURCE_SHA="$FIREBOT_REQUIRE_SHA"
+  actual="$(git -C "$SCRIPT_DIR" rev-parse HEAD 2>/dev/null || echo "")"
+  if [ "$actual" != "$SOURCE_SHA" ]; then
+    echo "ERROR: 源码 SHA 与 FIREBOT_REQUIRE_SHA 不一致（禁止安装）" >&2
+    echo "  要求 SHA: $SOURCE_SHA" >&2
+    echo "  实际 HEAD: ${actual:-<非 git 目录>}" >&2
+    exit 1
+  fi
+  echo "  源码 SHA 校验通过: $SOURCE_SHA"
+else
+  SOURCE_SHA="$(git -C "$SCRIPT_DIR" rev-parse HEAD 2>/dev/null || echo "")"
+  if [ -n "$SOURCE_SHA" ]; then
+    echo "  源码 SHA（当前 HEAD）: $SOURCE_SHA"
+  else
+    echo "  WARN: 非 git 目录且未设置 FIREBOT_REQUIRE_SHA，将无法记录来源 SHA" >&2
+  fi
+fi
+
 # 1) 依赖校验
 command -v python3 >/dev/null || { echo "ERROR: python3 未安装" >&2; exit 1; }
 python3 -c "import paho.mqtt" 2>/dev/null || { echo "ERROR: paho-mqtt 未安装（pip3 install -r requirements.txt）" >&2; exit 1; }
@@ -49,6 +70,10 @@ sudo cp "$SCRIPT_DIR/watch-bridge.sh" "$INSTALL_DIR/"
 sudo cp "$SCRIPT_DIR/requirements.txt" "$INSTALL_DIR/"
 sudo chmod 0755 "$INSTALL_DIR/watch-bridge.sh" "$INSTALL_DIR/run_bridge.sh" "$INSTALL_DIR/verify.sh"
 sudo chown -R "$BRIDGE_USER":"$(id -gn "$BRIDGE_USER" 2>/dev/null || echo "$BRIDGE_USER")" "$INSTALL_DIR"
+if [ -n "$SOURCE_SHA" ]; then
+  echo "$SOURCE_SHA" | sudo tee "$INSTALL_DIR/APPROVED_RUNTIME.txt" >/dev/null
+  echo "  已记录来源 SHA: $SOURCE_SHA"
+fi
 
 # 4) bridge.env 唯一真实位置（无密码）
 if [ -f "$BRIDGE_ENV" ]; then

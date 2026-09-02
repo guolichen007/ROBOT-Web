@@ -11,9 +11,11 @@
 
 边界：
   - 不实现巡检规划、不自己写 move_base 逻辑、不解析多点轨迹。
-  - 只处理 PATROL_START；其它命令直接忽略（本轮能力只有 patrol）。
+  - 本轮能力：PATROL_START（开始导航）+ STOP_MOTION（零速度停车 + 取消导航目标）。
+    其它命令（emergency_stop / reset_estop / ...）直接忽略。
   - command_id / task_id 原样回传。
-  - fail-closed：绝不把「发布 /waterplus/navi_pose」等同于「导航已开始」。
+  - fail-closed：绝不把「发布 /waterplus/navi_pose」等同于「导航已开始」；
+    STOP_MOTION 的 ACK 只表示「控制层接受并执行停止动作」，不表示物理车辆已被服务器确认静止。
 """
 from __future__ import annotations
 
@@ -25,13 +27,15 @@ from datetime import datetime, timezone
 import rospy
 import actionlib
 from std_msgs.msg import String
-from geometry_msgs.msg import Pose
+from geometry_msgs.msg import Pose, Twist
 from actionlib_msgs.msg import GoalStatus, GoalStatusArray
 from move_base_msgs.msg import MoveBaseAction
 
 # 现有导航入口：waterplus pose_navi_server 订阅的「按坐标导航」话题
 NAV_POSE_TOPIC = "/waterplus/navi_pose"
 MOVE_BASE_ACTION = "move_base"
+# 车端现有底盘速度通路（STOP_MOTION 通过它输出零速度停车）
+CMD_VEL_TOPIC = "/cmd_vel"
 # move_base 真正「开始导航」的状态
 MB_ACTIVE_STATES = (GoalStatus.PENDING, GoalStatus.ACTIVE)
 
@@ -43,6 +47,7 @@ class FirebotControlAdapter:
             "/firebot_bridge/command_feedback", String, queue_size=10
         )
         self.navi_pose_pub = rospy.Publisher(NAV_POSE_TOPIC, Pose, queue_size=10)
+        self.cmd_vel_pub = rospy.Publisher(CMD_VEL_TOPIC, Twist, queue_size=10)
 
         # move_base action server 探测（只用于 readiness 检查，不发 goal）
         self._mb_client = actionlib.SimpleActionClient(
@@ -72,9 +77,15 @@ class FirebotControlAdapter:
             cmd = json.loads(msg.data)
         except (UnicodeDecodeError, json.JSONDecodeError):
             return
-        if not isinstance(cmd, dict) or cmd.get("command") != "PATROL_START":
+        if not isinstance(cmd, dict):
             return
+        if cmd.get("command") == "PATROL_START":
+            self._handle_patrol_start(cmd)
+        elif cmd.get("command") == "STOP_MOTION":
+            self._handle_stop_motion(cmd)
+        # 其它命令直接忽略（本轮能力只有 patrol / stop_motion）
 
+    def _handle_patrol_start(self, cmd):
         command_id = cmd.get("command_id")
         task_id = cmd.get("task_id")
 
@@ -112,6 +123,42 @@ class FirebotControlAdapter:
                 command_id, task_id, "FAILED",
                 reason_code="COMMAND_REJECTED", message="NAV_START_NOT_CONFIRMED",
             )
+
+    def _handle_stop_motion(self, cmd):
+        """STOP_MOTION：取消导航目标 + 输出零速度，回 ACCEPTED。
+
+        注意：ACK 只表示「控制层接受并执行停止动作」；物理静止由服务器 telemetry
+        状态机独立确认，本节点不把「命令收到」等同于「车辆已静止」。
+        """
+        command_id = cmd.get("command_id")
+        task_id = cmd.get("task_id")
+        if self._expired(cmd.get("expires_at")):
+            self._feedback(command_id, task_id, "REJECTED", reason_code="COMMAND_EXPIRED")
+            return
+        # 1) 取消 move_base 当前导航目标
+        try:
+            self._mb_client.cancel_all_goals()
+            rospy.loginfo("STOP_MOTION cancel_all_goals 已调用")
+        except Exception as exc:  # noqa: BLE001
+            rospy.logwarn("STOP_MOTION cancel_all_goals 失败: %s", exc)
+        # 2) 通过 /cmd_vel 输出零速度停车
+        self._publish_zero_velocity()
+        # 3) 回 ACCEPTED（表示控制层接受并执行停止动作）
+        self._feedback(command_id, task_id, "ACCEPTED")
+
+    def _publish_zero_velocity(self):
+        twist = Twist()
+        twist.linear.x = 0.0
+        twist.linear.y = 0.0
+        twist.linear.z = 0.0
+        twist.angular.x = 0.0
+        twist.angular.y = 0.0
+        twist.angular.z = 0.0
+        try:
+            self.cmd_vel_pub.publish(twist)
+            rospy.loginfo("STOP_MOTION 零速度已输出到 %s", CMD_VEL_TOPIC)
+        except Exception as exc:  # noqa: BLE001
+            rospy.logwarn("STOP_MOTION 零速度输出失败: %s", exc)
 
     # ---- downstream readiness ----
     def _downstream_ready(self):

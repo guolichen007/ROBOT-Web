@@ -18,7 +18,7 @@ from firebot_bridge.downlink.command_validator import validate_received_command 
 from firebot_bridge.uplink import location as location_uplink  # noqa: E402
 from firebot_bridge.uplink import sensor as sensor_uplink  # noqa: E402
 from firebot_bridge.uplink import status as status_uplink  # noqa: E402
-from firebot_bridge.ros.interfaces import MQTT_CMD_TO_ROS  # noqa: E402
+from firebot_bridge.ros.interfaces import MQTT_CMD_TO_ROS, build_ros_command  # noqa: E402
 
 PASS = 0
 FAIL = 0
@@ -154,8 +154,14 @@ def main() -> int:
 
     print("=== ROS command 映射 ===")
     check("patrol→PATROL_START", MQTT_CMD_TO_ROS["patrol"] == "PATROL_START")
+    check("stop_motion→STOP_MOTION", MQTT_CMD_TO_ROS["stop_motion"] == "STOP_MOTION")
     check("emergency_stop→EMERGENCY_STOP", MQTT_CMD_TO_ROS["emergency_stop"] == "EMERGENCY_STOP")
     check("8 命令齐全", len(MQTT_CMD_TO_ROS) == 8)
+    check(
+        "stop_motion 生成 STOP_MOTION command",
+        build_ros_command({"cmd": "stop_motion", "command_id": "c1", "task_id": "t1"})["command"]
+        == "STOP_MOTION",
+    )
 
     print("=== 命令生命周期（CommandProcessor，无 ROS/MQTT 依赖）===")
     from firebot_bridge.downlink.command_receiver import CommandProcessor
