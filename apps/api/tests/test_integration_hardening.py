@@ -699,6 +699,68 @@ def test_update_online_syncs_redis_latest() -> None:
         assert json.loads(latest_sets[-1])["online_state"] == "ONLINE"
 
 
+def _availability_bytes(state: str, seq: int, vehicle_id: str = "R001") -> bytes:
+    msg = {
+        "schema_version": "1.3",
+        "message_id": str(uuid4()),
+        "type": "availability",
+        "vehicle_id": vehicle_id,
+        "boot_id": BOOT_A,
+        "timestamp": datetime.now(UTC).isoformat(),
+        "seq": seq,
+        "state": state,
+    }
+    if state == "offline":
+        msg["reason"] = "test"
+    return json.dumps(msg).encode()
+
+
+def _availability_channel(db, vehicle_id: str):
+    robot = db.scalar(select(Robot).where(Robot.vehicle_id == vehicle_id))
+    assert robot
+    channel = db.scalar(
+        select(RobotDataChannel).where(
+            RobotDataChannel.robot_id == robot.id,
+            RobotDataChannel.channel == "availability",
+        )
+    )
+    return robot, channel
+
+
+def test_ingress_availability_channel_state_online_offline_recovery() -> None:
+    """ingress 级：availability online/offline 正确驱动 online_state 与 channel 状态。"""
+    ingress = load_service("firebot_mqtt_ingress_avail", "services/mqtt-ingress/main.py")
+    from app.modules.robots.channel_freshness import effective_channel_state
+
+    # CASE 1: online → DB ONLINE + availability channel CONNECTED
+    ingress.process("robot/R001/availability", _availability_bytes("online", 1))
+    with SessionLocal.begin() as db:
+        robot, channel = _availability_channel(db, "R001")
+        assert robot.online_state == "ONLINE"
+        assert channel and channel.support_state == "CONNECTED"
+
+    # CASE 2: offline → DB OFFLINE + availability channel NOT_CONNECTED
+    ingress.process("robot/R001/availability", _availability_bytes("offline", 2))
+    with SessionLocal.begin() as db:
+        robot, channel = _availability_channel(db, "R001")
+        assert robot.online_state == "OFFLINE"
+        assert channel and channel.support_state == "NOT_CONNECTED"
+
+    # CASE 3: offline 后 effective_channel_state 仍 NOT_CONNECTED（不随时间回 CONNECTED）
+    with SessionLocal.begin() as db:
+        _, channel = _availability_channel(db, "R001")
+        assert effective_channel_state(channel, None, datetime.now(UTC)) == "NOT_CONNECTED"
+
+    # CASE 4: 再次 online → DB/Redis/channel 全部 ONLINE/CONNECTED
+    ingress.process("robot/R001/availability", _availability_bytes("online", 3))
+    with SessionLocal.begin() as db:
+        robot, channel = _availability_channel(db, "R001")
+        assert robot.online_state == "ONLINE"
+        assert channel and channel.support_state == "CONNECTED"
+        raw = get_redis().get(f"robot:{robot.vehicle_id}:latest")
+        assert raw and json.loads(raw)["online_state"] == "ONLINE"
+
+
 def test_ingress_field_channel_realtime_delta() -> None:
     """U2B：vehicle.status/sensor realtime event 携带字段级 data_channels freshness delta。
 

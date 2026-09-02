@@ -1007,6 +1007,9 @@ def process(topic: str, payload: bytes) -> None:
                 channel.last_source_timestamp = source_ts
                 channel.last_received_at = received
                 if msg["type"] == "availability" and msg["state"] == "offline":
+                    # 离线声明必须把 availability channel 显式置为 NOT_CONNECTED，
+                    # 否则 J5-S1 的事件保持型语义会让错误 CONNECTED 长期保留。
+                    channel.support_state = "NOT_CONNECTED"
                     update_online(db, robot, "OFFLINE", msg, msg.get("reason"))
                     queue_redis_delete(db, f"heartbeat:{robot.vehicle_id}")
                 elif msg["type"] in {"heartbeat", "availability"}:
