@@ -828,12 +828,14 @@ def test_stop_operation_ack_missing_with_fresh_zero_velocity_confirms_stationary
         operation_id = operation.id
         vehicle_id = robot.vehicle_id
     for i in range(5):
+        # 每条观测随时间推进（真实独立观测），而不是固定 now + 未来时间戳
+        sample_now = now + timedelta(milliseconds=i)
         get_redis().set(
             f"robot:{vehicle_id}:latest",
             json.dumps(
                 {
-                    "server_received_at": (now + timedelta(milliseconds=i)).isoformat(),
-                    "source_timestamp": (now + timedelta(milliseconds=i)).isoformat(),
+                    "server_received_at": sample_now.isoformat(),
+                    "source_timestamp": sample_now.isoformat(),
                     "linear_x": 0,
                     "linear_y": 0,
                     "angular_z": 0,
@@ -841,7 +843,7 @@ def test_stop_operation_ack_missing_with_fresh_zero_velocity_confirms_stationary
             ),
         )
         with SessionLocal.begin() as db:
-            worker.reconcile_stop_operations(db, now)
+            worker.reconcile_stop_operations(db, sample_now)
     with SessionLocal() as db:
         operation = db.get(StopOperation, operation_id)
         assert operation

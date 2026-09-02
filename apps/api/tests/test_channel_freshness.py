@@ -8,7 +8,9 @@ NOW = datetime.now(UTC)
 
 
 class _Channel:
-    def __init__(self, channel: str, support_state: str, last_received_at: datetime | None = None):
+    def __init__(
+        self, channel: str, support_state: object, last_received_at: datetime | None = None
+    ):
         self.channel = channel
         self.support_state = support_state
         self.last_received_at = last_received_at
@@ -93,4 +95,20 @@ def test_unsupported_not_time_decayed() -> None:
             _Channel("roof_rgb", "UNSUPPORTED", NOW - timedelta(seconds=999)), p, NOW
         )
         == "UNSUPPORTED"
+    )
+
+
+def test_support_state_none_is_fail_closed_not_connected() -> None:
+    p = _Profile(5, 10)
+    assert (
+        effective_channel_state(_Channel("battery", None, NOW - timedelta(seconds=1)), p, NOW)
+        == "NOT_CONNECTED"
+    )
+
+
+def test_support_state_non_string_is_fail_closed_not_connected() -> None:
+    p = _Profile(5, 10)
+    assert (
+        effective_channel_state(_Channel("battery", 12345, NOW - timedelta(seconds=1)), p, NOW)
+        == "NOT_CONNECTED"
     )

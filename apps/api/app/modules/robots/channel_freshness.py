@@ -25,6 +25,9 @@ def effective_channel_state(channel, profile, now: datetime) -> str:
     now: 当前 server 时间（UTC aware）
     """
     state = getattr(channel, "support_state", None)
+    if not isinstance(state, str):
+        # 未知/缺失状态：fail-closed，不伪造 CONNECTED（channel 状态只允许合法枚举）
+        return "NOT_CONNECTED"
     if state not in _TIME_DECAYABLE:
         # 显式 ERROR / UNSUPPORTED 等状态不允许被时间逻辑覆盖
         return state
