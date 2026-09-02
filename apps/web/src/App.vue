@@ -165,16 +165,33 @@ const sevClass = computed(() => ({
   topIr: channelSeverity(effectiveChannelState('top_ir')),
   bottomIr: channelSeverity(effectiveChannelState('bottom_ir')),
   smoke: channelSeverity(effectiveChannelState('smoke')),
-  freshness: freshnessAge.value == null ? 'danger' : freshnessSeverity(freshnessAge.value, robot.value?.integration?.stale_seconds ?? 3, robot.value?.integration?.offline_seconds ?? 10),
+  freshness:
+    freshnessAge.value == null
+      ? 'danger'
+      : freshnessSeverity(
+          freshnessAge.value,
+          robot.value?.integration?.stale_seconds ?? 3,
+          robot.value?.integration?.offline_seconds ?? 10,
+        ),
 }))
 function sevLabel(severity: string): string {
-  return ({ normal: 'ok', active: 'active', warning: 'warn', danger: 'danger', unknown: 'muted' })[severity] || ''
+  return (
+    { normal: 'ok', active: 'active', warning: 'warn', danger: 'danger', unknown: 'muted' }[severity] || ''
+  )
 }
 function batteryText(): string {
-  return telemetryValueLabel(robot.value?.battery, effectiveChannelState('battery'), (v) => `${v.toFixed(0)}%`)
+  return telemetryValueLabel(
+    robot.value?.battery,
+    effectiveChannelState('battery'),
+    (v) => `${v.toFixed(0)}%`,
+  )
 }
 function metricValue(value: number | null | undefined, channel: string, unit: string): string {
-  return telemetryValueLabel(value, effectiveChannelState(channel), (v) => `${v.toFixed(channel === 'smoke' ? 2 : 1)} ${unit}`)
+  return telemetryValueLabel(
+    value,
+    effectiveChannelState(channel),
+    (v) => `${v.toFixed(channel === 'smoke' ? 2 : 1)} ${unit}`,
+  )
 }
 
 const userInitial = computed(() => (auth.user?.display_name || auth.user?.username || '?').slice(0, 1))
@@ -257,15 +274,11 @@ function onUserMenuClick(data: { value?: unknown }): void {
         <div class="status-area">
           <div class="status-primary">
             <span class="status-cell"
-              ><LinkIcon class="status-icon" :class="sevLabel(sevClass.link)" /><span
-                >链路状态</span
-              ><b :class="sevLabel(sevClass.link)">{{
-                monitor.connected ? '正常' : '正在重连'
-              }}</b></span
+              ><LinkIcon class="status-icon" :class="sevLabel(sevClass.link)" /><span>链路状态</span
+              ><b :class="sevLabel(sevClass.link)">{{ monitor.connected ? '正常' : '正在重连' }}</b></span
             >
             <span class="status-cell"
-              ><RobotIcon class="status-icon" :class="sevLabel(sevClass.robot)" /><span
-                >机器人</span
+              ><RobotIcon class="status-icon" :class="sevLabel(sevClass.robot)" /><span>机器人</span
               ><b :class="sevLabel(sevClass.robot)">{{
                 robot?.online_state === 'ONLINE' ? '在线' : robot?.online_state === 'STALE' ? '陈旧' : '离线'
               }}</b></span
@@ -279,11 +292,15 @@ function onUserMenuClick(data: { value?: unknown }): void {
             </span>
             <span class="status-cell"
               ><TaskIcon class="status-icon" /><span>当前任务</span
-              ><b :class="sevLabel(sevClass.task)">{{ activeTask ? taskTypeLabel(activeTask.type) : '空闲' }}</b></span
+              ><b :class="sevLabel(sevClass.task)">{{
+                activeTask ? taskTypeLabel(activeTask.type) : '空闲'
+              }}</b></span
             >
             <span class="status-cell"
               ><LocationIcon class="status-icon" /><span>定位状态</span
-              ><b :class="sevLabel(sevClass.localization)">{{ localizationLabel(robot?.localization_status) }}</b></span
+              ><b :class="sevLabel(sevClass.localization)">{{
+                localizationLabel(robot?.localization_status)
+              }}</b></span
             >
           </div>
           <div class="status-telemetry-row">
@@ -293,7 +310,9 @@ function onUserMenuClick(data: { value?: unknown }): void {
             >
             <span class="status-cell status-telemetry"
               ><span>底部红外</span
-              ><b :class="sevLabel(sevClass.bottomIr)">{{ metricValue(robot?.bottom_ir, 'bottom_ir', '℃') }}</b></span
+              ><b :class="sevLabel(sevClass.bottomIr)">{{
+                metricValue(robot?.bottom_ir, 'bottom_ir', '℃')
+              }}</b></span
             >
             <span class="status-cell status-telemetry"
               ><span>烟雾浓度</span

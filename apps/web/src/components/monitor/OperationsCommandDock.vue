@@ -83,7 +83,9 @@ const homeDisabled = computed(
     <div v-if="estopActive" class="dock-status dock-status--estop">
       <span>软件急停已生效，请先解除急停后再执行车辆运动操作</span>
     </div>
-    <div v-else-if="reason" class="dock-status"><span>{{ reason }}</span></div>
+    <div v-else-if="reason" class="dock-status">
+      <span>{{ reason }}</span>
+    </div>
     <div class="dock-actions">
       <t-button
         theme="primary"
@@ -91,17 +93,9 @@ const homeDisabled = computed(
         :disabled="patrolDisabled"
         @click="$emit('patrol')"
         ><ControlPlatformIcon />{{ patrolLabel }}</t-button
-      ><t-button
-        variant="outline"
-        :loading="busy === 'stop'"
-        :disabled="stopDisabled"
-        @click="$emit('stop')"
+      ><t-button variant="outline" :loading="busy === 'stop'" :disabled="stopDisabled" @click="$emit('stop')"
         ><StopCircleIcon />{{ stopLabel }}</t-button
-      ><t-button
-        variant="outline"
-        :loading="busy === 'home'"
-        :disabled="homeDisabled"
-        @click="$emit('home')"
+      ><t-button variant="outline" :loading="busy === 'home'" :disabled="homeDisabled" @click="$emit('home')"
         ><HomeIcon />{{ homeLabel }}</t-button
       ><button
         class="hold-estop"

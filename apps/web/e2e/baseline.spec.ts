@@ -56,10 +56,7 @@ test('media ticket is absent from URL and WHEP uses Authorization bearer', async
   expect(anonymous.status()).toBe(401)
 })
 
-test('A-12 manual fire dispatches extinguish directly without confirm chain', async ({
-  page,
-  request,
-}) => {
+test('A-12 manual fire dispatches extinguish directly without confirm chain', async ({ page, request }) => {
   await forceRelease(request)
   await login(page, request)
   await page.getByRole('button', { name: '车位 A-12' }).click()
@@ -126,10 +123,9 @@ test('software estop latches and reset-estop recovers to standby', async ({ page
     headers: { Authorization: `Bearer ${accessToken}` },
   })
   if ((await stateResponse.json()).estop_active) {
-    await request.post(
-      '/api/v1/robots/R001/commands/reset-estop',
-      { headers: { Authorization: `Bearer ${accessToken}`, 'Idempotency-Key': crypto.randomUUID() } },
-    )
+    await request.post('/api/v1/robots/R001/commands/reset-estop', {
+      headers: { Authorization: `Bearer ${accessToken}`, 'Idempotency-Key': crypto.randomUUID() },
+    })
   }
 
   await login(page, request)

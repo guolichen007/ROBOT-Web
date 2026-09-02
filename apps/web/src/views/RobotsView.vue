@@ -139,7 +139,11 @@ onMounted(() => {
 </script>
 
 <template>
-  <PageHeader eyebrow="设备管理" title="车辆配置" description="管理已接入平台的机器人，选择当前监控车辆。展开查看接入、传感器、地图与控制能力。" />
+  <PageHeader
+    eyebrow="设备管理"
+    title="车辆配置"
+    description="管理已接入平台的机器人，选择当前监控车辆。展开查看接入、传感器、地图与控制能力。"
+  />
   <div v-if="notice" class="toast">{{ notice }}</div>
 
   <section class="panel vehicle-panel">
@@ -167,9 +171,15 @@ onMounted(() => {
           <i class="online-dot" :class="String(robot.online_state || 'unknown').toLowerCase()"></i>
           {{ onlineLabel(robot.online_state) }}
         </span>
-        <span class="row-metric">电量 <b>{{ batteryLabel(robot) }}</b></span>
-        <span class="row-metric">模式 <b>{{ modeLabel(robot) }}</b></span>
-        <span class="row-metric">最后通信 <b>{{ lastComm(robot) }}</b></span>
+        <span class="row-metric"
+          >电量 <b>{{ batteryLabel(robot) }}</b></span
+        >
+        <span class="row-metric"
+          >模式 <b>{{ modeLabel(robot) }}</b></span
+        >
+        <span class="row-metric"
+          >最后通信 <b>{{ lastComm(robot) }}</b></span
+        >
         <span v-if="robot.enabled === false" class="row-metric disabled-badge">平台已停用</span>
         <div class="vehicle-actions" @click.stop>
           <button v-if="isCurrent(robot)" class="secondary-button compact" disabled>当前车辆</button>
@@ -192,16 +202,48 @@ onMounted(() => {
           <div class="detail-group">
             <h4>车辆状态</h4>
             <dl>
-              <div><dt>车辆名称</dt><dd>{{ robot.name || '—' }}</dd></div>
-              <div><dt>Vehicle ID</dt><dd class="mono">{{ robot.vehicle_id }}</dd></div>
-              <div><dt>型号</dt><dd>{{ robot.model || '—' }}</dd></div>
-              <div><dt>平台状态</dt><dd>{{ robot.enabled === false ? '已停用' : '已启用' }}</dd></div>
-              <div><dt>连接状态</dt><dd>{{ onlineLabel(robot.online_state) }}</dd></div>
-              <div><dt>当前模式</dt><dd>{{ modeLabel(robot) }}</dd></div>
-              <div><dt>电量</dt><dd>{{ batteryLabel(robot) }}</dd></div>
-              <div><dt>软件急停</dt><dd>{{ robot.estop_active ? '已触发' : '未触发' }}</dd></div>
-              <div><dt>当前任务</dt><dd class="mono">{{ monitor.activeTaskOf(robot.id || robot.vehicle_id)?.task_code || '无' }}</dd></div>
-              <div><dt>最后通信</dt><dd>{{ lastComm(robot) }}</dd></div>
+              <div>
+                <dt>车辆名称</dt>
+                <dd>{{ robot.name || '—' }}</dd>
+              </div>
+              <div>
+                <dt>Vehicle ID</dt>
+                <dd class="mono">{{ robot.vehicle_id }}</dd>
+              </div>
+              <div>
+                <dt>型号</dt>
+                <dd>{{ robot.model || '—' }}</dd>
+              </div>
+              <div>
+                <dt>平台状态</dt>
+                <dd>{{ robot.enabled === false ? '已停用' : '已启用' }}</dd>
+              </div>
+              <div>
+                <dt>连接状态</dt>
+                <dd>{{ onlineLabel(robot.online_state) }}</dd>
+              </div>
+              <div>
+                <dt>当前模式</dt>
+                <dd>{{ modeLabel(robot) }}</dd>
+              </div>
+              <div>
+                <dt>电量</dt>
+                <dd>{{ batteryLabel(robot) }}</dd>
+              </div>
+              <div>
+                <dt>软件急停</dt>
+                <dd>{{ robot.estop_active ? '已触发' : '未触发' }}</dd>
+              </div>
+              <div>
+                <dt>当前任务</dt>
+                <dd class="mono">
+                  {{ monitor.activeTaskOf(robot.id || robot.vehicle_id)?.task_code || '无' }}
+                </dd>
+              </div>
+              <div>
+                <dt>最后通信</dt>
+                <dd>{{ lastComm(robot) }}</dd>
+              </div>
             </dl>
           </div>
 
@@ -220,10 +262,22 @@ onMounted(() => {
           <div class="detail-group">
             <h4>地图与定位</h4>
             <dl>
-              <div><dt>当前地图</dt><dd>{{ robot.integration?.reported_map_code || robot.current_map_version || '—' }}</dd></div>
-              <div><dt>版本</dt><dd>{{ robot.integration?.reported_map_version || robot.current_map_version || '—' }}</dd></div>
-              <div><dt>定位状态</dt><dd>{{ localizationLabel(robot.localization_status) }}</dd></div>
-              <div><dt>地图合同</dt><dd>{{ robot.integration?.map_contract_verified ? '已验证' : '未验证' }}</dd></div>
+              <div>
+                <dt>当前地图</dt>
+                <dd>{{ robot.integration?.reported_map_code || robot.current_map_version || '—' }}</dd>
+              </div>
+              <div>
+                <dt>版本</dt>
+                <dd>{{ robot.integration?.reported_map_version || robot.current_map_version || '—' }}</dd>
+              </div>
+              <div>
+                <dt>定位状态</dt>
+                <dd>{{ localizationLabel(robot.localization_status) }}</dd>
+              </div>
+              <div>
+                <dt>地图合同</dt>
+                <dd>{{ robot.integration?.map_contract_verified ? '已验证' : '未验证' }}</dd>
+              </div>
             </dl>
           </div>
 
@@ -235,7 +289,9 @@ onMounted(() => {
               </li>
             </ul>
             <p v-if="isReadOnly(robot)" class="readonly-note">
-              只读接入{{ robot.integration?.read_only_reason ? `：${robot.integration.read_only_reason}` : '' }}
+              只读接入{{
+                robot.integration?.read_only_reason ? `：${robot.integration.read_only_reason}` : ''
+              }}
             </p>
           </div>
         </div>
@@ -284,8 +340,12 @@ onMounted(() => {
               <li>此操作不会使正在运动的实体车辆立即停车</li>
             </ul>
             <div class="disable-confirm-actions">
-              <button class="danger-outline compact" type="button" @click="setEnabled(robot, false)">确认停用</button>
-              <button class="secondary-button compact" type="button" @click="confirmDisable = null">取消</button>
+              <button class="danger-outline compact" type="button" @click="setEnabled(robot, false)">
+                确认停用
+              </button>
+              <button class="secondary-button compact" type="button" @click="confirmDisable = null">
+                取消
+              </button>
             </div>
           </div>
         </div>

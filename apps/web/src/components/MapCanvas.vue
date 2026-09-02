@@ -83,11 +83,7 @@ const coverageRays = computed(() => {
   if (world.length < 3) return []
   const origin = world[0]
   const arc = world.slice(1)
-  const indices = [
-    Math.floor(arc.length * 0.25),
-    Math.floor(arc.length * 0.5),
-    Math.floor(arc.length * 0.75),
-  ]
+  const indices = [Math.floor(arc.length * 0.25), Math.floor(arc.length * 0.5), Math.floor(arc.length * 0.75)]
   return indices.map((index) => {
     const o = point(origin.x, origin.y)
     const a = point(arc[index].x, arc[index].y)
@@ -152,7 +148,9 @@ const freeFirePins = computed(() =>
 // along theta requires an additional 90-degree sprite offset. Verify against
 // the four-direction fixture if the asset orientation changes.
 const ROBOT_SPRITE_FORWARD_OFFSET_DEG = 90
-const robotScreen = computed(() => (props.robot?.x != null && props.robot?.y != null ? point(props.robot.x, props.robot.y) : null))
+const robotScreen = computed(() =>
+  props.robot?.x != null && props.robot?.y != null ? point(props.robot.x, props.robot.y) : null,
+)
 const robotYawDeg = computed(() => {
   const theta = props.robot?.theta
   if (theta == null) return 0
@@ -279,11 +277,7 @@ onUnmounted(() => observer?.disconnect())
 
       <!-- Z4: detection edge + scan rays + sensor origin (over slots, under labels) -->
       <template v-if="showCoverage && visualSectorPoints && !coverageInvalid">
-        <polygon
-          :points="visualSectorPoints"
-          class="coverage-outline"
-          :class="{ danger: hasActiveFire }"
-        />
+        <polygon :points="visualSectorPoints" class="coverage-outline" :class="{ danger: hasActiveFire }" />
         <line
           v-for="(ray, index) in coverageRays"
           :key="index"
@@ -294,7 +288,13 @@ onUnmounted(() => observer?.disconnect())
           class="coverage-ray"
           :class="{ danger: hasActiveFire }"
         />
-        <circle v-if="sensorOriginScreen" :cx="sensorOriginScreen.x" :cy="sensorOriginScreen.y" r="3.5" class="coverage-origin" />
+        <circle
+          v-if="sensorOriginScreen"
+          :cx="sensorOriginScreen.x"
+          :cy="sensorOriginScreen.y"
+          r="3.5"
+          class="coverage-origin"
+        />
       </template>
 
       <!-- Z5: parking slot labels -->
@@ -336,7 +336,13 @@ onUnmounted(() => observer?.disconnect())
           :x2="badge.flip ? badge.x + badge.badge : badge.x"
           :y2="badge.y + badge.badge / 2"
         />
-        <image :href="fireSlotBadgeUrl" :x="badge.x" :y="badge.y" :width="badge.badge" :height="badge.badge" />
+        <image
+          :href="fireSlotBadgeUrl"
+          :x="badge.x"
+          :y="badge.y"
+          :width="badge.badge"
+          :height="badge.badge"
+        />
       </g>
 
       <g

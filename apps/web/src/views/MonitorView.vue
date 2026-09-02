@@ -61,7 +61,11 @@ const selectedPreset = computed(() =>
   ),
 )
 const activeTask = computed(() => monitor.activeTask)
-const { state: vehicleState, atWaitingArea, resumeOptions } = useVehicleOperationState({
+const {
+  state: vehicleState,
+  atWaitingArea,
+  resumeOptions,
+} = useVehicleOperationState({
   robot,
   activeTask,
   stopOperation,
@@ -85,7 +89,9 @@ const estopReady = computed(() => robot.value?.safety_command_ready?.emergency_s
 const resetEstopReady = computed(() => robot.value?.safety_command_ready?.reset_estop === true)
 const readinessText = computed(() => {
   const labels = [
-    ...new Set((robot.value?.readiness_reasons || []).map((code) => reasonCodeLabel(code) || '控制链路尚未就绪')),
+    ...new Set(
+      (robot.value?.readiness_reasons || []).map((code) => reasonCodeLabel(code) || '控制链路尚未就绪'),
+    ),
   ].filter(Boolean)
   return labels.join('、')
 })
@@ -570,11 +576,7 @@ onUnmounted(() => {
           />
           <section class="panel secondary-alarms" :class="{ open: otherEventsOpen }">
             <header>
-              <button
-                class="other-events-toggle"
-                type="button"
-                @click="otherEventsOpen = !otherEventsOpen"
-              >
+              <button class="other-events-toggle" type="button" @click="otherEventsOpen = !otherEventsOpen">
                 <strong>其他事件 ({{ Math.max(0, activeAlarms.length - 1) }})</strong>
                 <span v-if="!otherEventsOpen && activeAlarms.length > 1" class="other-events-summary">
                   {{ activeAlarms[1]?.event_code }} · {{ alarmTypeLabel(activeAlarms[1]?.fire_type) }}
@@ -591,10 +593,13 @@ onUnmounted(() => {
               >
                 <i :data-level="alarm.severity"></i
                 ><span
-                  >{{ alarm.event_code }}<small
+                  >{{ alarm.event_code
+                  }}<small
                     >{{ alarmTypeLabel(alarm.fire_type) }} · {{ alarmStateLabel(alarm.state) }}</small
                   ></span
-                ><time>{{ new Date(alarm.last_seen_at).toLocaleTimeString('zh-CN', { hour12: false }) }}</time>
+                ><time>{{
+                  new Date(alarm.last_seen_at).toLocaleTimeString('zh-CN', { hour12: false })
+                }}</time>
               </button>
               <div v-if="activeAlarms.length <= 1" class="quiet-state">暂无其他活动事件</div>
             </div>
@@ -619,10 +624,18 @@ onUnmounted(() => {
             </div>
             <div class="yd-patrol-meta">
               <div><span>巡检路线</span><b>右侧全覆盖 S 型</b></div>
-              <div v-if="liveCheckpoint"><span>当前巡检</span><b>{{ liveCheckpoint.current_slot_code || '--' }}</b></div>
-              <div v-if="liveCheckpoint"><span>下一巡检</span><b>{{ liveCheckpoint.next_slot_code || '--' }}</b></div>
-              <div v-if="liveCheckpoint"><span>已巡检</span><b>{{ liveCheckpoint.index }} / {{ liveCheckpoint.total }}</b></div>
-              <div v-else><span>任务进度</span><b>{{ patrolProgress }}%</b></div>
+              <div v-if="liveCheckpoint">
+                <span>当前巡检</span><b>{{ liveCheckpoint.current_slot_code || '--' }}</b>
+              </div>
+              <div v-if="liveCheckpoint">
+                <span>下一巡检</span><b>{{ liveCheckpoint.next_slot_code || '--' }}</b>
+              </div>
+              <div v-if="liveCheckpoint">
+                <span>已巡检</span><b>{{ liveCheckpoint.index }} / {{ liveCheckpoint.total }}</b>
+              </div>
+              <div v-else>
+                <span>任务进度</span><b>{{ patrolProgress }}%</b>
+              </div>
             </div>
             <ProgressRingGate4 :value="patrolProgress" label="任务进度" />
           </section>

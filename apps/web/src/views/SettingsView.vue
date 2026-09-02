@@ -55,8 +55,7 @@ onMounted(load)
         </div>
       </div>
       <div class="deployment-stamp">
-        <strong>服务端部署就绪</strong
-        ><span>{{ status.server_deployment_ready ? '是' : '否' }}</span
+        <strong>服务端部署就绪</strong><span>{{ status.server_deployment_ready ? '是' : '否' }}</span
         ><small>已部署 = {{ status.server_deployed ? '是' : '否' }}</small>
       </div>
     </section>

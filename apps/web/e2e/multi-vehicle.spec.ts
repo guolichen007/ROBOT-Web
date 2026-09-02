@@ -37,7 +37,11 @@ function deviceRow(page: Page, label: string): Locator {
 async function switchToR002(page: Page, request: APIRequestContext): Promise<void> {
   await loginPage(page, request)
   await page.goto('/robots')
-  await page.locator('.vehicle-row').filter({ hasText: 'R002' }).getByRole('button', { name: '切换监控' }).click()
+  await page
+    .locator('.vehicle-row')
+    .filter({ hasText: 'R002' })
+    .getByRole('button', { name: '切换监控' })
+    .click()
   await expect(page.getByText('已切换当前监控车辆：R002')).toBeVisible()
 }
 

@@ -21,7 +21,9 @@ async function safeDetail(response: APIResponse): Promise<unknown> {
 export async function workingPassword(
   request: APIRequestContext,
 ): Promise<{ value: string; mustChange: boolean }> {
-  const candidates = [...new Set([changedPassword, adminPassword, devFallback].filter((v): v is string => Boolean(v)))]
+  const candidates = [
+    ...new Set([changedPassword, adminPassword, devFallback].filter((v): v is string => Boolean(v))),
+  ]
   let lastStatus: number | undefined
   let lastDetail: unknown
   for (const candidate of candidates) {

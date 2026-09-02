@@ -259,7 +259,9 @@ onUnmounted(() => {
       </button>
       <button
         class="direction stop"
-        :disabled="busy || !auth.can('robot.control.stop') || !supports('stop_motion') || !safetyReady('stop_motion')"
+        :disabled="
+          busy || !auth.can('robot.control.stop') || !supports('stop_motion') || !safetyReady('stop_motion')
+        "
         @click="stopAndRelease('停止并释放租约')"
       >
         ■<small>停止</small>
@@ -286,7 +288,12 @@ onUnmounted(() => {
       <button
         v-if="!robot?.estop_active"
         class="estop-button"
-        :disabled="busy || !auth.can('robot.control.estop') || !supports('emergency_stop') || !safetyReady('emergency_stop')"
+        :disabled="
+          busy ||
+          !auth.can('robot.control.estop') ||
+          !supports('emergency_stop') ||
+          !safetyReady('emergency_stop')
+        "
         @click="emergencyStop"
       >
         软件急停
@@ -294,7 +301,12 @@ onUnmounted(() => {
       <button
         v-else
         class="reset-button"
-        :disabled="busy || !auth.can('robot.control.reset_estop') || !supports('reset_estop') || !safetyReady('reset_estop')"
+        :disabled="
+          busy ||
+          !auth.can('robot.control.reset_estop') ||
+          !supports('reset_estop') ||
+          !safetyReady('reset_estop')
+        "
         @click="resetEstop"
       >
         复位软件急停

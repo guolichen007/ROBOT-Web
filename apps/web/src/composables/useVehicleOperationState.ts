@@ -37,9 +37,12 @@ export function useVehicleOperationState(input: {
 
     const stop = input.stopOperation.value
     if (stop) {
-      const terminal = ['VEHICLE_STATIONARY_CONFIRMED', 'PARTIAL_UNCONFIRMED', 'UNCONFIRMED', 'FAILED'].includes(
-        stop.state || '',
-      )
+      const terminal = [
+        'VEHICLE_STATIONARY_CONFIRMED',
+        'PARTIAL_UNCONFIRMED',
+        'UNCONFIRMED',
+        'FAILED',
+      ].includes(stop.state || '')
       if (!terminal) return 'STOPPING'
       if (['UNCONFIRMED', 'FAILED'].includes(stop.state || '')) return 'ERROR_STOP_UNCONFIRMED'
       return 'PAUSED_SAFE'

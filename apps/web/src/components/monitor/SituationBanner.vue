@@ -21,9 +21,7 @@ defineEmits<{ select: [] }>()
   </section>
   <section v-else-if="state !== 'NORMAL'" class="situation-banner warning" role="status">
     <ErrorCircleIcon />
-    <strong>{{
-      state === 'OFFLINE_UNKNOWN' ? '车辆离线，现场态势未知' : '系统降级，数据需核实'
-    }}</strong>
+    <strong>{{ state === 'OFFLINE_UNKNOWN' ? '车辆离线，现场态势未知' : '系统降级，数据需核实' }}</strong>
     <span>{{ situationLabel(state) }}</span>
   </section>
 </template>

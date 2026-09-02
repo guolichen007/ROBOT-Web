@@ -1,11 +1,6 @@
 import type { Alarm, DataSupportState, OnlineState } from '@/types'
 
-export type SituationState =
-  | 'FIRE_CRITICAL'
-  | 'ESTOP_ACTIVE'
-  | 'DEGRADED'
-  | 'NORMAL'
-  | 'OFFLINE_UNKNOWN'
+export type SituationState = 'FIRE_CRITICAL' | 'ESTOP_ACTIVE' | 'DEGRADED' | 'NORMAL' | 'OFFLINE_UNKNOWN'
 
 const severityRank: Record<string, number> = { CRITICAL: 4, HIGH: 3, MEDIUM: 2, LOW: 1 }
 const stateRank: Record<string, number> = { NEW: 4, ACKNOWLEDGED: 3, CONFIRMED: 2 }

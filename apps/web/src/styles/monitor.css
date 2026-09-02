@@ -202,7 +202,9 @@
   stroke: #dbe3ee;
   stroke-width: 1.1;
   cursor: pointer;
-  transition: fill 0.12s, stroke 0.12s;
+  transition:
+    fill 0.12s,
+    stroke 0.12s;
 }
 .slot-group:hover .parking-slot,
 .parking-slot.selected {

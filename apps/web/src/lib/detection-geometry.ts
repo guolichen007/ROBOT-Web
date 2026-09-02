@@ -42,10 +42,7 @@ export function buildSensorSector(
  * half-plane (world XY, theta CCW from +X). A mis-configured mount must be
  * surfaced as invalid rather than mirrored into a fake "correct" side.
  */
-export function isSectorOnVehicleRight(
-  robot: Pick<RobotState, 'x' | 'y' | 'theta'>,
-  sector: XY[],
-): boolean {
+export function isSectorOnVehicleRight(robot: Pick<RobotState, 'x' | 'y' | 'theta'>, sector: XY[]): boolean {
   if (robot.x == null || robot.y == null || robot.theta == null || sector.length < 3) return false
   const arc = sector.slice(1)
   const centroid = arc.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 })

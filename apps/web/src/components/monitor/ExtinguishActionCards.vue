@@ -8,7 +8,12 @@ const emit = defineEmits<{ execute: [mode: 'DEPLOY_BLANKET' | 'SPRAY_AGENT' | 'D
 const actions = [
   { value: 'DEPLOY_BLANKET' as const, title: '展开灭火帐', detail: '展开并覆盖目标车辆', icon: iconBlanket },
   { value: 'SPRAY_AGENT' as const, title: '喷射灭火剂', detail: '对准目标执行药剂喷射', icon: iconSpray },
-  { value: 'DEPLOY_THEN_SPRAY' as const, title: '灭火帐 + 喷射', detail: '先展开灭火帐，再喷射灭火剂', icon: iconJoint },
+  {
+    value: 'DEPLOY_THEN_SPRAY' as const,
+    title: '灭火帐 + 喷射',
+    detail: '先展开灭火帐，再喷射灭火剂',
+    icon: iconJoint,
+  },
 ]
 </script>
 <template>

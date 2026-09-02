@@ -24,7 +24,8 @@ export function batterySeverity(value?: number | null): MetricSeverity {
 
 export function taskSeverity(taskType?: string): MetricSeverity {
   if (!taskType) return 'normal' // 空闲
-  if (taskType === 'PATROL' || taskType === 'RETURN_DOCK' || taskType === 'NAVIGATE_TO_PRESET') return 'active'
+  if (taskType === 'PATROL' || taskType === 'RETURN_DOCK' || taskType === 'NAVIGATE_TO_PRESET')
+    return 'active'
   if (taskType === 'EXTINGUISH') return 'danger'
   return 'unknown'
 }
@@ -45,7 +46,11 @@ export function channelSeverity(supportState?: string, hasAlarm = false): Metric
   return 'unknown'
 }
 
-export function freshnessSeverity(ageSeconds: number, staleSeconds: number, offlineSeconds: number): MetricSeverity {
+export function freshnessSeverity(
+  ageSeconds: number,
+  staleSeconds: number,
+  offlineSeconds: number,
+): MetricSeverity {
   if (ageSeconds >= offlineSeconds) return 'danger'
   if (ageSeconds >= staleSeconds) return 'warning'
   return 'normal'

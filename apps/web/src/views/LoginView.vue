@@ -80,7 +80,8 @@ async function submit(): Promise<void> {
           <label for="login-username">账号</label>
           <div class="yd-input-shell">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="8" r="4" /><path d="M4 21c0-4.3 3.6-7 8-7s8 2.7 8 7" />
+              <circle cx="12" cy="8" r="4" />
+              <path d="M4 21c0-4.3 3.6-7 8-7s8 2.7 8 7" />
             </svg>
             <input
               id="login-username"
@@ -96,7 +97,8 @@ async function submit(): Promise<void> {
           <label for="login-password">密码</label>
           <div class="yd-input-shell">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" />
+              <rect x="5" y="10" width="14" height="11" rx="2" />
+              <path d="M8 10V7a4 4 0 0 1 8 0v3" />
             </svg>
             <input
               id="login-password"
@@ -112,9 +114,7 @@ async function submit(): Promise<void> {
           </div>
         </div>
         <div class="yd-login-options">
-          <label class="yd-remember"
-            ><input v-model="remember" type="checkbox" /><span>记住账号</span></label
-          >
+          <label class="yd-remember"><input v-model="remember" type="checkbox" /><span>记住账号</span></label>
         </div>
         <p v-if="error" class="yd-auth-error">{{ error }}</p>
         <button class="yd-login-btn" type="submit" :disabled="auth.loading">
@@ -132,8 +132,8 @@ async function submit(): Promise<void> {
       </div>
     </section>
     <footer class="yd-auth-footer">
-      上海友道智造自动化科技有限公司&nbsp; | &nbsp;技术支持：400-xxxx-xxx&nbsp; | &nbsp;推荐使用 Chrome 浏览器（版本 100+） 获得最佳体验<br />©
-      2024 友道智造 保留所有权利
+      上海友道智造自动化科技有限公司&nbsp; | &nbsp;技术支持：400-xxxx-xxx&nbsp; | &nbsp;推荐使用 Chrome
+      浏览器（版本 100+） 获得最佳体验<br />© 2024 友道智造 保留所有权利
     </footer>
   </main>
 </template>

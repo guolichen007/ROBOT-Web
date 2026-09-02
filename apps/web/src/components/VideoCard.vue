@@ -121,7 +121,11 @@ onUnmounted(() => void disconnect())
     <div ref="stage" class="video-stage">
       <video v-show="state === 'LIVE'" ref="video" autoplay muted playsinline />
       <div v-if="state === 'LIVE'" class="video-time">
-        {{ new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'medium', hour12: false }).format(now) }}
+        {{
+          new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'medium', hour12: false }).format(
+            now,
+          )
+        }}
       </div>
       <div v-if="state === 'LIVE'" class="video-live-tag">{{ streamStateLabel(state) }}</div>
       <button

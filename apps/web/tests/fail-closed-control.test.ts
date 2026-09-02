@@ -42,7 +42,12 @@ function mountDock(overrides: DockOverrides = {}) {
       estopActive: false,
       vehicleState: (overrides.vehicleState ?? 'IDLE') as never,
       atWaitingArea: false,
-      resumeOptions: { canContinuePatrol: false, canReturnWaiting: false, atWaitingArea: false, interruptedKind: null },
+      resumeOptions: {
+        canContinuePatrol: false,
+        canReturnWaiting: false,
+        atWaitingArea: false,
+        interruptedKind: null,
+      },
       patrolReady: overrides.patrolReady ?? false,
       returnReady: overrides.returnReady ?? false,
       stopReady: overrides.stopReady ?? false,
@@ -50,7 +55,12 @@ function mountDock(overrides: DockOverrides = {}) {
       resetEstopReady: overrides.resetEstopReady ?? false,
     },
     global: {
-      stubs: { TButton: TButtonStub, ControlPlatformIcon: IconStub, HomeIcon: IconStub, StopCircleIcon: IconStub },
+      stubs: {
+        TButton: TButtonStub,
+        ControlPlatformIcon: IconStub,
+        HomeIcon: IconStub,
+        StopCircleIcon: IconStub,
+      },
     },
   })
 }

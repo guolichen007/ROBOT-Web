@@ -34,7 +34,12 @@ onMounted(async () => {
   chart.setOption({
     backgroundColor: 'transparent',
     grid: { left: 42, right: 18, top: 28, bottom: 32 },
-    tooltip: { trigger: 'axis', backgroundColor: '#fff', borderColor: '#dee6f2', textStyle: { color: '#1f3254' } },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: '#fff',
+      borderColor: '#dee6f2',
+      textStyle: { color: '#1f3254' },
+    },
     legend: { textStyle: { color: '#5f6f89' } },
     xAxis: {
       type: 'category',

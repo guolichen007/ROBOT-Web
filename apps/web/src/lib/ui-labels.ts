@@ -14,10 +14,7 @@ export const alarmTypeLabel = (v?: string): string =>
     unknown: '未知火情',
   })[String(v || '').toLowerCase()] || '其它类型'
 
-export const severityLabel = map(
-  { CRITICAL: '严重', HIGH: '高', MEDIUM: '中', LOW: '低' },
-  '未知',
-)
+export const severityLabel = map({ CRITICAL: '严重', HIGH: '高', MEDIUM: '中', LOW: '低' }, '未知')
 
 export const alarmStateLabel = map(
   {
@@ -55,10 +52,7 @@ export const streamStateLabel = map(
   '未知',
 )
 
-export const detectionMethodLabel = map(
-  { AUTO: '自动检测', MANUAL: '人工上报' },
-  '未知方式',
-)
+export const detectionMethodLabel = map({ AUTO: '自动检测', MANUAL: '人工上报' }, '未知方式')
 
 export const taskStateLabel = map(
   {

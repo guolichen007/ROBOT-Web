@@ -5,10 +5,7 @@ const circumference = 2 * Math.PI * radius
 </script>
 
 <template>
-  <div
-    class="g4-progress-ring"
-    :aria-label="`${label || '任务进度'} ${Math.round(props.value)}%`"
-  >
+  <div class="g4-progress-ring" :aria-label="`${label || '任务进度'} ${Math.round(props.value)}%`">
     <svg viewBox="0 0 100 100">
       <circle cx="50" cy="50" :r="radius" class="track" />
       <circle

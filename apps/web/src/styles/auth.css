@@ -99,8 +99,7 @@
   right: 0;
   bottom: 0;
   height: 52%;
-  background: url('@/assets/yd/auth/login_lower_factory_robot_scene.jpg') left bottom / cover
-    no-repeat;
+  background: url('@/assets/yd/auth/login_lower_factory_robot_scene.jpg') left bottom / cover no-repeat;
   z-index: 1;
 }
 .yd-auth-scene:after {
@@ -177,7 +176,9 @@
   gap: 11px;
   padding: 0 15px;
   color: #b3becd;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 .yd-input-shell:focus-within {
   border-color: var(--yd-primary);
