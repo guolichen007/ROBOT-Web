@@ -19,11 +19,8 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import UTC, datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "apps", "api"))
-
-from sqlalchemy import select  # noqa: E402
 
 from app.core.config import get_settings  # noqa: E402
 from app.db.models import (  # noqa: E402
@@ -32,7 +29,6 @@ from app.db.models import (  # noqa: E402
     NavigationPreset,
     ParkingSlot,
     PatrolPlan,
-    PatrolPlanPoint,
     Robot,
     Trajectory,
 )
@@ -44,6 +40,7 @@ from app.modules.navigation.route_builder import (  # noqa: E402
     inspection_pose,
     ordered_codes,
 )
+from sqlalchemy import select  # noqa: E402
 
 
 def sync(db, apply: bool) -> dict:

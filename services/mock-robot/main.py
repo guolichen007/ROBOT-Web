@@ -247,8 +247,14 @@ class MockRobot:
             if waypoints:
                 return waypoints
         if command["cmd"] == "return_dock":
-            return [{"x": self.home[0], "y": self.home[1], "kind": "WAITING", "theta": self.home[2]}]
-        target = params.get("target_pose") if params.get("mission_kind") == "NAVIGATE_TO_PRESET" else None
+            return [
+                {"x": self.home[0], "y": self.home[1], "kind": "WAITING", "theta": self.home[2]}
+            ]
+        target = (
+            params.get("target_pose")
+            if params.get("mission_kind") == "NAVIGATE_TO_PRESET"
+            else None
+        )
         if target and "x" in target and "y" in target:
             return [
                 {
@@ -314,9 +320,13 @@ class MockRobot:
             )
         waypoints = self._cruise_waypoints(command)
         inspections = [wp for wp in waypoints if wp["kind"] == "INSPECTION"]
-        inspection_total = int(inspections[-1].get("sequence") or len(inspections)) if inspections else 1
+        inspection_total = (
+            int(inspections[-1].get("sequence") or len(inspections)) if inspections else 1
+        )
         first_sequence = inspections[0].get("sequence") if inspections else None
-        inspection_base = int(first_sequence) - 1 if isinstance(first_sequence, int) and first_sequence else 0
+        inspection_base = (
+            int(first_sequence) - 1 if isinstance(first_sequence, int) and first_sequence else 0
+        )
         inspections_done_local = 0
         waypoint_total = len(waypoints)
         emitted = [self.task_status(task_id, "accepted", "ACCEPTED", 0)]
@@ -366,7 +376,9 @@ class MockRobot:
                             if self.active_execution:
                                 self.active_execution["checkpoint_index"] = checkpoint_index
                                 self.active_execution["checkpoint_total"] = inspection_total
-                                self.active_execution["current_slot_code"] = waypoint.get("slot_code")
+                                self.active_execution["current_slot_code"] = waypoint.get(
+                                    "slot_code"
+                                )
                                 self.active_execution["next_slot_code"] = (
                                     next_inspection.get("slot_code") if next_inspection else None
                                 )
@@ -380,7 +392,9 @@ class MockRobot:
                                 checkpoint_index=checkpoint_index,
                                 checkpoint_total=inspection_total,
                                 current_slot_code=waypoint.get("slot_code"),
-                                next_slot_code=next_inspection.get("slot_code") if next_inspection else None,
+                                next_slot_code=next_inspection.get("slot_code")
+                                if next_inspection
+                                else None,
                                 waypoint_index=waypoint_index,
                                 waypoint_total=waypoint_total,
                                 target_waypoint_index=waypoint_index,
@@ -404,14 +418,30 @@ class MockRobot:
                         last_abs_heading_error = abs(heading_error)
                         last_progress_at = now
                     if now - last_progress_at > ROTATE_STALL_TIMEOUT_S:
-                        self._stall(command, emitted, task_id, "ROTATION_STALLED", inspection_base, inspections_done_local, inspection_total)
+                        self._stall(
+                            command,
+                            emitted,
+                            task_id,
+                            "ROTATION_STALLED",
+                            inspection_base,
+                            inspections_done_local,
+                            inspection_total,
+                        )
                         return
                 else:
                     if distance < last_distance - DISTANCE_PROGRESS_EPSILON:
                         last_distance = distance
                         last_progress_at = now
                     if now - last_progress_at > DRIVE_STALL_TIMEOUT_S:
-                        self._stall(command, emitted, task_id, "PATH_FOLLOWING_STALLED", inspection_base, inspections_done_local, inspection_total)
+                        self._stall(
+                            command,
+                            emitted,
+                            task_id,
+                            "PATH_FOLLOWING_STALLED",
+                            inspection_base,
+                            inspections_done_local,
+                            inspection_total,
+                        )
                         return
                 with self.lock:
                     self.linear = linear
@@ -502,7 +532,9 @@ class MockRobot:
                         waypoint_index=execution.get("last_completed_waypoint_index"),
                         waypoint_total=execution.get("waypoint_total"),
                         target_waypoint_index=execution.get("target_waypoint_index"),
-                        last_completed_waypoint_index=execution.get("last_completed_waypoint_index"),
+                        last_completed_waypoint_index=execution.get(
+                            "last_completed_waypoint_index"
+                        ),
                     )
                 )
             with self.lock:
@@ -548,7 +580,9 @@ class MockRobot:
                         waypoint_index=execution.get("last_completed_waypoint_index"),
                         waypoint_total=execution.get("waypoint_total"),
                         target_waypoint_index=execution.get("target_waypoint_index"),
-                        last_completed_waypoint_index=execution.get("last_completed_waypoint_index"),
+                        last_completed_waypoint_index=execution.get(
+                            "last_completed_waypoint_index"
+                        ),
                     )
                 )
             self.processed[command["command_id"]] = (ack, statuses)

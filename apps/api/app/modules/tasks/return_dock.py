@@ -77,7 +77,9 @@ def build_return_task(
         target_pose_snapshot_json=waiting.pose_json,
         map_id_snapshot=robot.current_map_id or "",
         map_version_snapshot=robot.current_map_version or "",
-        semantic_revision_snapshot=trajectory.semantic_revision if hasattr(trajectory, "semantic_revision") else 1,
+        semantic_revision_snapshot=trajectory.semantic_revision
+        if hasattr(trajectory, "semantic_revision")
+        else 1,
         trajectory_snapshot_json=return_path,
         parameters_json={
             "source": source,

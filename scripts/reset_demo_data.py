@@ -30,9 +30,6 @@ from datetime import UTC, datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "apps", "api"))
 
-from sqlalchemy import delete, select  # noqa: E402
-from sqlalchemy.orm import Session  # noqa: E402
-
 from app.core.config import get_settings  # noqa: E402
 from app.db.models import (  # noqa: E402
     AuditLog,
@@ -44,6 +41,8 @@ from app.db.models import (  # noqa: E402
     TelemetrySample,
 )
 from app.db.session import SessionLocal  # noqa: E402
+from sqlalchemy import delete, select  # noqa: E402
+from sqlalchemy.orm import Session  # noqa: E402
 
 TEST_NOTE_MARKERS = ("integration test", "ui-geometry probe", "direct extinguish")
 
@@ -65,15 +64,25 @@ def scalar_count(db: Session, stmt) -> int:
 def dry_run(db: Session, mock_ids: list[str]) -> dict[str, int]:
     counts: dict[str, int] = {"mock_robots": len(mock_ids)}
     counts["mock_tasks"] = scalar_count(db, select(Task.id).where(Task.robot_id.in_(mock_ids)))
-    counts["mock_fire_events"] = scalar_count(db, select(FireEvent.id).where(FireEvent.robot_id.in_(mock_ids)))
-    counts["mock_telemetry"] = scalar_count(db, select(TelemetrySample.id).where(TelemetrySample.robot_id.in_(mock_ids)))
-    counts["mock_sensor_samples"] = scalar_count(db, select(SensorSample.id).where(SensorSample.robot_id.in_(mock_ids)))
+    counts["mock_fire_events"] = scalar_count(
+        db, select(FireEvent.id).where(FireEvent.robot_id.in_(mock_ids))
+    )
+    counts["mock_telemetry"] = scalar_count(
+        db, select(TelemetrySample.id).where(TelemetrySample.robot_id.in_(mock_ids))
+    )
+    counts["mock_sensor_samples"] = scalar_count(
+        db, select(SensorSample.id).where(SensorSample.robot_id.in_(mock_ids))
+    )
     counts["test_marker_fire_events"] = sum(
         scalar_count(db, select(FireEvent.id).where(FireEvent.note.ilike(f"%{marker}%")))
         for marker in TEST_NOTE_MARKERS
     )
-    counts["seed_telemetry"] = scalar_count(db, select(TelemetrySample.id).where(TelemetrySample.boot_id == "seed-history"))
-    counts["seed_sensor_samples"] = scalar_count(db, select(SensorSample.id).where(SensorSample.boot_id == "seed-history"))
+    counts["seed_telemetry"] = scalar_count(
+        db, select(TelemetrySample.id).where(TelemetrySample.boot_id == "seed-history")
+    )
+    counts["seed_sensor_samples"] = scalar_count(
+        db, select(SensorSample.id).where(SensorSample.boot_id == "seed-history")
+    )
     counts["audit_logs_not_deleted"] = scalar_count(db, select(AuditLog.id))
     return counts
 
@@ -90,12 +99,37 @@ def export_rows(db: Session, out_dir: str, mock_ids: list[str]) -> str:
     payload: dict[str, list[dict]] = {}
     dump(db, select(FireEvent).where(FireEvent.robot_id.in_(mock_ids)), payload, "mock_fire_events")
     dump(db, select(Task).where(Task.robot_id.in_(mock_ids)), payload, "mock_tasks")
-    dump(db, select(TelemetrySample).where(TelemetrySample.robot_id.in_(mock_ids)), payload, "mock_telemetry")
-    dump(db, select(SensorSample).where(SensorSample.robot_id.in_(mock_ids)), payload, "mock_sensor_samples")
-    dump(db, select(TelemetrySample).where(TelemetrySample.boot_id == "seed-history"), payload, "seed_telemetry")
-    dump(db, select(SensorSample).where(SensorSample.boot_id == "seed-history"), payload, "seed_sensor_samples")
+    dump(
+        db,
+        select(TelemetrySample).where(TelemetrySample.robot_id.in_(mock_ids)),
+        payload,
+        "mock_telemetry",
+    )
+    dump(
+        db,
+        select(SensorSample).where(SensorSample.robot_id.in_(mock_ids)),
+        payload,
+        "mock_sensor_samples",
+    )
+    dump(
+        db,
+        select(TelemetrySample).where(TelemetrySample.boot_id == "seed-history"),
+        payload,
+        "seed_telemetry",
+    )
+    dump(
+        db,
+        select(SensorSample).where(SensorSample.boot_id == "seed-history"),
+        payload,
+        "seed_sensor_samples",
+    )
     for marker in TEST_NOTE_MARKERS:
-        dump(db, select(FireEvent).where(FireEvent.note.ilike(f"%{marker}%")), payload, f"test_fire_{marker.replace(' ', '_')}")
+        dump(
+            db,
+            select(FireEvent).where(FireEvent.note.ilike(f"%{marker}%")),
+            payload,
+            f"test_fire_{marker.replace(' ', '_')}",
+        )
 
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     path = os.path.join(out_dir, f"reset-demo-data-{stamp}.json")
@@ -114,10 +148,17 @@ def execute_cleanup(db: Session, mock_ids: list[str]) -> dict[str, int]:
     remove(delete(Task).where(Task.robot_id.in_(mock_ids)), "mock_tasks")
     remove(delete(TelemetrySample).where(TelemetrySample.robot_id.in_(mock_ids)), "mock_telemetry")
     remove(delete(SensorSample).where(SensorSample.robot_id.in_(mock_ids)), "mock_sensor_samples")
-    remove(delete(TelemetrySample).where(TelemetrySample.boot_id == "seed-history"), "seed_telemetry")
-    remove(delete(SensorSample).where(SensorSample.boot_id == "seed-history"), "seed_sensor_samples")
+    remove(
+        delete(TelemetrySample).where(TelemetrySample.boot_id == "seed-history"), "seed_telemetry"
+    )
+    remove(
+        delete(SensorSample).where(SensorSample.boot_id == "seed-history"), "seed_sensor_samples"
+    )
     for marker in TEST_NOTE_MARKERS:
-        remove(delete(FireEvent).where(FireEvent.note.ilike(f"%{marker}%")), f"test_fire_{marker.replace(' ', '_')}")
+        remove(
+            delete(FireEvent).where(FireEvent.note.ilike(f"%{marker}%")),
+            f"test_fire_{marker.replace(' ', '_')}",
+        )
     db.commit()
     return deleted
 
@@ -125,8 +166,12 @@ def execute_cleanup(db: Session, mock_ids: list[str]) -> dict[str, int]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="ROBOT-Web simulated data cleanup")
     parser.add_argument("--execute", action="store_true", help="actually delete (dev profile only)")
-    parser.add_argument("--force-server", action="store_true", help="override the non-dev guard (danger)")
-    parser.add_argument("--export", metavar="DIR", help="write a JSON backup of rows that would be deleted")
+    parser.add_argument(
+        "--force-server", action="store_true", help="override the non-dev guard (danger)"
+    )
+    parser.add_argument(
+        "--export", metavar="DIR", help="write a JSON backup of rows that would be deleted"
+    )
     args = parser.parse_args()
 
     settings = get_settings()
@@ -143,7 +188,9 @@ def main() -> int:
             if settings.app_env != "dev" and not args.force_server:
                 print("REFUSED: destructive delete requires app_env == 'dev' (or --force-server).")
                 return 2
-            print("deleted:", json.dumps(execute_cleanup(db, mock_ids), ensure_ascii=False, indent=2))
+            print(
+                "deleted:", json.dumps(execute_cleanup(db, mock_ids), ensure_ascii=False, indent=2)
+            )
     return 0
 
 

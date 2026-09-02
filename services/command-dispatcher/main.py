@@ -52,9 +52,7 @@ def publish_command(payload: dict, qos: int) -> None:
 
 def _manual_heartbeat() -> None:
     try:
-        redis.setex(
-            "service:command-dispatcher:manual-heartbeat", 5, datetime.now(UTC).isoformat()
-        )
+        redis.setex("service:command-dispatcher:manual-heartbeat", 5, datetime.now(UTC).isoformat())
     except Exception:
         logger.exception("manual heartbeat failed")
 

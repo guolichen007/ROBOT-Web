@@ -29,6 +29,7 @@
   REDIS_URL                      仅 local-sim 注入需要
   REAL_VEHICLE_EVENT_WAIT_SECONDS postfield 观察实车事件的最长等待秒数（默认 30）
 """
+
 from __future__ import annotations
 
 import argparse
@@ -37,7 +38,7 @@ import json
 import os
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import httpx
@@ -113,8 +114,9 @@ async def _verify_resync(client: httpx.Client, ws_base: str, origin: str, token:
     return event.get("event_type") == "resync_required"
 
 
-async def _verify_replay(client: httpx.Client, ws_base: str, origin: str, token: str,
-                         marker: str, redis_url: str) -> bool:
+async def _verify_replay(
+    client: httpx.Client, ws_base: str, origin: str, token: str, marker: str, redis_url: str
+) -> bool:
     """local-sim 专用：先取当前 stream 最新 id 作为 after，再注入 marker 并等待回放。
 
     不能用 snapshot watermark：双 mock 持续写入会把它推到有限窗口之外，或早于
@@ -130,13 +132,25 @@ async def _verify_replay(client: httpx.Client, ws_base: str, origin: str, token:
             fresh = str(latest[0][0])
     except Exception as exc:  # noqa: BLE001
         _diag("REPLAY_READ_WATERMARK", exc)
-    marker_id = r.xadd("firebot:events", {"event": json.dumps({
-        "event_type": "system.acceptance_marker",
-        "server_received_at": datetime.now(timezone.utc).isoformat(),
-        "payload": {"marker": marker},
-    }, default=str)})
+    marker_id = r.xadd(
+        "firebot:events",
+        {
+            "event": json.dumps(
+                {
+                    "event_type": "system.acceptance_marker",
+                    "server_received_at": datetime.now(UTC).isoformat(),
+                    "payload": {"marker": marker},
+                },
+                default=str,
+            )
+        },
+    )
     # 安全诊断：只写 after 与 marker id，不写 auth ticket。
-    print(f"GATE_DIAG REPLAY_FROM_STREAM_ID after={fresh} marker_id={marker_id}", file=sys.stderr, flush=True)
+    print(
+        f"GATE_DIAG REPLAY_FROM_STREAM_ID after={fresh} marker_id={marker_id}",
+        file=sys.stderr,
+        flush=True,
+    )
     ticket = client.post("/api/v1/auth/ws-ticket", headers=_headers(token, origin))
     ticket.raise_for_status()
     uri = f"{ws_base}/ws/v1/monitor?ticket={ticket.json()['ticket']}&after={fresh}"
@@ -149,7 +163,7 @@ async def _verify_replay(client: httpx.Client, ws_base: str, origin: str, token:
                 return False
             try:
                 event = json.loads(await asyncio.wait_for(socket.recv(), timeout=remaining))
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 return False
             if event.get("event_type") == "resync_required":
                 return False
@@ -157,8 +171,9 @@ async def _verify_replay(client: httpx.Client, ws_base: str, origin: str, token:
                 return True
 
 
-async def _verify_real_vehicle_event(client: httpx.Client, ws_base: str, origin: str,
-                                     token: str, watermark: str, wait: float) -> bool:
+async def _verify_real_vehicle_event(
+    client: httpx.Client, ws_base: str, origin: str, token: str, watermark: str, wait: float
+) -> bool:
     """只读观察：等一段实车 `vehicle.*`/`robot.*` 事件。不写任何状态。"""
     ticket = client.post("/api/v1/auth/ws-ticket", headers=_headers(token, origin))
     ticket.raise_for_status()
@@ -172,12 +187,13 @@ async def _verify_real_vehicle_event(client: httpx.Client, ws_base: str, origin:
                 return False
             try:
                 event = json.loads(await asyncio.wait_for(socket.recv(), timeout=remaining))
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 return False
             event_type = event.get("event_type", "")
-            if event_type.startswith(("vehicle.", "robot.")) and str(
-                event.get("data", {}).get("vehicle_id")
-            ) == REAL_VEHICLE_ID:
+            if (
+                event_type.startswith(("vehicle.", "robot."))
+                and str(event.get("data", {}).get("vehicle_id")) == REAL_VEHICLE_ID
+            ):
                 return True
 
 
@@ -341,7 +357,9 @@ async def run() -> None:
         else:
             wait = float(os.getenv("REAL_VEHICLE_EVENT_WAIT_SECONDS", "30"))
             try:
-                seen = await _verify_real_vehicle_event(client, ws_base, origin, token, watermark, wait)
+                seen = await _verify_real_vehicle_event(
+                    client, ws_base, origin, token, watermark, wait
+                )
                 emit("REAL_VEHICLE_EVENT", "PASS" if seen else "FAIL")
             except Exception as exc:
                 _diag("REAL_VEHICLE_EVENT", exc)

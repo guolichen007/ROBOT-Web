@@ -114,7 +114,12 @@ def build_cruise_waypoints(slots: list[SlotRef]) -> list[dict]:
     """
     groups = ordered_groups(slots)
     waypoints: list[dict] = [
-        {"x": REMOTE_WAITING["x"], "y": REMOTE_WAITING["y"], "kind": "WAITING", "theta": REMOTE_WAITING["theta"]},
+        {
+            "x": REMOTE_WAITING["x"],
+            "y": REMOTE_WAITING["y"],
+            "kind": "WAITING",
+            "theta": REMOTE_WAITING["theta"],
+        },
     ]
 
     first = inspection_pose(groups[0][0])
@@ -157,7 +162,12 @@ def build_cruise_waypoints(slots: list[SlotRef]) -> list[dict]:
     top_end = inspection_pose(groups[-1][-1])
     waypoints.append({"x": REMOTE_WAITING["x"], "y": top_end["y"], "kind": "TRANSIT"})
     waypoints.append(
-        {"x": REMOTE_WAITING["x"], "y": REMOTE_WAITING["y"], "kind": "WAITING", "theta": REMOTE_WAITING["theta"]}
+        {
+            "x": REMOTE_WAITING["x"],
+            "y": REMOTE_WAITING["y"],
+            "kind": "WAITING",
+            "theta": REMOTE_WAITING["theta"],
+        }
     )
     return waypoints
 
@@ -208,16 +218,24 @@ def _corridor_graph() -> tuple[dict, list[tuple[float, float]], dict]:
     for x, ymin, ymax in CORRIDOR_VERTICALS:
         ys = sorted(
             {ymin, ymax}
-            | {hy for hy, xmin, xmax in CORRIDOR_HORIZONTALS if ymin <= hy <= ymax and xmin <= x <= xmax}
+            | {
+                hy
+                for hy, xmin, xmax in CORRIDOR_HORIZONTALS
+                if ymin <= hy <= ymax and xmin <= x <= xmax
+            }
         )
-        for a, b in zip(ys, ys[1:]):
+        for a, b in zip(ys, ys[1:], strict=False):
             link(idx(x, a), idx(x, b), b - a)
     for hy, xmin, xmax in CORRIDOR_HORIZONTALS:
         xs = sorted(
             {xmin, xmax}
-            | {vx for vx, ymin, ymax in CORRIDOR_VERTICALS if ymin <= hy <= ymax and xmin <= vx <= xmax}
+            | {
+                vx
+                for vx, ymin, ymax in CORRIDOR_VERTICALS
+                if ymin <= hy <= ymax and xmin <= vx <= xmax
+            }
         )
-        for a, b in zip(xs, xs[1:]):
+        for a, b in zip(xs, xs[1:], strict=False):
             link(idx(a, hy), idx(b, hy), b - a)
 
     remote = idx(REMOTE_WAITING["x"], REMOTE_WAITING["y"])
@@ -251,7 +269,9 @@ def _dijkstra(adjacency: dict, node_xy: list, start: int, goal: int) -> list[int
     return path
 
 
-def _project_onto_segments(cx: float, cy: float, segments: list[tuple[tuple[float, float], tuple[float, float]]]) -> tuple[float, tuple[float, float], int]:
+def _project_onto_segments(
+    cx: float, cy: float, segments: list[tuple[tuple[float, float], tuple[float, float]]]
+) -> tuple[float, tuple[float, float], int]:
     best: tuple[float, tuple[float, float], int] | None = None
     for i, ((ax, ay), (bx, by)) in enumerate(segments):
         dx, dy = bx - ax, by - ay
@@ -278,10 +298,12 @@ def _corridor_segments() -> list[tuple[tuple[float, float], tuple[float, float]]
     return segments
 
 
-def _project_onto_route(cx: float, cy: float, waypoints: list[dict]) -> tuple[float, tuple[float, float], int, int]:
+def _project_onto_route(
+    cx: float, cy: float, waypoints: list[dict]
+) -> tuple[float, tuple[float, float], int, int]:
     """Return (distance, projection, seg_a_idx, seg_b_idx) of the nearest cruise segment."""
     best: tuple[float, tuple[float, float], int, int] | None = None
-    for i, (a, b) in enumerate(zip(waypoints, waypoints[1:])):
+    for i, (a, b) in enumerate(zip(waypoints, waypoints[1:], strict=False)):
         ax, ay = a["x"], a["y"]
         bx, by = b["x"], b["y"]
         dx, dy = bx - ax, by - ay
@@ -299,7 +321,9 @@ def _project_onto_route(cx: float, cy: float, waypoints: list[dict]) -> tuple[fl
     return best
 
 
-def build_return_waypoints(current_pose: dict, full_waypoints: list[dict] | None = None, route_cursor: int | None = None) -> list[dict]:
+def build_return_waypoints(
+    current_pose: dict, full_waypoints: list[dict] | None = None, route_cursor: int | None = None
+) -> list[dict]:
     """Shortest safe return-to-waiting path over the corridor graph.
 
     Projects the current pose onto the nearest corridor lane, runs Dijkstra to
@@ -367,7 +391,12 @@ def _fallback_return(cx: float, cy: float) -> list[dict]:
     waypoints.append({"x": vx, "y": 1.0, "kind": "TRANSIT"})
     waypoints.append({"x": REMOTE_WAITING["x"], "y": 1.0, "kind": "TRANSIT"})
     waypoints.append(
-        {"x": REMOTE_WAITING["x"], "y": REMOTE_WAITING["y"], "kind": "WAITING", "theta": REMOTE_WAITING["theta"]}
+        {
+            "x": REMOTE_WAITING["x"],
+            "y": REMOTE_WAITING["y"],
+            "kind": "WAITING",
+            "theta": REMOTE_WAITING["theta"],
+        }
     )
     return _dedupe_waypoints(waypoints)
 
@@ -385,7 +414,9 @@ def infer_route_cursor(current_pose: dict, full_waypoints: list[dict]) -> dict:
     return {"last_completed_waypoint_index": seg_a, "target_waypoint_index": seg_b}
 
 
-def build_resumed_cruise_waypoints(current_pose: dict, full_waypoints: list[dict], route_cursor: int | None = None) -> list[dict]:
+def build_resumed_cruise_waypoints(
+    current_pose: dict, full_waypoints: list[dict], route_cursor: int | None = None
+) -> list[dict]:
     """Continue a cancelled cruise from the current pose onto the target
     waypoint, then the remaining canonical waypoints. Never re-runs REMOTE."""
     if route_cursor is None:
@@ -398,7 +429,12 @@ def build_resumed_cruise_waypoints(current_pose: dict, full_waypoints: list[dict
         return remaining
     if not remaining:
         return head + [
-            {"x": REMOTE_WAITING["x"], "y": REMOTE_WAITING["y"], "kind": "WAITING", "theta": REMOTE_WAITING["theta"]}
+            {
+                "x": REMOTE_WAITING["x"],
+                "y": REMOTE_WAITING["y"],
+                "kind": "WAITING",
+                "theta": REMOTE_WAITING["theta"],
+            }
         ]
     return head + remaining
 
@@ -411,7 +447,9 @@ def _dedupe_waypoints(points: list[dict]) -> list[dict]:
     return out
 
 
-def segment_intersects_slot(a: dict, b: dict, slot: SlotRef, half_width: float, half_height: float, margin: float) -> bool:
+def segment_intersects_slot(
+    a: dict, b: dict, slot: SlotRef, half_width: float, half_height: float, margin: float
+) -> bool:
     """True if the segment a->b intersects the slot's expanded AABB."""
     min_x = slot.x - half_width - margin
     max_x = slot.x + half_width + margin
@@ -431,7 +469,9 @@ def segment_intersects_slot(a: dict, b: dict, slot: SlotRef, half_width: float, 
         d2 = _cross((a["x"], a["y"]), (b["x"], b["y"]), q)
         d3 = _cross(p, q, (a["x"], a["y"]))
         d4 = _cross(p, q, (b["x"], b["y"]))
-        if ((d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)) and ((d3 > 0 and d4 < 0) or (d3 < 0 and d4 > 0)):
+        if ((d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)) and (
+            (d3 > 0 and d4 < 0) or (d3 < 0 and d4 > 0)
+        ):
             return True
         return False
 

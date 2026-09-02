@@ -393,7 +393,9 @@ def handle_sensor(
     top_ir_max = msg.get("top_ir_max")
     channel_delta: dict = {}
     if smoke is not None:
-        channel_delta["smoke"] = touch_field_channel(db, robot, "smoke", source_ts, received, source_kind)
+        channel_delta["smoke"] = touch_field_channel(
+            db, robot, "smoke", source_ts, received, source_kind
+        )
     db.add(
         SensorSample(
             robot_id=robot.id,
@@ -813,7 +815,11 @@ def handle_task_status(db, robot: Robot, msg: dict, received: datetime) -> None:
 
     # Interrupted missions become resumable; a completed return consumes them.
     parameters = dict(task.parameters_json or {})
-    if internal_status == "CANCELLED" and task.type == "PATROL" and parameters.get("live_route_cursor"):
+    if (
+        internal_status == "CANCELLED"
+        and task.type == "PATROL"
+        and parameters.get("live_route_cursor")
+    ):
         parameters["resume_state"] = "AVAILABLE"
         task.parameters_json = parameters
     elif internal_status == "CANCELLED" and task.type == "RETURN_DOCK":
@@ -1032,8 +1038,12 @@ def process(topic: str, payload: bytes) -> None:
                             profile.map_contract_verified if source_kind == "ROS_COMPAT" else True
                         ),
                     ),
-                    "status": lambda: handle_status(db, robot, msg, source_ts, received, source_kind),
-                    "sensor": lambda: handle_sensor(db, robot, msg, source_ts, received, source_kind),
+                    "status": lambda: handle_status(
+                        db, robot, msg, source_ts, received, source_kind
+                    ),
+                    "sensor": lambda: handle_sensor(
+                        db, robot, msg, source_ts, received, source_kind
+                    ),
                     "alarm": lambda: handle_alarm(db, robot, msg, received),
                     "capabilities": lambda: handle_capabilities(db, robot, msg, received),
                     "command_ack": lambda: handle_ack(db, robot, msg, received),

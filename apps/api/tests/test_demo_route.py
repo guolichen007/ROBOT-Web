@@ -9,7 +9,6 @@ from __future__ import annotations
 import math
 
 import pytest
-
 from app.db.models import ParkingSlot, RobotSensorProfile
 from app.modules.navigation.route_builder import (
     REMOTE_WAITING,
@@ -40,7 +39,6 @@ def demo_slots() -> list[SlotRef]:
 def test_all_54_slots_have_unique_right_side_inspection_pose() -> None:
     slots = demo_slots()
     assert len(slots) == 54
-    by_code = {s.code: s for s in slots}
     poses: dict[str, dict] = {}
     for slot in slots:
         pose = inspection_pose(slot)
@@ -89,7 +87,7 @@ def test_cruise_waypoints_include_all_54_inspection_checkpoints() -> None:
 
 def test_trajectory_segments_are_axis_aligned_lanes() -> None:
     path = build_cruise_trajectory(demo_slots())
-    for a, b in zip(path, path[1:]):
+    for a, b in zip(path, path[1:], strict=False):
         dx = abs(b["x"] - a["x"])
         dy = abs(b["y"] - a["y"])
         # No diagonal cuts: every segment is a straight horizontal/vertical lane.

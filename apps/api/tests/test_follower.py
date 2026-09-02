@@ -9,10 +9,7 @@ from __future__ import annotations
 
 import math
 
-import pytest
-
 from app.modules.navigation.follower import (
-    ARRIVE_DISTANCE_M,
     drive_speed,
     follower_command,
     normalize,
@@ -22,7 +19,9 @@ from app.modules.navigation.follower import (
 def test_large_heading_error_rotates_in_place_without_driving() -> None:
     # Robot at A19 (8, 3.0) facing south (-pi/2); next waypoint is A28 (14, 3.0).
     dx, dy = 14.0 - 8.0, 3.0 - 3.0
-    linear, angular, state, heading_error = follower_command(-math.pi / 2, dx, dy, math.hypot(dx, dy))
+    linear, angular, state, heading_error = follower_command(
+        -math.pi / 2, dx, dy, math.hypot(dx, dy)
+    )
     assert state == "ROTATE"
     assert linear == 0.0
     assert angular > 0

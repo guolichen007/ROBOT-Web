@@ -459,7 +459,9 @@ def calculate_detection_coverage(
     }
 
 
-def _sector_is_on_vehicle_right(robot_pose: dict[str, float], sector: list[tuple[float, float]]) -> bool:
+def _sector_is_on_vehicle_right(
+    robot_pose: dict[str, float], sector: list[tuple[float, float]]
+) -> bool:
     theta = float(robot_pose["theta"])
     arc = sector[1:]
     centroid = (

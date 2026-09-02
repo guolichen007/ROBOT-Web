@@ -52,9 +52,7 @@ def check_reset_allowed(
     if settings.app_env != "dev" or not settings.mock_enabled:
         return "MOCK_RESET_FORBIDDEN=YES (APP_ENV != dev or MOCK_ENABLED != true)"
     if not profile or profile.source_kind != "MOCK":
-        return (
-            f"MOCK_RESET_FORBIDDEN=YES (source_kind is not MOCK, vehicle_id={vehicle_id})"
-        )
+        return f"MOCK_RESET_FORBIDDEN=YES (source_kind is not MOCK, vehicle_id={vehicle_id})"
     return None
 
 
@@ -178,9 +176,7 @@ def reset(vehicle_id: str = DEFAULT_VEHICLE_ID) -> int:
             print(f"MOCK_RESET_FORBIDDEN=YES (robot not found: {vehicle_id})")
             return 1
         profile = db.get(RobotIntegrationProfile, robot.id)
-        result = run_reset(
-            db, get_redis(), robot=robot, profile=profile, settings=settings
-        )
+        result = run_reset(db, get_redis(), robot=robot, profile=profile, settings=settings)
         if not result["ok"]:
             print(result["error"])
             return 1
@@ -204,9 +200,7 @@ def wait_ready(vehicle_id: str = DEFAULT_VEHICLE_ID, timeout: int = 45) -> int:
             at_waiting = (
                 x is not None
                 and y is not None
-                and math.hypot(
-                    float(x) - REMOTE_WAITING["x"], float(y) - REMOTE_WAITING["y"]
-                )
+                and math.hypot(float(x) - REMOTE_WAITING["x"], float(y) - REMOTE_WAITING["y"])
                 <= WAITING_TOLERANCE_M
             )
             if (

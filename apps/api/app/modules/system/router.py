@@ -210,7 +210,11 @@ def build_operation_context(db, robot: Robot) -> dict:
 
     active = db.scalar(
         select(Task)
-        .where(Task.robot_id == robot.id, Task.type.in_({"PATROL", "RETURN_DOCK"}), Task.status.in_(active_states))
+        .where(
+            Task.robot_id == robot.id,
+            Task.type.in_({"PATROL", "RETURN_DOCK"}),
+            Task.status.in_(active_states),
+        )
         .order_by(Task.created_at.desc())
     )
     if active:
@@ -238,7 +242,9 @@ def build_operation_context(db, robot: Robot) -> dict:
                 "kind": "PATROL",
                 "task_id": patrol.id,
                 "patrol_plan_id": (patrol.parameters_json or {}).get("patrol_plan_id"),
-                "last_completed_waypoint_index": cursor.get("last_completed_waypoint_index", cursor.get("waypoint_index")),
+                "last_completed_waypoint_index": cursor.get(
+                    "last_completed_waypoint_index", cursor.get("waypoint_index")
+                ),
                 "target_waypoint_index": cursor.get("target_waypoint_index"),
                 "waypoint_total": cursor.get("waypoint_total"),
                 "checkpoint_index": checkpoint.get("index"),

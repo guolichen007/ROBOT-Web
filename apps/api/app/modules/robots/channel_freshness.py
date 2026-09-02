@@ -6,6 +6,7 @@ U2B 语义：
 - ERROR / UNSUPPORTED 等是车端/系统显式声明的状态，不得被时间算法覆盖。
 - 不引入第二套 battery_fresh/smoke_fresh boolean；data_channels 是唯一事实源。
 """
+
 from __future__ import annotations
 
 from datetime import datetime

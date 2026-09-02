@@ -1,4 +1,5 @@
 """Mosquitto ACL 模板静态校验：车辆 %u 规则必须用 pattern，且不能写 command。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -53,12 +54,12 @@ def test_vehicle_can_write_telemetry_and_read_own_command() -> None:
             if r.startswith("pattern write robot/%u/")
         }
         assert write == VEHICLE_WRITE_TOPICS, f"{user} 写权限集合不完整/不正确: {write}"
-        assert f"pattern read robot/%u/command" in block["rules"], f"{user} 缺 command 读权限"
+        assert "pattern read robot/%u/command" in block["rules"], f"{user} 缺 command 读权限"
 
 
 def test_vehicle_cannot_write_command() -> None:
     for block in _vehicle_blocks():
         for rule in block["rules"]:
-            assert not (
-                "write" in rule and rule.endswith("/command")
-            ), f"{block['user']} 非法拥有 command 写权限: {rule}"
+            assert not ("write" in rule and rule.endswith("/command")), (
+                f"{block['user']} 非法拥有 command 写权限: {rule}"
+            )

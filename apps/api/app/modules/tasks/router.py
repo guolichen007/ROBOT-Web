@@ -73,7 +73,13 @@ def _robot_at_waiting(db, robot: Robot) -> bool:
     latest = json.loads(raw) if raw else {}
     if "x" not in latest or "y" not in latest:
         return False
-    return math.hypot(float(latest["x"]) - REMOTE_WAITING_POSE["x"], float(latest["y"]) - REMOTE_WAITING_POSE["y"]) <= WAITING_TOLERANCE_M
+    return (
+        math.hypot(
+            float(latest["x"]) - REMOTE_WAITING_POSE["x"],
+            float(latest["y"]) - REMOTE_WAITING_POSE["y"],
+        )
+        <= WAITING_TOLERANCE_M
+    )
 
 
 def target_snapshot(
@@ -309,7 +315,8 @@ def patrol_plan_task(
     )
     resume_available = (
         resume_available
-        if resume_available and (resume_available.parameters_json or {}).get("resume_state") == "AVAILABLE"
+        if resume_available
+        and (resume_available.parameters_json or {}).get("resume_state") == "AVAILABLE"
         else None
     )
     if payload.resume_task_id:
@@ -320,9 +327,7 @@ def patrol_plan_task(
             or previous.type != "PATROL"
             or previous.status != "CANCELLED"
         ):
-            raise PlatformError(
-                "PATROL_RESUME_INVALID", "上次巡检状态无法安全恢复，请先返回等待区"
-            )
+            raise PlatformError("PATROL_RESUME_INVALID", "上次巡检状态无法安全恢复，请先返回等待区")
         task, command_id = build_resumed_patrol_task(
             db,
             plan=plan,

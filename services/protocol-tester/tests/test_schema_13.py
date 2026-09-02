@@ -1,7 +1,7 @@
 """schema 1.3 服务器双版本兼容回归测试。"""
+
 from __future__ import annotations
 
-import json
 import uuid
 
 import pytest

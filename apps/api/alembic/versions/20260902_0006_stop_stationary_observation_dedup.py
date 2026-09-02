@@ -16,9 +16,7 @@ depends_on = None
 def upgrade() -> None:
     op.add_column(
         "stop_operations",
-        sa.Column(
-            "last_stationary_observation_at", sa.DateTime(timezone=True), nullable=True
-        ),
+        sa.Column("last_stationary_observation_at", sa.DateTime(timezone=True), nullable=True),
     )
 
 

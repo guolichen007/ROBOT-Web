@@ -107,4 +107,6 @@ if latest_hits or marker_hits or unpinned_actions or migration_metadata_hits or 
         f"latest={latest_hits} markers={marker_hits} unpinned={unpinned_actions} "
         f"migration_metadata={migration_metadata_hits} stale_state={stale_state_hits}"
     )
-print("repository policy OK: no latest, no production markers, actions pinned, no stale state markers")
+print(
+    "repository policy OK: no latest, no production markers, actions pinned, no stale state markers"
+)

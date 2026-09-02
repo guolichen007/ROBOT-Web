@@ -290,7 +290,10 @@ def seed() -> None:
             }
 
         cruise_path = build_cruise_waypoints(
-            [SlotRef(code=slot.code, x=slot.center_pose_json["x"], y=slot.center_pose_json["y"]) for slot in slots]
+            [
+                SlotRef(code=slot.code, x=slot.center_pose_json["x"], y=slot.center_pose_json["y"])
+                for slot in slots
+            ]
         )
         trajectory = _get_or_create(
             db,
@@ -479,7 +482,10 @@ def seed() -> None:
         )
         patrol_plan.trajectory_id = trajectory.id
         ordered = ordered_codes(
-            [SlotRef(code=s.code, x=s.center_pose_json["x"], y=s.center_pose_json["y"]) for s in slots]
+            [
+                SlotRef(code=s.code, x=s.center_pose_json["x"], y=s.center_pose_json["y"])
+                for s in slots
+            ]
         )
         presets_by_code = {
             row.code: row

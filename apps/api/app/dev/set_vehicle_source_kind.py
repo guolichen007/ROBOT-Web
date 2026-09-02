@@ -8,6 +8,7 @@ Never runs automatically. Usage (inside the api container):
 A source_kind change is a transport-identity fact, never a control-readiness
 promotion — every real-control verification flag is always forced false here.
 """
+
 from __future__ import annotations
 
 import json
