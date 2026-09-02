@@ -267,6 +267,35 @@ def test_mecanum_lateral_motion_cannot_be_confirmed_stationary() -> None:
     assert stationary is False
 
 
+def test_stationary_observation_token_and_frame_dedup() -> None:
+    worker = load_service("task_worker_dedup", "services/task-worker/main.py")
+    base = datetime.now(UTC)
+
+    # observation_token：优先 server_received_at，回退 source_timestamp，缺失/解析失败 → None
+    assert worker.observation_token({}) is None
+    assert worker.observation_token({"server_received_at": base.isoformat()}) == base
+    assert worker.observation_token({"source_timestamp": base.isoformat()}) == base
+    assert worker.observation_token({"server_received_at": "not-a-date"}) is None
+
+    # 同一观测去重：token 不大于 last_token → 帧不变
+    frames, last = worker.advance_stationary_frames(True, True, base, base, 1)
+    assert (frames, last) == (1, base)
+
+    # 新静止观测：帧 +1
+    t2 = base + timedelta(seconds=1)
+    frames, last = worker.advance_stationary_frames(True, True, t2, last, frames)
+    assert (frames, last) == (2, t2)
+
+    # 新非零速度观测：帧清零
+    t3 = base + timedelta(seconds=2)
+    frames, last = worker.advance_stationary_frames(True, False, t3, last, frames)
+    assert (frames, last) == (0, t3)
+
+    # stale：帧清零且 last_token 保持不变
+    frames, last = worker.advance_stationary_frames(False, False, base + timedelta(seconds=3), last, 4)
+    assert (frames, last) == (0, t3)
+
+
 def test_submitted_ros1_interface_baseline_matches_platform_adapter() -> None:
     baseline = json.loads((ROOT / "integration/ros1/ROS1实车接口基线.json").read_text("utf-8"))
     assert baseline["platform_contract"] == "1.2.0"

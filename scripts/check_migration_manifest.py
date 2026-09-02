@@ -13,7 +13,7 @@ MANIFEST = VERSIONS / "migration-sha256.json"
 def hashes() -> dict[str, str]:
     return {
         path.name: hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in sorted(VERSIONS.glob("202608*.py"))
+        for path in sorted(VERSIONS.glob("2026*.py"))
     }
 
 

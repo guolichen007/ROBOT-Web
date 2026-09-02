@@ -561,8 +561,56 @@ def test_stop_operation_stationary_confirmed_not_downgraded_by_stale_telemetry()
 
 
 def test_stop_operation_fresh_zero_velocity_confirms_stationary() -> None:
-    """连续 fresh 零速度帧达到阈值后确认 STATIONARY_CONFIRMED。"""
+    """连续 5 条独立新鲜零速度观测达到阈值后确认 STATIONARY_CONFIRMED。"""
     worker = load_service("firebot_stop_confirm", "services/task-worker/main.py")
+    now = datetime.now(UTC)
+    with SessionLocal.begin() as db:
+        robot = db.scalar(select(Robot).where(Robot.vehicle_id == "R001"))
+        user = db.scalar(select(User).where(User.username == "admin"))
+        assert robot and user
+        stop = _command_for_stop(
+            db, robot=robot, user=user, cmd="stop_motion", task=None, ack_status="accepted"
+        )
+        operation = StopOperation(
+            robot_id=robot.id,
+            stop_command_id=stop.command_id,
+            state="VERIFYING_STATIONARY",
+            motion_stop_state="VERIFYING_STATIONARY",
+            mission_cancel_state="NOT_REQUIRED",
+            requested_by=user.id,
+            stop_ack_deadline_at=now + timedelta(seconds=60),
+            stationary_verify_deadline_at=now + timedelta(seconds=60),
+        )
+        db.add(operation)
+        db.flush()
+        operation_id = operation.id
+        vehicle_id = robot.vehicle_id
+    # 每条 reconcile 都是「不同的独立观测」：server_received_at 逐帧递增。
+    for i in range(5):
+        get_redis().set(
+            f"robot:{vehicle_id}:latest",
+            json.dumps(
+                {
+                    "server_received_at": (now + timedelta(milliseconds=i)).isoformat(),
+                    "source_timestamp": (now + timedelta(milliseconds=i)).isoformat(),
+                    "linear_x": 0,
+                    "linear_y": 0,
+                    "angular_z": 0,
+                }
+            ),
+        )
+        with SessionLocal.begin() as db:
+            worker.reconcile_stop_operations(db, now)
+    with SessionLocal() as db:
+        operation = db.get(StopOperation, operation_id)
+        assert operation
+        assert operation.motion_stop_state == "STATIONARY_CONFIRMED"
+        assert operation.state == "VEHICLE_STATIONARY_CONFIRMED"
+
+
+def test_stop_operation_same_observation_does_not_confirm_stationary() -> None:
+    """同一条 latest 被 reconcile 反复读取 5 次，不得确认 STATIONARY_CONFIRMED。"""
+    worker = load_service("firebot_stop_dedup_test", "services/task-worker/main.py")
     now = datetime.now(UTC)
     with SessionLocal.begin() as db:
         robot = db.scalar(select(Robot).where(Robot.vehicle_id == "R001"))
@@ -603,8 +651,68 @@ def test_stop_operation_fresh_zero_velocity_confirms_stationary() -> None:
     with SessionLocal() as db:
         operation = db.get(StopOperation, operation_id)
         assert operation
-        assert operation.motion_stop_state == "STATIONARY_CONFIRMED"
-        assert operation.state == "VEHICLE_STATIONARY_CONFIRMED"
+        assert operation.motion_stop_state != "STATIONARY_CONFIRMED"
+        assert operation.state != "VEHICLE_STATIONARY_CONFIRMED"
+        # 同一观测只应计 1 帧，绝不按 worker 调度次数累计
+        assert operation.stationary_frames == 1
+
+
+def test_stop_operation_nonzero_velocity_resets_stationary_frames() -> None:
+    """第 3 帧出现非零速度时，连续静止帧重新计数，不提前确认。"""
+    worker = load_service("firebot_stop_reset_test", "services/task-worker/main.py")
+    now = datetime.now(UTC)
+    with SessionLocal.begin() as db:
+        robot = db.scalar(select(Robot).where(Robot.vehicle_id == "R001"))
+        user = db.scalar(select(User).where(User.username == "admin"))
+        assert robot and user
+        stop = _command_for_stop(
+            db, robot=robot, user=user, cmd="stop_motion", task=None, ack_status="accepted"
+        )
+        operation = StopOperation(
+            robot_id=robot.id,
+            stop_command_id=stop.command_id,
+            state="VERIFYING_STATIONARY",
+            motion_stop_state="VERIFYING_STATIONARY",
+            mission_cancel_state="NOT_REQUIRED",
+            requested_by=user.id,
+            stop_ack_deadline_at=now + timedelta(seconds=60),
+            stationary_verify_deadline_at=now + timedelta(seconds=60),
+        )
+        db.add(operation)
+        db.flush()
+        operation_id = operation.id
+        vehicle_id = robot.vehicle_id
+
+    def feed(i: int, vx: float) -> None:
+        get_redis().set(
+            f"robot:{vehicle_id}:latest",
+            json.dumps(
+                {
+                    "server_received_at": (now + timedelta(milliseconds=i)).isoformat(),
+                    "source_timestamp": (now + timedelta(milliseconds=i)).isoformat(),
+                    "linear_x": vx,
+                    "linear_y": 0,
+                    "angular_z": 0,
+                }
+            ),
+        )
+        with SessionLocal.begin() as db:
+            worker.reconcile_stop_operations(db, now)
+
+    feed(0, 0.0)
+    feed(1, 0.0)
+    feed(2, 0.5)  # 第 3 帧非零速度：连续静止计数清零
+    with SessionLocal() as db:
+        operation = db.get(StopOperation, operation_id)
+        assert operation and operation.stationary_frames == 0
+    feed(3, 0.0)
+    feed(4, 0.0)
+    feed(5, 0.0)
+    with SessionLocal() as db:
+        operation = db.get(StopOperation, operation_id)
+        assert operation
+        assert operation.stationary_frames == 3
+        assert operation.motion_stop_state != "STATIONARY_CONFIRMED"
 
 
 def test_stop_operation_stale_telemetry_terminates_unconfirmed() -> None:

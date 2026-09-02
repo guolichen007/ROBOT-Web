@@ -663,6 +663,10 @@ class StopOperation(Base):
     motion_stop_state: Mapped[str] = mapped_column(String(40), default="WAITING_ACK")
     mission_cancel_state: Mapped[str] = mapped_column(String(40), default="NOT_REQUIRED")
     stationary_frames: Mapped[int] = mapped_column(Integer, default=0)
+    # 上一帧已消费的运动观测标识（去重用）：只有比它更新的独立观测才允许推进 stationary_frames。
+    last_stationary_observation_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     linear_threshold: Mapped[float] = mapped_column(Float, default=0.02)
     angular_threshold: Mapped[float] = mapped_column(Float, default=0.03)
     telemetry_freshness_ms: Mapped[int] = mapped_column(Integer, default=1000)

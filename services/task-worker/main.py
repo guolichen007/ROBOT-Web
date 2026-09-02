@@ -94,6 +94,48 @@ def stationary_observation(
     return fresh, stationary
 
 
+def observation_token(latest: dict) -> datetime | None:
+    """返回可用于静止帧去重的观测标识（可比较、单调的时间戳）。
+
+    优先 server_received_at（服务器接收时刻，单调）；缺失时回退 source_timestamp。
+    无法解析返回 None（视为无有效观测）。
+    """
+    for key in ("server_received_at", "source_timestamp"):
+        raw = latest.get(key)
+        if not raw:
+            continue
+        try:
+            token = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            continue
+        if token.tzinfo is None:
+            token = token.replace(tzinfo=UTC)
+        return token
+    return None
+
+
+def advance_stationary_frames(
+    fresh: bool,
+    stationary: bool,
+    token: datetime | None,
+    last_token: datetime | None,
+    current_frames: int,
+) -> tuple[int, datetime | None]:
+    """仅按「独立新鲜运动观测」推进静止帧计数，绝不按 worker reconcile 次数累计。
+
+    - stale（不新鲜）：帧清零，不确认。
+    - 同一观测再次 reconcile（token 不大于 last_token）：帧数不变（去重）。
+    - 新观测且静止：帧 +1，更新 last_token。
+    - 新观测且非静止（非零速度）：帧清零，更新 last_token。
+    """
+    if not fresh:
+        return 0, last_token
+    is_new = token is not None and (last_token is None or token > last_token)
+    if not is_new:
+        return current_frames, last_token
+    return (current_frames + 1 if stationary else 0), token
+
+
 def reconcile_robot_states(db, now: datetime) -> None:
     for robot in db.scalars(select(Robot)).all():
         integration = db.get(RobotIntegrationProfile, robot.id)
@@ -225,7 +267,15 @@ def reconcile_stop_operations(db, now: datetime) -> None:
                 linear_threshold=operation.linear_threshold,
                 angular_threshold=operation.angular_threshold,
             )
-            operation.stationary_frames = operation.stationary_frames + 1 if stationary else 0
+            operation.stationary_frames, operation.last_stationary_observation_at = (
+                advance_stationary_frames(
+                    fresh,
+                    stationary,
+                    observation_token(latest),
+                    operation.last_stationary_observation_at,
+                    operation.stationary_frames,
+                )
+            )
             physically_stationary = operation.stationary_frames >= 5
 
         def terminal(state: str, motion_state: str, failure_reason: str | None = None) -> None:
