@@ -1,4 +1,6 @@
 {
+  "snapshot_status": "HISTORICAL",
+  "current_ssot": "docs/现场状态/当前现场状态.md",
   "snapshot_date": "2026-08-31",
   "development_branch": "integration/server-web-real-vehicle-ready-v1",
   "server_web_code_base_sha": "8e63d5d8def6c60c0244505685e6305422f0cccc",

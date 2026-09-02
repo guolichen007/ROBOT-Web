@@ -59,6 +59,26 @@ marker_allow = {
     "docs/开发指南.md",
     "docs/发布检查清单.md",
 }
+# ---- 现场状态一致性：当前状态文档不得残留已废弃的固定运行基线 ----
+CURRENT_STATE_DOCS = {
+    "README.md",
+    "docs/现场状态/当前现场状态.md",
+    "docs/现场状态/approved-baseline.yaml",
+    "integration/ros1/vehicle-bridge/README.md",
+    "integration/ros1/vehicle-bridge/HANDOFF/CURRENT_STATE.md",
+    "integration/ros1/vehicle-bridge/HANDOFF/SAFETY.md",
+    "integration/ros1/vehicle-bridge/HANDOFF/NEXT_PHASE.md",
+}
+DEPRECATED_RUNTIME_MARKERS = (
+    "41bbaf4",
+    "13c8692",
+    "56e151e9",
+    "675b1a6",
+    "REAL_CONTROL=NOT_IMPLEMENTED",
+    "/home/tl/vehicle-bridge",
+)
+stale_state_hits: list[str] = []
+
 for path in files():
     relative = path.relative_to(ROOT).as_posix()
     text = path.read_text(encoding="utf-8")
@@ -76,11 +96,15 @@ for path in files():
         text,
     ):
         migration_metadata_hits.append(relative)
+    if relative in CURRENT_STATE_DOCS:
+        for marker in DEPRECATED_RUNTIME_MARKERS:
+            if marker in text:
+                stale_state_hits.append(f"{relative}:{marker}")
 
-if latest_hits or marker_hits or unpinned_actions or migration_metadata_hits:
+if latest_hits or marker_hits or unpinned_actions or migration_metadata_hits or stale_state_hits:
     raise SystemExit(
         "repository policy failed "
         f"latest={latest_hits} markers={marker_hits} unpinned={unpinned_actions} "
-        f"migration_metadata={migration_metadata_hits}"
+        f"migration_metadata={migration_metadata_hits} stale_state={stale_state_hits}"
     )
-print("repository policy OK: no latest, no production markers, actions pinned")
+print("repository policy OK: no latest, no production markers, actions pinned, no stale state markers")

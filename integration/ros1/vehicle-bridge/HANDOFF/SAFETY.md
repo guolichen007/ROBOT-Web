@@ -1,7 +1,8 @@
 # 安全边界
 
 ```text
-REAL_CONTROL=NOT_IMPLEMENTED
+CONTROL_CODE=PATROL_START,STOP_MOTION
+CONTROL_FIELD_VERIFIED=NO
 ```
 
 Bridge 只做通信层：MQTT 连接、协议校验、上行封装、下行转交、ROS 反馈重封装。

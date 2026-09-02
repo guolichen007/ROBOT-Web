@@ -48,16 +48,26 @@ fi
 [ -f packages/protocol-schemas/firebot-message-1.2.schema.json ] && echo "SCHEMA_1_2=PRESENT" || echo "SCHEMA_1_2=MISSING"
 [ -f packages/protocol-schemas/firebot-message-1.3.schema.json ] && echo "SCHEMA_1_3=PRESENT" || echo "SCHEMA_1_3=MISSING"
 
-# 6) firebot-vehicle-01 身份 + 实时投影 + 控制 flags（DB 权威，容器内查询）
-"${COMPOSE[@]}" exec -T api python -c \
-  "import json
+# 6) 车辆身份 + 实时投影 + 控制 flags（DB 权威，容器内查询；不硬编码车辆 ID）
+VEHICLE_ID="${FIREBOT_VERIFY_VEHICLE_ID:-}"
+case "$VEHICLE_ID" in
+  "")
+    echo "ROBOT=UNKNOWN（未提供 FIREBOT_VERIFY_VEHICLE_ID，fail-closed，不查默认车辆）"
+    ;;
+  *[!A-Za-z0-9_-]*)
+    echo "ROBOT=UNKNOWN（FIREBOT_VERIFY_VEHICLE_ID 含非法字符）"
+    ;;
+  *)
+    "${COMPOSE[@]}" exec -T api python -c \
+      "import json
 from app.db.session import SessionLocal
 from app.db.models import Robot, RobotIntegrationProfile
 from sqlalchemy import select
 db = SessionLocal()
-r = db.scalar(select(Robot).where(Robot.vehicle_id == 'firebot-vehicle-01'))
+r = db.scalar(select(Robot).where(Robot.vehicle_id == '$VEHICLE_ID'))
 p = db.get(RobotIntegrationProfile, r.id) if r else None
 print(json.dumps({
+  'vehicle_id': '$VEHICLE_ID',
   'exists': r is not None,
   'enabled': r.enabled if r else None,
   'online_state': r.online_state if r else None,
@@ -73,6 +83,11 @@ print(json.dumps({
   'bidirectional_bridge_verified': p.bidirectional_bridge_verified if p else None,
   'command_path_verified': p.command_path_verified if p else None,
   'cmd_vel_arbitration_verified': p.cmd_vel_arbitration_verified if p else None,
-}))" 2>/dev/null || echo "ROBOT firebot-vehicle-01=UNKNOWN（DB 查询失败）"
+}))" 2>/dev/null || echo "ROBOT $VEHICLE_ID=UNKNOWN（DB 查询失败）"
+    ;;
+esac
 
-echo "REAL_CONTROL=NOT_IMPLEMENTED"
+# 7) 控制能力分层（代码实现 ≠ 现场开放 ≠ 实车验收）
+echo "CONTROL_CODE=PATROL_START,STOP_MOTION"
+echo "CONTROL_FIELD_VERIFIED=NO"
+echo "ROS_COMPAT_DOWNLINK=NOT_IMPLEMENTED"

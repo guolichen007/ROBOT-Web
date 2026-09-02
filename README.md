@@ -14,13 +14,13 @@ ROBOT-Web 是智能灭火机器人项目的云端与 Web 平台。Robot Integrat
 
 ## 3. 当前版本与状态
 
-- 平台分支：`ui/youdao-light-hmi-v1`
+- 平台分支：`integration/server-web-real-vehicle-ready-v1`（实车 ready 支线；`ui/youdao-light-hmi-v1` 已冻结为历史 UI 支线）
 - 合同：`1.2.0`（frozen legacy）；Vehicle Bridge Contract `1.3`（current）
 - Schema：`1.2`（frozen legacy）+ `1.3`（current bridge contract）
 - 本机 DEV/TEST：可运行
-- **当前现场服务器：已部署**（运行基线 `41bbaf4…`，R0–R4 期间不升级、不重新部署）
-- **Vehicle Bridge R0–R4：待现场验收**（Bridge 运行基线 `13c8692…`）
-- 真实车辆控制：`NOT_IMPLEMENTED`
+- **当前现场状态唯一真相源**：[docs/现场状态/当前现场状态.md](docs/现场状态/当前现场状态.md)（机器可读见 [approved-baseline.yaml](docs/现场状态/approved-baseline.yaml)）
+- 服务器 J5 online/freshness 现场验收：PASS；J6-A STOP 状态机 / J6-S1 task-worker：PENDING
+- 车端控制：`PATROL_START`/`STOP_MOTION` 代码已实现，但现场下行闸未开放、实车控制未验收（`CONTROL_FIELD_VERIFIED=NO`）
 - 真车/真实视频：待现场接入
 
 ## 4. 架构
@@ -163,7 +163,7 @@ SERVER 公网默认只开放 80（跳转）、443（HTTPS/WSS/WebRTC gateway）�
 
 现场优先阅读：
 
-- [实车现场联调总览](docs/实车现场联调总览.md)（当前状态真相源）
+- [当前现场状态](docs/现场状态/当前现场状态.md)（当前状态真相源）
 - [车端Bridge部署与实车接口](docs/车端Bridge部署与实车接口.md)
 - [服务器与Web现场配合](docs/服务器与Web现场配合.md)
 - [FIREBOT_BRIDGE_CONTRACT_1.3](docs/FIREBOT_BRIDGE_CONTRACT_1.3.md)

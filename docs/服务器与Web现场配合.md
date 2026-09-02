@@ -26,14 +26,15 @@ Current：
 Phase E0 completed / Phase E1 preparing
 ```
 
-版本双轨（必须分开）：
+版本（当前批准基线）：
 
 ```text
-DEPLOYED_SERVER=41bbaf4398711fd940dde1818193a67d34e355c8
-SERVER_WEB_CANDIDATE=8e63d5d8def6c60c0244505685e6305422f0cccc
+DEVELOPMENT_BRANCH=integration/server-web-real-vehicle-ready-v1
+批准 SHA = 分支 HEAD（git rev-parse HEAD，不硬编码）
+部署校验 = FIREBOT_REQUIRE_SHA=<HEAD SHA>
 ```
 
-> 本轮文档同步不触发 server redeploy。
+> 历史基线（`41bbaf4` / `8e63d5d`）见历史交接文档，不再作为当前批准基线。
 
 ---
 
@@ -41,36 +42,37 @@ SERVER_WEB_CANDIDATE=8e63d5d8def6c60c0244505685e6305422f0cccc
 
 ```text
 目录：/opt/firebot/ROBOT-Web
-SERVER_RUNTIME_SHA=41bbaf4398711fd940dde1818193a67d34e355c8
+分支：integration/server-web-real-vehicle-ready-v1
+批准 SHA：以分支 HEAD 为准（不硬编码）
 ```
 
 先确认：
 
 ```bash
 cd /opt/firebot/ROBOT-Web
-git rev-parse HEAD   # 预期 41bbaf4398711fd940dde1818193a67d34e355c8
+git rev-parse HEAD   # 记录当前 SHA，用于部署校验与回滚
 ```
 
 ---
 
-## 2. 现场期间：禁止 / 允许（R0–R4 已完成，纪律仍适用）
+## 2. 现场期间：禁止 / 允许（R0–R4 已完成，纪律按批准流程演进）
 
 禁止：
 
 ```text
-git pull
-server-update.sh
-数据库 migration
 source_kind migration
-控制 flag 修改
+控制 flag 修改（FIREBOT_SUPPORTED_COMMANDS 不开放）
 secret 重建
 CA 重签 / 替换
 网络 / Tailscale / firewall 修改
 ```
 
-允许：
+允许（J5 已 pull+deploy、J6-S1 按批准流程受控执行）：
 
 ```text
+git fetch + git pull --ff-only 到批准 SHA（先记录/确认 SHA）
+只部署批准变更的服务（J6-S1 仅 task-worker，不整体重造）
+数据库 migration（仅随批准代码，且先备份）
 只读验证（readonly verify）
 服务健康检查
 MQTT 观察

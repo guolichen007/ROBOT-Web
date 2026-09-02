@@ -1,0 +1,45 @@
+# 现场状态 SSOT（机器可读批准基线）
+#
+# 这是「当前批准部署」与「代码实现 vs 现场验证」的唯一权威来源。
+# 历史验收记录只归档不改写（见 docs/archive/ 与各 *_验收记录 文档）。
+#
+# 原则：
+#   - 不散落硬编码 SHA：批准 SHA = development_branch 的 HEAD
+#     （部署时用 FIREBOT_REQUIRE_SHA 校验，观测值由部署脚本生成）。
+#   - 明确区分 code_implemented / config_enabled / field_verified 三种状态。
+schema_version: "1.0"
+
+development_branch: "integration/server-web-real-vehicle-ready-v1"
+# 批准 SHA 以分支 HEAD 为准（git rev-parse HEAD / git ls-remote），不在此硬编码。
+approved_sha_source: "integration/server-web-real-vehicle-ready-v1 HEAD"
+
+install:
+  bridge_dir: "/opt/firebot/vehicle-bridge"
+  control_dir: "/home/tl/firerobot_ws/src/firebot_control"
+  # install.sh 写入 APPROVED_RUNTIME.txt 留痕；旧版本保留 .previous 可一步回滚。
+
+control:
+  patrol:
+    code_implemented: true      # PATROL_START 代码路径已实现
+    config_enabled: false       # 现场 FIREBOT_SUPPORTED_COMMANDS 尚未开放
+    field_verified: false       # 真实运动尚未验收
+  stop_motion:
+    code_implemented: true      # STOP_MOTION 代码路径已实现（fail-closed）
+    config_enabled: false
+    field_verified: false       # 第一条 Web STOP 尚未验收
+  emergency_stop: "unavailable" # 真实实现未接入
+  reset_estop: "unavailable"
+
+telemetry:
+  battery_real: false           # 现场仍为 TEST_INJECTED
+  smoke_real: false
+  motion_velocity_verified: false   # 真实 /odom→MQTT→服务器 速度链尚未现场验证
+  location_enabled: false       # FIREBOT_LOCATION_ENABLED=false（地图身份未确认）
+  cmd_vel_arbitration_verified: false
+  ros_compat_downlink: "NOT_IMPLEMENTED"  # ROS compat 仍为只读
+
+integration:
+  j5_server_state_chain: "PASS"        # 服务器 online/freshness 现场验收通过
+  j6_a_stop_state_machine: "PENDING"   # 待服务器完整环境跑
+  j6_s1_task_worker: "PENDING"
+  vehicle_first_deploy: "NOT_DEPLOYED" # 车端正式 60f/J6-R2 runtime 尚未部署

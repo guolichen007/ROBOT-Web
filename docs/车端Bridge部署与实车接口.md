@@ -6,17 +6,16 @@
 
 ---
 
-## 0. 当前首车现场状态（Bridge-only 隔离运行）
+## 0. 当前首车现场状态
 
-当前首车**不是** `/opt` 标准安装形态，而是 `/home/tl/vehicle-bridge` + systemd 直接运行 Python 包：
+正式安装形态为 `/opt/firebot/vehicle-bridge`（install.sh 原子切换 + APPROVED_RUNTIME.txt 留痕）：
 
 ```text
 VEHICLE_OS=Ubuntu 20.04
-BRIDGE_FIELD_PATH=/home/tl/vehicle-bridge
+BRIDGE_INSTALL_DIR=/opt/firebot/vehicle-bridge
 SYSTEMD_UNIT=/etc/systemd/system/firebot-bridge.service
-WorkingDirectory=/home/tl/vehicle-bridge
-ExecStart=/usr/bin/python3 -m firebot_bridge.main
-ROS_MASTER_URI=http://127.0.0.1:1   （process-local ROS isolation）
+ExecStart=/bin/bash /opt/firebot/vehicle-bridge/run_bridge.sh /etc/firebot/bridge.env
+ROS_MASTER_URI：经 FIREBOT_ROS_SETUP / FIREBOT_ROS_WORKSPACE_SETUP 环境注入
 ```
 
 当前：
@@ -25,16 +24,17 @@ ROS_MASTER_URI=http://127.0.0.1:1   （process-local ROS isolation）
 commands=[]
 sensors=[]
 location_enabled=false
-real control=NOT_IMPLEMENTED
+CONTROL_CODE=PATROL_START,STOP_MOTION、CONTROL_FIELD_VERIFIED=NO
 ```
 
-R0–R4 已完成，**不再把“R2 启动 roscore”当成当前下一步**。当前下一步是：
+J6 支线已取代旧 `/home/tl/vehicle-bridge` Bridge-only 隔离形态；历史冻结基线 `13c8692` 见历史交接文档。
+当前下一步（实车控制未开放，须按批准流程）：
 
 ```text
-Phase E1 = read-only ROS source discovery
+车端 Pull 批准 SHA → Bridge/Control 安装 → catkin_make → 静态 ROS 验证 → 再开放 stop_motion
 ```
 
-> 本次任务**禁止**执行 Phase E1。
+> 本次任务**禁止**真实运动；`FIREBOT_SUPPORTED_COMMANDS` 不开放。
 
 标准 `/opt/install.sh` 部署路线见下方第 2–3 节，继续保留为通用部署资产（第二台车从零部署仍按它走）。
 
@@ -42,22 +42,19 @@ Phase E1 = read-only ROS source discovery
 
 ## 1. Git 来源与批准基线
 
-仓库：`guolichen007/ROBOT-Web`。现场 Bridge 运行时代码冻结基线为：
+仓库：`guolichen007/ROBOT-Web`。车端 Bridge/Control 的**唯一源码权威**是分支
+`integration/server-web-real-vehicle-ready-v1`，批准 SHA = 该分支 HEAD（不硬编码）。
 
-```text
-13c869247079b88da11b36666755906001a0041c
-```
-
-**不要写“拉最新代码”**。现场安装运行时，优先使用明确批准的 Bridge runtime SHA：
+**不要写“拉最新代码”**。现场安装时用明确记录的 HEAD SHA 做校验与留痕：
 
 ```bash
 git fetch origin
-git checkout ui/youdao-light-hmi-v1
-git checkout 13c869247079b88da11b36666755906001a0041c
-git rev-parse HEAD   # 必须输出 13c869247079b88da11b36666755906001a0041c
+git checkout integration/server-web-real-vehicle-ready-v1
+git pull --ff-only origin integration/server-web-real-vehicle-ready-v1
+git rev-parse HEAD   # 记录此 SHA，作为 FIREBOT_REQUIRE_SHA 与回滚锚点
 ```
 
-> 文档收尾 commit 不改变 Bridge runtime。分支 HEAD 可能比 `13c8692` 新，但那只是文档变更。
+> 历史冻结基线 `13c8692` / 分支 `ui/youdao-light-hmi-v1` 已由 J6 支线取代，见历史交接文档。
 
 ---
 

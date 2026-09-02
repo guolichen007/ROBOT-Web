@@ -1,10 +1,13 @@
-# 当前首车现场状态（2026-08-31）
+# 当前首车现场状态
+
+> 历史快照：本文件保留 2026-08-31 现场验证证据（不改写历史 PASS）。
+> 当前状态唯一真相源已迁移到 [`docs/现场状态/当前现场状态.md`](../../../../docs/现场状态/当前现场状态.md)。
 
 ## 版本
 
 ```text
-批准 runtime = 56e151e9c3cf061e0c706011b39c41fff44dd83a（2026-08-31 U2 freshness 现场验证代码）
-服务器现场   = 41bbaf4398711fd940dde1818193a67d34e355c8
+批准基线 = integration/server-web-real-vehicle-ready-v1 HEAD（以 git rev-parse 为准，不硬编码 SHA）
+安装目录 = /opt/firebot/vehicle-bridge（正式运行副本，install.sh 原子切换 + APPROVED_RUNTIME.txt 留痕）
 ```
 
 ## 现场运行形态（firebot-vehicle-02 现场验证）
@@ -70,7 +73,7 @@ REAL_MOTION_VERIFIED                   = NO
 ```text
 FIREBOT_SUPPORTED_COMMANDS=patrol（仅 patrol；firebot-vehicle-02 现场配置，非产品默认）
 其它控制能力（manual/stop/estop/reset/return/extinguish/cancel）= 未开放
-REAL_CONTROL=NOT_IMPLEMENTED（真实运动仍未实现/未验证）
+CONTROL_CODE=PATROL_START,STOP_MOTION、CONTROL_FIELD_VERIFIED=NO（真实运动仍未验收）
 ```
 
-PID / boot_id 是运行时易变值，固定身份只有 `56e151e`。
+PID / boot_id 是运行时易变值，固定身份只有 APPROVED_RUNTIME.txt 记录的来源 SHA。

@@ -4,19 +4,19 @@
 > 边界：**只做 Bridge 通信层**。不实现任何真实车辆运动/巡航/急停/灭火/回充/手动控制。真实执行由车端 ROS 控制程序后续实现。
 > 协议契约见 [`docs/FIREBOT_BRIDGE_CONTRACT_1.3.md`](../../../docs/FIREBOT_BRIDGE_CONTRACT_1.3.md)。
 
-## 当前首车现场状态（2026-08-26）
+## 当前首车现场状态
 
 ```text
-批准 runtime = 13c869247079b88da11b36666755906001a0041c
-现场运行路径 = /home/tl/vehicle-bridge（非 /opt 标准安装形态）
-运行方式     = systemd firebot-bridge.service → /usr/bin/python3 -m firebot_bridge.main
-ROS isolation = process-local，ROS_MASTER_URI=http://127.0.0.1:1
+批准基线     = integration/server-web-real-vehicle-ready-v1 HEAD（以 git rev-parse 为准，不硬编码 SHA）
+正式安装目录 = /opt/firebot/vehicle-bridge（install.sh 原子切换 + APPROVED_RUNTIME.txt 留痕）
+运行方式     = systemd firebot-bridge.service → bash run_bridge.sh（ROS 路径经环境变量）
 
-当前安全态：commands=[]、sensors=[]、location_enabled=false、REAL_CONTROL=NOT_IMPLEMENTED
-当前 Gate：Bridge communication/operation、broker reconnect、graceful stop、LWT、
+当前安全态：commands=[]、sensors=[]、location_enabled=false
+控制能力   ：CONTROL_CODE=PATROL_START,STOP_MOTION、CONTROL_FIELD_VERIFIED=NO
+当前 Gate  ：Bridge communication/operation、broker reconnect、graceful stop、LWT、
           systemd recovery、short soak 均 PASS；long soak DEFERRED；Web UI NOT_CHECKED。
 
-现场日常启停/状态/大屏见 HANDOFF/：`HANDOFF/README.md`
+现场日常启停/状态/大屏见 HANDOFF/：`HANDOFF/README.md`；当前状态真相源见 docs/现场状态/。
 ```
 
 ## 职责
@@ -169,5 +169,5 @@ sudo systemctl start firebot-bridge
 
 ## 验收边界
 
-本轮正确结果：`REAL_PATROL/REAL_STOP/REAL_ESTOP/REAL_EXTINGUISH/REAL_MANUAL_CONTROL = NOT_IMPLEMENTED`。
+本轮正确结果：`PATROL_START`/`STOP_MOTION` 代码已实现（`CONTROL_CODE`），但 `CONTROL_FIELD_VERIFIED=NO`；`emergency_stop`/`reset_estop` 未实现。
 绝不因 MQTT 命令到达就标记"真实控制已验证"。

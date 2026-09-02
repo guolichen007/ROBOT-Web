@@ -26,8 +26,21 @@ env_value() {
 
 [ "$(env_value BRIDGE_STUB_MODE)" = "false" ] \
   || fail "BRIDGE_STUB_MODE must be false"
-[ -z "$(env_value FIREBOT_SUPPORTED_COMMANDS)" ] \
-  || fail "FIREBOT_SUPPORTED_COMMANDS must be empty"
+# 代码已实现但尚未现场验收的命令白名单；只拒绝「代码未实现」的声明，
+# 不把「supported_commands 必须为空」当作永久合同（未来逐命令开放时在此扩展）。
+IMPLEMENTED_CMDS="patrol,stop_motion"
+declared_supported="$(env_value FIREBOT_SUPPORTED_COMMANDS)"
+if [ -n "$declared_supported" ]; then
+  for c in $(echo "$declared_supported" | tr ',' ' '); do
+    case ",$IMPLEMENTED_CMDS," in
+      *",$c,"*) ;;
+      *) fail "FIREBOT_SUPPORTED_COMMANDS 声明了未实现的命令: $c" ;;
+    esac
+  done
+  echo "  注意：FIREBOT_SUPPORTED_COMMANDS=$declared_supported（控制尚未现场验收，须人工确认与 approved capability 一致）"
+else
+  echo "  FIREBOT_SUPPORTED_COMMANDS 为空（控制未开放，符合当前 approved capability）"
+fi
 [ -z "$(env_value FIREBOT_SENSORS)" ] \
   || fail "FIREBOT_SENSORS must be empty"
 [ "$(env_value FIREBOT_LOCATION_ENABLED)" = "false" ] \
@@ -37,21 +50,15 @@ env_value() {
 show_val() { systemctl show "$UNIT" -p "$1" --value 2>/dev/null || true; }
 
 EFF_USER="$(show_val User)"
-EFF_WD="$(show_val WorkingDirectory)"
 EFF_EXEC="$(show_val ExecStart)"
-EFF_ENV="$(show_val Environment)"
 
 [ "$EFF_USER" = "tl" ] \
   || fail "effective User must be tl (got: $EFF_USER)"
-[ "$EFF_WD" = "/home/tl/vehicle-bridge" ] \
-  || fail "effective WorkingDirectory must be /home/tl/vehicle-bridge (got: $EFF_WD)"
+# 当前 /opt 正式安装架构：ExecStart=/bin/bash /opt/firebot/vehicle-bridge/run_bridge.sh <env>。
+# 不再要求旧形态 WorkingDirectory=/home/tl/vehicle-bridge 或 python3 -m firebot_bridge.main。
 case "$EFF_EXEC" in
-  *python3*firebot_bridge.main*) ;;
-  *) fail "effective ExecStart must run python3 -m firebot_bridge.main (got: $EFF_EXEC)" ;;
-esac
-case "$EFF_ENV" in
-  *ROS_MASTER_URI=http://127.0.0.1:1*) ;;
-  *) fail "effective Environment must contain ROS_MASTER_URI=http://127.0.0.1:1" ;;
+  *"/run_bridge.sh"*) ;;
+  *) fail "effective ExecStart must reference run_bridge.sh (got: $EFF_EXEC)" ;;
 esac
 
 # ---- status.json helpers ----
