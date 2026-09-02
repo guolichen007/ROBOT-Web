@@ -510,6 +510,103 @@ def test_stop_operation_keeps_physical_stop_separate_from_cancel_timeout() -> No
         assert operation.failure_reason == "TASK_CANCEL_TIMEOUT"
 
 
+def test_stop_operation_stationary_confirmed_not_downgraded_by_stale_telemetry() -> None:
+    """已确认物理静止后，后续陈旧遥测不得把 motion_stop_state 降级。"""
+    worker = load_service("firebot_stop_monotonic", "services/task-worker/main.py")
+    now = datetime.now(UTC)
+    with SessionLocal.begin() as db:
+        robot = db.scalar(select(Robot).where(Robot.vehicle_id == "R001"))
+        user = db.scalar(select(User).where(User.username == "admin"))
+        assert robot and user
+        stop = _command_for_stop(
+            db, robot=robot, user=user, cmd="stop_motion", task=None, ack_status="accepted"
+        )
+        cancel = _command_for_stop(
+            db, robot=robot, user=user, cmd="cancel_task", task=None, ack_status="accepted"
+        )
+        operation = StopOperation(
+            robot_id=robot.id,
+            stop_command_id=stop.command_id,
+            cancel_command_id=cancel.command_id,
+            state="STATIONARY_CONFIRMED_CANCEL_PENDING",
+            motion_stop_state="STATIONARY_CONFIRMED",
+            mission_cancel_state="ACK_ACCEPTED",
+            requested_by=user.id,
+            stop_ack_deadline_at=now + timedelta(seconds=5),
+            cancel_deadline_at=now + timedelta(seconds=60),
+            stationary_verify_deadline_at=now + timedelta(seconds=60),
+        )
+        db.add(operation)
+        db.flush()
+        operation_id = operation.id
+        vehicle_id = robot.vehicle_id
+    get_redis().set(
+        f"robot:{vehicle_id}:latest",
+        json.dumps(
+            {
+                "server_received_at": (now - timedelta(seconds=30)).isoformat(),
+                "linear_x": 0,
+                "linear_y": 0,
+                "angular_z": 0,
+            }
+        ),
+    )
+    with SessionLocal.begin() as db:
+        worker.reconcile_stop_operations(db, now)
+    with SessionLocal() as db:
+        operation = db.get(StopOperation, operation_id)
+        assert operation
+        assert operation.motion_stop_state == "STATIONARY_CONFIRMED"
+        assert operation.state == "STATIONARY_CONFIRMED_CANCEL_PENDING"
+
+
+def test_stop_operation_fresh_zero_velocity_confirms_stationary() -> None:
+    """连续 fresh 零速度帧达到阈值后确认 STATIONARY_CONFIRMED。"""
+    worker = load_service("firebot_stop_confirm", "services/task-worker/main.py")
+    now = datetime.now(UTC)
+    with SessionLocal.begin() as db:
+        robot = db.scalar(select(Robot).where(Robot.vehicle_id == "R001"))
+        user = db.scalar(select(User).where(User.username == "admin"))
+        assert robot and user
+        stop = _command_for_stop(
+            db, robot=robot, user=user, cmd="stop_motion", task=None, ack_status="accepted"
+        )
+        operation = StopOperation(
+            robot_id=robot.id,
+            stop_command_id=stop.command_id,
+            state="VERIFYING_STATIONARY",
+            motion_stop_state="VERIFYING_STATIONARY",
+            mission_cancel_state="NOT_REQUIRED",
+            requested_by=user.id,
+            stop_ack_deadline_at=now + timedelta(seconds=60),
+            stationary_verify_deadline_at=now + timedelta(seconds=60),
+        )
+        db.add(operation)
+        db.flush()
+        operation_id = operation.id
+        vehicle_id = robot.vehicle_id
+    get_redis().set(
+        f"robot:{vehicle_id}:latest",
+        json.dumps(
+            {
+                "server_received_at": now.isoformat(),
+                "source_timestamp": now.isoformat(),
+                "linear_x": 0,
+                "linear_y": 0,
+                "angular_z": 0,
+            }
+        ),
+    )
+    for _ in range(5):
+        with SessionLocal.begin() as db:
+            worker.reconcile_stop_operations(db, now)
+    with SessionLocal() as db:
+        operation = db.get(StopOperation, operation_id)
+        assert operation
+        assert operation.motion_stop_state == "STATIONARY_CONFIRMED"
+        assert operation.state == "VEHICLE_STATIONARY_CONFIRMED"
+
+
 def test_stop_operation_stale_telemetry_terminates_unconfirmed() -> None:
     worker = load_service("firebot_stop_stale_test", "services/task-worker/main.py")
     now = datetime.now(UTC)

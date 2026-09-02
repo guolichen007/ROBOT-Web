@@ -210,18 +210,23 @@ def reconcile_stop_operations(db, now: datetime) -> None:
         # --- physical stationary truth: always verify telemetry, even when
         # the stop ACK is lost. A missing ACK must never suppress the
         # independent velocity check. ---
-        robot = db.get(Robot, operation.robot_id)
-        raw = redis.get(f"robot:{robot.vehicle_id}:latest") if robot else None
-        latest = json.loads(raw) if raw else {}
-        fresh, stationary = stationary_observation(
-            latest,
-            now,
-            freshness_ms=operation.telemetry_freshness_ms,
-            linear_threshold=operation.linear_threshold,
-            angular_threshold=operation.angular_threshold,
-        )
-        operation.stationary_frames = operation.stationary_frames + 1 if stationary else 0
-        physically_stationary = operation.stationary_frames >= 5
+        # 物理静止确认是单调事实：一旦 STATIONARY_CONFIRMED，后续 reconcile 不得因
+        # cancel/ACK timeout、telemetry 缺失/陈旧、帧数不足等原因重新降级。
+        if operation.motion_stop_state == "STATIONARY_CONFIRMED":
+            physically_stationary = True
+        else:
+            robot = db.get(Robot, operation.robot_id)
+            raw = redis.get(f"robot:{robot.vehicle_id}:latest") if robot else None
+            latest = json.loads(raw) if raw else {}
+            fresh, stationary = stationary_observation(
+                latest,
+                now,
+                freshness_ms=operation.telemetry_freshness_ms,
+                linear_threshold=operation.linear_threshold,
+                angular_threshold=operation.angular_threshold,
+            )
+            operation.stationary_frames = operation.stationary_frames + 1 if stationary else 0
+            physically_stationary = operation.stationary_frames >= 5
 
         def terminal(state: str, motion_state: str, failure_reason: str | None = None) -> None:
             operation.state = state
@@ -250,7 +255,9 @@ def reconcile_stop_operations(db, now: datetime) -> None:
                 else:
                     terminal("PARTIAL_UNCONFIRMED", "STATIONARY_CONFIRMED", "STOP_ACK_UNCONFIRMED")
             elif operation.mission_cancel_state in {"UNAVAILABLE", "UNCONFIRMED"}:
-                terminal("PARTIAL_UNCONFIRMED", "STATIONARY_CONFIRMED", "TASK_CANCEL_UNCONFIRMED")
+                # 保留已设置的 failure_reason（如 TASK_CANCEL_TIMEOUT），不要用统一值覆盖
+                reason = operation.failure_reason or "TASK_CANCEL_UNCONFIRMED"
+                terminal("PARTIAL_UNCONFIRMED", "STATIONARY_CONFIRMED", reason)
             else:
                 operation.motion_stop_state = "STATIONARY_CONFIRMED"
                 operation.state = "STATIONARY_CONFIRMED_CANCEL_PENDING"
