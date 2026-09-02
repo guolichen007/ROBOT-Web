@@ -466,9 +466,9 @@ class MockRobot:
 
     def execute_command(self, command: dict) -> None:
         if command["command_id"] in self.processed:
-            ack, statuses = self.processed[command["command_id"]]
+            ack, cached_statuses = self.processed[command["command_id"]]
             self.publish("command_ack", ack, 1)
-            for status in statuses[-1:]:
+            for status in cached_statuses[-1:]:
                 self.publish("task_status", status, 1)
             return
         if datetime.fromisoformat(command["expires_at"]) <= datetime.now(UTC):
@@ -517,9 +517,9 @@ class MockRobot:
                 self.active_task_id = None
             # Terminate the active mission on the platform side too, preserving
             # the resume cursor so the operator can continue after reset.
-            statuses: list[dict] = []
+            estop_statuses: list[dict] = []
             if interrupted_task_id:
-                statuses.append(
+                estop_statuses.append(
                     self.task_status(
                         interrupted_task_id,
                         "cancelled",
@@ -540,7 +540,7 @@ class MockRobot:
             with self.lock:
                 self.active_execution = None
             ack = self.ack(command, "accepted")
-            self.processed[command["command_id"]] = (ack, statuses)
+            self.processed[command["command_id"]] = (ack, estop_statuses)
             return
         if cmd == "reset_estop":
             with self.lock:
@@ -563,11 +563,11 @@ class MockRobot:
                 self.linear = self.angular = 0
                 self.mode = "IDLE"
             ack = self.ack(command, "accepted")
-            statuses: list[dict] = []
+            cancel_statuses: list[dict] = []
             if task_id:
                 # Preserve the resume cursor so the operator can continue from
                 # the interrupted point instead of restarting from REMOTE.
-                statuses.append(
+                cancel_statuses.append(
                     self.task_status(
                         task_id,
                         "cancelled",
@@ -585,7 +585,7 @@ class MockRobot:
                         ),
                     )
                 )
-            self.processed[command["command_id"]] = (ack, statuses)
+            self.processed[command["command_id"]] = (ack, cancel_statuses)
             return
         if cmd in {"patrol", "extinguish", "return_dock"}:
             if self.active_task_id:
