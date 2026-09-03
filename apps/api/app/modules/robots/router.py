@@ -60,12 +60,7 @@ def robot_detail(
     return serialize_model(find_robot(db, robot_id))
 
 
-@router.get("/{robot_id}/assignment")
-def robot_assignment(
-    robot_id: str,
-    db: DbSession,
-    _: AuthContext = Depends(require_permission("robot.read")),
-) -> dict:
+def build_robot_assignment(db, robot) -> dict:
     """服务器权威的 Fleet assignment（复用 Robot/Site/Map/MapVersion，不重复存）。"""
     from app.db.models import (
         Map,
@@ -75,7 +70,6 @@ def robot_assignment(
         StopOperation,
     )
 
-    robot = find_robot(db, robot_id)
     assignment = db.get(RobotFleetAssignment, robot.id)
     site = db.get(Site, robot.site_id) if robot.site_id else None
     map_row = db.get(Map, robot.current_map_id) if robot.current_map_id else None
@@ -100,6 +94,12 @@ def robot_assignment(
         and stop_verified.boot_id_snapshot
         and stop_verified.boot_id_snapshot == robot.boot_id
     )
+    stop_id = stop_verified.id if stop_verified else None
+    stop_at = (
+        stop_verified.terminal_at.isoformat()
+        if stop_verified and stop_verified.terminal_at
+        else None
+    )
 
     return {
         "device_id": robot.vehicle_id,
@@ -112,13 +112,31 @@ def robot_assignment(
         "supported_commands": assignment.supported_commands_json if assignment else [],
         "assignment_revision": assignment.revision if assignment else 0,
         "stop_field_verified": stop_field_verified,
-        "stop_operation_id": stop_verified.id if stop_field_verified else None,
-        "stop_verified_at": (
-            stop_verified.terminal_at.isoformat()
-            if stop_field_verified and stop_verified.terminal_at
-            else None
-        ),
+        "stop_operation_id": stop_id if stop_field_verified else None,
+        "stop_verified_at": stop_at if stop_field_verified else None,
     }
+
+
+@router.get("/{robot_id}/assignment")
+def robot_assignment(
+    robot_id: str,
+    db: DbSession,
+    _: AuthContext = Depends(require_permission("robot.read")),
+) -> dict:
+    return build_robot_assignment(db, find_robot(db, robot_id))
+
+
+@router.get("/{robot_id}/assignment/device")
+def robot_assignment_device(
+    robot_id: str,
+    db: DbSession,
+    device_token: str = Header(default="", alias="X-Device-Token"),
+) -> dict:
+    """车端设备认证读取 assignment（firebotctl profile-sync 使用，不要求 Web 用户 JWT）。"""
+    robot = find_robot(db, robot_id)
+    if not _verify_device_token(db, robot, device_token):
+        raise HTTPException(401, "device token 无效")
+    return build_robot_assignment(db, robot)
 
 
 def _bump_assignment(db, robot):

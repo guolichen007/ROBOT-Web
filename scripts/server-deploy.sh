@@ -49,7 +49,11 @@ require_sha() {
     echo "ERROR: git HEAD($head) != TARGET_SHA($TARGET_SHA)，禁止部署非精确版本" >&2
     exit 1
   fi
-  if [ -n "$(git status --porcelain)" ]; then
+  local dirty
+  dirty="$(git status --porcelain)"
+  # 服务器模式唯一允许的历史合法 probe（scripts/r1_patrol_probe.sh）；其余任何 dirty 一律 FAIL。
+  dirty="$(printf '%s\n' "$dirty" | grep -v '^?? scripts/r1_patrol_probe.sh$' || true)"
+  if [ -n "$dirty" ]; then
     echo "ERROR: 工作区不干净（含 untracked/staged 变更），先提交/清理再部署" >&2
     exit 1
   fi

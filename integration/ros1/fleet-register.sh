@@ -41,6 +41,18 @@ mkdir -p "$(dirname "$MOSQUITTO_PASSWD_FILE")"
 PASSWORD="$(openssl rand -hex 24)"
 mosquitto_passwd -b "$MOSQUITTO_PASSWD_FILE" "$DEVICE_ID" "$PASSWORD"
 
+# ---- 2.5) canonical ACL 落地（权威模板 infra/mosquitto/acl.example → secrets/mosquitto/acl）----
+CANONICAL_ACL="infra/mosquitto/acl.example"
+RUNTIME_ACL="./secrets/mosquitto/acl"
+if [ -f "$CANONICAL_ACL" ]; then
+  if [ -f "$RUNTIME_ACL" ] && ! cmp -s "$CANONICAL_ACL" "$RUNTIME_ACL"; then
+    echo "FLEET_REGISTER=FAIL（canonical ACL 与 runtime ACL 不一致，禁止用旧 ACL 部署）" >&2
+    exit 1
+  fi
+  cp "$CANONICAL_ACL" "$RUNTIME_ACL"
+  echo "  canonical ACL 已同步到 $RUNTIME_ACL（%u pattern）"
+fi
+
 # ---- 3) credential 真正生效（config-init 同步 source → volume → restart → healthy → TLS 验证）----
 CA_CERT="${FIREBOT_MOSQUITTO_CA:-./secrets/mosquitto/certs/ca.crt}"
 MQTT_PORT="$("${COMPOSE[@]}" port mosquitto 8883 2>/dev/null | sed 's/.*://' || echo 8883)"
@@ -115,5 +127,5 @@ echo ""
 echo "FLEET_REGISTER=PASS device_id=$DEVICE_ID"
 echo "MQTT_USERNAME=$DEVICE_ID"
 echo "ENROLL_TOKEN=$ENROLL_TOKEN"
-echo "DEVICE_TOKEN=$DEVICE_TOKEN"
-echo "  交付：管理员经 Tailscale/一次性通道把 token 交给现场；车辆执行 firebotctl vehicle enroll $DEVICE_ID --token $ENROLL_TOKEN"
+echo "  交付：管理员经 Tailscale/一次性通道把 enrollment token 交给现场；车辆执行 firebotctl vehicle enroll $DEVICE_ID --token $ENROLL_TOKEN"
+echo "  注：设备长期 API token（device_token）由 enrollment API 一次性安全下发给车辆，不在本输出打印。"

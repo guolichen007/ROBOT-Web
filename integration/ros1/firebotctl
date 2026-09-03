@@ -55,7 +55,8 @@ server_base_url() { echo "${FIREBOT_SERVER_URL%/}"; }
 server_get_assignment() {
   local did="$1"
   curl -sf --cacert /etc/firebot/production-ca.crt \
-    "$(server_base_url)/api/v1/robots/$did/assignment" 2>/dev/null || true
+    -H "X-Device-Token: $(device_token_value)" \
+    "$(server_base_url)/api/v1/robots/$did/assignment/device" 2>/dev/null || true
 }
 
 server_put_assignment() {
@@ -72,11 +73,17 @@ require_sha() {
 }
 
 # 自动同步批准 SHA：fetch + checkout --detach，禁止 reset/stash/改代码。
+# mode=server 允许唯一既有 probe（scripts/r1_patrol_probe.sh）；mode=vehicle 要求完全 clean。
 release_sync() {
-  local sha="$1"
+  local sha="$1" mode="${2:-vehicle}"
   require_sha "$sha"
-  if [ -n "$(git -C "$REPO_DIR" status --porcelain 2>/dev/null)" ]; then
-    echo "ERROR: ROBOT-Web 工作区不干净，禁止自动 checkout" >&2
+  local dirty
+  dirty="$(git -C "$REPO_DIR" status --porcelain 2>/dev/null)"
+  if [ "$mode" = "server" ]; then
+    dirty="$(printf '%s\n' "$dirty" | grep -v '^?? scripts/r1_patrol_probe.sh$' || true)"
+  fi
+  if [ -n "$dirty" ]; then
+    echo "ERROR: ROBOT-Web 工作区不干净（含 untracked/staged 变更），禁止自动 checkout" >&2
     exit 1
   fi
   git -C "$REPO_DIR" fetch origin 2>/dev/null || true
@@ -478,39 +485,47 @@ vehicle_support_bundle() {
 # ================= 服务器 =================
 cmd_server() {
   local sub="${1:-}"; shift || true
-  case "$sub" in
-    deploy)
-      local sha=""; while [ $# -gt 0 ]; do case "$1" in --sha) sha="$2"; shift 2;; *) shift;; esac; done
-      require_sha "$sha"
-      release_sync "$sha"
-      TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" preflight
-      # 自动 migration：DB revision != 目标 head 时，先真实 pg_dump 备份再 migrate
-      if ! TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" migration-needed; then
-        TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" backup
-        TARGET_SHA="$sha" BACKUP_VERIFIED=1 "$REPO_DIR/scripts/server-deploy.sh" migrate
-      fi
-      TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" all-app
-      TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" verify ;;
-    verify) "$REPO_DIR/scripts/server-deploy.sh" verify ;;
-    rollback) "$REPO_DIR/scripts/server-deploy.sh" rollback ;;
-    support-bundle)
-      echo "SERVER_SUPPORT_BUNDLE=见 scripts/server-deploy.sh manifest + docker compose logs" ;;
-    *) echo "firebotctl server <deploy|verify|rollback|support-bundle>" >&2; exit 1 ;;
-  esac
+  # 服务器操作依赖 .env.server / docker-compose.server.yml / ./secrets 的相对路径，必须 cd 到仓库根执行。
+  (
+    cd "$REPO_DIR"
+    case "$sub" in
+      deploy)
+        local sha=""; while [ $# -gt 0 ]; do case "$1" in --sha) sha="$2"; shift 2;; *) shift;; esac; done
+        require_sha "$sha"
+        release_sync "$sha" server
+        TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" preflight
+        # 自动 migration：DB revision != 目标 head 时，先真实 pg_dump 备份再 migrate
+        if ! TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" migration-needed; then
+          TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" backup
+          TARGET_SHA="$sha" BACKUP_VERIFIED=1 "$REPO_DIR/scripts/server-deploy.sh" migrate
+        fi
+        TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" all-app
+        TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" verify ;;
+      verify) "$REPO_DIR/scripts/server-deploy.sh" verify ;;
+      rollback) "$REPO_DIR/scripts/server-deploy.sh" rollback ;;
+      support-bundle)
+        echo "SERVER_SUPPORT_BUNDLE=见 scripts/server-deploy.sh manifest + docker compose logs" ;;
+      *) echo "firebotctl server <deploy|verify|rollback|support-bundle>" >&2; exit 1 ;;
+    esac
+  )
 }
 
 # ================= 舰队 =================
 cmd_fleet() {
   local sub="${1:-}"; shift || true
-  case "$sub" in
-    register)
-      local did="${1:-}"
-      [ -n "$did" ] || { echo "用法: firebotctl fleet register <DEVICE_ID>" >&2; exit 1; }
-      "$SCRIPT_DIR/fleet-register.sh" "$did" ;;
-    status)
-      echo "FLEET_STATUS=见服务器 Robot/IntegrationProfile（firebotctl server verify）" ;;
-    *) echo "firebotctl fleet <register|status>" >&2; exit 1 ;;
-  esac
+  # fleet-register 依赖 ./secrets/mosquitto 等相对路径，必须 cd 到仓库根执行。
+  (
+    cd "$REPO_DIR"
+    case "$sub" in
+      register)
+        local did="${1:-}"
+        [ -n "$did" ] || { echo "用法: firebotctl fleet register <DEVICE_ID>" >&2; exit 1; }
+        "$SCRIPT_DIR/fleet-register.sh" "$did" ;;
+      status)
+        echo "FLEET_STATUS=见服务器 Robot/IntegrationProfile（firebotctl server verify）" ;;
+      *) echo "firebotctl fleet <register|status>" >&2; exit 1 ;;
+    esac
+  )
 }
 
 # ================= 入口 =================
