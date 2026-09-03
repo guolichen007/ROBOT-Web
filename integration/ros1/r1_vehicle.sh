@@ -93,6 +93,7 @@ stage_cn() {
     CMD_VEL_DRIVER)     echo "底盘控制" ;;
     LOCALIZATION)       echo "定位系统" ;;
     SUPPORTED_COMMANDS) echo "支持的指令" ;;
+    CONTROL_MODE)       echo "底盘控制模式" ;;
     REAL_HARDWARE)      echo "真实硬件" ;;
     *)                  echo "$1" ;;
   esac
@@ -276,7 +277,6 @@ do_real() {
   start_real_navigation
   start_pose_navi_server
   start_adapter
-  start_battery
   start_bridge
 
   # 等 move_base 起来（最多 60 秒，每 2 秒；加载地图/costmap 较慢）
@@ -320,12 +320,13 @@ motion_gate() {
   local batt; batt=$(battery_value); [ -n "$batt" ] && batt=$(fmt_battery "$batt")
 
   # 综合判定（fail-closed：任一缺失即 FAIL，绝不 PASS）
+  # REAL 模式必须硬要求底盘 control_mode == 3（ROS 控制模式），不得只展示不强制。
   local ready="FAIL"
   if [ "$ros_master" = "PASS" ] && [ "$bridge_mqtt" = "PASS" ] && \
      [ "$ros_adapter" = "PASS" ] && [ "$control_adapter" = "PASS" ] && \
      [ "$pose_navi" = "PASS" ] && [ "$move_base" = "PASS" ] && \
      [ "$cmdvel" = "PASS" ] && [ "$loc" = "PASS" ] && \
-     [ "$has_patrol" = "yes" ] && [ "$hw" = "YES" ]; then
+     [ "$cmode" = "3" ] && [ "$has_patrol" = "yes" ] && [ "$hw" = "YES" ]; then
     ready="PASS"
   fi
 
@@ -338,6 +339,7 @@ motion_gate() {
   [ -z "$stage" ] && [ "$move_base" != "PASS" ] && stage="MOVE_BASE"
   [ -z "$stage" ] && [ "$cmdvel" != "PASS" ] && stage="CMD_VEL_DRIVER"
   [ -z "$stage" ] && [ "$loc" != "PASS" ] && stage="LOCALIZATION"
+  [ -z "$stage" ] && [ "$cmode" != "3" ] && stage="CONTROL_MODE"
   [ -z "$stage" ] && [ "$has_patrol" != "yes" ] && stage="SUPPORTED_COMMANDS"
   [ -z "$stage" ] && [ "$hw" = "NO" ] && stage="REAL_HARDWARE"
 
@@ -357,7 +359,7 @@ motion_gate() {
   echo ""
   echo "巡检启动接口：/waterplus/navi_pose"
   echo ""
-  echo "电量数据源：模拟测试数据"
+  echo "电量数据源：真实 provider（未验证）"
   echo "当前电量：${batt:-N/A}%"
   echo ""
   if [ "$hw" = "YES" ]; then

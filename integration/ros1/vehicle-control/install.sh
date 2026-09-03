@@ -45,9 +45,10 @@ STAGING_DIR="$WORKSPACE_DIR/.firebot_control.staging"
 PREVIOUS_DIR="$WORKSPACE_DIR/.firebot_control.previous"
 
 # staging 构建（放 workspace 根：catkin 只扫 src/，不会误扫 hidden staging/previous）
+# 复制「目录内容」而非目录本身，保证 package.xml/CMakeLists.txt 位于 staging 根。
 rm -rf "$STAGING_DIR"
 mkdir -p "$STAGING_DIR"
-cp -r "$SCRIPT_DIR" "$STAGING_DIR"
+cp -a "$SCRIPT_DIR"/. "$STAGING_DIR"/
 # install.sh 属于仓库交付工具，不放进 catkin 包目录。
 rm -f "$STAGING_DIR/install.sh"
 
