@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
 # server-deploy.sh — SERVER 模块化部署（exact SHA + immutable image + manifest + rollback）
 #
-# 用法（必须显式指定 TARGET_SHA，禁止无 SHA 部署）：
-#   TARGET_SHA=<40SHA> ./server-deploy.sh status
+# 用法：
 #   TARGET_SHA=<40SHA> ./server-deploy.sh preflight
-#   TARGET_SHA=<40SHA> ./server-deploy.sh migrate
-#   TARGET_SHA=<40SHA> ./server-deploy.sh api | web | worker | control-plane | all-app
+#   TARGET_SHA=<40SHA> ./server-deploy.sh migrate          # 需 BACKUP_VERIFIED=1
+#   TARGET_SHA=<40SHA> ./server-deploy.sh api|web|worker|control-plane|all-app
 #   TARGET_SHA=<40SHA> ./server-deploy.sh verify
 #   TARGET_SHA=<40SHA> ./server-deploy.sh rollback
+#   ./server-deploy.sh status                              # 读 current.json，不需 TARGET_SHA
 #
-# 服务分组：
-#   control-plane = api + mqtt-ingress + command-dispatcher + task-worker
-#   绝不默认重启 postgres / redis / mosquitto / nginx / mediamtx（除非对应配置明确变化）。
-#   镜像使用不可变 SHA tag：firebot-python:<SHA> / firebot-web:<SHA>，并打 OCI revision label。
+# 服务分组：control-plane = api+mqtt-ingress+command-dispatcher+task-worker
+# 绝不默认重启 postgres/redis/mosquitto/nginx/mediamtx。
+# 版本 SSOT：/opt/firebot/deployments/current.json（current/previous SHA）
 set -euo pipefail
 
 ENV_FILE="${SERVER_ENV_FILE:-.env.server}"
@@ -21,11 +20,23 @@ TARGET_SHA="${TARGET_SHA:-}"
 PY_IMAGE="firebot-python:${TARGET_SHA}"
 WEB_IMAGE="firebot-web:${TARGET_SHA}"
 DEPLOY_ROOT="/opt/firebot/deployments"
-PREVIOUS_SHA_FILE="$DEPLOY_ROOT/.previous-sha"
+CURRENT_JSON="$DEPLOY_ROOT/current.json"
 
 CONTROL_PLANE=(api mqtt-ingress command-dispatcher task-worker)
 APP_ALL=(api mqtt-ingress command-dispatcher task-worker web)
-INFRA=(postgres redis mosquitto nginx mediamtx)
+
+# ---- 版本 SSOT ----
+current_sha() {
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1],encoding="utf-8")).get("current_sha","UNKNOWN"))' "$CURRENT_JSON" 2>/dev/null || echo "UNKNOWN"
+}
+previous_sha() {
+  python3 -c 'import json,sys; print(json.load(open(sys.argv[1],encoding="utf-8")).get("previous_sha","UNKNOWN"))' "$CURRENT_JSON" 2>/dev/null || echo "UNKNOWN"
+}
+write_ssot() {
+  # $1=current $2=previous
+  mkdir -p "$DEPLOY_ROOT"
+  printf '{"current_sha": "%s", "previous_sha": "%s"}\n' "$1" "$2" > "$CURRENT_JSON"
+}
 
 require_sha() {
   if [ -z "$TARGET_SHA" ] || ! echo "$TARGET_SHA" | grep -qE '^[0-9a-f]{40}$'; then
@@ -44,13 +55,6 @@ require_sha() {
   fi
 }
 
-previous_sha() { cat "$PREVIOUS_SHA_FILE" 2>/dev/null || echo "UNKNOWN"; }
-
-record_previous() {
-  mkdir -p "$DEPLOY_ROOT"
-  echo "$TARGET_SHA" > "$PREVIOUS_SHA_FILE"
-}
-
 build_images() {
   local services=("$@")
   echo "  构建不可变镜像（tag=$TARGET_SHA）：${services[*]}"
@@ -62,18 +66,34 @@ recreate() {
   local services=("$@")
   echo "  重建服务：${services[*]}"
   FIREBOT_PYTHON_IMAGE="$PY_IMAGE" FIREBOT_WEB_IMAGE="$WEB_IMAGE" \
-    "${COMPOSE[@]}" up -d --no-deps "${services[@]}"
+    "${COMPOSE[@]}" up -d --no-deps --wait "${services[@]}"
+  # --wait 后检查 required services healthy（fail-closed）
+  for svc in "${services[@]}"; do
+    local st
+    st="$("${COMPOSE[@]}" ps --format '{{.Name}} {{.State}} {{.Health}}' 2>/dev/null | grep -E " ${svc}( |$)" | head -1 || true)"
+    echo "$st" | grep -qE 'healthy' || { echo "ERROR: $svc 未 healthy（$st）" >&2; return 1; }
+  done
+}
+
+migration_revision() {
+  "${COMPOSE[@]}" exec -T api python -c "
+from app.db.session import SessionLocal
+from sqlalchemy import text
+db = SessionLocal()
+print(db.scalar(text('SELECT version_num FROM alembic_version')) or 'unknown')
+" 2>/dev/null || echo "unknown"
 }
 
 write_manifest() {
-  local scope="$1" prev="$2" ts
+  local scope="$1" prev="$2" mig_before="$3" ts
   ts="$(date -u +%Y%m%dT%H%M%SZ)"
   local dir="$DEPLOY_ROOT/${ts}-${TARGET_SHA}"
   mkdir -p "$dir"
-  local manifest="$dir/manifest.json"
-  python3 - "$TARGET_SHA" "$scope" "$prev" "$ts" "$dir" <<'PY'
+  local mig_after
+  mig_after="$(migration_revision)"
+  python3 - "$TARGET_SHA" "$scope" "$prev" "$ts" "$dir" "$mig_before" "$mig_after" <<'PY'
 import json, subprocess, sys
-target_sha, scope, prev, ts, d = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+target_sha, scope, prev, ts, d, mig_before, mig_after = sys.argv[1:8]
 
 def inspect(args):
     try:
@@ -81,29 +101,26 @@ def inspect(args):
     except Exception:
         return ""
 
-images = {}
-for name, image in (("api", f"firebot-python:{target_sha}"), ("web", f"firebot-web:{target_sha}")):
-    img_id = inspect(["docker", "inspect", "--format", "{{.Id}}", image])
-    if img_id:
-        images[name] = img_id
-
-containers = {}
-for svc in ("api", "mqtt-ingress", "command-dispatcher", "task-worker", "web"):
-    cid = inspect(["docker", "compose", "ps", "-q", svc])
-    if cid:
-        containers[svc] = cid
-
 manifest = {
     "target_sha": target_sha,
     "branch": inspect(["git", "branch", "--show-current"]),
     "previous_sha": prev,
     "deploy_scope": scope,
     "timestamp": ts,
-    "image_ids": images,
-    "container_ids": containers,
-    "started_at": inspect(["date", "-u", "+%Y-%m-%dT%H:%M:%SZ"]),
-    "migration": "see deploy log / alembic version",
+    "migration_before": mig_before,
+    "migration_after": mig_after,
+    "containers": {},
 }
+for svc in ("api", "mqtt-ingress", "command-dispatcher", "task-worker", "web"):
+    cid = inspect(["docker", "compose", "ps", "-q", svc])
+    if cid:
+        manifest["containers"][svc] = {
+            "container_id": cid,
+            "image_id": inspect(["docker", "inspect", "--format", "{{.Image}}", cid]),
+            "image_revision": inspect(["docker", "inspect", "--format",
+                                       '{{ index .Config.Labels "org.opencontainers.image.revision" }}', cid]),
+            "started_at": inspect(["docker", "inspect", "--format", "{{.State.StartedAt}}", cid]),
+        }
 with open(d + "/manifest.json", "w", encoding="utf-8") as f:
     json.dump(manifest, f, ensure_ascii=False, indent=2)
 print(f"  manifest 已写入 {d}/manifest.json")
@@ -112,10 +129,10 @@ PY
 
 do_status() {
   echo "== SERVER 部署状态 =="
-  echo "TARGET_SHA=${TARGET_SHA:-<未设置>}"
-  echo "git HEAD=$(git rev-parse HEAD)"
+  echo "current_sha=$(current_sha)"
   echo "previous_sha=$(previous_sha)"
-  "${COMPOSE[@]}" ps --format '{{.Name}} {{.Image}} {{.State}}'
+  echo "git HEAD=$(git rev-parse HEAD)"
+  "${COMPOSE[@]}" ps --format '{{.Name}} {{.Image}} {{.State}} {{.Health}}'
 }
 
 do_preflight() {
@@ -128,7 +145,7 @@ do_preflight() {
 do_migrate() {
   require_sha
   if [ "${BACKUP_VERIFIED:-0}" != "1" ]; then
-    echo "ERROR: 生产 migration 前必须完成 backup 且验证通过；确认后以 BACKUP_VERIFIED=1 重跑" >&2
+    echo "ERROR: 生产 migration 前必须 backup 且验证；确认后 BACKUP_VERIFIED=1 重跑" >&2
     exit 1
   fi
   build_images api
@@ -141,25 +158,33 @@ deploy_scope() {
   local scope="$1"
   shift
   require_sha
-  local prev
-  prev="$(previous_sha)"
+  local prev mig_before
+  prev="$(current_sha)"          # 部署前 current → 变成 previous
+  mig_before="$(migration_revision)"
   build_images "$@"
   recreate "$@"
-  record_previous
-  write_manifest "$scope" "$prev"
+  # 成功后才更新 SSOT：previous=旧 current，current=TARGET_SHA
+  write_ssot "$TARGET_SHA" "$prev"
+  write_manifest "$scope" "$prev" "$mig_before"
   echo "DEPLOY=PASS scope=$scope sha=$TARGET_SHA previous=$prev"
 }
 
 do_verify() {
-  require_sha
-  scripts/server-verify.sh
+  # verify 不需要外部 TARGET_SHA：从 current.json 读期望 SHA
+  local expected
+  expected="$(current_sha)"
+  if [ "$expected" = "UNKNOWN" ]; then
+    echo "SERVER_VERIFY=FAIL（无 current.json，先 deploy）" >&2
+    exit 1
+  fi
+  # 传 VERIFY_SHA 给 server-verify.sh，且失败必须 exit != 0
+  VERIFY_SHA="$expected" scripts/server-verify.sh
 }
 
 do_rollback() {
-  require_sha
   local prev
   prev="$(previous_sha)"
-  if [ "$prev" = "UNKNOWN" ] || [ "$prev" = "$TARGET_SHA" ]; then
+  if [ "$prev" = "UNKNOWN" ] || [ "$prev" = "$(current_sha)" ]; then
     echo "ERROR: 没有可回滚的 previous SHA（$prev）" >&2
     exit 1
   fi

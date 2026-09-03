@@ -126,7 +126,27 @@ if [ -n "$VERIFY_SHA" ]; then
   done
   if [ -n "$mismatch" ]; then
     echo "IMAGE_SHA_MATCH=FAIL（期望 $VERIFY_SHA，异常:$mismatch）"
+    exit 1
   else
     echo "IMAGE_SHA_MATCH=PASS"
   fi
 fi
+
+# 9) task-worker 心跳（J6-S1 生产必需）
+if "${COMPOSE[@]}" exec -T api python -c \
+  "from app.core.events import get_redis; raise SystemExit(0 if get_redis().get('service:task-worker:heartbeat') else 1)" 2>/dev/null; then
+  echo "TASK_WORKER_HEARTBEAT=PASS"
+else
+  echo "TASK_WORKER_HEARTBEAT=FAIL"
+  exit 1
+fi
+
+# 10) required services 全部 healthy（fail-closed：任一 unhealthy 即 exit != 0）
+for svc in api mqtt-ingress command-dispatcher task-worker web; do
+  if "${COMPOSE[@]}" ps --format '{{.Name}} {{.Health}}' 2>/dev/null | grep -E " ${svc}( |$)" | grep -q healthy; then
+    echo "SERVICE_${svc}=HEALTHY"
+  else
+    echo "SERVICE_${svc}=UNHEALTHY"
+    exit 1
+  fi
+done
