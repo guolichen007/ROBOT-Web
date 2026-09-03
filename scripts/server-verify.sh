@@ -61,11 +61,15 @@ case "$VEHICLE_ID" in
     "${COMPOSE[@]}" exec -T api python -c \
       "import json
 from app.db.session import SessionLocal
-from app.db.models import Robot, RobotIntegrationProfile
+from app.db.models import Robot, RobotCapability, RobotDataChannel, RobotIntegrationProfile
+from app.modules.commands.readiness import robot_readiness
 from sqlalchemy import select
 db = SessionLocal()
 r = db.scalar(select(Robot).where(Robot.vehicle_id == '$VEHICLE_ID'))
 p = db.get(RobotIntegrationProfile, r.id) if r else None
+cap = db.get(RobotCapability, r.id) if r else None
+channels = db.scalars(select(RobotDataChannel).where(RobotDataChannel.robot_id == r.id)).all() if r else []
+readiness = robot_readiness(db, r) if r else {}
 print(json.dumps({
   'vehicle_id': '$VEHICLE_ID',
   'exists': r is not None,
@@ -83,6 +87,11 @@ print(json.dumps({
   'bidirectional_bridge_verified': p.bidirectional_bridge_verified if p else None,
   'command_path_verified': p.command_path_verified if p else None,
   'cmd_vel_arbitration_verified': p.cmd_vel_arbitration_verified if p else None,
+  'capabilities': cap.supported_commands_json if cap else None,
+  'data_channels': [c.channel for c in channels],
+  'stop_ready': bool(readiness.get('safety_command_ready', {}).get('stop_motion')),
+  'patrol_ready': bool(readiness.get('autonomous_task_ready', {}).get('patrol')),
+  'readiness_reasons': readiness.get('readiness_reasons', []),
 }))" 2>/dev/null || echo "ROBOT $VEHICLE_ID=UNKNOWN（DB 查询失败）"
     ;;
 esac
@@ -91,3 +100,33 @@ esac
 echo "CONTROL_CODE=PATROL_START,STOP_MOTION"
 echo "CONTROL_FIELD_VERIFIED=NO"
 echo "ROS_COMPAT_DOWNLINK=NOT_IMPLEMENTED"
+
+# 8) 镜像来源版本（OCI revision label，必须与批准 SHA 一致）
+VERIFY_SHA="${VERIFY_SHA:-}"
+image_revision() {
+  local cid
+  cid="$("${COMPOSE[@]}" ps -q "$1" 2>/dev/null | head -1)"
+  [ -n "$cid" ] || { echo "UNKNOWN"; return; }
+  docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$cid" 2>/dev/null || echo "UNKNOWN"
+}
+API_IMAGE_REVISION="$(image_revision api)"
+INGRESS_IMAGE_REVISION="$(image_revision mqtt-ingress)"
+DISPATCHER_IMAGE_REVISION="$(image_revision command-dispatcher)"
+WORKER_IMAGE_REVISION="$(image_revision task-worker)"
+WEB_IMAGE_REVISION="$(image_revision web)"
+echo "API_IMAGE_REVISION=$API_IMAGE_REVISION"
+echo "INGRESS_IMAGE_REVISION=$INGRESS_IMAGE_REVISION"
+echo "DISPATCHER_IMAGE_REVISION=$DISPATCHER_IMAGE_REVISION"
+echo "WORKER_IMAGE_REVISION=$WORKER_IMAGE_REVISION"
+echo "WEB_IMAGE_REVISION=$WEB_IMAGE_REVISION"
+if [ -n "$VERIFY_SHA" ]; then
+  mismatch=""
+  for rev in "$API_IMAGE_REVISION" "$INGRESS_IMAGE_REVISION" "$DISPATCHER_IMAGE_REVISION" "$WORKER_IMAGE_REVISION" "$WEB_IMAGE_REVISION"; do
+    [ "$rev" = "$VERIFY_SHA" ] || mismatch="$mismatch $rev"
+  done
+  if [ -n "$mismatch" ]; then
+    echo "IMAGE_SHA_MATCH=FAIL（期望 $VERIFY_SHA，异常:$mismatch）"
+  else
+    echo "IMAGE_SHA_MATCH=PASS"
+  fi
+fi
