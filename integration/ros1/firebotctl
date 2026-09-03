@@ -494,6 +494,9 @@ cmd_server() {
         require_sha "$sha"
         release_sync "$sha" server
         TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" preflight
+        # 在整个 deploy 开始时就记录 migration_before（供 manifest 使用，避免 migrate 后误记）
+        DEPLOY_MIGRATION_BEFORE="$(TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" current-revision)"
+        export DEPLOY_MIGRATION_BEFORE
         # 自动 migration：DB revision != 目标 head 时，先真实 pg_dump 备份再 migrate
         if ! TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" migration-needed; then
           TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" backup

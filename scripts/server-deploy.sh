@@ -227,7 +227,9 @@ deploy_scope() {
   require_sha
   local prev mig_before
   prev="$(current_sha)"          # 部署前 current → 变成 previous
-  mig_before="$(migration_revision)"
+  # migration_before 必须在整个 server deploy 开始时就记录（firebotctl 传 DEPLOY_MIGRATION_BEFORE），
+  # 不能等 migrate 之后才取（否则会误记 migration 后的 revision）。
+  mig_before="${DEPLOY_MIGRATION_BEFORE:-$(migration_revision)}"
   if ! build_images "$@" || ! recreate "$@"; then
     echo "SERVER_DEPLOY=FAIL（rollout 失败，自动回滚 $prev）" >&2
     if [ "$prev" != "UNKNOWN" ]; then
@@ -282,6 +284,7 @@ case "${1:-}" in
   migrate) do_migrate ;;
   backup) do_backup ;;
   migration-needed) do_migration_needed ;;
+  current-revision) echo "$(migration_revision)" ;;
   api) deploy_scope "api" api ;;
   worker) deploy_scope "worker" task-worker ;;
   web) deploy_scope "web" web ;;

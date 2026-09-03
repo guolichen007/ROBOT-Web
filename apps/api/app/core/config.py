@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     robot_offline_seconds: int = 10
     ros_compat_stale_seconds: int = 8
     ros_compat_offline_seconds: int = 15
+    # ROS_COMPAT_MODE=true 时才把 ros-compat-adapter 当作 readiness 必需项；
+    # canonical MQTT 正式路径下为 false，ros-compat-adapter 是 optional/not_required。
+    ros_compat_mode: bool = False
     ros_compat_pose_max_age_seconds: float = 2.0
     ros_compat_heartbeat_max_age_seconds: float = 8.0
     ros_compat_max_future_skew_seconds: float = 2.0

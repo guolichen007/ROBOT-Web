@@ -94,16 +94,27 @@ def readiness_payload(db: DbSession) -> dict:
         else None
     )
     checks["mqtt_ingress"] = {"ok": bool(mqtt_heartbeat), "last_heartbeat": mqtt_heartbeat}
-    for service_name in ("ros-compat-adapter", "task-worker"):
-        heartbeat = (
-            get_redis().get(f"service:{service_name}:heartbeat")
-            if checks.get("redis", {}).get("ok")
-            else None
-        )
-        checks[service_name.replace("-", "_")] = {
-            "ok": bool(heartbeat),
-            "last_heartbeat": heartbeat,
-        }
+    # ros-compat-adapter：仅 ROS_COMPAT_MODE=true 时必需；canonical MQTT 路径下 optional。
+    ros_compat_required = settings.ros_compat_mode
+    ros_compat_heartbeat = (
+        get_redis().get("service:ros-compat-adapter:heartbeat")
+        if checks.get("redis", {}).get("ok")
+        else None
+    )
+    checks["ros_compat_adapter"] = {
+        "ok": bool(ros_compat_heartbeat),
+        "last_heartbeat": ros_compat_heartbeat,
+        "required": ros_compat_required,
+    }
+    worker_heartbeat = (
+        get_redis().get("service:task-worker:heartbeat")
+        if checks.get("redis", {}).get("ok")
+        else None
+    )
+    checks["task_worker"] = {
+        "ok": bool(worker_heartbeat),
+        "last_heartbeat": worker_heartbeat,
+    }
     dispatcher_outbox = (
         get_redis().get("service:command-dispatcher:outbox-heartbeat")
         if checks.get("redis", {}).get("ok")
@@ -125,7 +136,13 @@ def readiness_payload(db: DbSession) -> dict:
         if mqtt_ok
         else {"ok": False, "error": mqtt_error}
     )
-    ok = all(item["ok"] for item in checks.values())
+    # 整体 ready：除 optional 的 ros_compat_adapter 外，其余全部 fail-closed。
+    ok = True
+    for name, item in checks.items():
+        if name == "ros_compat_adapter" and not ros_compat_required:
+            continue
+        if not item["ok"]:
+            ok = False
     return {"status": "ready" if ok else "degraded", "ok": ok, "checks": checks}
 
 
