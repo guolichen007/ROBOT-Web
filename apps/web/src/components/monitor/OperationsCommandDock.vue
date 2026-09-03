@@ -59,7 +59,7 @@ const stopDisabled = computed(
     !props.stopReady ||
     Boolean(props.busy) ||
     motionLocked.value ||
-    ['IDLE', 'PAUSED_SAFE', 'ERROR_STOP_UNCONFIRMED'].includes(props.vehicleState),
+    ['STOPPING', 'PAUSED_SAFE', 'ERROR_STOP_UNCONFIRMED'].includes(props.vehicleState),
 )
 
 const homeLabel = computed(() => {
