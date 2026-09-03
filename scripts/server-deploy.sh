@@ -166,6 +166,23 @@ do_migrate() {
   echo "MIGRATE=PASS sha=$TARGET_SHA"
 }
 
+migration_head() {
+  "${COMPOSE[@]}" exec -T api alembic heads 2>/dev/null | tail -1 || echo "unknown"
+}
+
+do_migration_needed() {
+  require_sha
+  local db head
+  db="$(migration_revision)"
+  head="$(migration_head)"
+  if [ "$db" = "$head" ]; then
+    echo "MIGRATION=SKIP（db=$db == head=$head）"
+    return 0
+  fi
+  echo "MIGRATION=NEEDED（db=$db != head=$head）"
+  return 1
+}
+
 deploy_scope() {
   local scope="$1"
   shift
@@ -225,6 +242,7 @@ case "${1:-}" in
   status) do_status ;;
   preflight) do_preflight ;;
   migrate) do_migrate ;;
+  migration-needed) do_migration_needed ;;
   api) deploy_scope "api" api ;;
   worker) deploy_scope "worker" task-worker ;;
   web) deploy_scope "web" web ;;

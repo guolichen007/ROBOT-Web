@@ -1,5 +1,6 @@
-# Firebot Mosquitto ACL 模板（多车通用）
-# 约定：MQTT username == canonical vehicle_id。%u 会自动展开为当前用户名。
+# Firebot Mosquitto ACL 模板（多车通用，username pattern）
+# 约定：MQTT username == canonical vehicle_id（DEVICE_ID）。
+# `pattern` 用 %u 自动展开为当前用户名，新增车辆无需修改本文件。
 # 注意：%u/%c 替换必须使用 `pattern` 关键字（`topic` 不做替换）。
 
 # ---- 平台账号（服务器端下发命令 + 消费全部上行）----
@@ -7,25 +8,8 @@ user platform
 topic readwrite robot/+/+
 topic readwrite _platform/compat/+/+
 
-# ---- 车端账号模板 ----
-# 每个真车复制下面 10 行，只改 `user <vehicle_id>`（pattern 用 %u 无需再改）。
-# 车端只允许：写自己的遥测/ACK，读自己的 command。绝不允许车写 command。
-
-# 首台真车（canonical vehicle_id = firebot-vehicle-01）
-user firebot-vehicle-01
-pattern write robot/%u/availability
-pattern write robot/%u/heartbeat
-pattern write robot/%u/capabilities
-pattern write robot/%u/status
-pattern write robot/%u/sensor
-pattern write robot/%u/location
-pattern write robot/%u/alarm
-pattern write robot/%u/task_status
-pattern write robot/%u/command_ack
-pattern read robot/%u/command
-
-# Mock/联调车辆示例（DEV 使用，username = R001）
-user R001
+# ---- 车端通用模式（%u = DEVICE_ID，自动适用于所有设备账号）----
+# 车端只允许：写自己的遥测/ACK，读自己的 command。绝不允许车写 command、绝不允许跨车访问。
 pattern write robot/%u/availability
 pattern write robot/%u/heartbeat
 pattern write robot/%u/capabilities

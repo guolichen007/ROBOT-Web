@@ -1,43 +1,24 @@
-# Firebot Fleet Mosquitto ACL 模板（按 username=DEVICE_ID 做 namespace 隔离）
+# Firebot Fleet Mosquitto ACL（username=DEVICE_ID 通用 pattern，多车复制不改本文件）
 #
-# 本模板配合：username = DEVICE_ID（firebot-vehicle-XX）
-# 规则语义：
-#   - 每辆车只能 publish 自己的 telemetry/status/location/heartbeat/ack/task_status
-#   - 每辆车只能 subscribe 自己的 command
-#   - 绝对不能访问 robot/<其它DEVICE_ID>/#
-#
-# 部署：mosquitto.conf 中 acl_file 指向本文件；新增车辆无需改 ACL（pattern 自动覆盖）。
+# 安全语义：
+#   - 平台账号（platform）拥有 fleet 级读写。
+#   - 设备账号（username = DEVICE_ID）：只读自己的 command，只写自己的 telemetry/ACK。
+#   - vehicle-01 凭据绝不能 publish/subscribe vehicle-02 namespace。
+#   - 新增 vehicle-03 无需修改本 ACL（%u 自动展开）。
 
-# 平台（服务器）账号拥有 fleet 级读写（部署时替换为真实 platform 账号）
+# ---- 平台账号 ----
 user platform
-topic readwrite robot/#
-topic readwrite $SYS/#
+topic readwrite robot/+/+
+topic readwrite _platform/compat/+/+
 
-# 设备账号：只允许自己的 namespace
-user firebot-vehicle-01
-topic read robot/firebot-vehicle-01/command
-topic write robot/firebot-vehicle-01/heartbeat
-topic write robot/firebot-vehicle-01/status
-topic write robot/firebot-vehicle-01/location
-topic write robot/firebot-vehicle-01/availability
-topic write robot/firebot-vehicle-01/capabilities
-topic write robot/firebot-vehicle-01/command_ack
-topic write robot/firebot-vehicle-01/task_status
-topic write robot/firebot-vehicle-01/sensor
-topic write robot/firebot-vehicle-01/battery
-
-user firebot-vehicle-02
-topic read robot/firebot-vehicle-02/command
-topic write robot/firebot-vehicle-02/heartbeat
-topic write robot/firebot-vehicle-02/status
-topic write robot/firebot-vehicle-02/location
-topic write robot/firebot-vehicle-02/availability
-topic write robot/firebot-vehicle-02/capabilities
-topic write robot/firebot-vehicle-02/command_ack
-topic write robot/firebot-vehicle-02/task_status
-topic write robot/firebot-vehicle-02/sensor
-topic write robot/firebot-vehicle-02/battery
-
-# 默认拒绝其它所有访问（fail-closed）
-user anonymous
-topic readwrite #
+# ---- 设备通用模式（%u = DEVICE_ID）----
+pattern write robot/%u/availability
+pattern write robot/%u/heartbeat
+pattern write robot/%u/capabilities
+pattern write robot/%u/status
+pattern write robot/%u/sensor
+pattern write robot/%u/location
+pattern write robot/%u/alarm
+pattern write robot/%u/task_status
+pattern write robot/%u/command_ack
+pattern read robot/%u/command

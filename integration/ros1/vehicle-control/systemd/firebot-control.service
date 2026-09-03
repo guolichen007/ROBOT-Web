@@ -10,7 +10,8 @@ Type=simple
 # 车型参数来自 /etc/firebot/runtime.env（Fleet Profile 生成），不硬编码 workspace/adapter。
 ExecStart=/bin/bash -lc 'set -e; [ -f /etc/firebot/runtime.env ] && . /etc/firebot/runtime.env; ROS_DISTRO=${ROS_DISTRO:-noetic}; ROS_WORKSPACE=${ROS_WORKSPACE:-/home/tl/firerobot_ws}; source /opt/ros/$ROS_DISTRO/setup.bash; source $ROS_WORKSPACE/devel/setup.bash; exec rosrun firebot_control ${CONTROL_ADAPTER:-firebot_control_adapter.py}'
 Restart=no
-User=tl
+# 运行用户由 install.sh 根据 FIREBOT_CONTROL_USER 生成（默认当前用户），不硬编码 tl。
+User=@CONTROL_USER@
 
 [Install]
 WantedBy=multi-user.target

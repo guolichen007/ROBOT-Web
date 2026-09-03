@@ -54,16 +54,22 @@ install_control() {
     fi
     return 1
   fi
-  # 安装 firebot-control systemd 单元（只安装，不 enable/start）
+  # 安装 firebot-control systemd 单元（只安装，不 enable/start）。
+  # 运行用户按 FIREBOT_CONTROL_USER（默认当前用户）生成，不硬编码 tl。
   if [ -f "$CONTROL_UNIT_SRC" ]; then
+    local control_user="${FIREBOT_CONTROL_USER:-$(id -un)}"
+    local tmp_unit
+    tmp_unit="$(mktemp)"
+    sed "s/@CONTROL_USER@/$control_user/g" "$CONTROL_UNIT_SRC" > "$tmp_unit"
     if command -v sudo >/dev/null 2>&1; then
-      sudo cp "$CONTROL_UNIT_SRC" "$CONTROL_UNIT_DST"
+      sudo cp "$tmp_unit" "$CONTROL_UNIT_DST"
       sudo systemctl daemon-reload
     else
-      cp "$CONTROL_UNIT_SRC" "$CONTROL_UNIT_DST"
+      cp "$tmp_unit" "$CONTROL_UNIT_DST"
       systemctl daemon-reload
     fi
-    echo "  firebot-control systemd 单元已安装（默认 disabled，不自动启动）"
+    rm -f "$tmp_unit"
+    echo "  firebot-control systemd 单元已安装（默认 disabled，不自动启动，User=$control_user）"
   fi
 }
 

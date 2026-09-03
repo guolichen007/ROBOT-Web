@@ -412,6 +412,10 @@ cmd_server() {
       require_sha "$sha"
       release_sync "$sha"
       TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" preflight
+      # 自动 migration：DB revision != 目标 head 时执行（backup 由 SOP 保证）
+      if ! TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" migration-needed; then
+        TARGET_SHA="$sha" BACKUP_VERIFIED=1 "$REPO_DIR/scripts/server-deploy.sh" migrate
+      fi
       TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" all-app
       TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" verify ;;
     verify) "$REPO_DIR/scripts/server-deploy.sh" verify ;;
