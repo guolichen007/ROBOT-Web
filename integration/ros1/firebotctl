@@ -437,9 +437,27 @@ cmd_fleet() {
 }
 
 # ================= 入口 =================
+print_help() {
+  echo "Firebot 现场统一入口（firebotctl）"
+  echo ""
+  echo "用法："
+  echo "  firebotctl vehicle enroll <设备编号> --token <令牌>     车辆注册"
+  echo "  firebotctl vehicle install --sha <SHA>                车辆安装"
+  echo "  firebotctl vehicle verify                              车辆验收"
+  echo "  firebotctl vehicle start base|navigation|control       模块化启动"
+  echo "  firebotctl vehicle capability stop-only|patrol         能力提升"
+  echo "  firebotctl vehicle location enable                     定位开启"
+  echo "  firebotctl vehicle rollback / support-bundle           回滚 / 诊断包"
+  echo "  firebotctl server deploy --sha <SHA> / verify / rollback  服务器部署/验收/回滚"
+  echo "  firebotctl fleet register <设备编号>                    设备签发"
+  echo ""
+  echo "详细见 docs/现场交付/样机1安装部署与Web控制SOP.md"
+}
+
 case "${1:-}" in
   vehicle) shift; cmd_vehicle "$@" ;;
   server) shift; cmd_server "$@" ;;
   fleet) shift; cmd_fleet "$@" ;;
-  *) echo "用法: firebotctl <vehicle|server|fleet> ..." >&2; exit 1 ;;
+  -h|--help|help) print_help ;;
+  *) echo "用法: firebotctl <vehicle|server|fleet> ...（firebotctl --help 查看）" >&2; exit 1 ;;
 esac

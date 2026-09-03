@@ -73,15 +73,17 @@ jobs:
           for f in $(find integration/ros1 scripts -name '*.sh' -type f | sort); do
             bash -n "$f"
           done
-      - name: Enrollment token + readiness tests
-        run: |
-          python3 -m pytest apps/api/tests/test_enrollment_token.py -q
-          python3 -m pytest apps/api/tests/test_channel_freshness.py -q
-      - name: DB/Redis readiness + STOP tests
+      - name: firebotctl 路径解析测试（repo根/任意目录/符号链接）
+        run: bash integration/ros1/tests/test_firebotctl_path.sh
+      - name: DB/Redis 就绪（alembic + seed）
         working-directory: apps/api
+        run: alembic upgrade head && python -m app.db.seed
+      - name: Enrollment token（DB 事务化：单次消费/重放/过期/并发）
+        run: python3 -m pytest apps/api/tests/test_enrollment_token.py -q
+      - name: freshness + readiness + STOP 测试
         run: |
-          alembic upgrade head && python -m app.db.seed
-          cd .. && python3 -m pytest apps/api/tests/test_operations_upgrade.py apps/api/tests/test_integration_hardening.py -q
+          python3 -m pytest apps/api/tests/test_channel_freshness.py -q
+          python3 -m pytest apps/api/tests/test_operations_upgrade.py apps/api/tests/test_integration_hardening.py -q
       - name: Secret scan on support bundle sources（gitleaks）
         run: |
           docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.24.2 git --config=/repo/.gitleaks.toml --no-banner /repo
