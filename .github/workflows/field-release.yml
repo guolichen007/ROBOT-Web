@@ -1,0 +1,90 @@
+name: Field Release Gate
+
+on:
+  push:
+    branches: ["hardening/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  field-release:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18.4-alpine
+        env:
+          POSTGRES_DB: firebot_ci
+          POSTGRES_USER: firebot_ci
+          POSTGRES_PASSWORD: firebot_ci
+        options: >-
+          --health-cmd "pg_isready -U firebot_ci -d firebot_ci"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+        ports: ["5432:5432"]
+      redis:
+        image: redis:8.4.5-alpine
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 3s --health-retries 20
+        ports: ["6379:6379"]
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+psycopg://firebot_ci:firebot_ci@localhost:5432/firebot_ci
+      REDIS_URL: redis://localhost:6379/15
+      JWT_SECRET: ci-jwt-secret-at-least-32-characters-long
+      REFRESH_SECRET: ci-refresh-secret-at-least-32-characters
+      CSRF_SECRET: ci-csrf-secret-at-least-32-characters-long
+      BOOTSTRAP_ADMIN_PASSWORD: Firebot-CI-Only-2026!
+      SEED_DEMO: "true"
+      ASSET_ROOT: /tmp/firebot-assets
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check apps/api services scripts
+      - run: ruff format --check apps/api services scripts
+      - run: python scripts/check_migration_manifest.py
+      - name: Fleet profile render + generated config
+        run: |
+          python3 integration/ros1/profile-render.py runtime integration/ros1/profiles/firebot_ros1_standard_v1.yaml > /tmp/runtime.env
+          grep -q '^ROS_WORKSPACE=' /tmp/runtime.env
+          grep -q '^EXPECTED_CONTROL_MODE=3' /tmp/runtime.env
+      - name: Vehicle Bridge tests（无 ROS 依赖）
+        working-directory: integration/ros1/vehicle-bridge
+        run: |
+          python3 tests/test_bridge.py
+          python3 tests/test_reliability.py
+          python3 tests/test_field_console.py
+          python3 tests/test_u2_freshness.py
+          python3 tests/test_mecanum_odom.py
+          python3 tests/test_location_freshness.py
+          python3 tests/test_fleet_isolation.py
+      - name: Vehicle Control + installer tests
+        run: |
+          python3 integration/ros1/vehicle-control/tests/test_stop_motion_safety.py
+          python3 integration/ros1/vehicle-control/tests/test_install_atomic.py
+      - name: bash -n 车端/服务器脚本
+        run: |
+          set -euo pipefail
+          for f in $(find integration/ros1 scripts -name '*.sh' -type f | sort); do
+            bash -n "$f"
+          done
+      - name: Enrollment token + readiness tests
+        run: |
+          python3 -m pytest apps/api/tests/test_enrollment_token.py -q
+          python3 -m pytest apps/api/tests/test_channel_freshness.py -q
+      - name: DB/Redis readiness + STOP tests
+        working-directory: apps/api
+        run: |
+          alembic upgrade head && python -m app.db.seed
+          cd .. && python3 -m pytest apps/api/tests/test_operations_upgrade.py apps/api/tests/test_integration_hardening.py -q
+      - name: Secret scan on support bundle sources（gitleaks）
+        run: |
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.24.2 git --config=/repo/.gitleaks.toml --no-banner /repo
+      - name: Known waiver note（alarm history 测试不阻塞 FIELD_RELEASE_GATE）
+        run: |
+          echo "FIELD_RELEASE_GATE 独立于 full backend pytest；已知 alarm lifecycle 历史测试记录 waiver，不使本 gate skipped。"
