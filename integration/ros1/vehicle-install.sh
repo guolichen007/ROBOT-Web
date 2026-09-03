@@ -38,11 +38,24 @@ install_bridge() {
 
 install_control() {
   FIREBOT_REQUIRE_SHA="$REQUIRE_SHA" bash "$CONTROL_INSTALL"
-  # catkin 编译（firebot_control 是 catkin 包，安装后必须编译才能 rosrun）
+  # catkin 编译（firebot_control 是 catkin 包，安装后必须编译才能 rosrun）。
+  # build 失败自动回滚 previous，绝不留下 new SHA 半安装。
   local ws
   ws="$(dirname "${FIREBOT_ROS_SRC_DIR:-/home/tl/firerobot_ws/src}")"
   echo "  catkin_make ..."
-  ( cd "$ws" && catkin_make )
+  if ! ( cd "$ws" && catkin_make ); then
+    echo "ERROR: catkin_make 失败，自动回滚 previous" >&2
+    local pkg="$ws/src/firebot_control" prev="$ws/.firebot_control.previous"
+    if [ -d "$prev" ]; then
+      mv "$pkg" "$ws/.firebot_control.failed"
+      mv "$prev" "$pkg"
+      ( cd "$ws" && catkin_make ) || { echo "ERROR: 回滚后 build 也失败" >&2; return 1; }
+      echo "INSTALL=FAIL ROLLBACK=PASS" >&2
+    else
+      echo "ERROR: 无 previous 可回滚" >&2
+    fi
+    return 1
+  fi
   # 安装 firebot-control systemd 单元（只安装，不 enable/start）
   if [ -f "$CONTROL_UNIT_SRC" ]; then
     if command -v sudo >/dev/null 2>&1; then
@@ -71,10 +84,38 @@ verify() {
   return 1
 }
 
+rollback() {
+  # 一步回滚 Bridge + Control 到 previous（APPROVED_RUNTIME 回到 PREVIOUS_SHA）。
+  local bridge_dir="${FIREBOT_INSTALL_DIR:-/opt/firebot/vehicle-bridge}"
+  local bridge_prev="$(dirname "$bridge_dir")/.$(basename "$bridge_dir").previous"
+  local ws
+  ws="$(dirname "${FIREBOT_ROS_SRC_DIR:-/home/tl/firerobot_ws/src}")"
+  local ctrl_pkg="$ws/src/firebot_control" ctrl_prev="$ws/.firebot_control.previous"
+
+  if [ -d "$bridge_prev" ]; then
+    mv "$bridge_dir" "$(dirname "$bridge_dir")/.$(basename "$bridge_dir").bad" 2>/dev/null || true
+    mv "$bridge_prev" "$bridge_dir"
+    systemctl restart firebot-bridge 2>/dev/null || true
+    echo "  Bridge 已回滚"
+  else
+    echo "  Bridge previous 不存在，跳过"
+  fi
+  if [ -d "$ctrl_prev" ]; then
+    mv "$ctrl_pkg" "$ws/.firebot_control.bad" 2>/dev/null || true
+    mv "$ctrl_prev" "$ctrl_pkg"
+    ( cd "$ws" && catkin_make )
+    echo "  Control 已回滚并重编译"
+  else
+    echo "  Control previous 不存在，跳过"
+  fi
+  echo "VEHICLE_ROLLBACK=PASS"
+}
+
 case "${1:-}" in
   bridge) install_bridge ;;
   control) install_control ;;
   all) install_bridge && install_control ;;
   verify) verify ;;
-  *) echo "用法: FIREBOT_REQUIRE_SHA=<SHA> $0 bridge|control|all|verify" >&2; exit 1 ;;
+  rollback) rollback ;;
+  *) echo "用法: FIREBOT_REQUIRE_SHA=<SHA> $0 bridge|control|all|verify|rollback" >&2; exit 1 ;;
 esac
