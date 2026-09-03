@@ -6,6 +6,50 @@
 
 ---
 
+## 0. 产品化接入流程（firebotctl 唯一入口）
+
+现场只使用 `firebotctl`。除 Tailscale 登录 + DEVICE_ID 外，不手填任何配置。
+
+服务器（管理员，一次）：
+
+```bash
+firebotctl fleet register firebot-vehicle-01     # 签发 per-device credential + 一次性 token
+firebotctl server deploy --sha <FINAL_SHA>        # 一条命令部署
+```
+
+车端（现场，每台一次）：
+
+```bash
+sudo firebotctl vehicle enroll firebot-vehicle-01 --token <TOKEN> --password <PW>
+sudo firebotctl vehicle install --sha <FINAL_SHA>
+firebotctl vehicle verify                          # 返回 CONTROL_ENABLED=NO
+```
+
+硬件起来后（模块化，一个命令一件事）：
+
+```bash
+firebotctl vehicle start base
+firebotctl vehicle start navigation
+firebotctl vehicle verify
+```
+
+STOP 验收（静止态）：
+
+```bash
+firebotctl vehicle capability stop-only            # 自动写 capability + 重启 Bridge + 等 ONLINE
+# 然后 Web 静止态 STOP → ACK + 5 fresh zero + STATIONARY_CONFIRMED
+```
+
+STOP 验收通过后：
+
+```bash
+firebotctl vehicle capability patrol               # stop_motion,patrol
+```
+
+禁止：`vim/nano/sed -i` 改 bridge.env、手填 MQTT host/username/password、手改 supported_commands、现场 SQL、现场改源码。
+
+---
+
 ## A. 准备
 
 - 执行：确认样机1（`firebot-vehicle-01`）物理急停可达、无人位于运动区、网络可达。

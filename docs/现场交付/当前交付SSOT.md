@@ -58,3 +58,41 @@ emergency_stop / reset_estop：real implementation unavailable
 Web STOP 不是物理急停。第一次运动必须：现场人员在场、物理急停可达、空旷路径、
 低速、短距离、不载人、无人员位于运动区域。网络中断不能依赖 Web STOP。
 ```
+
+## 七、四层模型（冻结）
+
+```text
+1 RELEASE       不可变 FINAL_SHA；Server/Web/Bridge/Control 所有车辆完全相同。
+2 FLEET PROFILE 车型/场站公共非 secret 配置（integration/ros1/profiles/）。
+3 DEVICE IDENTITY 每辆车唯一 DEVICE_ID（现场唯一人工输入）。
+4 RUNTIME FACTS boot_id/odom/control_mode/cmd_vel/amcl 只检测、不手填。
+```
+
+## 八、Fleet 产品化（firebotctl 唯一入口）
+
+现场只使用 `firebotctl`（`integration/ros1/firebotctl`），底层脚本保留为 module implementation。
+
+新设备接入（只允许 Tailscale 登录 + DEVICE_ID）：
+
+```bash
+# 服务器（管理员）：
+firebotctl fleet register firebot-vehicle-01   # 签发 per-device MQTT credential + 一次性 token
+
+# 车端（现场）：
+firebotctl vehicle enroll firebot-vehicle-01 --token <TOKEN> --password <PW>
+firebotctl vehicle install --sha <FINAL_SHA>
+firebotctl vehicle verify
+```
+
+返回 `CONTROL_ENABLED=NO`（安装 ≠ 启动 ≠ 运动）。
+
+```text
+FLEET_PROFILE            = firebot_ros1_standard_v1（版本化车型合同，不含身份/secret）
+GENERATED_BRIDGE_CONFIG  = 是（/etc/firebot/bridge.env 标记 GENERATED - DO NOT EDIT）
+AUTO_MQTT_CREDENTIAL     = per-device（username=DEVICE_ID + 随机 password，绝不 fleet 共用）
+FLEET_IDENTITY_ISOLATION = topic namespace 由 DEVICE_ID 派生，两两不相交（unit 测试 PASS）
+CONTROL_DEFAULT_DISABLED = 是（firebot-control systemd 安装默认 disabled）
+ZERO_MANUAL_CONFIG       = 代码已就绪；需在样机2 clean rehearsal 现场验收（本机无法跑真机）
+```
+
+禁止：`vim/nano/sed -i` 改 bridge.env、手填 MQTT host/username/password、手改 supported_commands、现场 SQL update、现场改源码。
