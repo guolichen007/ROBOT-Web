@@ -1,0 +1,17 @@
+[Unit]
+Description=Firebot vehicle control adapter (PATROL_START / STOP_MOTION)
+# 默认 disabled：只有 ROS master ready + 下游 gate ready + 现场负责人明确执行后
+# 才允许 `systemctl start firebot-control`。安装绝不自动 enable --now。
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/bin/bash -lc 'source /opt/ros/noetic/setup.bash && source /home/tl/firerobot_ws/devel/setup.bash && exec rosrun firebot_control firebot_control_adapter.py'
+Restart=no
+User=tl
+StandardOutput=append:/home/tl/firerobot_ws/logs/r1/control_adapter.log
+StandardError=append:/home/tl/firerobot_ws/logs/r1/control_adapter.log
+
+[Install]
+WantedBy=multi-user.target
