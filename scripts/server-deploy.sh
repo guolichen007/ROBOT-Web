@@ -62,16 +62,25 @@ build_images() {
     "${COMPOSE[@]}" build --build-arg SOURCE_REVISION="$TARGET_SHA" "${services[@]}"
 }
 
+get_service_container_id() {
+  "${COMPOSE[@]}" ps -q "$1" 2>/dev/null | head -1
+}
+
+service_healthy() {
+  local cid
+  cid="$(get_service_container_id "$1")"
+  [ -n "$cid" ] || return 1
+  docker inspect --format '{{.State.Running}} {{.State.Health.Status}}' "$cid" 2>/dev/null | grep -q '^true healthy$'
+}
+
 recreate() {
   local services=("$@")
   echo "  重建服务：${services[*]}"
   FIREBOT_PYTHON_IMAGE="$PY_IMAGE" FIREBOT_WEB_IMAGE="$WEB_IMAGE" \
     "${COMPOSE[@]}" up -d --no-deps --wait "${services[@]}"
-  # --wait 后检查 required services healthy（fail-closed）
+  # --wait 后检查 required services healthy（fail-closed，统一走 docker inspect）
   for svc in "${services[@]}"; do
-    local st
-    st="$("${COMPOSE[@]}" ps --format '{{.Name}} {{.State}} {{.Health}}' 2>/dev/null | grep -E " ${svc}( |$)" | head -1 || true)"
-    echo "$st" | grep -qE 'healthy' || { echo "ERROR: $svc 未 healthy（$st）" >&2; return 1; }
+    service_healthy "$svc" || { echo "ERROR: $svc 未 healthy" >&2; return 1; }
   done
 }
 
@@ -91,15 +100,18 @@ write_manifest() {
   mkdir -p "$dir"
   local mig_after
   mig_after="$(migration_revision)"
-  python3 - "$TARGET_SHA" "$scope" "$prev" "$ts" "$dir" "$mig_before" "$mig_after" <<'PY'
+  python3 - "$TARGET_SHA" "$scope" "$prev" "$ts" "$dir" "$mig_before" "$mig_after" "$ENV_FILE" <<'PY'
 import json, subprocess, sys
-target_sha, scope, prev, ts, d, mig_before, mig_after = sys.argv[1:8]
+target_sha, scope, prev, ts, d, mig_before, mig_after, env_file = sys.argv[1:9]
 
 def inspect(args):
     try:
         return subprocess.check_output(args, text=True).strip()
     except Exception:
         return ""
+
+def cid_of(svc):
+    return inspect(["docker", "compose", "--env-file", env_file, "-f", "docker-compose.server.yml", "ps", "-q", svc])
 
 manifest = {
     "target_sha": target_sha,
@@ -112,7 +124,7 @@ manifest = {
     "containers": {},
 }
 for svc in ("api", "mqtt-ingress", "command-dispatcher", "task-worker", "web"):
-    cid = inspect(["docker", "compose", "ps", "-q", svc])
+    cid = cid_of(svc)
     if cid:
         manifest["containers"][svc] = {
             "container_id": cid,
@@ -161,8 +173,24 @@ deploy_scope() {
   local prev mig_before
   prev="$(current_sha)"          # 部署前 current → 变成 previous
   mig_before="$(migration_revision)"
-  build_images "$@"
-  recreate "$@"
+  if ! build_images "$@" || ! recreate "$@"; then
+    echo "SERVER_DEPLOY=FAIL（rollout 失败，自动回滚 $prev）" >&2
+    if [ "$prev" != "UNKNOWN" ]; then
+      git checkout "$prev" 2>/dev/null || true
+      FIREBOT_PYTHON_IMAGE="firebot-python:$prev" FIREBOT_WEB_IMAGE="firebot-web:$prev" \
+        "${COMPOSE[@]}" up -d --no-deps "${APP_ALL[@]}" 2>/dev/null || true
+      local ok=1
+      for svc in "${APP_ALL[@]}"; do service_healthy "$svc" || ok=0; done
+      if [ "$ok" = "1" ]; then
+        echo "AUTO_ROLLBACK=PASS（回 $prev）" >&2
+      else
+        echo "AUTO_ROLLBACK=FAIL（高优先级报警，需人工介入）" >&2
+      fi
+    else
+      echo "AUTO_ROLLBACK=FAIL（无 previous SHA）" >&2
+    fi
+    exit 1
+  fi
   # 成功后才更新 SSOT：previous=旧 current，current=TARGET_SHA
   write_ssot "$TARGET_SHA" "$prev"
   write_manifest "$scope" "$prev" "$mig_before"
