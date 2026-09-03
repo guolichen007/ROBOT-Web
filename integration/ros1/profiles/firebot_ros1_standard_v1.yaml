@@ -1,0 +1,44 @@
+# Firebot 车端 Fleet 车型 Profile（版本化合同，非车辆身份）
+#
+# 这是「车型/场站公共非 secret 配置」：样机1/样机2 代码完全一致，引用同一个 profile。
+# 严禁在本文件放 vehicle ID / password / per-device secret。
+# 未来新底盘新增 profile（如 firebot_ros2_standard_v1），不 fork 主代码。
+
+profile_version: 1
+
+ros:
+  distro: noetic
+  workspace: /home/tl/firerobot_ws
+
+base:
+  device: /dev/agv
+  status_topic: /robot_status
+  odom_topic: /odom
+  cmd_vel_topic: /cmd_vel
+  expected_control_mode: 3
+
+navigation:
+  base_launch:
+    package: smartcar_description
+    launch: bringup_dual_lidar.launch
+  navigation_launch:
+    package: navigation
+    launch: navigation.launch
+  pose_server:
+    package: waterplus_map_tools
+    launch: pose_navi_server.launch
+  pose_topic: /waterplus/navi_pose
+  amcl_topic: /amcl_pose
+
+control:
+  adapter: firebot_control_adapter.py
+  # 默认 disabled：只有现场负责人明确执行 firebotctl vehicle start control 才启动。
+  default_enabled: false
+
+motion:
+  stationary_linear_mps: 0.02
+  stationary_angular_radps: 0.03
+
+bridge:
+  location_stale_seconds: 3
+  # freshness 合同：provider 断源超过 TTL 即清除，避免旧值续命。
