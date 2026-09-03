@@ -38,8 +38,8 @@ require_sha() {
     echo "ERROR: git HEAD($head) != TARGET_SHA($TARGET_SHA)，禁止部署非精确版本" >&2
     exit 1
   fi
-  if ! git diff --quiet || ! git diff --cached --quiet; then
-    echo "ERROR: 工作区不干净（含 staged 变更），先提交/清理再部署" >&2
+  if [ -n "$(git status --porcelain)" ]; then
+    echo "ERROR: 工作区不干净（含 untracked/staged 变更），先提交/清理再部署" >&2
     exit 1
   fi
 }

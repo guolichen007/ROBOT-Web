@@ -25,12 +25,24 @@ if [ -z "$REQUIRE_SHA" ]; then
   exit 1
 fi
 
+# dirty provenance：ROBOT-Web 工作区必须干净（含 untracked），否则安装的代码不可追溯。
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)" ]; then
+  echo "ERROR: ROBOT-Web 工作区不干净（含 untracked/staged 变更），禁止安装（dirty provenance）" >&2
+  exit 1
+fi
+
 install_bridge() {
   FIREBOT_REQUIRE_SHA="$REQUIRE_SHA" bash "$BRIDGE_INSTALL"
 }
 
 install_control() {
   FIREBOT_REQUIRE_SHA="$REQUIRE_SHA" bash "$CONTROL_INSTALL"
+  # catkin 编译（firebot_control 是 catkin 包，安装后必须编译才能 rosrun）
+  local ws
+  ws="$(dirname "${FIREBOT_ROS_SRC_DIR:-/home/tl/firerobot_ws/src}")"
+  echo "  catkin_make ..."
+  ( cd "$ws" && catkin_make )
   # 安装 firebot-control systemd 单元（只安装，不 enable/start）
   if [ -f "$CONTROL_UNIT_SRC" ]; then
     if command -v sudo >/dev/null 2>&1; then

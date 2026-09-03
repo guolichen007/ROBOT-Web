@@ -266,6 +266,7 @@ do_sim() {
 
 # ---------------- real：真实运动栈 + motion gate ----------------
 do_real() {
+  echo "WARN: r1_vehicle.sh real 已弃用，请改用 ./vehicle-runtime.sh（模块化：ros-base/navigation/control-start/control-stop）" >&2
   mkdir -p "$LOG_DIR"
 
   # 硬件是否在位（缺底盘串口 = 备份机/无硬件）

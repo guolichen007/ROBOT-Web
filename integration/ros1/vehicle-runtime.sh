@@ -73,6 +73,13 @@ start_adapter() {
     echo "firebot_control_adapter 已在运行"
     return
   fi
+  # control-start gate：ROS master 必须 ready + /firebot_bridge/command 有 publisher（Bridge 已接），
+  # 否则 fail-closed 拒绝启动（不得在无下游 gate 时启动控制 adapter）。
+  rosmaster_ok || { echo "ERROR: ROS master 未就绪，禁止启动 control adapter" >&2; return 1; }
+  if [ "$(topic_pub_count /firebot_bridge/command)" -eq 0 ]; then
+    echo "ERROR: /firebot_bridge/command 无 publisher（Bridge 未接），禁止启动 control adapter" >&2
+    return 1
+  fi
   nohup rosrun firebot_control firebot_control_adapter.py > "$LOG_DIR/control_adapter.log" 2>&1 &
   sleep 2
 }
