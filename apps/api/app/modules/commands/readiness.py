@@ -19,6 +19,20 @@ AUTONOMOUS_COMMANDS = ("patrol", "extinguish", "return_dock", "cancel_task")
 ROS_COMPAT_DOWNLINK_IMPLEMENTED = False
 
 
+def _ros_motion_path_verified(integration: RobotIntegrationProfile | None) -> bool:
+    """真实 ROS 后端车辆必须共同证明的底层 ROS 运动命令通路。
+
+    MOCK 是测试模拟，不经过真实 ROS 命令通路，调用方单独处理其测试语义。
+    """
+    return bool(
+        integration
+        and integration.bidirectional_bridge_verified
+        and integration.command_path_verified
+        and integration.cmd_vel_arbitration_verified
+        and integration.ros_control_mode == 3
+    )
+
+
 def _supports(capability: RobotCapability | None, command: str) -> bool:
     # A missing retained capability declaration is never control proof.
     return bool(capability and command in (capability.supported_commands_json or []))
@@ -42,18 +56,16 @@ def robot_readiness(db: Session, robot: Robot) -> dict[str, Any]:
         integration and integration.control_contract_verified and bridge_ready
     )
     ack_contract_ready = bool(integration and integration.ack_contract_verified)
+    # ROS_COMPAT 仍受 ROS_COMPAT_DOWNLINK_IMPLEMENTED 只读约束；
+    # CANONICAL_MQTT 真实车辆 Bridge 不得用传输层作为绕过 ROS 运动门的理由，
+    # 必须与 ROS_COMPAT 同级证明 ROS 命令通路。MOCK 保留独立测试语义。
     ros_command_path_ready = bool(
         integration
         and (
             integration.source_kind != "ROS_COMPAT"
-            or (
-                ROS_COMPAT_DOWNLINK_IMPLEMENTED
-                and integration.bidirectional_bridge_verified
-                and integration.command_path_verified
-                and integration.cmd_vel_arbitration_verified
-                and integration.ros_control_mode == 3
-            )
+            or (ROS_COMPAT_DOWNLINK_IMPLEMENTED and _ros_motion_path_verified(integration))
         )
+        and (integration.source_kind != "CANONICAL_MQTT" or _ros_motion_path_verified(integration))
     )
     safety = {
         command: bool(
@@ -109,7 +121,9 @@ def robot_readiness(db: Session, robot: Robot) -> dict[str, Any]:
         reasons.append("ACK_CONTRACT_NOT_VERIFIED")
     if integration and not integration.map_contract_verified:
         reasons.append("MAP_CONTRACT_NOT_VERIFIED")
-    if integration and integration.source_kind == "ROS_COMPAT":
+    if integration and integration.source_kind in {"ROS_COMPAT", "CANONICAL_MQTT"}:
+        if not integration.bidirectional_bridge_verified:
+            reasons.append("BIDIRECTIONAL_BRIDGE_NOT_VERIFIED")
         if not integration.command_path_verified:
             reasons.append("COMMAND_PATH_NOT_VERIFIED")
         if not integration.cmd_vel_arbitration_verified:

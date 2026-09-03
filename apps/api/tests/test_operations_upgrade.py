@@ -161,6 +161,10 @@ def test_readiness_is_per_operation_and_safety_does_not_require_map() -> None:
         control_contract_verified=True,
         ack_contract_verified=True,
         map_contract_verified=False,
+        bidirectional_bridge_verified=True,
+        command_path_verified=True,
+        cmd_vel_arbitration_verified=True,
+        ros_control_mode=3,
     )
     capability = RobotCapability(
         robot_id=robot.id,
@@ -183,6 +187,68 @@ def test_readiness_is_per_operation_and_safety_does_not_require_map() -> None:
     assert readiness["safety_command_ready"]["emergency_stop"] is True
     assert readiness["autonomous_task_ready"]["patrol"] is False
     assert readiness["control_enabled"] is False
+
+
+def _readiness_robot() -> Robot:
+    return Robot(
+        id="robot-id",
+        vehicle_id="R001",
+        site_id="site",
+        name="R001",
+        enabled=True,
+        online_state="ONLINE",
+        estop_active=False,
+    )
+
+
+def _readiness_db(integration: RobotIntegrationProfile) -> object:
+    capability = RobotCapability(
+        robot_id=integration.robot_id,
+        protocol_version="1.2.0",
+        supported_commands_json=["stop_motion", "emergency_stop", "patrol"],
+        sensors_json=[],
+        media_json=[],
+    )
+
+    class FakeDb:
+        def get(self, model, _key):
+            return {
+                RobotIntegrationProfile: integration,
+                RobotCapability: capability,
+                RobotMotionProfile: None,
+            }.get(model)
+
+    return FakeDb()
+
+
+def test_canonical_mqtt_requires_ros_motion_gates() -> None:
+    """CANONICAL_MQTT 真实车辆 Bridge 不得用传输层绕过 ROS 运动门。"""
+    integration = RobotIntegrationProfile(
+        robot_id="robot-id",
+        source_kind="CANONICAL_MQTT",
+        control_contract_verified=True,
+        ack_contract_verified=True,
+        map_contract_verified=True,
+        # 未验证 ROS 命令通路 / cmd_vel 仲裁 / control_mode
+    )
+    readiness = robot_readiness(_readiness_db(integration), _readiness_robot())  # type: ignore[arg-type]
+    assert readiness["safety_command_ready"]["stop_motion"] is False
+    assert readiness["autonomous_task_ready"]["patrol"] is False
+    assert "COMMAND_PATH_NOT_VERIFIED" in readiness["readiness_reasons"]
+
+
+def test_mock_keeps_test_semantics_without_ros_gates() -> None:
+    """MOCK 是测试模拟，不经过真实 ROS 命令通路，保留独立测试语义。"""
+    integration = RobotIntegrationProfile(
+        robot_id="robot-id",
+        source_kind="MOCK",
+        control_contract_verified=True,
+        ack_contract_verified=True,
+        map_contract_verified=False,
+    )
+    readiness = robot_readiness(_readiness_db(integration), _readiness_robot())  # type: ignore[arg-type]
+    assert readiness["safety_command_ready"]["stop_motion"] is True
+    assert readiness["autonomous_task_ready"]["patrol"] is False
 
 
 def test_ros1_actual_payload_mapping_preserves_mecanum_and_unknown_safety(monkeypatch) -> None:
