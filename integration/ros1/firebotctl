@@ -25,7 +25,9 @@
 #   firebotctl fleet status
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# 用真实路径（resolve symlink），保证从任意 cwd / /usr/local/bin 符号链接都能正确定位 ROBOT-Web 根。
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(dirname "$SELF")"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ROS1_DIR="$SCRIPT_DIR"
 PROFILE_DIR="$ROS1_DIR/profiles"
@@ -37,6 +39,25 @@ DEFAULT_PROFILE="firebot_ros1_standard_v1"
 require_root() { [ "$(id -u)" -eq 0 ] || { echo "ERROR: 需要 root（用 sudo）" >&2; exit 1; }; }
 require_sha() {
   echo "$1" | grep -qE '^[0-9a-f]{40}$' || { echo "ERROR: SHA 必须是 40 位 hex" >&2; exit 1; }
+}
+
+# 自动同步批准 SHA：fetch + checkout --detach，禁止 reset/stash/改代码。
+release_sync() {
+  local sha="$1"
+  require_sha "$sha"
+  if [ -n "$(git -C "$REPO_DIR" status --porcelain 2>/dev/null)" ]; then
+    echo "ERROR: ROBOT-Web 工作区不干净，禁止自动 checkout" >&2
+    exit 1
+  fi
+  git -C "$REPO_DIR" fetch origin 2>/dev/null || true
+  git -C "$REPO_DIR" cat-file -e "$sha^{commit}" 2>/dev/null || {
+    echo "ERROR: 目标 SHA $sha 在本地仓库不存在（先 git fetch）" >&2
+    exit 1
+  }
+  git -C "$REPO_DIR" checkout --detach "$sha"
+  local head
+  head="$(git -C "$REPO_DIR" rev-parse HEAD)"
+  [ "$head" = "$sha" ] || { echo "ERROR: HEAD($head) != SHA($sha)" >&2; exit 1; }
 }
 
 read_device_id() {
@@ -203,6 +224,7 @@ print(pid)
     install)
       local sha=""; while [ $# -gt 0 ]; do case "$1" in --sha) sha="$2"; shift 2;; *) shift;; esac; done
       require_sha "$sha"
+      release_sync "$sha"
       require_root
       FIREBOT_REQUIRE_SHA="$sha" bash "$ROS1_DIR/vehicle-install.sh" all
       FIREBOT_REQUIRE_SHA="$sha" bash "$ROS1_DIR/vehicle-install.sh" verify
@@ -264,7 +286,7 @@ print(pid)
       bash "$ROS1_DIR/vehicle-install.sh" rollback ;;
     upgrade)
       local sha=""; while [ $# -gt 0 ]; do case "$1" in --sha) sha="$2"; shift 2;; *) shift;; esac; done
-      require_sha "$sha"; require_root
+      require_sha "$sha"; release_sync "$sha"; require_root
       FIREBOT_REQUIRE_SHA="$sha" bash "$ROS1_DIR/vehicle-install.sh" all
       FIREBOT_REQUIRE_SHA="$sha" bash "$ROS1_DIR/vehicle-install.sh" verify ;;
     *)
@@ -388,6 +410,7 @@ cmd_server() {
     deploy)
       local sha=""; while [ $# -gt 0 ]; do case "$1" in --sha) sha="$2"; shift 2;; *) shift;; esac; done
       require_sha "$sha"
+      release_sync "$sha"
       TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" preflight
       TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" all-app
       TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" verify ;;

@@ -681,6 +681,23 @@ class StopOperation(Base):
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class EnrollmentToken(Base):
+    """一次性设备 enrollment token（DB 事务化消费，杜绝 host/container 文件同步）。
+
+    credential_json 含 per-device MQTT credential + assignment（profile/site/map），
+    消费成功后由调用方清除敏感字段。
+    """
+
+    __tablename__ = "enrollment_tokens"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    device_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    token_hash: Mapped[str] = mapped_column(String(64))
+    credential_json: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class RobotOperationEvent(Base):
     __tablename__ = "robot_operation_events"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)

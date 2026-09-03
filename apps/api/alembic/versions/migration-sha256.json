@@ -4,5 +4,6 @@
   "20260812_0003_operations_upgrade.py": "be0f036d6e0d0a43f8a583d79814f221b03026e3cc604853e58c5a718c2d9c2f",
   "20260813_0004_pre_real_vehicle_hardening.py": "9bd99922d600d8e08d534043f3195abb7ff6689ca15748ec89586462d323e0a5",
   "20260813_0005_ros1_truth_and_preset_link.py": "f86d7fc626f5f0df2baf72d8e31d9b568f3b4ebe4b2fb3030f410d3bfb63d068",
-  "20260902_0006_stop_stationary_observation_dedup.py": "420f46afb2b13d325a076519132973a561bbd960257c6d493f318020c63ebe1b"
+  "20260902_0006_stop_stationary_observation_dedup.py": "420f46afb2b13d325a076519132973a561bbd960257c6d493f318020c63ebe1b",
+  "20260902_0007_enrollment_token.py": "ebd632ec5cc996dfd84f02f1e3f0f738a6b3bfbd2b4c0445fb01a1ac91949b19"
 }
