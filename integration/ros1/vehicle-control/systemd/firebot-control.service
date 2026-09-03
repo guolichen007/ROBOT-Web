@@ -7,11 +7,10 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/bin/bash -lc 'source /opt/ros/noetic/setup.bash && source /home/tl/firerobot_ws/devel/setup.bash && exec rosrun firebot_control firebot_control_adapter.py'
+# 车型参数来自 /etc/firebot/runtime.env（Fleet Profile 生成），不硬编码 workspace/adapter。
+ExecStart=/bin/bash -lc 'set -e; [ -f /etc/firebot/runtime.env ] && . /etc/firebot/runtime.env; ROS_DISTRO=${ROS_DISTRO:-noetic}; ROS_WORKSPACE=${ROS_WORKSPACE:-/home/tl/firerobot_ws}; source /opt/ros/$ROS_DISTRO/setup.bash; source $ROS_WORKSPACE/devel/setup.bash; exec rosrun firebot_control ${CONTROL_ADAPTER:-firebot_control_adapter.py}'
 Restart=no
 User=tl
-StandardOutput=append:/home/tl/firerobot_ws/logs/r1/control_adapter.log
-StandardError=append:/home/tl/firerobot_ws/logs/r1/control_adapter.log
 
 [Install]
 WantedBy=multi-user.target
