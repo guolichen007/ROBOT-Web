@@ -47,14 +47,17 @@ class Config:
     # ---- MQTT ----
     mqtt_host: str = os.environ.get("FIREBOT_MQTT_HOST", "100.110.31.112")
     mqtt_port: int = int(os.environ.get("FIREBOT_MQTT_PORT", "8883"))
-    mqtt_username: str = os.environ.get("FIREBOT_MQTT_USERNAME", "firebot-vehicle-01")
+    # MQTT username 由 DEVICE_ID 派生，不单独手填；空则 validate() 回落到 vehicle_id。
+    mqtt_username: str = os.environ.get("FIREBOT_MQTT_USERNAME", "")
     mqtt_password: str = os.environ.get("FIREBOT_MQTT_PASSWORD", "")
     ca_cert: str = os.environ.get("FIREBOT_CA_CERT", "/etc/firebot/production-ca.crt")
     # TLS：生产 true；本地联调测试可设 false（连无 TLS 测试 broker）
     mqtt_tls: bool = _env_bool("FIREBOT_MQTT_TLS", True)
 
     # ---- 身份 / 地图 ----
-    vehicle_id: str = os.environ.get("FIREBOT_VEHICLE_ID", "firebot-vehicle-01")
+    # 设备身份不能有危险默认值：缺失即启动失败（firebotctl enroll 写入 /etc/firebot/device.env）。
+    # FIREBOT_DEVICE_ID 是 Fleet 化的唯一人工输入根；FIREBOT_VEHICLE_ID 作为兼容别名。
+    vehicle_id: str = os.environ.get("FIREBOT_VEHICLE_ID", os.environ.get("FIREBOT_DEVICE_ID", ""))
     # 地图身份不设危险默认值：必须显式配置，且 location 默认关闭。
     site_code: str = os.environ.get("FIREBOT_SITE_CODE", "")
     map_code: str = os.environ.get("FIREBOT_MAP_CODE", "")
@@ -124,8 +127,17 @@ class Config:
     # location freshness TTL（fail-closed）：0/空/非法 → 3.0s，绝不允许「永不过期旧 location」。
     location_stale_seconds: float = _env_location_stale_seconds()
 
-    # ---- 密码缺失即退出 ----
+    # ---- 身份/密码缺失即退出（fail-closed，绝不落入危险默认身份） ----
     def validate(self) -> None:
+        if not self.vehicle_id:
+            print(
+                "ERROR: FIREBOT_VEHICLE_ID/FIREBOT_DEVICE_ID 未设置（设备身份必须显式，"
+                "由 firebotctl vehicle enroll 生成 /etc/firebot/device.env）",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if not self.mqtt_username:
+            self.mqtt_username = self.vehicle_id
         if not self.mqtt_password:
             print(
                 "ERROR: FIREBOT_MQTT_PASSWORD 未设置（应从 /etc/firebot/bridge-secret.env 或 "
