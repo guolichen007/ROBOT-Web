@@ -4,7 +4,7 @@ title = "Firebot Gitleaks policy"
 useDefault = true
 
 [allowlist]
-description = "Exact non-production secrets used only by isolated CI and test profiles"
+description = "Exact non-production secrets used only by isolated CI and test profiles; migration manifest is a SHA256 integrity digest, not a credential"
 regexTarget = "secret"
 regexes = [
   '''ci-jwt-secret-at-least-32-characters-long''',
@@ -17,9 +17,6 @@ regexes = [
   '''strong-password''',
   '''mqtt-secret''',
 ]
-
-[allowlist.paths]
-description = "迁移清单是 Alembic 文件完整性 SHA256 摘要，非凭据；dist 是构建产物"
 paths = [
   '''apps/api/alembic/versions/migration-sha256\.json''',
 ]

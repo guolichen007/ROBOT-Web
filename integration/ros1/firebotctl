@@ -26,15 +26,45 @@
 set -euo pipefail
 
 # 用真实路径（resolve symlink），保证从任意 cwd / /usr/local/bin 符号链接都能正确定位 ROBOT-Web 根。
+# SCRIPT_DIR = ROBOT-Web/integration/ros1（firebotctl 所在目录），因此 REPO_DIR 需上两级到 ROBOT-Web。
 SELF="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(dirname "$SELF")"
-REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ROS1_DIR="$SCRIPT_DIR"
 PROFILE_DIR="$ROS1_DIR/profiles"
 DEVICE_ENV="/etc/firebot/device.env"
 BRIDGE_ENV="/etc/firebot/bridge.env"
 BRIDGE_SECRET="/etc/firebot/bridge-secret.env"
 DEFAULT_PROFILE="firebot_ros1_standard_v1"
+BOOTSTRAP_ENV="/etc/firebot/bootstrap.env"
+
+# 服务器 bootstrap 配置（非 secret）：FIREBOT_SERVER_URL=https://<server>
+if [ -f "$BOOTSTRAP_ENV" ]; then
+  # shellcheck disable=SC1091
+  . "$BOOTSTRAP_ENV"
+fi
+# enrollment 正式入口（Nginx HTTPS API），禁止 http 默认地址、禁止 -k。
+ENROLL_URL_DEFAULT="${FIREBOT_SERVER_URL:+${FIREBOT_SERVER_URL%/}/api/v1/enrollment/activate}"
+
+DEVICE_TOKEN_FILE="/etc/firebot/device-token"
+
+device_token_value() { cat "$DEVICE_TOKEN_FILE" 2>/dev/null || true; }
+
+server_base_url() { echo "${FIREBOT_SERVER_URL%/}"; }
+
+server_get_assignment() {
+  local did="$1"
+  curl -sf --cacert /etc/firebot/production-ca.crt \
+    "$(server_base_url)/api/v1/robots/$did/assignment" 2>/dev/null || true
+}
+
+server_put_assignment() {
+  local did="$1" path="$2" json_body="$3"
+  curl -sf --cacert /etc/firebot/production-ca.crt \
+    -X PUT -H "Content-Type: application/json" -H "X-Device-Token: $(device_token_value)" \
+    -d "$json_body" \
+    "$(server_base_url)/api/v1/robots/$did/assignment/$path" 2>/dev/null || true
+}
 
 require_root() { [ "$(id -u)" -eq 0 ] || { echo "ERROR: 需要 root（用 sudo）" >&2; exit 1; }; }
 require_sha() {
@@ -177,7 +207,7 @@ cmd_vehicle() {
       [ -n "$did" ] || { echo "用法: firebotctl vehicle enroll <DEVICE_ID> --token <TOKEN>" >&2; exit 1; }
       echo "$did" | grep -qE '^[A-Za-z0-9_-]{1,64}$' || { echo "ERROR: DEVICE_ID 非法" >&2; exit 1; }
       require_root
-      local token="" server="${FIREBOT_ENROLL_URL:-http://firebot-server:8080/api/v1/enrollment/activate}"
+      local token="" server="${FIREBOT_ENROLL_URL:-${ENROLL_URL_DEFAULT:-}}"
       shift || true
       while [ $# -gt 0 ]; do
         case "$1" in
@@ -186,10 +216,13 @@ cmd_vehicle() {
           *) shift ;;
         esac
       done
+      [ -n "$server" ] || { echo "ERROR: 未配置 enrollment 服务器地址（/etc/firebot/bootstrap.env 的 FIREBOT_SERVER_URL）" >&2; exit 1; }
       [ -n "$token" ] || { echo "ERROR: 缺少 --token（由服务器 firebotctl fleet register 签发）" >&2; exit 1; }
-      # 真实验证 token + 取得 per-device credential（服务器一次性消费，重放会 401）
+      # 真实验证 token + 取得 per-device credential（服务器一次性消费，重放会 401）。
+      # 必须验证 CA（--cacert），禁止 -k。
       local resp
-      resp="$(curl -sf -X POST "$server" -H 'Content-Type: application/json' \
+      resp="$(curl -sf --cacert /etc/firebot/production-ca.crt -X POST "$server" \
+        -H 'Content-Type: application/json' \
         -d "{\"device_id\":\"$did\",\"token\":\"$token\"}" 2>/dev/null || true)"
       if [ -z "$resp" ]; then
         echo "ENROLL=FAIL（enrollment API 不可达 / token 无效或已使用）" >&2
@@ -211,6 +244,8 @@ open("/etc/firebot/assignment.env", "w").write(
 os.chmod("/etc/firebot/assignment.env", 0o644)
 open("/etc/firebot/bridge-secret.env", "w").write(f"FIREBOT_MQTT_PASSWORD={d['mqtt_password']}\n")
 os.chmod("/etc/firebot/bridge-secret.env", 0o600)
+open("/etc/firebot/device-token", "w").write(d.get("device_token", ""))
+os.chmod("/etc/firebot/device-token", 0o600)
 print(did)
 print(pid)
 '
@@ -277,8 +312,7 @@ print(pid)
       local did; did="$(read_device_id)"
       local pid; pid="$(grep -E '^PROFILE_ID=' "$DEVICE_ENV" 2>/dev/null | cut -d= -f2- || echo "$DEFAULT_PROFILE")"
       [ -n "$did" ] || { echo "ERROR: 先 enroll" >&2; exit 1; }
-      generate_bridge_env "$did" "$pid" > "$BRIDGE_ENV"
-      generate_runtime_env "$pid"
+      do_profile_sync "$did" "$pid" || exit 1
       echo "PROFILE_SYNC=PASS" ;;
     support-bundle)
       vehicle_support_bundle ;;
@@ -294,19 +328,48 @@ print(pid)
   esac
 }
 
-# ---- 受控能力提升（完整闭环：prereq → 写声明源 → 重生成 → 重启 → 新 boot → 等 ONLINE）----
+# ---- 服务器权威 assignment 同步（GET → 写本地缓存 → 重生成 runtime/bridge）----
+do_profile_sync() {
+  local did="$1" pid="$2"
+  local resp
+  resp="$(server_get_assignment "$did")"
+  [ -n "$resp" ] || { echo "PROFILE_SYNC=FAIL（无法请求服务器 assignment）" >&2; return 1; }
+  echo "$resp" | python3 -c '
+import json, os, sys
+d = json.load(sys.stdin)
+old = {}
+p = "/etc/firebot/assignment.env"
+if os.path.exists(p):
+    for line in open(p, encoding="utf-8"):
+        line = line.strip()
+        if "=" in line and not line.startswith("#"):
+            k, v = line.split("=", 1)
+            old[k] = v
+out = [
+    "MQTT_HOST=%s" % old.get("MQTT_HOST", ""),
+    "MQTT_PORT=%s" % old.get("MQTT_PORT", "8883"),
+    "SITE_CODE=%s" % d.get("site_code", ""),
+    "MAP_CODE=%s" % d.get("map_code", ""),
+    "MAP_VERSION=%s" % d.get("map_version", ""),
+    "MAP_CHECKSUM=%s" % d.get("map_checksum", ""),
+    "LOCATION_ENABLED=%s" % ("true" if d.get("location_enabled") else "false"),
+    "SUPPORTED_COMMANDS=%s" % ",".join(d.get("supported_commands", [])),
+    "ASSIGNMENT_REVISION=%s" % d.get("assignment_revision", 0),
+]
+open(p, "w").write("\n".join(out) + "\n")
+os.chmod(p, 0o644)
+print(d.get("assignment_revision", 0))
+'
+  generate_bridge_env "$did" "$pid" > "$BRIDGE_ENV"
+  generate_runtime_env "$pid"
+}
+
+# ---- 受控能力提升（服务器权威：GET 证据 → PUT capability → profile-sync → 重启 → 新 boot）----
 set_capability() {
   local level="$1"
   local commands
   if [ "$level" = "patrol" ]; then
     commands="stop_motion,patrol"
-    # patrol 必须先有 STOP field evidence（不可伪造，来自服务器 attest 后写入 assignment）
-    local stop_verified
-    stop_verified="$(grep -E '^STOP_FIELD_VERIFIED=' "${FIREBOT_ASSIGNMENT_FILE:-/etc/firebot/assignment.env}" 2>/dev/null | cut -d= -f2- || echo "0")"
-    [ "$stop_verified" = "1" ] || {
-      echo "PATROL_CAPABILITY_PROMOTION=REJECTED（无 STOP field evidence，禁止 patrol）" >&2
-      exit 1
-    }
   else
     commands="stop_motion"
   fi
@@ -314,13 +377,22 @@ set_capability() {
   local did; did="$(read_device_id)"
   local pid; pid="$(grep -E '^PROFILE_ID=' "$DEVICE_ENV" 2>/dev/null | cut -d= -f2- || echo "$DEFAULT_PROFILE")"
   [ -n "$did" ] || { echo "ERROR: 先 enroll" >&2; exit 1; }
-  local assignment="${FIREBOT_ASSIGNMENT_FILE:-/etc/firebot/assignment.env}"
-  local tmp; tmp="$(mktemp)"
-  grep -v '^SUPPORTED_COMMANDS=' "$assignment" 2>/dev/null > "$tmp" || true
-  echo "SUPPORTED_COMMANDS=$commands" >> "$tmp"
-  mv "$tmp" "$assignment"
-  generate_bridge_env "$did" "$pid" > "$BRIDGE_ENV"
-
+  if [ "$level" = "patrol" ]; then
+    # patrol 必须从服务器读取 STOP 现场验证证据（不再读本地人工 assignment.env）
+    local verified
+    verified="$(server_get_assignment "$did" | python3 -c 'import json,sys; print("true" if json.load(sys.stdin).get("stop_field_verified") else "false")' 2>/dev/null || echo false)"
+    [ "$verified" = "true" ] || {
+      echo "PATROL_CAPABILITY_PROMOTION=REJECTED（服务器无 STOP field evidence，禁止 patrol）" >&2
+      exit 1
+    }
+  fi
+  # 请求服务器修改 SUPPORTED_COMMANDS（revision+1）
+  local cmds_json
+  cmds_json="$(printf '%s' "$commands" | python3 -c 'import json,sys; print(json.dumps([c for c in sys.stdin.read().split(",") if c]))')"
+  local put_resp
+  put_resp="$(server_put_assignment "$did" "capability" "{\"commands\": $cmds_json}")"
+  [ -n "$put_resp" ] || { echo "CAPABILITY_PROMOTION=FAIL（服务器拒绝/不可达）" >&2; exit 1; }
+  do_profile_sync "$did" "$pid" || exit 1
   # restart 必须成功，禁止 || true 吞错
   local old_boot new_boot=""
   old_boot="$(read_boot_id)"
@@ -349,12 +421,14 @@ set_capability() {
 enable_location() {
   require_root
   local did; did="$(read_device_id)"
-  local assignment="${FIREBOT_ASSIGNMENT_FILE:-/etc/firebot/assignment.env}"
+  local pid; pid="$(grep -E '^PROFILE_ID=' "$DEVICE_ENV" 2>/dev/null | cut -d= -f2- || echo "$DEFAULT_PROFILE")"
+  local resp
+  resp="$(server_get_assignment "$did")"
   local site map ver ck
-  site="$(grep -E '^SITE_CODE=' "$assignment" 2>/dev/null | cut -d= -f2- || echo "")"
-  map="$(grep -E '^MAP_CODE=' "$assignment" 2>/dev/null | cut -d= -f2- || echo "")"
-  ver="$(grep -E '^MAP_VERSION=' "$assignment" 2>/dev/null | cut -d= -f2- || echo "")"
-  ck="$(grep -E '^MAP_CHECKSUM=' "$assignment" 2>/dev/null | cut -d= -f2- || echo "")"
+  site="$(echo "$resp" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("site_code",""))' 2>/dev/null || echo "")"
+  map="$(echo "$resp" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("map_code",""))' 2>/dev/null || echo "")"
+  ver="$(echo "$resp" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("map_version",""))' 2>/dev/null || echo "")"
+  ck="$(echo "$resp" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("map_checksum",""))' 2>/dev/null || echo "")"
   if [ -z "$site" ] || [ -z "$map" ] || [ -z "$ver" ] || [ -z "$ck" ]; then
     echo "LOCATION_ENABLE=REJECTED" >&2
     echo "MAP_IDENTITY_NOT_VERIFIED" >&2
@@ -368,13 +442,11 @@ enable_location() {
     echo "ROS_SOURCE_NOT_READY amcl=$amcl odom=$odom" >&2
     exit 1
   }
-  # 声明式：写 desired LOCATION_ENABLED=true 到 assignment，再重新生成（不 sed bridge.env）
-  local tmp; tmp="$(mktemp)"
-  grep -v '^LOCATION_ENABLED=' "$assignment" 2>/dev/null > "$tmp" || true
-  echo "LOCATION_ENABLED=true" >> "$tmp"
-  mv "$tmp" "$assignment"
-  local pid; pid="$(grep -E '^PROFILE_ID=' "$DEVICE_ENV" 2>/dev/null | cut -d= -f2- || echo "$DEFAULT_PROFILE")"
-  generate_bridge_env "$did" "$pid" > "$BRIDGE_ENV"
+  # 请求服务器设置 desired LOCATION_ENABLED=true（revision+1）
+  local put_resp
+  put_resp="$(server_put_assignment "$did" "location" '{"enabled": true}')"
+  [ -n "$put_resp" ] || { echo "LOCATION_ENABLE=REJECTED（服务器拒绝）" >&2; exit 1; }
+  do_profile_sync "$did" "$pid" || exit 1
   systemctl restart firebot-bridge
   echo "LOCATION_PROMOTION=PASS"
 }
@@ -412,8 +484,9 @@ cmd_server() {
       require_sha "$sha"
       release_sync "$sha"
       TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" preflight
-      # 自动 migration：DB revision != 目标 head 时执行（backup 由 SOP 保证）
+      # 自动 migration：DB revision != 目标 head 时，先真实 pg_dump 备份再 migrate
       if ! TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" migration-needed; then
+        TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" backup
         TARGET_SHA="$sha" BACKUP_VERIFIED=1 "$REPO_DIR/scripts/server-deploy.sh" migrate
       fi
       TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" all-app
@@ -463,5 +536,13 @@ case "${1:-}" in
   server) shift; cmd_server "$@" ;;
   fleet) shift; cmd_fleet "$@" ;;
   -h|--help|help) print_help ;;
+  __pathcheck__)
+    # 内部测试用：验证 REPO_DIR 正确定位到 ROBOT-Web 根（而非 integration/）。
+    [ -f "$REPO_DIR/scripts/server-deploy.sh" ] || { echo "MISSING scripts/server-deploy.sh（REPO_DIR=$REPO_DIR）" >&2; exit 1; }
+    [ -f "$REPO_DIR/docker-compose.server.yml" ] || { echo "MISSING docker-compose.server.yml" >&2; exit 1; }
+    [ -f "$ROS1_DIR/vehicle-install.sh" ] || { echo "MISSING vehicle-install.sh" >&2; exit 1; }
+    echo "REPO_DIR=$REPO_DIR"
+    echo "PATHCHECK=PASS"
+    ;;
   *) echo "用法: firebotctl <vehicle|server|fleet> ...（firebotctl --help 查看）" >&2; exit 1 ;;
 esac

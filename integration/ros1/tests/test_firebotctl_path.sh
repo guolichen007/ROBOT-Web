@@ -29,6 +29,10 @@ check "/tmp 目录调用 --help" bash -c "cd /tmp && bash '$FIREBOTCTL' --help >
 TMPLINK="$(mktemp -d)/firebotctl"
 ln -s "$FIREBOTCTL" "$TMPLINK"
 check "符号链接调用 --help" bash -c "cd /tmp && bash '$TMPLINK' --help >/dev/null 2>&1"
+
+# 4) 真实路径解析：__pathcheck__ 必须找到 ROBOT-Web 根的 scripts/server-deploy.sh
+check "repo 根路径解析（__pathcheck__）" bash -c "cd /tmp && bash '$FIREBOTCTL' __pathcheck__ >/dev/null 2>&1"
+check "符号链接路径解析（__pathcheck__）" bash -c "cd /tmp && bash '$TMPLINK' __pathcheck__ >/dev/null 2>&1"
 rm -rf "$(dirname "$TMPLINK")"
 
 echo ""
