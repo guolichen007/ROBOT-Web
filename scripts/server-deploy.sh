@@ -171,7 +171,23 @@ do_migrate() {
 }
 
 migration_head() {
-  "${COMPOSE[@]}" exec -T api alembic heads 2>/dev/null | tail -1 || echo "unknown"
+  # 从 TARGET_SHA 工作树的 Alembic migration 图计算 head（不读旧 API 容器，避免把旧代码 head 当目标 head）。
+  python3 - <<'PY'
+import re
+from pathlib import Path
+
+versions = Path("apps/api/alembic/versions")
+revisions: dict[str, str | None] = {}
+for p in sorted(versions.glob("2026*.py")):
+    text = p.read_text(encoding="utf-8")
+    rev = re.search(r'revision\s*=\s*["\']([^"\']+)["\']', text)
+    down = re.search(r'down_revision\s*=\s*["\']([^"\']+)["\']', text)
+    if rev:
+        revisions[rev.group(1)] = down.group(1) if down else None
+downs = {v for v in revisions.values() if v}
+heads = [r for r in revisions if r not in downs]
+print(heads[-1] if heads else "unknown")
+PY
 }
 
 do_migration_needed() {

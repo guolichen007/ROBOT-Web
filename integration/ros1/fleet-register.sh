@@ -58,11 +58,13 @@ CA_CERT="${FIREBOT_MOSQUITTO_CA:-./secrets/mosquitto/certs/ca.crt}"
 MQTT_PORT="$("${COMPOSE[@]}" port mosquitto 8883 2>/dev/null | sed 's/.*://' || echo 8883)"
 # 重新跑 mosquitto-config-init，把 source 的 passwords + ACL 复制进 mosquitto_config volume
 "${COMPOSE[@]}" run --rm mosquitto-config-init
-# 重启 mosquitto 并等 healthy（禁止 restart || true）
+# 重启 mosquitto 并等 healthy（禁止 restart || true；与 server-deploy service_healthy 同原则：
+# ps -q 拿 CID + docker inspect 判 Running=true + Health.Status=healthy）
 "${COMPOSE[@]}" restart mosquitto
 healthy="no"
 for _ in $(seq 1 30); do
-  if "${COMPOSE[@]}" ps --format '{{.Name}} {{.Health}}' 2>/dev/null | grep -qE 'mosquitto[^-].*healthy'; then
+  mosq_cid="$("${COMPOSE[@]}" ps -q mosquitto 2>/dev/null | head -1)"
+  if [ -n "$mosq_cid" ] && docker inspect --format '{{.State.Running}} {{.State.Health.Status}}' "$mosq_cid" 2>/dev/null | grep -q '^true healthy$'; then
     healthy="yes"; break
   fi
   sleep 2
