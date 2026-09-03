@@ -24,6 +24,7 @@ from app.modules.admin.router import router as admin_router
 from app.modules.alarms.router import router as alarms_router
 from app.modules.auth.router import router as auth_router
 from app.modules.commands.router import router as commands_router
+from app.modules.enrollment.router import router as enrollment_router
 from app.modules.history.router import router as history_router
 from app.modules.maps.router import router as maps_router
 from app.modules.media.router import router as media_router
@@ -101,6 +102,7 @@ for router in (
     media_router,
     operations_router,
     reports_router,
+    enrollment_router,
 ):
     app.include_router(router)
 

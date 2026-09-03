@@ -153,37 +153,52 @@ cmd_vehicle() {
   case "$sub" in
     enroll)
       local did="${1:-}"
-      [ -n "$did" ] || { echo "用法: firebotctl vehicle enroll <DEVICE_ID> [--token <TOKEN>] [--password <PW>]" >&2; exit 1; }
+      [ -n "$did" ] || { echo "用法: firebotctl vehicle enroll <DEVICE_ID> --token <TOKEN>" >&2; exit 1; }
+      echo "$did" | grep -qE '^[A-Za-z0-9_-]{1,64}$' || { echo "ERROR: DEVICE_ID 非法" >&2; exit 1; }
       require_root
-      local token="" password=""
+      local token="" server="${FIREBOT_ENROLL_URL:-http://firebot-server:8080/api/v1/enrollment/activate}"
       shift || true
       while [ $# -gt 0 ]; do
         case "$1" in
           --token) token="${2:-}"; shift 2 ;;
-          --password) password="${2:-}"; shift 2 ;;
+          --server) server="${2:-}"; shift 2 ;;
           *) shift ;;
         esac
       done
-      # enrollment token 是信任边界：必须由服务器 fleet register 签发，非空。
       [ -n "$token" ] || { echo "ERROR: 缺少 --token（由服务器 firebotctl fleet register 签发）" >&2; exit 1; }
-      local profile_id="${FIREBOT_PROFILE_ID:-$DEFAULT_PROFILE}"
-      mkdir -p /etc/firebot
-      printf 'DEVICE_ID=%s\nPROFILE_ID=%s\n' "$did" "$profile_id" > "$DEVICE_ENV"
-      chmod 644 "$DEVICE_ENV"
-      # per-device credential：由 enrollment 写入 bridge-secret.env（0600），绝不 fleet 共用。
-      if [ -n "$password" ]; then
-        printf 'FIREBOT_MQTT_PASSWORD=%s\n' "$password" > "$BRIDGE_SECRET"
-        chmod 600 "$BRIDGE_SECRET"
-        echo "  bridge-secret.env 已写入（0600，per-device）"
-      elif [ -f "$BRIDGE_SECRET" ]; then
-        echo "  bridge-secret.env 已存在（保留，不覆盖）"
-      else
-        echo "  WARN: 未提供 --password 且 bridge-secret.env 缺失（由 enrollment 服务补）" >&2
+      # 真实验证 token + 取得 per-device credential（服务器一次性消费，重放会 401）
+      local resp
+      resp="$(curl -sf -X POST "$server" -H 'Content-Type: application/json' \
+        -d "{\"device_id\":\"$did\",\"token\":\"$token\"}" 2>/dev/null || true)"
+      if [ -z "$resp" ]; then
+        echo "ENROLL=FAIL（enrollment API 不可达 / token 无效或已使用）" >&2
+        exit 1
       fi
+      mkdir -p /etc/firebot
+      echo "$resp" | python3 -c '
+import json, os, sys
+d = json.load(sys.stdin)
+did = d["device_id"]
+pid = d.get("profile_id", "firebot_ros1_standard_v1")
+open("/etc/firebot/device.env", "w").write(f"DEVICE_ID={did}\nPROFILE_ID={pid}\n")
+os.chmod("/etc/firebot/device.env", 0o644)
+open("/etc/firebot/assignment.env", "w").write(
+    "MQTT_HOST=%s\nMQTT_PORT=%s\nSITE_CODE=%s\nMAP_CODE=%s\nMAP_VERSION=%s\nMAP_CHECKSUM=%s\n"
+    % (d.get("mqtt_host", ""), d.get("mqtt_port", 8883), d.get("site_code", ""),
+       d.get("map_code", ""), d.get("map_version", ""), d.get("map_checksum", ""))
+)
+os.chmod("/etc/firebot/assignment.env", 0o644)
+open("/etc/firebot/bridge-secret.env", "w").write(f"FIREBOT_MQTT_PASSWORD={d['mqtt_password']}\n")
+os.chmod("/etc/firebot/bridge-secret.env", 0o600)
+print(did)
+print(pid)
+'
+      local profile_id
+      profile_id="$(grep -E '^PROFILE_ID=' "$DEVICE_ENV" | cut -d= -f2-)"
       generate_bridge_env "$did" "$profile_id" > "$BRIDGE_ENV"
       chmod 644 "$BRIDGE_ENV"
       generate_runtime_env "$profile_id"
-      echo "ENROLL=PASS device_id=$did profile=$profile_id"
+      echo "ENROLL=PASS device_id=$did profile=$profile_id（per-device credential 已安全写入 0600）"
       ;;
     install)
       local sha=""; while [ $# -gt 0 ]; do case "$1" in --sha) sha="$2"; shift 2;; *) shift;; esac; done

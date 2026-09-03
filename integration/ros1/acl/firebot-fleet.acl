@@ -1,0 +1,43 @@
+# Firebot Fleet Mosquitto ACL 模板（按 username=DEVICE_ID 做 namespace 隔离）
+#
+# 本模板配合：username = DEVICE_ID（firebot-vehicle-XX）
+# 规则语义：
+#   - 每辆车只能 publish 自己的 telemetry/status/location/heartbeat/ack/task_status
+#   - 每辆车只能 subscribe 自己的 command
+#   - 绝对不能访问 robot/<其它DEVICE_ID>/#
+#
+# 部署：mosquitto.conf 中 acl_file 指向本文件；新增车辆无需改 ACL（pattern 自动覆盖）。
+
+# 平台（服务器）账号拥有 fleet 级读写（部署时替换为真实 platform 账号）
+user platform
+topic readwrite robot/#
+topic readwrite $SYS/#
+
+# 设备账号：只允许自己的 namespace
+user firebot-vehicle-01
+topic read robot/firebot-vehicle-01/command
+topic write robot/firebot-vehicle-01/heartbeat
+topic write robot/firebot-vehicle-01/status
+topic write robot/firebot-vehicle-01/location
+topic write robot/firebot-vehicle-01/availability
+topic write robot/firebot-vehicle-01/capabilities
+topic write robot/firebot-vehicle-01/command_ack
+topic write robot/firebot-vehicle-01/task_status
+topic write robot/firebot-vehicle-01/sensor
+topic write robot/firebot-vehicle-01/battery
+
+user firebot-vehicle-02
+topic read robot/firebot-vehicle-02/command
+topic write robot/firebot-vehicle-02/heartbeat
+topic write robot/firebot-vehicle-02/status
+topic write robot/firebot-vehicle-02/location
+topic write robot/firebot-vehicle-02/availability
+topic write robot/firebot-vehicle-02/capabilities
+topic write robot/firebot-vehicle-02/command_ack
+topic write robot/firebot-vehicle-02/task_status
+topic write robot/firebot-vehicle-02/sensor
+topic write robot/firebot-vehicle-02/battery
+
+# 默认拒绝其它所有访问（fail-closed）
+user anonymous
+topic readwrite #
