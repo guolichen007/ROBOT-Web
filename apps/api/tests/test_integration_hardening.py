@@ -872,6 +872,16 @@ def test_resumed_patrol_uses_route_cursor_as_resume_waypoint_index() -> None:
             user = db.scalar(select(User).where(User.username == "admin"))
             plan = db.scalar(select(PatrolPlan).where(PatrolPlan.enabled.is_(True)))
             assert robot and user and plan
+            # 测试隔离：清理上一轮残留的活动任务（避免 ACTIVE_TASK_CONFLICT 跨用例干扰；
+            # 不削弱生产 ACTIVE_TASK_CONFLICT 安全逻辑）
+            db.execute(
+                update(Task)
+                .where(
+                    Task.robot_id == robot.id,
+                    Task.status.in_({"CREATED", "QUEUED", "ACCEPTED", "EXECUTING"}),
+                )
+                .values(status="SUCCEEDED", phase="TEST_CLEANUP")
+            )
             version = db.get(MapVersion, plan.map_version_id)
             assert version
             previous = Task(
