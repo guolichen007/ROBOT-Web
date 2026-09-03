@@ -1,0 +1,335 @@
+#!/usr/bin/env bash
+# firebotctl — Firebot 现场唯一统一入口（Fleet 产品化）
+#
+# 现场只使用本入口；底层模块脚本（vehicle-install.sh / vehicle-runtime.sh / server-deploy.sh 等）
+# 保留为 module implementation，不要求现场人员理解。
+#
+# 车端：
+#   firebotctl vehicle enroll <DEVICE_ID>            # 生成 device.env + GENERATED bridge.env
+#   firebotctl vehicle install --sha <SHA>           # 安装 Bridge + Control（不启动控制）
+#   firebotctl vehicle verify                         # 机器可读验收
+#   firebotctl vehicle status                         # 只读状态
+#   firebotctl vehicle start base|navigation|control  # 模块化启动
+#   firebotctl vehicle stop control                   # 只停 control
+#   firebotctl vehicle capability stop-only|patrol    # 受控能力提升（自动重启 Bridge）
+#   firebotctl vehicle location enable                # 受控开启 location（先验地图/AMCL/odom）
+#   firebotctl vehicle profile-sync                   # 从 profile 重新生成 bridge.env
+#   firebotctl vehicle support-bundle                 # 脱敏诊断包
+#   firebotctl vehicle rollback                       # 回滚 previous
+#   firebotctl vehicle upgrade --sha <SHA>            # 升级
+# 服务器：
+#   firebotctl server deploy --sha <SHA>              # 一条命令部署
+#   firebotctl server verify / rollback / support-bundle
+# 舰队：
+#   firebotctl fleet register <DEVICE_ID>             # 生成 per-device credential + enrollment token
+#   firebotctl fleet status
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+ROS1_DIR="$SCRIPT_DIR"
+PROFILE_DIR="$ROS1_DIR/profiles"
+DEVICE_ENV="/etc/firebot/device.env"
+BRIDGE_ENV="/etc/firebot/bridge.env"
+BRIDGE_SECRET="/etc/firebot/bridge-secret.env"
+DEFAULT_PROFILE="firebot_ros1_standard_v1"
+
+require_root() { [ "$(id -u)" -eq 0 ] || { echo "ERROR: 需要 root（用 sudo）" >&2; exit 1; }; }
+require_sha() {
+  echo "$1" | grep -qE '^[0-9a-f]{40}$' || { echo "ERROR: SHA 必须是 40 位 hex" >&2; exit 1; }
+}
+
+read_device_id() {
+  local did=""
+  [ -f "$DEVICE_ENV" ] && did="$(grep -E '^DEVICE_ID=' "$DEVICE_ENV" | tail -1 | cut -d= -f2- | tr -d '"')"
+  echo "$did"
+}
+
+# ---- 生成 bridge.env（GENERATED，来源 device.env + profile + assignment）----
+generate_bridge_env() {
+  local device_id="$1" profile_id="$2"
+  [ -f "$PROFILE_DIR/$profile_id.yaml" ] || { echo "ERROR: profile 不存在: $profile_id" >&2; exit 1; }
+  # site/map 由服务器 assignment 提供（/etc/firebot/assignment.env），可选。
+  local assignment="${FIREBOT_ASSIGNMENT_FILE:-/etc/firebot/assignment.env}"
+  [ -f "$assignment" ] || assignment=/dev/null
+  python3 - "$device_id" "$profile_id" "$PROFILE_DIR/$profile_id.yaml" "$assignment" <<'PY'
+import os, sys
+device_id, profile_id, profile_path, assignment_path = sys.argv[1:5]
+def load_kv(path):
+    d = {}
+    if os.path.exists(path):
+        for line in open(path, encoding="utf-8"):
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            d[k.strip()] = v.strip().strip('"').strip("'")
+    return d
+assignment = load_kv(assignment_path)
+
+# 轻量 YAML 解析（仅取我们需要的标量键，不引入第三方依赖）
+profile = {}
+cur = None
+for line in open(profile_path, encoding="utf-8"):
+    raw = line.rstrip("\n")
+    stripped = raw.strip()
+    if not stripped or stripped.startswith("#"):
+        continue
+    indent = len(raw) - len(raw.lstrip(" "))
+    if indent == 0 and stripped.endswith(":"):
+        cur = stripped[:-1]
+        profile[cur] = {}
+    elif ":" in stripped and indent == 2:
+        k, v = stripped.split(":", 1)
+        profile.setdefault(cur, {})[k.strip()] = v.strip()
+    elif indent == 4 and ":" in stripped and cur and profile[cur].get(stripped.split(":")[0].strip()) is None:
+        # 嵌套（package/launch）忽略到顶层即可；这里简单记录标量
+        k, v = stripped.split(":", 1)
+        profile.setdefault(cur, {})[k.strip()] = v.strip()
+
+ros = profile.get("ros", {})
+base = profile.get("base", {})
+bridge = profile.get("bridge", {})
+motion = profile.get("motion", {})
+
+lines = [
+    "# GENERATED FILE - DO NOT EDIT",
+    "# 来源：device.env + fleet profile(%s) + server assignment" % profile_id,
+    "# 如需改变 map/site/MQTT host，用 firebotctl vehicle profile-sync 重新生成。",
+    "",
+    "FIREBOT_VEHICLE_ID=%s" % device_id,
+    "FIREBOT_MQTT_USERNAME=%s" % device_id,
+    "FIREBOT_MQTT_HOST=%s" % assignment.get("MQTT_HOST", "100.110.31.112"),
+    "FIREBOT_MQTT_PORT=%s" % assignment.get("MQTT_PORT", "8883"),
+    "FIREBOT_CA_CERT=/etc/firebot/production-ca.crt",
+    "",
+    "FIREBOT_SITE_CODE=%s" % assignment.get("SITE_CODE", ""),
+    "FIREBOT_MAP_CODE=%s" % assignment.get("MAP_CODE", ""),
+    "FIREBOT_MAP_VERSION=%s" % assignment.get("MAP_VERSION", ""),
+    "FIREBOT_MAP_CHECKSUM=%s" % assignment.get("MAP_CHECKSUM", ""),
+    "FIREBOT_LOCATION_ENABLED=false",
+    "",
+    "FIREBOT_HEARTBEAT_HZ=1",
+    "FIREBOT_STATUS_HZ=1",
+    "FIREBOT_LOCATION_MAX_HZ=10",
+    "",
+    "BRIDGE_STUB_MODE=false",
+    "FIREBOT_FEEDBACK_TIMEOUT_SECONDS=3",
+    "",
+    "FIREBOT_SUPPORTED_COMMANDS=%s" % assignment.get("SUPPORTED_COMMANDS", ""),
+    "FIREBOT_SENSORS=",
+    "FIREBOT_MEDIA=",
+    "FIREBOT_PROTOCOL_VERSION=1.3.0",
+    "",
+    "FIREBOT_FIELD_TRACE=false",
+    "",
+]
+print("\n".join(lines))
+PY
+}
+
+# ================= 车端 =================
+cmd_vehicle() {
+  local sub="${1:-}"; shift || true
+  case "$sub" in
+    enroll)
+      local did="${1:-}"
+      [ -n "$did" ] || { echo "用法: firebotctl vehicle enroll <DEVICE_ID> [--token <TOKEN>] [--password <PW>]" >&2; exit 1; }
+      require_root
+      local token="" password=""
+      shift || true
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --token) token="${2:-}"; shift 2 ;;
+          --password) password="${2:-}"; shift 2 ;;
+          *) shift ;;
+        esac
+      done
+      # enrollment token 是信任边界：必须由服务器 fleet register 签发，非空。
+      [ -n "$token" ] || { echo "ERROR: 缺少 --token（由服务器 firebotctl fleet register 签发）" >&2; exit 1; }
+      local profile_id="${FIREBOT_PROFILE_ID:-$DEFAULT_PROFILE}"
+      mkdir -p /etc/firebot
+      printf 'DEVICE_ID=%s\nPROFILE_ID=%s\n' "$did" "$profile_id" > "$DEVICE_ENV"
+      chmod 644 "$DEVICE_ENV"
+      # per-device credential：由 enrollment 写入 bridge-secret.env（0600），绝不 fleet 共用。
+      if [ -n "$password" ]; then
+        printf 'FIREBOT_MQTT_PASSWORD=%s\n' "$password" > "$BRIDGE_SECRET"
+        chmod 600 "$BRIDGE_SECRET"
+        echo "  bridge-secret.env 已写入（0600，per-device）"
+      elif [ -f "$BRIDGE_SECRET" ]; then
+        echo "  bridge-secret.env 已存在（保留，不覆盖）"
+      else
+        echo "  WARN: 未提供 --password 且 bridge-secret.env 缺失（由 enrollment 服务补）" >&2
+      fi
+      generate_bridge_env "$did" "$profile_id" > "$BRIDGE_ENV"
+      chmod 644 "$BRIDGE_ENV"
+      echo "ENROLL=PASS device_id=$did profile=$profile_id"
+      ;;
+    install)
+      local sha=""; while [ $# -gt 0 ]; do case "$1" in --sha) sha="$2"; shift 2;; *) shift;; esac; done
+      require_sha "$sha"
+      require_root
+      FIREBOT_REQUIRE_SHA="$sha" bash "$ROS1_DIR/vehicle-install.sh" all
+      FIREBOT_REQUIRE_SHA="$sha" bash "$ROS1_DIR/vehicle-install.sh" verify
+      echo "CONTROL_ENABLED=NO"
+      ;;
+    verify)
+      bash "$ROS1_DIR/vehicle-install.sh" verify 2>/dev/null || true
+      echo "DEVICE_ID=$(read_device_id)"
+      echo "PROFILE_ID=$(grep -E '^PROFILE_ID=' "$DEVICE_ENV" 2>/dev/null | cut -d= -f2- || echo UNKNOWN)"
+      echo "SOURCE_SHA=$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || echo UNKNOWN)"
+      echo "CONTROL_ENABLED=$(systemctl is-enabled firebot-control 2>/dev/null || echo disabled)"
+      ;;
+    status)
+      bash "$ROS1_DIR/vehicle-runtime.sh" status ;;
+    start)
+      local what="${1:-}"; case "$what" in
+        base) bash "$ROS1_DIR/vehicle-runtime.sh" ros-base ;;
+        navigation) bash "$ROS1_DIR/vehicle-runtime.sh" navigation ;;
+        control) bash "$ROS1_DIR/vehicle-runtime.sh" control-start ;;
+        *) echo "用法: firebotctl vehicle start base|navigation|control" >&2; exit 1 ;;
+      esac ;;
+    stop)
+      [ "${1:-}" = "control" ] || { echo "用法: firebotctl vehicle stop control" >&2; exit 1; }
+      bash "$ROS1_DIR/vehicle-runtime.sh" control-stop ;;
+    capability)
+      local level="${1:-}"
+      case "$level" in
+        stop-only) set_capability "stop_motion" ;;
+        patrol) set_capability "stop_motion,patrol" ;;
+        *) echo "用法: firebotctl vehicle capability stop-only|patrol" >&2; exit 1 ;;
+      esac ;;
+    location)
+      [ "${1:-}" = "enable" ] || { echo "用法: firebotctl vehicle location enable" >&2; exit 1; }
+      enable_location ;;
+    profile-sync)
+      local did; did="$(read_device_id)"
+      local pid; pid="$(grep -E '^PROFILE_ID=' "$DEVICE_ENV" 2>/dev/null | cut -d= -f2- || echo "$DEFAULT_PROFILE")"
+      [ -n "$did" ] || { echo "ERROR: 先 enroll" >&2; exit 1; }
+      generate_bridge_env "$did" "$pid" > "$BRIDGE_ENV"
+      echo "PROFILE_SYNC=PASS" ;;
+    support-bundle)
+      vehicle_support_bundle ;;
+    rollback)
+      bash "$ROS1_DIR/vehicle-install.sh" rollback 2>/dev/null || echo "见 SOP U 节 previous 回滚" ;;
+    upgrade)
+      local sha=""; while [ $# -gt 0 ]; do case "$1" in --sha) sha="$2"; shift 2;; *) shift;; esac; done
+      require_sha "$sha"; require_root
+      FIREBOT_REQUIRE_SHA="$sha" bash "$ROS1_DIR/vehicle-install.sh" all
+      FIREBOT_REQUIRE_SHA="$sha" bash "$ROS1_DIR/vehicle-install.sh" verify ;;
+    *)
+      echo "firebotctl vehicle <enroll|install|verify|status|start|stop|capability|location|profile-sync|support-bundle|rollback|upgrade>" >&2; exit 1 ;;
+  esac
+}
+
+# ---- 受控能力提升（写 supported_commands → 重生成 → 重启 Bridge → 等 ONLINE）----
+set_capability() {
+  local commands="$1"
+  require_root
+  local did; did="$(read_device_id)"
+  local pid; pid="$(grep -E '^PROFILE_ID=' "$DEVICE_ENV" 2>/dev/null | cut -d= -f2- || echo "$DEFAULT_PROFILE")"
+  [ -n "$did" ] || { echo "ERROR: 先 enroll" >&2; exit 1; }
+  # 写到 assignment 源（不直接改 bridge.env，避免下次 profile-sync 丢失）
+  local assignment="${FIREBOT_ASSIGNMENT_FILE:-/etc/firebot/assignment.env}"
+  local tmp; tmp="$(mktemp)"
+  grep -v '^SUPPORTED_COMMANDS=' "$assignment" 2>/dev/null > "$tmp" || true
+  echo "SUPPORTED_COMMANDS=$commands" >> "$tmp"
+  mv "$tmp" "$assignment"
+  generate_bridge_env "$did" "$pid" > "$BRIDGE_ENV"
+  systemctl restart firebot-bridge 2>/dev/null || true
+  echo "CAPABILITY_SET=$commands"
+  echo "NEW_BOOT_ID=等待 Bridge 重启后 verify"
+}
+
+enable_location() {
+  require_root
+  # 开启 location 前必须验证 map identity + AMCL + odom（fail-closed）
+  local did; did="$(read_device_id)"
+  local assignment="${FIREBOT_ASSIGNMENT_FILE:-/etc/firebot/assignment.env}"
+  local site map ver ck
+  site="$(grep -E '^SITE_CODE=' "$assignment" 2>/dev/null | cut -d= -f2- || echo "")"
+  map="$(grep -E '^MAP_CODE=' "$assignment" 2>/dev/null | cut -d= -f2- || echo "")"
+  ver="$(grep -E '^MAP_VERSION=' "$assignment" 2>/dev/null | cut -d= -f2- || echo "")"
+  ck="$(grep -E '^MAP_CHECKSUM=' "$assignment" 2>/dev/null | cut -d= -f2- || echo "")"
+  if [ -z "$site" ] || [ -z "$map" ] || [ -z "$ver" ] || [ -z "$ck" ]; then
+    echo "LOCATION_ENABLE=REJECTED" >&2
+    echo "MAP_IDENTITY_NOT_VERIFIED" >&2
+    exit 1
+  fi
+  # 只读检测 AMCL / odom（不自动改状态）
+  local amcl odom
+  amcl="$(timeout 3 rostopic echo -n1 /amcl_pose >/dev/null 2>&1 && echo ok || echo missing)"
+  odom="$(timeout 3 rostopic echo -n1 /odom >/dev/null 2>&1 && echo ok || echo missing)"
+  [ "$amcl" = "ok" ] && [ "$odom" = "ok" ] || {
+    echo "LOCATION_ENABLE=REJECTED" >&2
+    echo "ROS_SOURCE_NOT_READY amcl=$amcl odom=$odom" >&2
+    exit 1
+  }
+  sed -i 's/^FIREBOT_LOCATION_ENABLED=.*/FIREBOT_LOCATION_ENABLED=true/' "$BRIDGE_ENV"
+  systemctl restart firebot-bridge 2>/dev/null || true
+  echo "LOCATION_ENABLE=PASS"
+}
+
+# ---- 脱敏 support bundle ----
+vehicle_support_bundle() {
+  local did; did="$(read_device_id)"
+  local ts; ts="$(date -u +%Y%m%d)"
+  local out="firebot-support-${did:-unknown}-${ts}.tar.gz"
+  local tmp; tmp="$(mktemp -d)"
+  {
+    echo "vehicle_id=$did"
+    echo "sha=$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || echo UNKNOWN)"
+    echo "bridge_runtime=$(cat /opt/firebot/vehicle-bridge/APPROVED_RUNTIME.txt 2>/dev/null || echo UNKNOWN)"
+    echo "control_runtime=$(cat /home/tl/firerobot_ws/src/firebot_control/APPROVED_RUNTIME.txt 2>/dev/null || echo UNKNOWN)"
+    echo "boot_id=$(cat /run/firebot-bridge/status.json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("boot_id",""))' 2>/dev/null || echo UNKNOWN)"
+    systemctl is-active firebot-bridge 2>/dev/null || true
+    systemctl is-enabled firebot-control 2>/dev/null || true
+    rostopic list 2>/dev/null || true
+    echo "control_mode=$(timeout 3 rostopic echo -n1 /robot_status 2>/dev/null | grep -oP '(?<=control_mode: )\S+' | head -1 || true)"
+    echo "cmd_vel_info=$(rostopic info /cmd_vel 2>/dev/null || true)"
+  } > "$tmp/vehicle.txt"
+  # 脱敏：绝不打包 secret
+  tar czf "$out" -C "$tmp" vehicle.txt
+  rm -rf "$tmp"
+  echo "SUPPORT_BUNDLE=$out（已脱敏，不含 secret）"
+}
+
+# ================= 服务器 =================
+cmd_server() {
+  local sub="${1:-}"; shift || true
+  case "$sub" in
+    deploy)
+      local sha=""; while [ $# -gt 0 ]; do case "$1" in --sha) sha="$2"; shift 2;; *) shift;; esac; done
+      require_sha "$sha"
+      TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" preflight
+      TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" all-app
+      TARGET_SHA="$sha" "$REPO_DIR/scripts/server-deploy.sh" verify ;;
+    verify) "$REPO_DIR/scripts/server-deploy.sh" verify ;;
+    rollback) "$REPO_DIR/scripts/server-deploy.sh" rollback ;;
+    support-bundle)
+      echo "SERVER_SUPPORT_BUNDLE=见 scripts/server-deploy.sh manifest + docker compose logs" ;;
+    *) echo "firebotctl server <deploy|verify|rollback|support-bundle>" >&2; exit 1 ;;
+  esac
+}
+
+# ================= 舰队 =================
+cmd_fleet() {
+  local sub="${1:-}"; shift || true
+  case "$sub" in
+    register)
+      local did="${1:-}"
+      [ -n "$did" ] || { echo "用法: firebotctl fleet register <DEVICE_ID>" >&2; exit 1; }
+      "$SCRIPT_DIR/fleet-register.sh" "$did" ;;
+    status)
+      echo "FLEET_STATUS=见服务器 Robot/IntegrationProfile（firebotctl server verify）" ;;
+    *) echo "firebotctl fleet <register|status>" >&2; exit 1 ;;
+  esac
+}
+
+# ================= 入口 =================
+case "${1:-}" in
+  vehicle) shift; cmd_vehicle "$@" ;;
+  server) shift; cmd_server "$@" ;;
+  fleet) shift; cmd_fleet "$@" ;;
+  *) echo "用法: firebotctl <vehicle|server|fleet> ..." >&2; exit 1 ;;
+esac
