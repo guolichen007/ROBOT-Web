@@ -45,7 +45,7 @@ def main() -> None:
             engine = create_engine(url)
             with engine.connect() as connection:
                 revision = connection.scalar(text("SELECT version_num FROM alembic_version"))
-                assert revision == "20260902_0007", (name, revision)
+                assert revision == "20260902_0008", (name, revision)
                 for table in (
                     "robot_motion_profiles",
                     "robot_navigation_diagnostics",

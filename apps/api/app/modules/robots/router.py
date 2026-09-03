@@ -4,7 +4,7 @@ import json
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import or_, select
 
@@ -58,6 +58,158 @@ def robot_detail(
     _: AuthContext = Depends(require_permission("robot.read")),
 ) -> dict:
     return serialize_model(find_robot(db, robot_id))
+
+
+@router.get("/{robot_id}/assignment")
+def robot_assignment(
+    robot_id: str,
+    db: DbSession,
+    _: AuthContext = Depends(require_permission("robot.read")),
+) -> dict:
+    """服务器权威的 Fleet assignment（复用 Robot/Site/Map/MapVersion，不重复存）。"""
+    from app.db.models import (
+        Map,
+        MapVersion,
+        RobotFleetAssignment,
+        Site,
+        StopOperation,
+    )
+
+    robot = find_robot(db, robot_id)
+    assignment = db.get(RobotFleetAssignment, robot.id)
+    site = db.get(Site, robot.site_id) if robot.site_id else None
+    map_row = db.get(Map, robot.current_map_id) if robot.current_map_id else None
+    version = (
+        db.get(MapVersion, map_row.active_version_id)
+        if map_row and map_row.active_version_id
+        else None
+    )
+
+    # STOP 现场验证证据：最近一次 STATIONARY_CONFIRMED（frames>=5）且 boot_id 匹配当前。
+    stop_verified = db.scalar(
+        select(StopOperation)
+        .where(
+            StopOperation.robot_id == robot.id,
+            StopOperation.motion_stop_state == "STATIONARY_CONFIRMED",
+            StopOperation.stationary_frames >= 5,
+        )
+        .order_by(StopOperation.terminal_at.desc().nullslast())
+    )
+    stop_field_verified = bool(
+        stop_verified
+        and stop_verified.boot_id_snapshot
+        and stop_verified.boot_id_snapshot == robot.boot_id
+    )
+
+    return {
+        "device_id": robot.vehicle_id,
+        "profile_id": assignment.profile_id if assignment else "firebot_ros1_standard_v1",
+        "site_code": site.code if site else "",
+        "map_code": map_row.code if map_row else "",
+        "map_version": version.version if version else "",
+        "map_checksum": version.checksum if version else "",
+        "location_enabled": assignment.location_enabled if assignment else False,
+        "supported_commands": assignment.supported_commands_json if assignment else [],
+        "assignment_revision": assignment.revision if assignment else 0,
+        "stop_field_verified": stop_field_verified,
+        "stop_operation_id": stop_verified.id if stop_field_verified else None,
+        "stop_verified_at": (
+            stop_verified.terminal_at.isoformat()
+            if stop_field_verified and stop_verified.terminal_at
+            else None
+        ),
+    }
+
+
+def _bump_assignment(db, robot):
+    """get-or-create RobotFleetAssignment 并 revision+1。"""
+    from app.db.models import RobotFleetAssignment
+
+    assignment = db.get(RobotFleetAssignment, robot.id)
+    if not assignment:
+        assignment = RobotFleetAssignment(robot_id=robot.id)
+        db.add(assignment)
+    assignment.revision = assignment.revision + 1
+    assignment.updated_at = datetime.now(UTC)
+    db.flush()
+    return assignment
+
+
+def _verify_device_token(db, robot, token: str) -> bool:
+    import hashlib
+    import secrets as _secrets
+
+    from app.db.models import RobotFleetAssignment
+
+    if not token:
+        return False
+    assignment = db.get(RobotFleetAssignment, robot.id)
+    if not assignment or not assignment.device_token_hash:
+        return False
+    return _secrets.compare_digest(
+        assignment.device_token_hash, hashlib.sha256(token.encode("utf-8")).hexdigest()
+    )
+
+
+def _stop_field_verified(db, robot) -> bool:
+    from app.db.models import StopOperation
+
+    row = db.scalar(
+        select(StopOperation)
+        .where(
+            StopOperation.robot_id == robot.id,
+            StopOperation.motion_stop_state == "STATIONARY_CONFIRMED",
+            StopOperation.stationary_frames >= 5,
+        )
+        .order_by(StopOperation.terminal_at.desc().nullslast())
+    )
+    return bool(row and row.boot_id_snapshot and row.boot_id_snapshot == robot.boot_id)
+
+
+class LocationEnabledRequest(BaseModel):
+    enabled: bool
+
+
+@router.put("/{robot_id}/assignment/location")
+def set_location_enabled(
+    robot_id: str,
+    req: LocationEnabledRequest,
+    db: DbSession,
+    device_token: str = Header(default="", alias="X-Device-Token"),
+) -> dict:
+    robot = find_robot(db, robot_id)
+    if not _verify_device_token(db, robot, device_token):
+        raise HTTPException(401, "device token 无效")
+    assignment = _bump_assignment(db, robot)
+    assignment.location_enabled = req.enabled
+    return {
+        "assignment_revision": assignment.revision,
+        "location_enabled": assignment.location_enabled,
+    }
+
+
+class CapabilityRequest(BaseModel):
+    commands: list[str]
+
+
+@router.put("/{robot_id}/assignment/capability")
+def set_capability(
+    robot_id: str,
+    req: CapabilityRequest,
+    db: DbSession,
+    device_token: str = Header(default="", alias="X-Device-Token"),
+) -> dict:
+    robot = find_robot(db, robot_id)
+    if not _verify_device_token(db, robot, device_token):
+        raise HTTPException(401, "device token 无效")
+    if "patrol" in req.commands and not _stop_field_verified(db, robot):
+        raise PlatformError("STOP_FIELD_VERIFIED_REQUIRED", "patrol 需要 STOP 现场验证证据")
+    assignment = _bump_assignment(db, robot)
+    assignment.supported_commands_json = req.commands
+    return {
+        "assignment_revision": assignment.revision,
+        "supported_commands": assignment.supported_commands_json,
+    }
 
 
 class EnabledRequest(BaseModel):

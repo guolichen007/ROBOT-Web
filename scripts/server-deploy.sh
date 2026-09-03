@@ -183,6 +183,24 @@ do_migration_needed() {
   return 1
 }
 
+do_backup() {
+  # 真实 pg_dump 备份（gzip + sha256 + 0600 + manifest），禁止假 BACKUP_VERIFIED。
+  require_sha
+  local dir="$DEPLOY_ROOT/backups"
+  mkdir -p "$dir"
+  local ts
+  ts="$(date -u +%Y%m%dT%H%M%SZ)"
+  local file="$dir/firebot-$ts.sql.gz"
+  "${COMPOSE[@]}" exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" | gzip' > "$file"
+  [ -s "$file" ] || { echo "BACKUP=FAIL（备份文件为空）" >&2; exit 1; }
+  chmod 600 "$file"
+  local sum
+  sum="$(sha256sum "$file" | cut -d' ' -f1)"
+  printf '{"backup_file":"%s","sha256":"%s","timestamp":"%s","sha":"%s"}\n' \
+    "$file" "$sum" "$ts" "$TARGET_SHA" > "$file.manifest.json"
+  echo "BACKUP=PASS file=$file sha256=$sum"
+}
+
 deploy_scope() {
   local scope="$1"
   shift
@@ -242,6 +260,7 @@ case "${1:-}" in
   status) do_status ;;
   preflight) do_preflight ;;
   migrate) do_migrate ;;
+  backup) do_backup ;;
   migration-needed) do_migration_needed ;;
   api) deploy_scope "api" api ;;
   worker) deploy_scope "worker" task-worker ;;

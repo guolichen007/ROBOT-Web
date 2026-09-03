@@ -654,6 +654,8 @@ class StopOperation(Base):
     __tablename__ = "stop_operations"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
     robot_id: Mapped[str] = mapped_column(String(36), ForeignKey("robots.id"), index=True)
+    # 发起 STOP 时的 boot_id 快照：STOP 现场验证证据必须与当前 boot_id 一致才有效。
+    boot_id_snapshot: Mapped[str | None] = mapped_column(String(36), nullable=True)
     task_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("tasks.id"), nullable=True)
     cancel_command_id: Mapped[str | None] = mapped_column(
         String(64), ForeignKey("commands.command_id"), nullable=True
@@ -696,6 +698,26 @@ class EnrollmentToken(Base):
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class RobotFleetAssignment(Base):
+    """最小 Fleet desired-state 权威（复用 Robot/Site/Map/MapVersion，不重复存 site/map）。
+
+    只保存现有模型没有的配置：profile_id / location_enabled / supported_commands。
+    revision 每次配置变化 +1；site/map/version/checksum 由 Robot 实时关联计算。
+    """
+
+    __tablename__ = "robot_fleet_assignments"
+    robot_id: Mapped[str] = mapped_column(String(36), ForeignKey("robots.id"), primary_key=True)
+    profile_id: Mapped[str] = mapped_column(String(64), default="firebot_ros1_standard_v1")
+    location_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    supported_commands_json: Mapped[list] = mapped_column(JSON, default=list)
+    # 设备 API token（车端 firebotctl 用于 assignment 变更；只存 SHA-256 哈希）
+    device_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
 
 
 class RobotOperationEvent(Base):

@@ -853,6 +853,7 @@ def stop_current_operation(
             mission_cancel_state = "UNAVAILABLE"
     operation = StopOperation(
         robot_id=robot.id,
+        boot_id_snapshot=robot.boot_id,
         task_id=active.id if active else None,
         cancel_command_id=cancel.command_id if cancel else None,
         stop_command_id=stop.command_id,

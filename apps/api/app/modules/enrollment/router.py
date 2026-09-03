@@ -33,6 +33,7 @@ class ActivateResponse(BaseModel):
     mqtt_port: int
     mqtt_username: str
     mqtt_password: str
+    device_token: str
     ca_cert: str
     site_code: str
     map_code: str
@@ -60,6 +61,7 @@ def activate(req: ActivateRequest) -> ActivateResponse:
         mqtt_port=int(cred.get("mqtt_port", 8883)),
         mqtt_username=device_id,
         mqtt_password=cred["mqtt_password"],
+        device_token=cred.get("device_token", ""),
         ca_cert=cred.get("ca_cert", "/etc/firebot/production-ca.crt"),
         site_code=cred.get("site_code", ""),
         map_code=cred.get("map_code", ""),
