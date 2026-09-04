@@ -161,6 +161,7 @@ services:
       MOCK_WRONG_COMMAND_ID_ACK: ${TEST_MOCK_WRONG_COMMAND_ID_ACK:-false}
       MOCK_REBOOT_AFTER_SECONDS: ${TEST_MOCK_REBOOT_AFTER_SECONDS:-0}
       MOCK_OFFLINE_AFTER_SECONDS: ${TEST_MOCK_OFFLINE_AFTER_SECONDS:-0}
+      MOCK_FIRE_AFTER_SECONDS: ${TEST_MOCK_FIRE_AFTER_SECONDS:-0}
     depends_on:
       mosquitto: { condition: service_healthy }
       mqtt-ingress: { condition: service_started }
@@ -174,6 +175,7 @@ services:
       MOCK_VEHICLE_ID: R002
       MOCK_MAP_CODE: parking_v1
       MOCK_MAP_VERSION: ${TEST_MOCK_MAP_VERSION:-1}
+      MOCK_FIRE_AFTER_SECONDS: ${TEST_MOCK_FIRE_AFTER_SECONDS:-0}
     depends_on:
       mosquitto: { condition: service_healthy }
       mqtt-ingress: { condition: service_started }
