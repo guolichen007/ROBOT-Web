@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch, type Component } from 'vue'
+import { computed, onUnmounted, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Dropdown as TDropdown } from 'tdesign-vue-next'
 import {
@@ -205,9 +205,17 @@ watch(
   { immediate: true },
 )
 
-onMounted(() => {
-  if (auth.authenticated && route.path !== '/login') void monitor.start()
-})
+// 统一由 App.vue 管理 authenticated monitor lifecycle：
+// 首次 login（或 refresh 恢复登录态）后 auth.authenticated 由 false→true 时启动 monitor，
+// logout 时 disconnect。旧写法依赖 onMounted 判断，login→monitor 不重新 mount 导致 monitor 永不 start。
+watch(
+  () => auth.authenticated,
+  (authenticated) => {
+    if (authenticated) void monitor.start()
+    else monitor.disconnect()
+  },
+  { immediate: true },
+)
 onUnmounted(() => monitor.disconnect())
 
 async function logout(): Promise<void> {
