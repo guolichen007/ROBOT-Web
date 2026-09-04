@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Firebot SERVER 验收脚本：全部用容器内部检查，不依赖宿主机端口/NOAUTH 猜测。
+# fail-closed：任一 required gate 失败 → 累计 verify_failed → SERVER_VERIFY=FAIL + exit 1。
 set -uo pipefail
 
 ENV_FILE="${SERVER_ENV_FILE:-.env.server}"
 COMPOSE=(docker compose --env-file "$ENV_FILE" -f docker-compose.server.yml)
+
+verify_failed=0
 
 # 容器健康判定统一走 docker inspect（compose ps -q → cid → State.Running + State.Health.Status），
 # 不依赖容器 Name 文本（旧写法 grep " api " 匹配不到 firebot-server-api-1 这类 compose 名）。
@@ -36,8 +39,45 @@ effective_ros_compat_mode() {
   fi
 }
 
-# --self-test：验证 service_healthy 解析逻辑（不依赖真实 docker/compose）
+# gate_check <label> <cmd...>：成功 PASS；失败 FAIL 并累计 verify_failed=1（不提前 exit）。
+gate_check() {
+  local label="$1"; shift
+  if "$@" >/dev/null 2>&1; then
+    echo "$label=PASS"
+  else
+    echo "$label=FAIL"
+    verify_failed=1
+  fi
+}
+
+# ros_compat_gate <mode>：ROS_COMPAT_MODE=true 才 required；false/absent OPTIONAL，缺失/不健康不 fail。
+ros_compat_gate() {
+  local mode="$1"
+  if [ "$mode" = "true" ]; then
+    if service_healthy ros-compat-adapter; then
+      echo "OPTIONAL_ROS_COMPAT_HEALTH=HEALTHY（ROS_COMPAT_MODE=true，required）"
+    else
+      echo "OPTIONAL_ROS_COMPAT_HEALTH=UNHEALTHY"
+      verify_failed=1
+    fi
+  else
+    echo "OPTIONAL_ROS_COMPAT_HEALTH=OPTIONAL（effective ROS_COMPAT_MODE=${mode:-false}，来源：api 容器 env）"
+  fi
+}
+
+# final_verdict：verify_failed 累计 → SERVER_VERIFY + exit code。
+final_verdict() {
+  if [ "$verify_failed" -ne 0 ]; then
+    echo "SERVER_VERIFY=FAIL"
+    return 1
+  fi
+  echo "SERVER_VERIFY=PASS"
+  return 0
+}
+
+# --self-test：验证 service_healthy / gate_check / ros_compat_gate / final_verdict（不依赖真实 docker/compose）
 if [ "${1:-}" = "--self-test" ]; then
+  _fail=0
   _mock_cid=""
   _mock_health=""
   get_service_container_id() { echo "$_mock_cid"; }
@@ -50,7 +90,8 @@ if [ "${1:-}" = "--self-test" ]; then
       *)         echo "" ;;
     esac
   }
-  _fail=0
+
+  # service_healthy 解析逻辑
   _mock_cid="abc123"; _mock_health="healthy"
   if service_healthy api; then echo "SELF_TEST running+healthy=PASS"; else echo "SELF_TEST running+healthy=FAIL"; _fail=1; fi
   _mock_cid="abc123"; _mock_health="unhealthy"
@@ -59,6 +100,37 @@ if [ "${1:-}" = "--self-test" ]; then
   if service_healthy api; then echo "SELF_TEST missing-container=FAIL"; _fail=1; else echo "SELF_TEST missing-container=PASS"; fi
   _mock_cid="abc123"; _mock_health="stopped"
   if service_healthy api; then echo "SELF_TEST not-running=FAIL"; _fail=1; else echo "SELF_TEST not-running=PASS"; fi
+
+  # 最终退出语义：required gate 失败 → overall FAIL
+  _check_required_fail() {
+    local name="$1"
+    verify_failed=0
+    gate_check "$name" false >/dev/null
+    if final_verdict >/dev/null; then
+      echo "SELF_TEST ${name}-fail=FAIL"; _fail=1
+    else
+      echo "SELF_TEST ${name}-fail=PASS"
+    fi
+  }
+  _check_required_fail API_HEALTH
+  _check_required_fail MQTT_INGRESS_HEALTH
+  _check_required_fail COMMAND_DISPATCHER_HEALTH
+
+  # 全过 → overall PASS
+  verify_failed=0
+  gate_check API_HEALTH true >/dev/null
+  if final_verdict >/dev/null; then echo "SELF_TEST all-pass=PASS"; else echo "SELF_TEST all-pass=FAIL"; _fail=1; fi
+
+  # ROS_COMPAT 语义：false + roscompat unhealthy → overall PASS；true + unhealthy → overall FAIL
+  verify_failed=0
+  _mock_cid="abc123"; _mock_health="unhealthy"
+  ros_compat_gate "false" >/dev/null
+  if [ "$verify_failed" -eq 0 ]; then echo "SELF_TEST roscompat-optional=PASS"; else echo "SELF_TEST roscompat-optional=FAIL"; _fail=1; fi
+  verify_failed=0
+  _mock_cid="abc123"; _mock_health="unhealthy"
+  ros_compat_gate "true" >/dev/null
+  if [ "$verify_failed" -ne 0 ]; then echo "SELF_TEST roscompat-required-fail=PASS"; else echo "SELF_TEST roscompat-required-fail=FAIL"; _fail=1; fi
+
   exit $_fail
 fi
 
@@ -76,36 +148,20 @@ else
   echo "CONTAINERS_HEALTHY=CHECK"
 fi
 
-# 2) API 容器内部 health（127.0.0.1:8000，不经宿主机 80/443）
-if "${COMPOSE[@]}" exec -T api python -c \
-  "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5)" 2>/dev/null; then
-  echo "API_HEALTH=PASS"
-else
-  echo "API_HEALTH=FAIL"
-fi
+# 2) API readiness（127.0.0.1:8000，不经宿主机 80/443）
+gate_check API_HEALTH "${COMPOSE[@]}" exec -T api python -c \
+  "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=5)"
 
 # 3) MQTT 8883（容器端口映射，而非宿主机 ss）
-if "${COMPOSE[@]}" port mosquitto 8883 >/dev/null 2>&1; then
-  echo "MQTT_8883=PASS"
-else
-  echo "MQTT_8883=FAIL"
-fi
+gate_check MQTT_8883 "${COMPOSE[@]}" port mosquitto 8883
 
 # 4) ingress / dispatcher 心跳（走 api 容器内 get_redis，自动用 REDIS_URL 认证，不会 NOAUTH 误判）
-if "${COMPOSE[@]}" exec -T api python -c \
-  "from app.core.events import get_redis; raise SystemExit(0 if get_redis().get('service:mqtt-ingress:heartbeat') else 1)" 2>/dev/null; then
-  echo "MQTT_INGRESS_HEALTH=PASS"
-else
-  echo "MQTT_INGRESS_HEALTH=FAIL"
-fi
-if "${COMPOSE[@]}" exec -T api python -c \
-  "from app.core.events import get_redis; r=get_redis(); raise SystemExit(0 if r.get('service:command-dispatcher:outbox-heartbeat') and r.get('service:command-dispatcher:safety-heartbeat') else 1)" 2>/dev/null; then
-  echo "COMMAND_DISPATCHER_HEALTH=PASS"
-else
-  echo "COMMAND_DISPATCHER_HEALTH=FAIL"
-fi
+gate_check MQTT_INGRESS_HEALTH "${COMPOSE[@]}" exec -T api python -c \
+  "from app.core.events import get_redis; raise SystemExit(0 if get_redis().get('service:mqtt-ingress:heartbeat') else 1)"
+gate_check COMMAND_DISPATCHER_HEALTH "${COMPOSE[@]}" exec -T api python -c \
+  "from app.core.events import get_redis; r=get_redis(); raise SystemExit(0 if r.get('service:command-dispatcher:outbox-heartbeat') and r.get('service:command-dispatcher:safety-heartbeat') else 1)"
 
-# 5) schema 文件存在
+# 5) schema 文件存在（informational）
 [ -f packages/protocol-schemas/firebot-message-1.2.schema.json ] && echo "SCHEMA_1_2=PRESENT" || echo "SCHEMA_1_2=MISSING"
 [ -f packages/protocol-schemas/firebot-message-1.3.schema.json ] && echo "SCHEMA_1_3=PRESENT" || echo "SCHEMA_1_3=MISSING"
 
@@ -187,43 +243,30 @@ if [ -n "$VERIFY_SHA" ]; then
   done
   if [ -n "$mismatch" ]; then
     echo "IMAGE_SHA_MATCH=FAIL（期望 $VERIFY_SHA，异常:$mismatch）"
-    exit 1
+    verify_failed=1
   else
     echo "IMAGE_SHA_MATCH=PASS"
   fi
 fi
 
-# 9) task-worker 心跳（J6-S1 生产必需）
-if "${COMPOSE[@]}" exec -T api python -c \
-  "from app.core.events import get_redis; raise SystemExit(0 if get_redis().get('service:task-worker:heartbeat') else 1)" 2>/dev/null; then
-  echo "TASK_WORKER_HEARTBEAT=PASS"
-else
-  echo "TASK_WORKER_HEARTBEAT=FAIL"
-  exit 1
-fi
+# 9) task-worker 心跳（生产必需）
+gate_check TASK_WORKER_HEARTBEAT "${COMPOSE[@]}" exec -T api python -c \
+  "from app.core.events import get_redis; raise SystemExit(0 if get_redis().get('service:task-worker:heartbeat') else 1)"
 
-# 10) required services 全部 healthy（fail-closed：任一 unhealthy 即 exit != 0）
+# 10) required services 全部 healthy（fail-closed：累计失败，不提前 exit）
 for svc in api mqtt-ingress command-dispatcher task-worker web; do
   if service_healthy "$svc"; then
     echo "SERVICE_${svc}=HEALTHY"
   else
     echo "SERVICE_${svc}=UNHEALTHY"
-    exit 1
+    verify_failed=1
   fi
 done
 
-echo "REQUIRED_CORE_HEALTH=PASS"
-
-# ros-compat-adapter：以实际运行 api 容器的有效 ROS_COMPAT_MODE 判定，
-# 不依赖调用 shell 是否 export（.env.server 传给 compose，不会自动 export 给本脚本）。
+# ros-compat-adapter：以实际运行 api 容器的有效 ROS_COMPAT_MODE 判定
 ROS_COMPAT_MODE="$(effective_ros_compat_mode)"
-if [ "$ROS_COMPAT_MODE" = "true" ]; then
-  if service_healthy ros-compat-adapter; then
-    echo "OPTIONAL_ROS_COMPAT_HEALTH=HEALTHY（ROS_COMPAT_MODE=true，required）"
-  else
-    echo "OPTIONAL_ROS_COMPAT_HEALTH=UNHEALTHY"
-    exit 1
-  fi
-else
-  echo "OPTIONAL_ROS_COMPAT_HEALTH=OPTIONAL（effective ROS_COMPAT_MODE=${ROS_COMPAT_MODE:-false}，来源：api 容器 env）"
-fi
+ros_compat_gate "$ROS_COMPAT_MODE"
+
+# 最终判定
+final_verdict
+exit $?
