@@ -429,10 +429,17 @@ def test_extinguish_task_allowed_before_confirm_rejected_after_resolve(client: T
     )
     assert created_task.status_code == 201, created_task.text
 
-    # RESOLVED alarm: dispatch is rejected even with authorization
+    # RESOLVED alarm: dispatch is rejected even with authorization.
+    # Legal production lifecycle is NEW → ACKNOWLEDGED → CONFIRMED → RESOLVED;
+    # construct the RESOLVED state by walking that sequence, not by jumping NEW → RESOLVED.
     resolved_id = create_alarm("direct extinguish resolved")
-    transitioned = client.post(f"/api/v1/alarms/{resolved_id}/resolve", headers=auth(token))
-    assert transitioned.status_code == 200, transitioned.text
+    for action, state in (
+        ("acknowledge", "ACKNOWLEDGED"),
+        ("confirm", "CONFIRMED"),
+        ("resolve", "RESOLVED"),
+    ):
+        transitioned = client.post(f"/api/v1/alarms/{resolved_id}/{action}", headers=auth(token))
+        assert transitioned.status_code == 200 and transitioned.json()["state"] == state
     rejected = client.post(
         f"/api/v1/alarms/{resolved_id}/create-task",
         json=payload,
