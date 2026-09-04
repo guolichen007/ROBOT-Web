@@ -483,7 +483,6 @@ async function resetEstop() {
 }
 
 onMounted(() => {
-  if (!monitor.connected && !monitor.resyncing) void monitor.start()
   void refreshCoverage()
   coverageTimer = window.setInterval(() => void refreshCoverage(), 1000)
 })

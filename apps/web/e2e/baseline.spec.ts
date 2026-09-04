@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import { getAccessToken as token, loginPage as login } from './helpers/auth'
+import { collectRuntimeErrors } from './helpers/runtime-errors'
 
 async function forceRelease(request: APIRequestContext): Promise<void> {
   const accessToken = await token(request)
@@ -29,6 +30,7 @@ test('industrial operations home shows map, roof camera and current control dock
   page,
   request,
 }) => {
+  const getRuntimeErrors = collectRuntimeErrors(page)
   await login(page, request)
   await expect(page.locator('.situation-banner')).toHaveCount(0)
   await expect(page.getByText('车顶实时相机').first()).toBeVisible()
@@ -38,6 +40,7 @@ test('industrial operations home shows map, roof camera and current control dock
   }
   await expect(page.getByRole('button', { name: '手动控制' })).toHaveCount(0)
   await expect(page.getByText('烟雾浓度')).toBeVisible()
+  expect(getRuntimeErrors()).toEqual([])
 })
 
 test('media ticket is absent from URL and WHEP uses Authorization bearer', async ({ page, request }) => {
@@ -87,8 +90,11 @@ test('stop patrol waits for task cancellation, stop ACK and five fresh stationar
 }) => {
   await forceRelease(request)
   await waitForRobotIdle(request)
+  const getRuntimeErrors = collectRuntimeErrors(page)
   await login(page, request)
-  await page.getByRole('button', { name: '开始巡检' }).click()
+  const startButton = page.getByRole('button', { name: '开始巡检' })
+  await expect(startButton).toBeEnabled({ timeout: 10_000 })
+  await startButton.click()
   await expect(page.getByText(/巡检任务已创建/)).toBeVisible()
   await expect
     .poll(async () => (await page.getByText(/PATROL|EXECUTING/).count()) > 0, { timeout: 10_000 })
@@ -97,6 +103,7 @@ test('stop patrol waits for task cancellation, stop ACK and five fresh stationar
   await expect(page.getByText(/正在停止车辆任务/)).toBeVisible()
   await expect(page.getByText('车辆已停止')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByText(/连续静止帧 5\/5/)).toBeVisible()
+  expect(getRuntimeErrors()).toEqual([])
 })
 
 test('patrol report PDF and Excel use authenticated browser downloads', async ({ page, request }) => {

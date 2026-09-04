@@ -205,17 +205,19 @@ watch(
   { immediate: true },
 )
 
-// 统一由 App.vue 管理 authenticated monitor lifecycle：
-// 仅在 authenticated 且非 must_change_password 时启动 monitor。首次 bootstrap admin 登录
-// （must_change_password=true）不得触发 /monitor/snapshot（后端 428），改完密码重新登录后 monitor.start。
-// logout 或未登录时 disconnect。旧写法依赖 onMounted 判断，login→monitor 不重新 mount 导致 monitor 永不 start。
+// App.vue 是唯一 monitor lifecycle owner。monitorAllowed 需同时满足：
+// auth.ready（restore 完成）、authenticated、已离开 login/change-password、非 must_change_password。
+const monitorAllowed = computed(
+  () => auth.ready && auth.authenticated && !isLogin.value && auth.user?.must_change_password !== true,
+)
+
 watch(
-  () => auth.authenticated && auth.user?.must_change_password !== true,
-  (monitorAllowed) => {
-    if (monitorAllowed) void monitor.start()
+  monitorAllowed,
+  (allowed) => {
+    if (allowed) void monitor.start()
     else monitor.disconnect()
   },
-  { immediate: true },
+  { immediate: true, flush: 'post' },
 )
 onUnmounted(() => monitor.disconnect())
 
@@ -231,125 +233,133 @@ function onUserMenuClick(data: { value?: unknown }): void {
 </script>
 
 <template>
-  <RouterView v-if="isLogin" />
-  <div v-else class="app-shell">
-    <aside class="sidebar">
-      <div class="brand">
-        <img class="brand-logo" :src="brandLogo" alt="友道智造" />
-      </div>
-      <nav aria-label="主导航">
-        <template v-for="item in visibleNav" :key="item.label">
-          <RouterLink
-            v-if="!item.children"
-            :to="item.path || '#'"
-            class="nav-item"
-            :class="{ active: route.path === item.path }"
-            :title="item.label"
-          >
-            <component :is="item.icon" class="nav-icon" />
-            <span>{{ item.label }}</span>
-          </RouterLink>
-          <div v-else class="nav-group">
-            <button
+  <RouterView v-slot="{ Component }">
+    <component :is="Component" v-if="isLogin" />
+    <div v-else class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <img class="brand-logo" :src="brandLogo" alt="友道智造" />
+        </div>
+        <nav aria-label="主导航">
+          <template v-for="item in visibleNav" :key="item.label">
+            <RouterLink
+              v-if="!item.children"
+              :to="item.path || '#'"
               class="nav-item"
-              :class="{ active: groupActive(item), open: openGroup === item.label || groupActive(item) }"
-              type="button"
-              @click="toggleGroup(item)"
+              :class="{ active: route.path === item.path }"
+              :title="item.label"
             >
               <component :is="item.icon" class="nav-icon" />
               <span>{{ item.label }}</span>
-              <i class="nav-arrow" />
-            </button>
-            <div v-show="openGroup === item.label || groupActive(item)" class="nav-sub">
-              <RouterLink
-                v-for="child in item.children"
-                :key="child.path"
-                :to="child.path"
-                class="nav-sub-item"
-                :class="{ active: route.path === child.path }"
+            </RouterLink>
+            <div v-else class="nav-group">
+              <button
+                class="nav-item"
+                :class="{ active: groupActive(item), open: openGroup === item.label || groupActive(item) }"
+                type="button"
+                @click="toggleGroup(item)"
               >
-                <span>{{ child.label }}</span>
-              </RouterLink>
+                <component :is="item.icon" class="nav-icon" />
+                <span>{{ item.label }}</span>
+                <i class="nav-arrow" />
+              </button>
+              <div v-show="openGroup === item.label || groupActive(item)" class="nav-sub">
+                <RouterLink
+                  v-for="child in item.children"
+                  :key="child.path"
+                  :to="child.path"
+                  class="nav-sub-item"
+                  :class="{ active: route.path === child.path }"
+                >
+                  <span>{{ child.label }}</span>
+                </RouterLink>
+              </div>
+            </div>
+          </template>
+        </nav>
+        <img class="sidebar-wave" :src="techWave" alt="" aria-hidden="true" />
+        <div class="sidebar-foot">科技赋能&nbsp;&nbsp;领航未来</div>
+      </aside>
+      <main class="workspace">
+        <div class="workspace-alert"></div>
+        <header class="topbar">
+          <div class="status-area">
+            <div class="status-primary">
+              <span class="status-cell"
+                ><LinkIcon class="status-icon" :class="sevLabel(sevClass.link)" /><span>链路状态</span
+                ><b :class="sevLabel(sevClass.link)">{{ monitor.connected ? '正常' : '正在重连' }}</b></span
+              >
+              <span class="status-cell"
+                ><RobotIcon class="status-icon" :class="sevLabel(sevClass.robot)" /><span>机器人</span
+                ><b :class="sevLabel(sevClass.robot)">{{
+                  robot?.online_state === 'ONLINE'
+                    ? '在线'
+                    : robot?.online_state === 'STALE'
+                      ? '陈旧'
+                      : '离线'
+                }}</b></span
+              >
+              <span class="status-cell"
+                ><BatteryIcon class="status-icon" /><span>电量</span
+                ><b :class="sevLabel(sevClass.battery)">{{ batteryText() }}</b>
+                <span class="battery-bars"
+                  ><i v-for="(on, index) in batteryBars" :key="index" :class="{ full: on }"></i
+                ></span>
+              </span>
+              <span class="status-cell"
+                ><TaskIcon class="status-icon" /><span>当前任务</span
+                ><b :class="sevLabel(sevClass.task)">{{
+                  activeTask ? taskTypeLabel(activeTask.type) : '空闲'
+                }}</b></span
+              >
+              <span class="status-cell"
+                ><LocationIcon class="status-icon" /><span>定位状态</span
+                ><b :class="sevLabel(sevClass.localization)">{{
+                  localizationLabel(robot?.localization_status)
+                }}</b></span
+              >
+            </div>
+            <div class="status-telemetry-row">
+              <span class="status-cell status-telemetry"
+                ><span>顶部热像</span
+                ><b :class="sevLabel(sevClass.topIr)">{{
+                  metricValue(robot?.top_ir, 'top_ir', '℃')
+                }}</b></span
+              >
+              <span class="status-cell status-telemetry"
+                ><span>底部红外</span
+                ><b :class="sevLabel(sevClass.bottomIr)">{{
+                  metricValue(robot?.bottom_ir, 'bottom_ir', '℃')
+                }}</b></span
+              >
+              <span class="status-cell status-telemetry"
+                ><span>烟雾浓度</span
+                ><b :class="sevLabel(sevClass.smoke)">{{ metricValue(robot?.smoke, 'smoke', '%') }}</b></span
+              >
+              <span class="status-cell status-telemetry"
+                ><span>数据更新</span><b :class="sevLabel(sevClass.freshness)">{{ freshness }}</b></span
+              >
             </div>
           </div>
-        </template>
-      </nav>
-      <img class="sidebar-wave" :src="techWave" alt="" aria-hidden="true" />
-      <div class="sidebar-foot">科技赋能&nbsp;&nbsp;领航未来</div>
-    </aside>
-    <main class="workspace">
-      <div class="workspace-alert"></div>
-      <header class="topbar">
-        <div class="status-area">
-          <div class="status-primary">
-            <span class="status-cell"
-              ><LinkIcon class="status-icon" :class="sevLabel(sevClass.link)" /><span>链路状态</span
-              ><b :class="sevLabel(sevClass.link)">{{ monitor.connected ? '正常' : '正在重连' }}</b></span
+          <div class="user-side">
+            <time>{{ clock }}</time>
+            <t-dropdown
+              :options="[{ content: '退出登录', value: 'logout' }]"
+              trigger="click"
+              @click="onUserMenuClick"
             >
-            <span class="status-cell"
-              ><RobotIcon class="status-icon" :class="sevLabel(sevClass.robot)" /><span>机器人</span
-              ><b :class="sevLabel(sevClass.robot)">{{
-                robot?.online_state === 'ONLINE' ? '在线' : robot?.online_state === 'STALE' ? '陈旧' : '离线'
-              }}</b></span
-            >
-            <span class="status-cell"
-              ><BatteryIcon class="status-icon" /><span>电量</span
-              ><b :class="sevLabel(sevClass.battery)">{{ batteryText() }}</b>
-              <span class="battery-bars"
-                ><i v-for="(on, index) in batteryBars" :key="index" :class="{ full: on }"></i
-              ></span>
-            </span>
-            <span class="status-cell"
-              ><TaskIcon class="status-icon" /><span>当前任务</span
-              ><b :class="sevLabel(sevClass.task)">{{
-                activeTask ? taskTypeLabel(activeTask.type) : '空闲'
-              }}</b></span
-            >
-            <span class="status-cell"
-              ><LocationIcon class="status-icon" /><span>定位状态</span
-              ><b :class="sevLabel(sevClass.localization)">{{
-                localizationLabel(robot?.localization_status)
-              }}</b></span
-            >
+              <button class="user-trigger" type="button">
+                <span class="avatar">{{ userInitial }}</span>
+                <b>{{ auth.user?.display_name || auth.user?.username }}</b>
+                <ChevronDownIcon class="user-chevron" />
+              </button>
+            </t-dropdown>
           </div>
-          <div class="status-telemetry-row">
-            <span class="status-cell status-telemetry"
-              ><span>顶部热像</span
-              ><b :class="sevLabel(sevClass.topIr)">{{ metricValue(robot?.top_ir, 'top_ir', '℃') }}</b></span
-            >
-            <span class="status-cell status-telemetry"
-              ><span>底部红外</span
-              ><b :class="sevLabel(sevClass.bottomIr)">{{
-                metricValue(robot?.bottom_ir, 'bottom_ir', '℃')
-              }}</b></span
-            >
-            <span class="status-cell status-telemetry"
-              ><span>烟雾浓度</span
-              ><b :class="sevLabel(sevClass.smoke)">{{ metricValue(robot?.smoke, 'smoke', '%') }}</b></span
-            >
-            <span class="status-cell status-telemetry"
-              ><span>数据更新</span><b :class="sevLabel(sevClass.freshness)">{{ freshness }}</b></span
-            >
-          </div>
-        </div>
-        <div class="user-side">
-          <time>{{ clock }}</time>
-          <t-dropdown
-            :options="[{ content: '退出登录', value: 'logout' }]"
-            trigger="click"
-            @click="onUserMenuClick"
-          >
-            <button class="user-trigger" type="button">
-              <span class="avatar">{{ userInitial }}</span>
-              <b>{{ auth.user?.display_name || auth.user?.username }}</b>
-              <ChevronDownIcon class="user-chevron" />
-            </button>
-          </t-dropdown>
-        </div>
-      </header>
-      <section class="page" :class="{ 'page--monitor': isMonitor }">
-        <RouterView />
-      </section>
-    </main>
-  </div>
+        </header>
+        <section class="page" :class="{ 'page--monitor': isMonitor }">
+          <component :is="Component" />
+        </section>
+      </main>
+    </div>
+  </RouterView>
 </template>

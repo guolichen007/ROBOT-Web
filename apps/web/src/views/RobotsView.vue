@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import PageHeader from '@/components/PageHeader.vue'
 import { useAuthStore } from '@/stores/auth'
@@ -132,10 +132,6 @@ function toast(value: string): void {
     if (notice.value === value) notice.value = ''
   }, 4000)
 }
-
-onMounted(() => {
-  if (!monitor.connected && !monitor.resyncing) void monitor.start()
-})
 </script>
 
 <template>
