@@ -4,9 +4,34 @@ import { collectRuntimeErrors } from './helpers/runtime-errors'
 
 async function forceRelease(request: APIRequestContext): Promise<void> {
   const accessToken = await token(request)
-  await request.post('/api/v1/robots/R001/manual-lease/force-release', {
+  const response = await request.post('/api/v1/robots/R001/manual-lease/force-release', {
     headers: { Authorization: `Bearer ${accessToken}` },
   })
+  expect(response.ok()).toBeTruthy()
+}
+
+// 服务器 readiness 合同断言：在点击按钮前分层暴露「服务器 readiness 红」vs「Web 投影/UI 问题」，
+// 不再把两层混成一个 button timeout。失败信息只打印 readiness_reasons，绝不打印 token/password。
+async function assertPatrolReady(request: APIRequestContext): Promise<void> {
+  const accessToken = await token(request)
+  const response = await request.get('/api/v1/monitor/snapshot', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  expect(response.ok()).toBeTruthy()
+  const snapshot = await response.json()
+  const robot = snapshot.robots.find((item: { vehicle_id: string }) => item.vehicle_id === 'R001')
+  const reasons = (robot?.readiness_reasons ?? []).join(', ')
+  expect(robot, 'R001 not found in /monitor/snapshot').toBeTruthy()
+  expect(robot.enabled, `R001.enabled expected true, readiness_reasons=[${reasons}]`).toBe(true)
+  expect(robot.online_state, `R001.online_state expected ONLINE, readiness_reasons=[${reasons}]`).toBe(
+    'ONLINE',
+  )
+  expect(robot.autonomous_task_ready?.patrol, `patrol not ready, readiness_reasons=[${reasons}]`).toBe(true)
+  expect(
+    robot.safety_command_ready?.stop_motion,
+    `stop_motion not ready, readiness_reasons=[${reasons}]`,
+  ).toBe(true)
+  expect(robot.readiness_reasons ?? [], `readiness_reasons=[${reasons}]`).toEqual([])
 }
 
 async function waitForRobotIdle(request: APIRequestContext): Promise<void> {
@@ -77,9 +102,10 @@ test('manual leases remain mutually exclusive via API', async ({ browser, reques
     data: { control_session_id: crypto.randomUUID() },
   })
   expect(secondResponse.status()).toBe(409)
-  await first.request.delete('/api/v1/robots/R001/manual-lease', {
+  const releaseResponse = await first.request.delete('/api/v1/robots/R001/manual-lease', {
     headers: { Authorization: `Bearer ${firstToken}` },
   })
+  expect(releaseResponse.ok()).toBeTruthy()
   await first.close()
   await second.close()
 })
@@ -90,6 +116,7 @@ test('stop patrol waits for task cancellation, stop ACK and five fresh stationar
 }) => {
   await forceRelease(request)
   await waitForRobotIdle(request)
+  await assertPatrolReady(request)
   const getRuntimeErrors = collectRuntimeErrors(page)
   await login(page, request)
   const startButton = page.getByRole('button', { name: '开始巡检' })
