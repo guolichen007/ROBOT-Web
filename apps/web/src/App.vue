@@ -206,12 +206,13 @@ watch(
 )
 
 // 统一由 App.vue 管理 authenticated monitor lifecycle：
-// 首次 login（或 refresh 恢复登录态）后 auth.authenticated 由 false→true 时启动 monitor，
-// logout 时 disconnect。旧写法依赖 onMounted 判断，login→monitor 不重新 mount 导致 monitor 永不 start。
+// 仅在 authenticated 且非 must_change_password 时启动 monitor。首次 bootstrap admin 登录
+// （must_change_password=true）不得触发 /monitor/snapshot（后端 428），改完密码重新登录后 monitor.start。
+// logout 或未登录时 disconnect。旧写法依赖 onMounted 判断，login→monitor 不重新 mount 导致 monitor 永不 start。
 watch(
-  () => auth.authenticated,
-  (authenticated) => {
-    if (authenticated) void monitor.start()
+  () => auth.authenticated && auth.user?.must_change_password !== true,
+  (monitorAllowed) => {
+    if (monitorAllowed) void monitor.start()
     else monitor.disconnect()
   },
   { immediate: true },
