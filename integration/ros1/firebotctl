@@ -546,7 +546,7 @@ print_help() {
   echo "  firebotctl server deploy --sha <SHA> / verify / rollback  服务器部署/验收/回滚"
   echo "  firebotctl fleet register <设备编号>                    设备签发"
   echo ""
-  echo "详细见 docs/现场交付/样机1安装部署与Web控制SOP.md"
+  echo "详细见 docs/部署运维/车端部署与实车接口.md"
 }
 
 case "${1:-}" in

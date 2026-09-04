@@ -87,6 +87,3 @@ jobs:
       - name: Secret scan on support bundle sources（gitleaks）
         run: |
           docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.24.2 git --config=/repo/.gitleaks.toml --no-banner /repo
-      - name: Known waiver note（alarm history 测试不阻塞 FIELD_RELEASE_GATE）
-        run: |
-          echo "FIELD_RELEASE_GATE 独立于 full backend pytest；已知 alarm lifecycle 历史测试记录 waiver，不使本 gate skipped。"

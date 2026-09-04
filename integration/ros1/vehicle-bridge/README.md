@@ -72,14 +72,14 @@ FIREBOT_ROS_WORKSPACE_SETUP=/home/tl/firerobot_ws/devel/setup.bash \
 FIREBOT_BRIDGE_ENV=/etc/firebot/bridge.env ./verify.sh
 ```
 
-`/etc/firebot/bridge.env` 是唯一配置文件（secret 在 `/etc/firebot/bridge-secret.env`，root:root 600），由 install.sh 生成；禁止部署时覆盖已有 CA / secret。
+`/etc/firebot/bridge.env` 是唯一配置文件（secret 在 `/etc/firebot/bridge-secret.env`，root:root 600），由 `firebotctl enroll` / profile-sync 生成；底层 install.sh 只是 module implementation。禁止部署时覆盖已有 CA / secret。
 
 ## 关键配置（config/bridge.env）
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `FIREBOT_MQTT_USERNAME` | firebot-vehicle-01 | 车端账号（canonical ID） |
-| `FIREBOT_VEHICLE_ID` | firebot-vehicle-01 | canonical vehicle_id |
+| `FIREBOT_MQTT_USERNAME` | 空 | 由 enrollment / DEVICE_ID 生成的车端账号（canonical ID） |
+| `FIREBOT_VEHICLE_ID` | 空 | 由 enrollment / DEVICE_ID 生成的 canonical vehicle_id |
 | `BRIDGE_STUB_MODE` | false | **生产必须 false**；true=联调 |
 | `FIREBOT_SUPPORTED_COMMANDS` | 空 | 只声明真实能力；未接 ROS 不声明 |
 | `FIREBOT_SENSORS` | 空 | 唯一权威传感器声明；有真实 smoke 源才声明 `smoke` |
