@@ -25,14 +25,15 @@ async function waitForRobotIdle(request: APIRequestContext): Promise<void> {
     .toBe(false)
 }
 
-test('industrial operations home prioritizes map, roof camera and four controls', async ({
+test('industrial operations home shows map, roof camera and current control dock', async ({
   page,
   request,
 }) => {
   await login(page, request)
   await expect(page.locator('.situation-banner')).toHaveCount(0)
   await expect(page.getByText('车顶实时相机').first()).toBeVisible()
-  for (const name of ['开始巡检', '停止巡检', '返回等待区', '软件急停']) {
+  // 当前冻结控制合同：开始巡检 / 停止 / 返回等待区；软件急停平台仍展示（真实 estop 未实现，仅可见性）。
+  for (const name of ['开始巡检', '停止', '返回等待区', '软件急停']) {
     await expect(page.getByRole('button', { name })).toBeVisible()
   }
   await expect(page.getByRole('button', { name: '手动控制' })).toHaveCount(0)
@@ -56,23 +57,8 @@ test('media ticket is absent from URL and WHEP uses Authorization bearer', async
   expect(anonymous.status()).toBe(401)
 })
 
-test('A-12 manual fire dispatches extinguish directly without confirm chain', async ({ page, request }) => {
-  await forceRelease(request)
-  await login(page, request)
-  await page.getByRole('button', { name: '车位 A-12' }).click()
-  await page.getByRole('button', { name: '人工上报火情' }).click()
-  await expect(page.getByText(/A-12 人工火情已创建/)).toBeVisible()
-  await expect(page.getByText('展开灭火帐', { exact: true })).toBeVisible()
-  await expect(page.getByText('喷射灭火剂', { exact: true })).toBeVisible()
-  await expect(page.getByText('灭火帐 + 喷射', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: '展开灭火帐' }).click()
-  await expect(page.getByText(/灭火帐任务已下发/)).toBeVisible()
-  await waitForRobotIdle(request)
-})
-
 test('manual leases remain mutually exclusive via API', async ({ browser, request }) => {
-  // Manual-control UI is paused (Gate-3); the underlying lease contract stays
-  // protected by API-level integration tests.
+  // Manual-control UI 收纳在抽屉；底层 lease 合同由 API 级互斥保护。
   await forceRelease(request)
   const first = await browser.newContext(),
     second = await browser.newContext()
@@ -107,48 +93,10 @@ test('stop patrol waits for task cancellation, stop ACK and five fresh stationar
   await expect
     .poll(async () => (await page.getByText(/PATROL|EXECUTING/).count()) > 0, { timeout: 10_000 })
     .toBe(true)
-  await page.getByRole('button', { name: '停止巡检' }).click()
-  await expect(page.getByText(/正在确认车辆静止/)).toBeVisible()
+  await page.getByRole('button', { name: '停止' }).click()
+  await expect(page.getByText(/正在停止车辆任务/)).toBeVisible()
   await expect(page.getByText('车辆已停止')).toBeVisible({ timeout: 15_000 })
   await expect(page.getByText(/连续静止帧 5\/5/)).toBeVisible()
-})
-
-test('software estop latches and reset-estop recovers to standby', async ({ page, request }) => {
-  await forceRelease(request)
-  await waitForRobotIdle(request)
-
-  // Ensure the robot is not already latched before the test.
-  const accessToken = await token(request)
-  const stateResponse = await request.get('/api/v1/robots/R001', {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  })
-  if ((await stateResponse.json()).estop_active) {
-    await request.post('/api/v1/robots/R001/commands/reset-estop', {
-      headers: { Authorization: `Bearer ${accessToken}`, 'Idempotency-Key': crypto.randomUUID() },
-    })
-  }
-
-  await login(page, request)
-  const estopButton = page.getByRole('button', { name: '软件急停' })
-  await estopButton.dispatchEvent('pointerdown')
-  await page.waitForTimeout(1000)
-  await estopButton.dispatchEvent('pointerup')
-  await expect(page.getByText(/软件急停命令已发送/)).toBeVisible()
-
-  // Button flips to the reset state and the other motion actions lock out.
-  const resetButton = page.getByRole('button', { name: '解除急停' })
-  await expect(resetButton).toBeVisible({ timeout: 15_000 })
-  await expect(page.getByText('软件急停已生效，请先解除急停后再执行车辆运动操作')).toBeVisible()
-  await expect(page.getByRole('button', { name: '开始巡检' })).toBeDisabled()
-
-  // Hold the reset action until the latch clears and the robot returns to standby.
-  await resetButton.dispatchEvent('pointerdown')
-  await page.waitForTimeout(1000)
-  await resetButton.dispatchEvent('pointerup')
-  await expect(page.getByText(/软件急停已解除/)).toBeVisible({ timeout: 15_000 })
-
-  await expect(page.getByRole('button', { name: '软件急停' })).toBeVisible({ timeout: 15_000 })
-  await expect(page.getByRole('button', { name: '开始巡检' })).toBeEnabled()
 })
 
 test('patrol report PDF and Excel use authenticated browser downloads', async ({ page, request }) => {

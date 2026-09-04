@@ -6,11 +6,10 @@ import { ensurePasswordReady, loginPage } from './helpers/auth'
 // mock-robot-2 (R002) are both online.
 //
 // 诚实边界（不写假测试）：
-// - ALARM 隔离：当前 API 的手工火情 /alarms/manual 创建的是 site-level 火情
-//   （FireEvent.robot_id = null），没有接口能确定性构造“属于 R001 的活动告警”，
-//   因此本文件不伪造 ALARM_ISOLATION 测试。
-// - R002 OFFLINE：需要停止 mock-robot-2 并等待 offline TTL，属于 Docker/运维动作，
-//   Playwright 不能安全控制，故拆到 Windows host live acceptance，不在此伪造。
+// - ALARM 隔离：/alarms/manual 创建的是 site-level 火情（FireEvent.robot_id = null），
+//   没有接口能确定性构造“属于 R001 的活动告警”，不伪造 ALARM_ISOLATION。
+// - 断线重连：依赖真实浏览器网络模拟，已迁移到 FIELD_ONLY
+//   （见 docs/开发验收/真车接入检查清单.md），不在 GitHub hosted runner 用 setOffline 伪装现场网络验收。
 
 async function snapshot(request: APIRequestContext): Promise<{
   robots: Array<{ id?: string; vehicle_id: string }>
@@ -45,14 +44,17 @@ async function switchToR002(page: Page, request: APIRequestContext): Promise<voi
   await expect(page.getByText('已切换当前监控车辆：R002')).toBeVisible()
 }
 
-// 1) API-only 测试独立：在全新 seed 上单独可跑；快照含 R001+R002，且 media 按 robot 隔离。
-test('snapshot lists R001 and R002 with robot-scoped streams', async ({ request }) => {
+// 1) 快照含 R001+R002，且每个 stream 有明确合法 robot owner（StreamRegistry.robot_id 是 owner，
+//    不再断言 `stream_id.startsWith(robot_id + '-')` 这种实现细节前缀）。
+test('snapshot lists R001 and R002 with robot-owned streams', async ({ request }) => {
   const snap = await snapshot(request)
   const ids = snap.robots.map((r) => r.vehicle_id)
   expect(ids).toContain('R001')
   expect(ids).toContain('R002')
+  const robotIds = new Set(snap.robots.map((r) => r.id))
   for (const stream of snap.streams) {
-    expect(stream.stream_id.startsWith(`${stream.robot_id}-`)).toBeTruthy()
+    expect(stream.robot_id).toBeTruthy()
+    expect(robotIds.has(stream.robot_id)).toBeTruthy()
   }
 })
 
@@ -93,8 +95,7 @@ test('R001 active task does not leak into the R002 monitor view', async ({ page,
   await expect(deviceRow(page, '任务编号')).toHaveText('--')
 })
 
-// 4) MEDIA 隔离：R001 的 roof_rgb 是 LIVE（media-test-source），R002 视图不得出现 live tag，
-//    只能显示 R002 自己的 OFFLINE 占位（“视频未连接”）。
+// 4) MEDIA 隔离：R001 的 roof_rgb 是 LIVE（media-test-source），R002 视图不得出现 live tag。
 test('R001 live media does not leak into the R002 video panel', async ({ page, request }) => {
   await switchToR002(page, request)
   await page.goto('/monitor')
@@ -103,23 +104,7 @@ test('R001 live media does not leak into the R002 video panel', async ({ page, r
   await expect(page.locator('.video-placeholder strong')).toContainText('视频未连接')
 })
 
-// 5) 真实 WS 断线重连（setOffline，非 reload）：断网 → 链路状态“正在重连”；
-//    恢复 → “正常”，且 active vehicle 仍为 R002。
-//    依赖真实浏览器网络模拟，需在 live 环境执行确认。
-test('websocket reconnect preserves the R002 active selection', async ({ page, request }) => {
-  await switchToR002(page, request)
-  const linkCell = page.locator('.status-cell').filter({ hasText: '链路状态' })
-  await expect(linkCell).toContainText('正常')
-
-  await page.context().setOffline(true)
-  await expect(linkCell).toContainText('正在重连', { timeout: 15_000 })
-
-  await page.context().setOffline(false)
-  await expect(linkCell).toContainText('正常', { timeout: 20_000 })
-  expect(await page.evaluate(() => localStorage.getItem('firebot.activeVehicleId'))).toBe('R002')
-})
-
-// 6) 刷新持久化：整页 reload 后 active vehicle 仍为 R002。
+// 5) 刷新持久化：整页 reload 后 active vehicle 仍为 R002。
 test('active R002 selection persists across reload', async ({ page, request }) => {
   await switchToR002(page, request)
   await page.reload()
