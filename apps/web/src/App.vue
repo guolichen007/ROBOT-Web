@@ -234,7 +234,7 @@ function onUserMenuClick(data: { value?: unknown }): void {
 
 <template>
   <RouterView v-slot="{ Component }">
-    <component :is="Component" v-if="isLogin" />
+    <component :is="Component" v-if="isLogin" :key="route.path" />
     <div v-else class="app-shell">
       <aside class="sidebar">
         <div class="brand">
@@ -357,7 +357,7 @@ function onUserMenuClick(data: { value?: unknown }): void {
           </div>
         </header>
         <section class="page" :class="{ 'page--monitor': isMonitor }">
-          <component :is="Component" />
+          <component :is="Component" :key="route.path" />
         </section>
       </main>
     </div>
