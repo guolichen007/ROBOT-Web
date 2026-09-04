@@ -28,6 +28,10 @@ class FakeSession:
                 control_contract_verified=True,
                 ack_contract_verified=True,
                 map_contract_verified=True,
+                bidirectional_bridge_verified=True,
+                command_path_verified=True,
+                cmd_vel_arbitration_verified=True,
+                ros_control_mode=3,
             )
         if model is RobotCapability and self.capability:
             return RobotCapability(
