@@ -2,7 +2,7 @@ name: Field Release Gate
 
 on:
   push:
-    branches: ["hardening/**"]
+    branches: ["field/**", "release/**"]
   workflow_dispatch:
 
 permissions:

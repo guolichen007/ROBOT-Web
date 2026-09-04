@@ -5,6 +5,45 @@ set -uo pipefail
 ENV_FILE="${SERVER_ENV_FILE:-.env.server}"
 COMPOSE=(docker compose --env-file "$ENV_FILE" -f docker-compose.server.yml)
 
+# 容器健康判定统一走 docker inspect（compose ps -q → cid → State.Running + State.Health.Status），
+# 不依赖容器 Name 文本（旧写法 grep " api " 匹配不到 firebot-server-api-1 这类 compose 名）。
+get_service_container_id() {
+  "${COMPOSE[@]}" ps -q "$1" 2>/dev/null | head -1
+}
+
+service_healthy() {
+  local cid
+  cid="$(get_service_container_id "$1")"
+  [ -n "$cid" ] || return 1
+  docker inspect --format '{{.State.Running}} {{.State.Health.Status}}' "$cid" 2>/dev/null | grep -q '^true healthy$'
+}
+
+# --self-test：验证 service_healthy 解析逻辑（不依赖真实 docker/compose）
+if [ "${1:-}" = "--self-test" ]; then
+  _mock_cid=""
+  _mock_health=""
+  get_service_container_id() { echo "$_mock_cid"; }
+  docker() {
+    [ "$1" = "inspect" ] || return 1
+    case "$_mock_health" in
+      healthy)   echo "true healthy" ;;
+      unhealthy) echo "true unhealthy" ;;
+      stopped)   echo "false" ;;
+      *)         echo "" ;;
+    esac
+  }
+  _fail=0
+  _mock_cid="abc123"; _mock_health="healthy"
+  if service_healthy api; then echo "SELF_TEST running+healthy=PASS"; else echo "SELF_TEST running+healthy=FAIL"; _fail=1; fi
+  _mock_cid="abc123"; _mock_health="unhealthy"
+  if service_healthy api; then echo "SELF_TEST running+unhealthy=FAIL"; _fail=1; else echo "SELF_TEST running+unhealthy=PASS"; fi
+  _mock_cid="";       _mock_health="healthy"
+  if service_healthy api; then echo "SELF_TEST missing-container=FAIL"; _fail=1; else echo "SELF_TEST missing-container=PASS"; fi
+  _mock_cid="abc123"; _mock_health="stopped"
+  if service_healthy api; then echo "SELF_TEST not-running=FAIL"; _fail=1; else echo "SELF_TEST not-running=PASS"; fi
+  exit $_fail
+fi
+
 echo "== Firebot SERVER verify =="
 echo "SERVER_SHA=$(git rev-parse HEAD)"
 
@@ -105,7 +144,7 @@ echo "ROS_COMPAT_DOWNLINK=NOT_IMPLEMENTED"
 VERIFY_SHA="${VERIFY_SHA:-}"
 image_revision() {
   local cid
-  cid="$("${COMPOSE[@]}" ps -q "$1" 2>/dev/null | head -1)"
+  cid="$(get_service_container_id "$1")"
   [ -n "$cid" ] || { echo "UNKNOWN"; return; }
   docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$cid" 2>/dev/null || echo "UNKNOWN"
 }
@@ -143,10 +182,23 @@ fi
 
 # 10) required services 全部 healthy（fail-closed：任一 unhealthy 即 exit != 0）
 for svc in api mqtt-ingress command-dispatcher task-worker web; do
-  if "${COMPOSE[@]}" ps --format '{{.Name}} {{.Health}}' 2>/dev/null | grep -E " ${svc}( |$)" | grep -q healthy; then
+  if service_healthy "$svc"; then
     echo "SERVICE_${svc}=HEALTHY"
   else
     echo "SERVICE_${svc}=UNHEALTHY"
     exit 1
   fi
 done
+
+# ros-compat-adapter：ROS_COMPAT_MODE=true 才 required；默认 false 下 OPTIONAL，缺失/不健康不 fail。
+ROS_COMPAT_MODE="${ROS_COMPAT_MODE:-false}"
+if [ "$ROS_COMPAT_MODE" = "true" ]; then
+  if service_healthy ros-compat-adapter; then
+    echo "SERVICE_ros-compat-adapter=HEALTHY"
+  else
+    echo "SERVICE_ros-compat-adapter=UNHEALTHY"
+    exit 1
+  fi
+else
+  echo "SERVICE_ros-compat-adapter=OPTIONAL（ROS_COMPAT_MODE=false）"
+fi

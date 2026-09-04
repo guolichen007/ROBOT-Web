@@ -2,9 +2,10 @@ name: Firebot V2 CI
 
 on:
   push:
-    branches: [develop, main, "hardening/**", "integration/**"]
+    branches: [main, "feature/**", "fix/**", "maintenance/**", "field/**", "release/**"]
   pull_request:
-    branches: [develop, main]
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -139,6 +140,7 @@ jobs:
           python-version: "3.12"
       - run: python scripts/check_docs_links.py
       - run: python scripts/check_repository_policy.py
+      - run: bash scripts/server-verify.sh --self-test
       - run: python scripts/generate_ros2_handoff.py
       - run: git diff --exit-code -- integration/ros2
       - run: python scripts/generate_ros2_handoff.py --dist
