@@ -19,7 +19,7 @@ if [[ "$SERVICE" != "active" ]]; then
     exit 2
 fi
 
-# 单一事实源：events.jsonl（与 r1_vehicle.sh watch 完全一致）。
+# 单一事实源：events.jsonl。
 # 历史回放最近 15 条 + 实时跟随（tail -F 跨轮转跟随，天然无重复）。
 # journalctl 仅作为技术诊断日志，不再作为正常 watch 数据源。
 EVENTS_FILE="${FIREBOT_EVENTS_DIR:-$SELF_DIR/logs}/events.jsonl"

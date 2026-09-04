@@ -42,10 +42,6 @@ marker_hits: list[str] = []
 unpinned_actions: list[str] = []
 migration_metadata_hits: list[str] = []
 marker_allow = {
-    "docs/archive/历史基线/CODEX_MASTER_SPEC_FIREBOT_V2_BASELINE_FINAL.md",
-    "docs/archive/历史基线/CODEX_FINAL_INTEGRATION_READY_ITERATION.md",
-    "docs/archive/工程报告/深度加固跟踪表.md",
-    "docs/协议待确认项.md",
     "integration/ros2/ROS2对接参数模板.yaml",
     "integration/ros2/现场对接说明.md",
     # Policy/checking sources must mention the forbidden markers literally.
@@ -55,19 +51,16 @@ marker_allow = {
     "apps/api/app/core/config.py",
     # The handoff generator intentionally emits OWNER-supplied placeholders.
     "scripts/generate_ros2_handoff.py",
-    # Contributor/release instructions document the zero-marker rule.
-    "docs/开发指南.md",
-    "docs/发布检查清单.md",
+    # Contributor/test instructions document the zero-marker rule.
+    "docs/开发验收/开发指南.md",
+    "docs/开发验收/测试与验收.md",
 }
 # ---- 现场状态一致性：当前状态文档不得残留已废弃的固定运行基线 ----
 CURRENT_STATE_DOCS = {
     "README.md",
-    "docs/现场状态/当前现场状态.md",
-    "docs/现场状态/approved-baseline.yaml",
+    "docs/当前状态/当前状态.md",
+    "docs/当前状态/approved-baseline.yaml",
     "integration/ros1/vehicle-bridge/README.md",
-    "integration/ros1/vehicle-bridge/HANDOFF/CURRENT_STATE.md",
-    "integration/ros1/vehicle-bridge/HANDOFF/SAFETY.md",
-    "integration/ros1/vehicle-bridge/HANDOFF/NEXT_PHASE.md",
 }
 DEPRECATED_RUNTIME_MARKERS = (
     "41bbaf4",

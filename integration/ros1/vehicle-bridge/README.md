@@ -2,12 +2,12 @@
 
 > 版本：1.3.0 · 2026-08-24
 > 边界：**只做 Bridge 通信层**。不实现任何真实车辆运动/巡航/急停/灭火/回充/手动控制。真实执行由车端 ROS 控制程序后续实现。
-> 协议契约见 [`docs/FIREBOT_BRIDGE_CONTRACT_1.3.md`](../../../docs/FIREBOT_BRIDGE_CONTRACT_1.3.md)。
+> 协议契约见 [`docs/FIREBOT_BRIDGE_CONTRACT_1.3.md`](../../../docs/技术合同/FIREBOT_BRIDGE_CONTRACT_1.3.md)。
 
 ## 当前首车现场状态
 
 ```text
-批准基线     = integration/server-web-real-vehicle-ready-v1 HEAD（以 git rev-parse 为准，不硬编码 SHA）
+批准基线     = baseline/server-runtime-2026-09-03（不可变运行基线 tag）
 正式安装目录 = /opt/firebot/vehicle-bridge（install.sh 原子切换 + APPROVED_RUNTIME.txt 留痕）
 运行方式     = systemd firebot-bridge.service → bash run_bridge.sh（ROS 路径经环境变量）
 
@@ -16,7 +16,7 @@
 当前 Gate  ：Bridge communication/operation、broker reconnect、graceful stop、LWT、
           systemd recovery、short soak 均 PASS；long soak DEFERRED；Web UI NOT_CHECKED。
 
-现场日常启停/状态/大屏见 HANDOFF/：`HANDOFF/README.md`；当前状态真相源见 docs/现场状态/。
+现场日常启停/状态/实时控制台见 [车端部署与实车接口](../../../docs/部署运维/车端部署与实车接口.md)；当前状态真相源见 [当前状态](../../../docs/当前状态/当前状态.md)。
 ```
 
 ## 职责
@@ -152,7 +152,7 @@ FIREBOT_FIELD_TRACE=true
 
 `watch-bridge.sh` 只是观察者：Ctrl+C 只退出 viewer，**不会**停止 `firebot-bridge.service`。
 
-现场部署与 R0–R4 完整操作见 [车端Bridge部署与实车接口](../../../docs/车端Bridge部署与实车接口.md)；当前状态真相源见 [实车现场联调总览](../../../docs/实车现场联调总览.md)。
+现场部署与实车操作见 [车端部署与实车接口](../../../docs/部署运维/车端部署与实车接口.md)；当前状态真相源见 [当前状态](../../../docs/当前状态/当前状态.md)。
 
 ## ⚠️ 禁止双 Bridge
 

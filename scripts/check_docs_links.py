@@ -6,7 +6,7 @@ from urllib.parse import unquote
 
 ROOT = Path(__file__).resolve().parents[1]
 docs = [ROOT / "README.md", ROOT / "CONTRIBUTING.md", ROOT / "SECURITY.md", ROOT / "CHANGELOG.md"]
-docs.extend((ROOT / "docs").glob("*.md"))
+docs.extend((ROOT / "docs").rglob("*.md"))
 docs.extend(
     (ROOT / "integration/ros2").glob("*.md") if (ROOT / "integration/ros2").exists() else []
 )
