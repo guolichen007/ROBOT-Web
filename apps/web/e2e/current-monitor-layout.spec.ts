@@ -28,11 +28,14 @@ async function createFire(request: APIRequestContext): Promise<string> {
   return (await created.json()).id
 }
 
-async function resolveFire(request: APIRequestContext, id: string): Promise<void> {
+async function dismissFire(request: APIRequestContext, id: string): Promise<void> {
   const accessToken = await token(request)
-  await request.post(`/api/v1/alarms/${id}/resolve`, {
+  // 生产 alarm 生命周期：NEW → RESOLVED 不合法（NEW → ACKNOWLEDGED/CONFIRMED/DISMISSED）。
+  // teardown 用 dismiss 清理，并断言响应，避免残留活动 alarm 造成假 PASS。
+  const response = await request.post(`/api/v1/alarms/${id}/dismiss`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   })
+  expect(response.ok()).toBeTruthy()
 }
 
 test('current monitor layout is stable across common resolutions', async ({ page, request }) => {
@@ -82,6 +85,6 @@ test('alarm smoke keeps monitor usable', async ({ page, request }) => {
     expect(dock).not.toBeNull()
     expect(dock!.y + dock!.height).toBeLessThanOrEqual(1080 + 1)
   } finally {
-    await resolveFire(request, alarmId)
+    await dismissFire(request, alarmId)
   }
 })
