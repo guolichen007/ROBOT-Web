@@ -9,7 +9,7 @@
 ## 安全与兼容性
 
 - [ ] 未提交 secret、证书、备份或真实现场数据
-- [ ] 未突破 ROS2/车端职责边界
+- [ ] 未突破平台/车端/物理安全职责边界
 - [ ] 协议变更已同步 Schema/generated/Mock/tester/handoff
 - [ ] 数据库变更有 migration 与 downgrade/restore 验证
 

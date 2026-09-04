@@ -1,105 +1,78 @@
 # Firebot 车端 ROS Bridge（通信层 · schema 1.3）
 
-> 版本：1.3.0 · 2026-08-24
-> 边界：**只做 Bridge 通信层**。不实现任何真实车辆运动/巡航/急停/灭火/回充/手动控制。真实执行由车端 ROS 控制程序后续实现。
-> 协议契约见 [`docs/FIREBOT_BRIDGE_CONTRACT_1.3.md`](../../../docs/技术合同/FIREBOT_BRIDGE_CONTRACT_1.3.md)。
-
-## 当前首车现场状态
-
-```text
-批准基线     = baseline/server-runtime-2026-09-03（不可变运行基线 tag）
-正式安装目录 = /opt/firebot/vehicle-bridge（install.sh 原子切换 + APPROVED_RUNTIME.txt 留痕）
-运行方式     = systemd firebot-bridge.service → bash run_bridge.sh（ROS 路径经环境变量）
-
-当前安全态：commands=[]、sensors=[]、location_enabled=false
-控制能力   ：CONTROL_CODE=PATROL_START,STOP_MOTION、CONTROL_FIELD_VERIFIED=NO
-当前 Gate  ：Bridge communication/operation、broker reconnect、graceful stop、LWT、
-          systemd recovery、short soak 均 PASS；long soak DEFERRED；Web UI NOT_CHECKED。
-
-现场日常启停/状态/实时控制台见 [车端部署与实车接口](../../../docs/部署运维/车端部署与实车接口.md)；当前状态真相源见 [当前状态](../../../docs/当前状态/当前状态.md)。
-```
+> 版本：1.3.0
+> 定位：**Vehicle Bridge 组件/开发 README**。Bridge 只做**通信 / 协议 / 安全网关**，不实现真实运动。
+> 现场唯一入口是 `firebotctl`（`vehicle enroll` → `vehicle install` → `vehicle verify`）；完整现场流程见 [车端部署与实车接口](../../../docs/部署运维/车端部署与实车接口.md)，当前状态真相源见 [当前状态](../../../docs/当前状态/当前状态.md)。
+> 协议契约见 [FIREBOT_BRIDGE_CONTRACT_1.3](../../../docs/技术合同/FIREBOT_BRIDGE_CONTRACT_1.3.md)。
 
 ## 职责
 
-```
-服务器 Web ── MQTT/TLS ── 本 Bridge ── /firebot_bridge/* ── ROS 控制程序(后续)
+```text
+服务器 Web ── MQTT/TLS ── 本 Bridge ── /firebot_bridge/* ── 车端控制层
      上行: battery/smoke/heartbeat/...      下行: patrol/stop/estop/...
 ```
 
 Bridge 只做 5 件事：MQTT 连接、协议校验、上行数据封装、下行命令转交、ROS 反馈重新封装。
-**它不知道"怎么巡航"**——只把"服务器要求开始巡航"可靠转交给 ROS 层。
+**它不知道"怎么巡航"**——只把"服务器要求开始巡航"可靠转交给 ROS 控制层。
+
+当前控制能力：`CONTROL_CODE=PATROL_START,STOP_MOTION`（`vehicle-control` 实现，范围有限）；`CONTROL_FIELD_VERIFIED=NO`，真实物理运动仍待现场验收。
 
 **MQTT 与 ROS master 解耦**：MQTT/TLS 生命周期不依赖 roscore——无 roscore 时 MQTT 仍在线；
 production 默认 `supported_commands=[]`，此时任何命令都在 validator 回 `COMMAND_UNSUPPORTED`
 （不会转发 ROS）；只有命令已通过 capability 校验并成功转发 ROS 后无 feedback，才回 `BRIDGE_ADAPTER_NOT_CONNECTED`。
 初始 MQTT 连接失败在进程内指数退避重试，不靠 systemd 重启。
 
-**STANDARD_RUNTIME_BEHAVIOR**：真实 ROS_MASTER_URI 可达时 adapter 可自动初始化。
-
-**CURRENT_FIRST_VEHICLE**：`ROS_MASTER_URI=http://127.0.0.1:1`，因此即使真实 roscore 存在，
-当前 Bridge 也故意不会自动连接；进入 Phase E1 前不得改变。
-
 **battery canonical 来源**：`/firebot_bridge/battery`（std_msgs/Float32），由车端 provider/adapter 发布；
 没有 provider 时不伪造电量（`BATTERY_PROVIDER=NOT_AVAILABLE`）。
 
 ## 目录结构
 
-```
+```text
 vehicle-bridge/
-├── firebot_bridge/
-│   ├── main.py            # 入口（线程布局）
-│   ├── config.py          # env 配置
-│   ├── mqtt_client.py     # MQTTv5+TLS+LWT+reconnect+订阅 command
-│   ├── protocol.py        # vehicleBase/seq/消息构造/命令校验（下行接受 1.2/1.3）
-│   ├── identity.py        # boot_id 生命周期
-│   ├── state.py           # 共享状态（任务锁/数据缓存/命令幂等重放）
-│   ├── field_trace.py     # FBTRACE 结构化事件（journal，无 ANSI）
-│   ├── uplink/            # 上行消息：availability/heartbeat/capabilities/status/sensor/location
-│   ├── downlink/          # 下行：command_receiver/validator/dedup/ros_placeholder
-│   └── ros/               # /firebot_bridge/* 冻结契约：interfaces/providers/feedback/ros_types
-├── config/bridge.env.example        # 配置模板（无密码、无危险地图默认值）
-├── systemd/firebot-bridge.service.template  # systemd 模板（install.sh 生成实际 unit）
-├── install.sh / uninstall.sh / verify.sh    # 安装 / 卸载 / 验收
-├── run_bridge.sh               # 启动（ROS 路径经环境变量，不硬编码 /home/tl）
-├── watch-bridge.sh             # 现场实时控制台（观察者）
-├── tools/field_console.py      # 终端 viewer（渲染 FBTRACE，只观察不改状态）
-├── requirements.txt            # paho-mqtt
-├── tests/                      # test_bridge / test_reliability / test_field_console
-└── README.md
+├── firebot_bridge/            # Bridge runtime（协议 / 上行 / 下行 / ROS 契约）
+├── config/bridge.env.example  # 配置模板（无密码）
+├── systemd/firebot-bridge.service.template  # systemd 模板
+├── install.sh / uninstall.sh / verify.sh    # 模块实现（被 vehicle-install.sh 调用，非现场标准入口）
+├── run_bridge.sh              # 启动（debug/foreground 用，正式走 systemd）
+├── watch-bridge.sh            # 现场实时控制台（观察者）
+├── tools/field_console.py     # 终端 viewer
+├── requirements.txt
+└── tests/
 ```
 
-## 部署（车端，GitHub 为唯一交付源）
+## 现场部署（标准流程）
 
-默认安装到固定目录 `/opt/firebot/vehicle-bridge`，不绑定开发人员 home；systemd 由 install.sh 从模板生成。
+标准现场安装/验证**只走 `firebotctl`**：
+
+```text
+firebotctl vehicle enroll <DEVICE_ID> --token <TOKEN>
+firebotctl vehicle install --sha <FINAL_SHA>
+firebotctl vehicle verify
+```
+
+`firebotctl vehicle install` 内部会调用 `vehicle-install.sh`（进而调用本目录 `install.sh`）完成原子安装与 `APPROVED_RUNTIME.txt` 留痕。**现场人员不得直接 `nano /etc/firebot/bridge.env`、`sed -i`、手填 MQTT credential**——这些是模块实现 / 开发 debug 手段，不是标准现场安装入口。
+
+安装产物：`/opt/firebot/vehicle-bridge`（systemd `firebot-bridge.service` 运行）。
+
+## 模块实现 / 开发 debug（非现场标准入口）
+
+以下命令仅供模块开发与排障，不是现场标准安装入口：
 
 ```bash
-# 1) 依赖
-pip3 install -r requirements.txt          # paho-mqtt；rospy 随 ROS Noetic 自带
+# 依赖
+pip3 install -r requirements.txt
 
-# 2) 安装（可配置：FIREBOT_INSTALL_DIR / FIREBOT_BRIDGE_USER / FIREBOT_ROS_SETUP / FIREBOT_ROS_WORKSPACE_SETUP）
+# 直接安装（等价于 vehicle-install.sh 内部调用；现场勿直接使用）
+FIREBOT_ROS_SETUP=/opt/ros/noetic/setup.bash \
+FIREBOT_ROS_WORKSPACE_SETUP=/home/tl/firerobot_ws/devel/setup.bash \
 ./install.sh
 
-# 3) 确认 CA 存在 + 编辑配置（无密码；唯一配置 = /etc/firebot/bridge.env）
-test -f /etc/firebot/production-ca.crt || { echo "STOP: CA 不存在，向部署所有者索取"; exit 1; }
-nano /etc/firebot/bridge.env   # SITE/MAP/频率/STUB；密码不写这里
-
-# 4) secret：已有则保留，绝不覆盖/重新生成；缺失则 STOP，由部署所有者提供
-if sudo test -f /etc/firebot/bridge-secret.env; then
-  echo "PASS: existing bridge secret preserved"
-else
-  echo "STOP: bridge secret missing; deployment owner must provision it"
-  exit 1
-fi
-sudo stat -c '%U:%G %a %n' /etc/firebot/bridge-secret.env
-
-# 5) 启动
-sudo systemctl enable --now firebot-bridge
-
-# 6) 验收
-./verify.sh
+# 卸载 / 验收
+./uninstall.sh
+FIREBOT_BRIDGE_ENV=/etc/firebot/bridge.env ./verify.sh
 ```
 
-卸载：`./uninstall.sh`（`--purge` 删除安装目录；secret 永不删除）。
+`/etc/firebot/bridge.env` 是唯一配置文件（secret 在 `/etc/firebot/bridge-secret.env`，root:root 600），由 install.sh 生成；禁止部署时覆盖已有 CA / secret。
 
 ## 关键配置（config/bridge.env）
 
@@ -137,22 +110,9 @@ FIREBOT_BRIDGE_ENV=/etc/firebot/bridge.env /opt/firebot/vehicle-bridge/verify.sh
 
 # 实时控制台（append-only，SSH 友好）
 /opt/firebot/vehicle-bridge/watch-bridge.sh
-
-# verbose / full id / raw
-/opt/firebot/vehicle-bridge/watch-bridge.sh --verbose
-/opt/firebot/vehicle-bridge/watch-bridge.sh --full-id
-/opt/firebot/vehicle-bridge/watch-bridge.sh --raw
-```
-
-现场 R0–R4 验证期间临时开启 trace（正常长期运行保持 false）：
-
-```text
-FIREBOT_FIELD_TRACE=true
 ```
 
 `watch-bridge.sh` 只是观察者：Ctrl+C 只退出 viewer，**不会**停止 `firebot-bridge.service`。
-
-现场部署与实车操作见 [车端部署与实车接口](../../../docs/部署运维/车端部署与实车接口.md)；当前状态真相源见 [当前状态](../../../docs/当前状态/当前状态.md)。
 
 ## ⚠️ 禁止双 Bridge
 
@@ -169,5 +129,5 @@ sudo systemctl start firebot-bridge
 
 ## 验收边界
 
-本轮正确结果：`PATROL_START`/`STOP_MOTION` 代码已实现（`CONTROL_CODE`），但 `CONTROL_FIELD_VERIFIED=NO`；`emergency_stop`/`reset_estop` 未实现。
+`PATROL_START`/`STOP_MOTION` 代码已实现（`CONTROL_CODE`），但 `CONTROL_FIELD_VERIFIED=NO`；`emergency_stop`/`reset_estop` 未实现。
 绝不因 MQTT 命令到达就标记"真实控制已验证"。

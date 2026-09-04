@@ -18,6 +18,24 @@ service_healthy() {
   docker inspect --format '{{.State.Running}} {{.State.Health.Status}}' "$cid" 2>/dev/null | grep -q '^true healthy$'
 }
 
+# 从实际运行的 api 容器读有效 ROS_COMPAT_MODE（.env.server 传给 compose，不自动 export 给本 shell）。
+api_container_env() {
+  local cid
+  cid="$(get_service_container_id api)"
+  [ -n "$cid" ] || return 1
+  docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$cid" 2>/dev/null
+}
+
+effective_ros_compat_mode() {
+  local line
+  line="$(api_container_env 2>/dev/null | grep -E '^ROS_COMPAT_MODE=' | tail -n1 || true)"
+  if [ -z "$line" ]; then
+    echo "false"   # absent → OPTIONAL
+  else
+    printf '%s' "$line" | cut -d= -f2-
+  fi
+}
+
 # --self-test：验证 service_healthy 解析逻辑（不依赖真实 docker/compose）
 if [ "${1:-}" = "--self-test" ]; then
   _mock_cid=""
@@ -47,8 +65,12 @@ fi
 echo "== Firebot SERVER verify =="
 echo "SERVER_SHA=$(git rev-parse HEAD)"
 
-# 1) 容器健康（compose health）
-if "${COMPOSE[@]}" ps --format '{{.Name}} {{.State}} {{.Health}}' 2>/dev/null | grep -vqE 'exited|unhealthy'; then
+# 1) 核心容器健康概览（只覆盖 required 五核心；optional ros-compat 不参与本概览，避免误导性 CHECK）
+core_healthy=1
+for svc in api mqtt-ingress command-dispatcher task-worker web; do
+  service_healthy "$svc" || core_healthy=0
+done
+if [ "$core_healthy" = "1" ]; then
   echo "CONTAINERS_HEALTHY=PASS"
 else
   echo "CONTAINERS_HEALTHY=CHECK"
@@ -190,15 +212,18 @@ for svc in api mqtt-ingress command-dispatcher task-worker web; do
   fi
 done
 
-# ros-compat-adapter：ROS_COMPAT_MODE=true 才 required；默认 false 下 OPTIONAL，缺失/不健康不 fail。
-ROS_COMPAT_MODE="${ROS_COMPAT_MODE:-false}"
+echo "REQUIRED_CORE_HEALTH=PASS"
+
+# ros-compat-adapter：以实际运行 api 容器的有效 ROS_COMPAT_MODE 判定，
+# 不依赖调用 shell 是否 export（.env.server 传给 compose，不会自动 export 给本脚本）。
+ROS_COMPAT_MODE="$(effective_ros_compat_mode)"
 if [ "$ROS_COMPAT_MODE" = "true" ]; then
   if service_healthy ros-compat-adapter; then
-    echo "SERVICE_ros-compat-adapter=HEALTHY"
+    echo "OPTIONAL_ROS_COMPAT_HEALTH=HEALTHY（ROS_COMPAT_MODE=true，required）"
   else
-    echo "SERVICE_ros-compat-adapter=UNHEALTHY"
+    echo "OPTIONAL_ROS_COMPAT_HEALTH=UNHEALTHY"
     exit 1
   fi
 else
-  echo "SERVICE_ros-compat-adapter=OPTIONAL（ROS_COMPAT_MODE=false）"
+  echo "OPTIONAL_ROS_COMPAT_HEALTH=OPTIONAL（effective ROS_COMPAT_MODE=${ROS_COMPAT_MODE:-false}，来源：api 容器 env）"
 fi

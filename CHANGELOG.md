@@ -1,6 +1,19 @@
 # 变更日志
 
-## Vehicle Bridge 现场交接收尾（docs closeout）
+## Repository consolidation / current sealed state
+
+- SERVER_RUNTIME_BASELINE= `584efcfda60b8d39c516a9939bc0481609fc6f3c`（不可变 tag `baseline/server-runtime-2026-09-03`）
+- DB= `20260902_0008`
+- SERVER_FINAL_SEAL=PASS
+- SAMPLE2=OFFLINE
+- SAMPLE2_FINAL_ACCEPTANCE=PENDING
+- FINAL_RELEASE=HOLD
+- 长期主线 `main`；文档收敛为唯一索引 docs/README.md + 四目录（当前状态/部署运维/技术合同/开发验收）。
+- CI 收敛到 main 主线（feature/fix/maintenance/field/release）；alarm lifecycle 测试对齐生产状态机；server-verify 容器健康解析修复。
+
+## Vehicle Bridge 现场交接收尾（Historical，旧基线）
+
+> 以下为历史记录，`13c869247079b88da11b36666755906001a0041c` 与 `REAL_CONTROL=NOT_IMPLEMENTED` 均为旧基线表述，不代表当前封板状态。
 
 - Vehicle Bridge runtime 冻结于 `13c869247079b88da11b36666755906001a0041c`（Field Console / ROS-MQTT 生命周期隔离 / 现场交接文档完成）。
 - 新增现场文档：实车现场联调总览（SSOT）、车端Bridge部署与实车接口、服务器与Web现场配合。
