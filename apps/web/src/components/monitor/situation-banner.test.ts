@@ -3,8 +3,8 @@ import { computed, defineComponent, nextTick, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import SituationBanner from './SituationBanner.vue'
 
-// 复现 MonitorView 的普通稳定 DOM 条件渲染结构（已移除 Teleport）：
-// host div 永远存在，SituationBanner 在其内部条件挂载。
+// SituationBanner 自身的条件渲染 transition 合同（OFF → NORMAL → OFF）。
+// 这不是 Teleport target mount regression——那部分由 monitor-view.test.ts 的真实 shell 拓扑覆盖。
 const Host = defineComponent({
   components: { SituationBanner },
   setup() {

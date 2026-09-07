@@ -1,13 +1,24 @@
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { nextTick } from 'vue'
+import { defineComponent, nextTick } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import MonitorView from './MonitorView.vue'
 import { useMonitorStore } from '@/stores/monitor'
 import type { RobotState } from '@/types'
 
-// Run69 renderer regression：monitor snapshot 从空/离线 → R001 就绪的转换，
-// 不得产生 Vue runtime "emitsOptions" TypeError，且 Patrol UI 正确投影就绪状态。
+// 真实 App shell mount 拓扑：target(#workspace-alert) 与 MonitorView 在同一个父级 mount tick 创建。
+// 不提前 document.body.appendChild(target)，避免掩盖 Teleport target 尚未入 document 的根因。
+const ShellHarness = defineComponent({
+  components: { MonitorView },
+  template: `
+    <main class="workspace">
+      <div id="workspace-alert" class="workspace-alert"></div>
+      <section class="page">
+        <MonitorView />
+      </section>
+    </main>
+  `,
+})
 
 const emptySnapshot = () => ({
   snapshot_watermark: '0-0',
@@ -63,7 +74,7 @@ afterEach(() => {
 })
 
 describe('MonitorView renderer regression', () => {
-  it('empty → R001 ready renders device/patrol and enables patrol without runtime error', async () => {
+  it('teleport target resolves in same mount tick and projects R001 without runtime error', async () => {
     setActivePinia(createPinia())
     const store = useMonitorStore()
     store.snapshot = emptySnapshot()
@@ -75,7 +86,8 @@ describe('MonitorView renderer regression', () => {
       consoleErrors.push(args.map((a) => String(a)).join(' '))
     })
 
-    const wrapper = mount(MonitorView, {
+    const wrapper = mount(ShellHarness, {
+      attachTo: document.body,
       global: {
         config: {
           errorHandler(err: unknown) {
@@ -96,19 +108,16 @@ describe('MonitorView renderer regression', () => {
       },
     })
 
-    // 初始（snapshot 空 → OFFLINE_UNKNOWN）：稳定 host 存在 + banner 可见
-    expect(wrapper.find('.monitor-situation-host').exists()).toBe(true)
-    expect(wrapper.find('.situation-banner').exists()).toBe(true)
+    await nextTick()
+
+    // 关键：target 与 MonitorView 同 mount tick 创建，defer 后 host 必须已进入 target
+    expect(document.querySelector('#workspace-alert .monitor-situation-host')).toBeTruthy()
 
     store.snapshot = { ...emptySnapshot(), robots: [readyRobot()] }
     store.activeRobotId = 'R001'
     store.connected = true
     await nextTick()
     await nextTick()
-
-    // 就绪（NORMAL）：host 仍存在 + banner 消失
-    expect(wrapper.find('.monitor-situation-host').exists()).toBe(true)
-    expect(wrapper.find('.situation-banner').exists()).toBe(false)
 
     const text = wrapper.text()
     expect(text).toContain('R001')

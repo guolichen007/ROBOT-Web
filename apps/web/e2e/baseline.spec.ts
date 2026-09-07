@@ -59,6 +59,8 @@ test('industrial operations home shows map, roof camera and current control dock
   await login(page, request)
   await expect(page.locator('.situation-banner')).toHaveCount(0)
   await expect(page.getByText('车顶实时相机').first()).toBeVisible()
+  // 等待真实 R001 projection 后再断言 runtime errors，避免 snapshot reactive update 前提前 PASS
+  await expect(page.locator('.device-snapshot')).toContainText('R001')
   // 当前冻结控制合同：开始巡检 / 停止 / 返回等待区；软件急停平台仍展示（真实 estop 未实现，仅可见性）。
   for (const name of ['开始巡检', '停止', '返回等待区', '软件急停']) {
     await expect(page.getByRole('button', { name })).toBeVisible()
@@ -119,6 +121,14 @@ test('stop patrol waits for task cancellation, stop ACK and five fresh stationar
   await assertPatrolReady(request)
   const getRuntimeErrors = collectRuntimeErrors(page)
   await login(page, request)
+
+  // renderer 先稳定投影 R001（defer 后 host 就绪 + DeviceSnapshot R001 + 待命），
+  // 再检查 runtime errors 与按钮，避免把 renderer 崩溃伪装成 button disabled。
+  await expect(page.locator('#workspace-alert .monitor-situation-host')).toHaveCount(1)
+  await expect(page.locator('.device-snapshot')).toContainText('R001')
+  await expect(page.getByText('待命').first()).toBeVisible()
+  expect(getRuntimeErrors()).toEqual([])
+
   const startButton = page.getByRole('button', { name: '开始巡检' })
   await expect(startButton).toBeEnabled({ timeout: 10_000 })
   await startButton.click()

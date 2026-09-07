@@ -281,7 +281,7 @@ function onUserMenuClick(data: { value?: unknown }): void {
         <div class="sidebar-foot">科技赋能&nbsp;&nbsp;领航未来</div>
       </aside>
       <main class="workspace">
-        <div class="workspace-alert"></div>
+        <div id="workspace-alert" class="workspace-alert"></div>
         <header class="topbar">
           <div class="status-area">
             <div class="status-primary">

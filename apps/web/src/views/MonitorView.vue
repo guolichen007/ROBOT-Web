@@ -497,14 +497,18 @@ onUnmounted(() => {
 <template>
   <main class="yd-monitor-view" :class="{ 'is-alarm': Boolean(primaryAlarm) }">
     <div v-if="notice" class="toast">{{ notice }}</div>
-    <div class="monitor-situation-host">
-      <SituationBanner
-        v-if="showSituationBanner"
-        :state="situation"
-        :alarm="primaryAlarm"
-        @select="primaryAlarmId = primaryAlarm?.id || null"
-      />
-    </div>
+    <!-- workspace-alert 与 MonitorView 在同一 App shell mount tick 创建；
+         用 Teleport defer 确保 target 在 shell 插入 document 后再解析，避免 target 尚未入 document。 -->
+    <Teleport defer to="#workspace-alert">
+      <div class="monitor-situation-host">
+        <SituationBanner
+          v-if="showSituationBanner"
+          :state="situation"
+          :alarm="primaryAlarm"
+          @select="primaryAlarmId = primaryAlarm?.id || null"
+        />
+      </div>
+    </Teleport>
     <section class="yd-monitor-core">
       <section class="panel operations-map-panel">
         <header>
