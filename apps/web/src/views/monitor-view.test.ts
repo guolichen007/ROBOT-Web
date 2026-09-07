@@ -34,7 +34,7 @@ const readyRobot = (): RobotState => ({
   online_state: 'ONLINE',
   estop_active: false,
   battery: 95,
-  localization_status: 'LOCALIZED',
+  localization_status: 'VALID',
   autonomous_task_ready: { patrol: true },
   safety_command_ready: { stop_motion: true },
   readiness_reasons: [],
@@ -52,7 +52,9 @@ const readyRobot = (): RobotState => ({
     stale_seconds: 3,
     offline_seconds: 10,
   },
-  data_channels: {},
+  data_channels: {
+    estop: { channel: 'estop', support_state: 'CONNECTED', quality: 'GOOD', source_kind: 'MOCK' },
+  },
   sensor_profiles: [],
 })
 
@@ -98,10 +100,19 @@ describe('MonitorView renderer regression', () => {
       },
     })
 
+    // 初始（snapshot 空 → OFFLINE_UNKNOWN）：稳定 host 存在 + banner 可见
+    expect(target.querySelector('.monitor-situation-host')).toBeTruthy()
+    expect(target.querySelector('.situation-banner')).toBeTruthy()
+
     store.snapshot = { ...emptySnapshot(), robots: [readyRobot()] }
     store.activeRobotId = 'R001'
+    store.connected = true
     await nextTick()
     await nextTick()
+
+    // 就绪（NORMAL）：host 仍存在 + banner 消失
+    expect(target.querySelector('.monitor-situation-host')).toBeTruthy()
+    expect(target.querySelector('.situation-banner')).toBeNull()
 
     const text = wrapper.text()
     expect(text).toContain('R001')

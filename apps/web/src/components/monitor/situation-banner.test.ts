@@ -1,17 +1,23 @@
 import { mount } from '@vue/test-utils'
-import { defineComponent, nextTick } from 'vue'
+import { computed, defineComponent, nextTick, ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import SituationBanner from './SituationBanner.vue'
 
-// 最小复现：Teleport 内挂 SituationBanner，state 从 OFFLINE_UNKNOWN（渲染 section.warning）
-// 切到 NORMAL（渲染空 fragment），验证不产生 Vue runtime "emitsOptions" TypeError。
-// Teleport target（.workspace-alert）必须像 App.vue shell 一样预存在于真实 DOM。
+// 复现 MonitorView 的稳定 Teleport host 结构：
+// Teleport 永远挂载，direct child 是稳定 div.monitor-situation-host，
+// SituationBanner 的条件挂载发生在普通 div 下（不再让 Teleport 生命周期动态 mount/unmount）。
 const Host = defineComponent({
   components: { SituationBanner },
-  props: { state: { type: String, required: true } },
+  setup() {
+    const state = ref('OFFLINE_UNKNOWN')
+    const show = computed(() => state.value !== 'NORMAL')
+    return { state, show }
+  },
   template: `
     <Teleport to=".workspace-alert">
-      <SituationBanner :state="state" />
+      <div class="monitor-situation-host">
+        <SituationBanner v-if="show" :state="state" />
+      </div>
     </Teleport>
   `,
 })
@@ -20,8 +26,8 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-describe('SituationBanner teleport transition', () => {
-  it('OFFLINE_UNKNOWN → NORMAL does not throw emitsOptions', async () => {
+describe('SituationBanner teleport host stability', () => {
+  it('keeps host stable across OFF → NORMAL → OFF without emitsOptions', async () => {
     const target = document.createElement('div')
     target.className = 'workspace-alert'
     document.body.appendChild(target)
@@ -33,7 +39,6 @@ describe('SituationBanner teleport transition', () => {
     })
 
     const wrapper = mount(Host, {
-      props: { state: 'OFFLINE_UNKNOWN' },
       global: {
         config: {
           errorHandler(err: unknown) {
@@ -42,15 +47,27 @@ describe('SituationBanner teleport transition', () => {
         },
       },
     })
-    // 初始 OFFLINE_UNKNOWN：Teleport 目标里应有一个 banner section
-    expect(target.querySelector('.situation-banner')).toBeTruthy()
 
-    await wrapper.setProps({ state: 'NORMAL' })
+    const host = () => target.querySelector('.monitor-situation-host')
+    const banner = () => target.querySelector('.situation-banner')
+
+    // OFFLINE_UNKNOWN：host 存在 + banner 可见
+    expect(host()).toBeTruthy()
+    expect(banner()).toBeTruthy()
+
+    // → NORMAL：host 仍存在 + banner 消失
+    ;(wrapper.vm as unknown as { state: string }).state = 'NORMAL'
     await nextTick()
     await nextTick()
+    expect(host()).toBeTruthy()
+    expect(banner()).toBeNull()
 
-    // NORMAL：banner 应清空
-    expect(target.querySelector('.situation-banner')).toBeNull()
+    // → 回 OFF：host 同一结构 + banner 恢复
+    ;(wrapper.vm as unknown as { state: string }).state = 'OFFLINE_UNKNOWN'
+    await nextTick()
+    await nextTick()
+    expect(host()).toBeTruthy()
+    expect(banner()).toBeTruthy()
 
     const fatal = [...appErrors, ...consoleErrors].filter((e) =>
       /emitsOptions|Cannot read properties of null/.test(String(e)),

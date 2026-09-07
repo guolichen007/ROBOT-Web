@@ -130,8 +130,7 @@ const situation = computed(() =>
     estopSupport: robot.value?.data_channels?.estop?.support_state || 'NOT_CONNECTED',
   }),
 )
-// 由父组件决定是否挂载 banner/Teleport：NORMAL 且无 alarm 时不挂载，
-// 避免 Teleport 内部长期挂一个最终返回空 fragment 的动态组件（Vue emitsOptions 运行时崩溃源）。
+// 保持 Teleport host 稳定，避免动态 Teleport 生命周期触发 renderer 异常路径。
 const showSituationBanner = computed(() => Boolean(primaryAlarm.value) || situation.value !== 'NORMAL')
 const navigationReason = computed(() => {
   if (!selectedSlot.value?.enabled) return '该车位已禁用'
@@ -498,12 +497,15 @@ onUnmounted(() => {
 <template>
   <main class="yd-monitor-view" :class="{ 'is-alarm': Boolean(primaryAlarm) }">
     <div v-if="notice" class="toast">{{ notice }}</div>
-    <Teleport v-if="showSituationBanner" to=".workspace-alert">
-      <SituationBanner
-        :state="situation"
-        :alarm="primaryAlarm"
-        @select="primaryAlarmId = primaryAlarm?.id || null"
-      />
+    <Teleport to=".workspace-alert">
+      <div class="monitor-situation-host">
+        <SituationBanner
+          v-if="showSituationBanner"
+          :state="situation"
+          :alarm="primaryAlarm"
+          @select="primaryAlarmId = primaryAlarm?.id || null"
+        />
+      </div>
     </Teleport>
     <section class="yd-monitor-core">
       <section class="panel operations-map-panel">
