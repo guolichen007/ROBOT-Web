@@ -497,16 +497,14 @@ onUnmounted(() => {
 <template>
   <main class="yd-monitor-view" :class="{ 'is-alarm': Boolean(primaryAlarm) }">
     <div v-if="notice" class="toast">{{ notice }}</div>
-    <Teleport to=".workspace-alert">
-      <div class="monitor-situation-host">
-        <SituationBanner
-          v-if="showSituationBanner"
-          :state="situation"
-          :alarm="primaryAlarm"
-          @select="primaryAlarmId = primaryAlarm?.id || null"
-        />
-      </div>
-    </Teleport>
+    <div class="monitor-situation-host">
+      <SituationBanner
+        v-if="showSituationBanner"
+        :state="situation"
+        :alarm="primaryAlarm"
+        @select="primaryAlarmId = primaryAlarm?.id || null"
+      />
+    </div>
     <section class="yd-monitor-core">
       <section class="panel operations-map-panel">
         <header>

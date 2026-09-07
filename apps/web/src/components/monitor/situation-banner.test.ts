@@ -1,11 +1,10 @@
 import { mount } from '@vue/test-utils'
 import { computed, defineComponent, nextTick, ref } from 'vue'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import SituationBanner from './SituationBanner.vue'
 
-// 复现 MonitorView 的稳定 Teleport host 结构：
-// Teleport 永远挂载，direct child 是稳定 div.monitor-situation-host，
-// SituationBanner 的条件挂载发生在普通 div 下（不再让 Teleport 生命周期动态 mount/unmount）。
+// 复现 MonitorView 的普通稳定 DOM 条件渲染结构（已移除 Teleport）：
+// host div 永远存在，SituationBanner 在其内部条件挂载。
 const Host = defineComponent({
   components: { SituationBanner },
   setup() {
@@ -14,24 +13,14 @@ const Host = defineComponent({
     return { state, show }
   },
   template: `
-    <Teleport to=".workspace-alert">
-      <div class="monitor-situation-host">
-        <SituationBanner v-if="show" :state="state" />
-      </div>
-    </Teleport>
+    <div class="monitor-situation-host">
+      <SituationBanner v-if="show" :state="state" />
+    </div>
   `,
 })
 
-afterEach(() => {
-  document.body.innerHTML = ''
-})
-
-describe('SituationBanner teleport host stability', () => {
+describe('SituationBanner conditional render stability', () => {
   it('keeps host stable across OFF → NORMAL → OFF without emitsOptions', async () => {
-    const target = document.createElement('div')
-    target.className = 'workspace-alert'
-    document.body.appendChild(target)
-
     const appErrors: unknown[] = []
     const consoleErrors: string[] = []
     const spy = vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
@@ -48,26 +37,26 @@ describe('SituationBanner teleport host stability', () => {
       },
     })
 
-    const host = () => target.querySelector('.monitor-situation-host')
-    const banner = () => target.querySelector('.situation-banner')
+    const host = () => wrapper.find('.monitor-situation-host')
+    const banner = () => wrapper.find('.situation-banner')
 
     // OFFLINE_UNKNOWN：host 存在 + banner 可见
-    expect(host()).toBeTruthy()
-    expect(banner()).toBeTruthy()
+    expect(host().exists()).toBe(true)
+    expect(banner().exists()).toBe(true)
 
     // → NORMAL：host 仍存在 + banner 消失
     ;(wrapper.vm as unknown as { state: string }).state = 'NORMAL'
     await nextTick()
     await nextTick()
-    expect(host()).toBeTruthy()
-    expect(banner()).toBeNull()
+    expect(host().exists()).toBe(true)
+    expect(banner().exists()).toBe(false)
 
     // → 回 OFF：host 同一结构 + banner 恢复
     ;(wrapper.vm as unknown as { state: string }).state = 'OFFLINE_UNKNOWN'
     await nextTick()
     await nextTick()
-    expect(host()).toBeTruthy()
-    expect(banner()).toBeTruthy()
+    expect(host().exists()).toBe(true)
+    expect(banner().exists()).toBe(true)
 
     const fatal = [...appErrors, ...consoleErrors].filter((e) =>
       /emitsOptions|Cannot read properties of null/.test(String(e)),
