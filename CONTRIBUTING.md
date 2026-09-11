@@ -18,6 +18,8 @@ feature/*  fix/*  maintenance/*  field/*  release/*
 
 长期分支只保留 `main`。历史 `develop`、`integration/**`、`hardening/**` 已收敛进 `main`，历史版本由 tag 保存（如 `baseline/server-runtime-2026-09-03`），不再作为开发流程分支使用。
 
+完整分支策略与版本真相见 [GitHub分支与版本治理](docs/开发验收/GitHub分支与版本治理.md)；封板与服务器发布 SOP 见 [仓库封板与发布流程](docs/开发验收/仓库封板与发布流程.md)。
+
 ## 现场发布（Field Release）
 
 现场模块验收使用独立 `FIELD_RELEASE_GATE`（`workflow_dispatch` + `field/**`、`release/**` 触发），不因已知的历史业务测试问题而整体 skipped。

@@ -1,5 +1,13 @@
 # 变更日志
 
+## 2026-09-11 仓库封板与主线收敛
+
+- 最后产品代码基线 `4fd3e59d39190b6fab0688aa01e80f1e4cca4a86`（Run76 全绿，E2E 11/11）。
+- Web renderer / STOP E2E 收口：STOP POST 202 → 任务取消 → STOP ACK → 5 帧静止 → `VEHICLE_STATIONARY_CONFIRMED`。
+- 仓库治理与文档收敛：main-only 分支策略；新增分支治理 / 封板发布 SOP 文档。
+- 服务器运行版本仍保持 `584efcf…`，DB 仍 `20260902_0008`（main 更新不代表服务器升级）。
+- 现场验收 `PENDING`，真实运动 `NO`，正式 Release `HOLD`。
+
 ## Repository consolidation / current sealed state
 
 - SERVER_RUNTIME_BASELINE= `584efcfda60b8d39c516a9939bc0481609fc6f3c`（不可变 tag `baseline/server-runtime-2026-09-03`）
