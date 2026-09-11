@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { loginPage } from './helpers/auth'
 import { ensureRobotIdle } from './helpers/robot-state'
+import { assertControlDockVisible } from './helpers/control-dock'
 
 // 当前监控布局（current monitor layout）：只校验当前稳定合同，不复刻历史 ui-gate2 几何常量。
 // 真实 emergency_stop / reset_estop 未实现，软件急停这里只校验可见性，不做锁存/复位流程。
@@ -18,15 +19,10 @@ test('current monitor layout is stable across common resolutions', async ({ page
   ]) {
     await page.setViewportSize({ width: viewport.width, height: viewport.height })
 
-    // 当前稳定合同：主地图 + 车顶实时相机 + 控制区 + 三个运动控制 + 软件急停可见性
+    // 当前稳定合同：主地图 + 车顶实时相机 + dock（state-dependent 动态标签）
     await expect(page.getByRole('heading', { name: '停车场巡检地图' })).toBeVisible()
     await expect(page.getByText('车顶实时相机').first()).toBeVisible()
-    await expect(page.locator('.operations-command-dock')).toBeVisible()
-    await expect(page.getByRole('button', { name: '开始巡检' })).toBeVisible()
-    await expect(page.getByRole('button', { name: '停止' })).toBeVisible()
-    await expect(page.getByRole('button', { name: '返回等待区' })).toBeVisible()
-    // 软件急停平台仍展示；真实 emergency_stop/reset_estop 未实现，这里只校验可见性
-    await expect(page.getByRole('button', { name: '软件急停' })).toBeVisible()
+    await assertControlDockVisible(page)
 
     // 关键区域不溢出、无横向滚动、控制区不被裁切
     const meta = await page.evaluate(() => ({

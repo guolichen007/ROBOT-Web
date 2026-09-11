@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext } from '@playwright/test'
 import { getAccessToken as token, loginPage as login } from './helpers/auth'
 import { collectRuntimeErrors } from './helpers/runtime-errors'
+import { assertControlDockVisible } from './helpers/control-dock'
 import {
   cleanupRobot,
   ensureRobotIdle,
@@ -45,10 +46,9 @@ test('industrial operations home shows map, roof camera and current control dock
   // 当前 MOCK 的 estop/safety truth 会让 operationalSituation 正确进入 DEGRADED，
   // 验证正式 banner 语义（不再是旧 .situation-banner count=0）。
   await expect(page.getByText('系统降级，数据需核实')).toBeVisible()
-  // 当前冻结控制合同：开始巡检 / 停止 / 返回等待区；软件急停平台仍展示（真实 estop 未实现，仅可见性）。
-  for (const name of ['开始巡检', '停止', '返回等待区', '软件急停']) {
-    await expect(page.getByRole('button', { name })).toBeVisible()
-  }
+  await expect(page.getByText('数据实时').first()).toBeVisible()
+  // 控制 dock 用 state-dependent 动态标签合同，不锁死瞬时标签
+  await assertControlDockVisible(page)
   await expect(page.getByRole('button', { name: '手动控制' })).toHaveCount(0)
   await expect(page.getByText('烟雾浓度')).toBeVisible()
   expect(getRuntimeErrors()).toEqual([])
@@ -131,10 +131,49 @@ test('stop patrol waits for task cancellation, stop ACK and five fresh stationar
       )
       .toBe(true)
 
-    await page.getByRole('button', { name: '停止' }).click()
-    await expect(page.getByText(/正在停止车辆任务/)).toBeVisible()
-    await expect(page.getByText('车辆已停止')).toBeVisible({ timeout: 15_000 })
-    await expect(page.getByText(/连续静止帧 5\/5/)).toBeVisible()
+    // 点击停止前监听 stop-operation POST（权威合同：202 + operation.id）
+    const stopResponsePromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === 'POST' &&
+        new URL(response.url()).pathname.endsWith('/api/v1/robots/R001/stop-operation'),
+    )
+    await page.getByRole('button', { name: '停止', exact: true }).click()
+
+    const stopResponse = await stopResponsePromise
+    expect(stopResponse.status()).toBe(202)
+    const operation = await stopResponse.json()
+    expect(operation.id).toBeTruthy()
+
+    // 停止过程 strict-mode 断言（只匹配 stop-operation-state strong，不匹配 toast）
+    await expect(
+      page.locator('.stop-operation-state strong').getByText('正在停止车辆任务', { exact: true }),
+    ).toBeVisible()
+
+    // API authoritative：poll stop operation 到 terminal（不依赖瞬态 UI 5/5）
+    const accessToken = await token(request)
+    const headers = { Authorization: `Bearer ${accessToken}` }
+    await expect
+      .poll(
+        async () => {
+          const resp = await request.get(`/api/v1/stop-operations/${operation.id}`, { headers })
+          expect(resp.ok()).toBeTruthy()
+          return (await resp.json()).state
+        },
+        { timeout: 20_000 },
+      )
+      .toBe('VEHICLE_STATIONARY_CONFIRMED')
+
+    const finalResp = await request.get(`/api/v1/stop-operations/${operation.id}`, { headers })
+    const finalOp = await finalResp.json()
+    expect(finalOp.stationary_frames).toBeGreaterThanOrEqual(5)
+
+    // UI terminal 断言
+    await expect(
+      page.locator('.stop-operation-state strong').getByText('车辆已停止', { exact: true }),
+    ).toBeVisible()
+    await expect(
+      page.locator('.stop-operation-state span').getByText('任务已取消，车辆静止已确认', { exact: true }),
+    ).toBeVisible()
 
     // 最终确认：R001 active task 归零
     await expect
