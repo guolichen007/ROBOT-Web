@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { loginPage } from './helpers/auth'
+import { ensureRobotIdle } from './helpers/robot-state'
 
 // 当前监控布局（current monitor layout）：只校验当前稳定合同，不复刻历史 ui-gate2 几何常量。
 // 真实 emergency_stop / reset_estop 未实现，软件急停这里只校验可见性，不做锁存/复位流程。
@@ -8,6 +9,7 @@ import { loginPage } from './helpers/auth'
 // critical banner（只 primaryAlarm.severity===CRITICAL）。该 case 是 domain contract 本身错误，不是 selector 过时。
 
 test('current monitor layout is stable across common resolutions', async ({ page, request }) => {
+  await ensureRobotIdle(request, 'R001')
   await loginPage(page, request)
   for (const viewport of [
     { width: 2048, height: 997 },

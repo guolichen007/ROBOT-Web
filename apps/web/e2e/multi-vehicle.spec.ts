@@ -1,5 +1,13 @@
-import { expect, test, type APIRequestContext, type Locator, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { ensurePasswordReady, loginPage } from './helpers/auth'
+import {
+  cleanupRobot,
+  ensureRobotIdle,
+  forceReleaseManualLease,
+  getActiveTasksForRobot,
+  resolveRobot,
+  snapshot,
+} from './helpers/robot-state'
 
 // Multi-vehicle (R001 + R002) isolation and active-vehicle switch acceptance.
 // Runs against compose.test.yml --profile full where mock-robot (R001) and
@@ -11,21 +19,6 @@ import { ensurePasswordReady, loginPage } from './helpers/auth'
 // - 断线重连：依赖真实浏览器网络模拟，已迁移到 FIELD_ONLY
 //   （见 docs/开发验收/真车接入检查清单.md），不在 GitHub hosted runner 用 setOffline 伪装现场网络验收。
 
-async function snapshot(request: APIRequestContext): Promise<{
-  robots: Array<{ id?: string; vehicle_id: string }>
-  streams: Array<{ stream_id: string; robot_id: string }>
-  tasks: Array<{ robot_id: string }>
-  trajectories: Array<{ id: string }>
-  parking_slots: Array<{ id: string }>
-}> {
-  const accessToken = await ensurePasswordReady(request)
-  const response = await request.get('/api/v1/monitor/snapshot', {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  })
-  expect(response.ok()).toBeTruthy()
-  return await response.json()
-}
-
 function deviceRow(page: Page, label: string): Locator {
   return page
     .locator('.device-snapshot .ds-grid > div')
@@ -33,7 +26,10 @@ function deviceRow(page: Page, label: string): Locator {
     .locator('dd')
 }
 
-async function switchToR002(page: Page, request: APIRequestContext): Promise<void> {
+async function switchToR002(
+  page: Page,
+  request: import('@playwright/test').APIRequestContext,
+): Promise<void> {
   await loginPage(page, request)
   await page.goto('/robots')
   await page
@@ -70,29 +66,35 @@ test('monitor device snapshot shows R002 as the active vehicle', async ({ page, 
 // 3) TASK 隔离：确定性创建 R001 任务，切到 R002 后当前任务必须仍为“空闲/--”。
 test('R001 active task does not leak into the R002 monitor view', async ({ page, request }) => {
   const accessToken = await ensurePasswordReady(request)
-  const base = await snapshot(request)
-  const slot = base.parking_slots[0]
-  const created = await request.post('/api/v1/tasks/patrol', {
-    headers: { Authorization: `Bearer ${accessToken}`, 'Idempotency-Key': crypto.randomUUID() },
-    data: {
-      robot_id: 'R001',
-      target_parking_slot_id: slot.id,
-      trajectory_id: base.trajectories[0]?.id,
-      parameters: {},
-    },
-  })
-  expect(created.ok()).toBeTruthy()
+  await forceReleaseManualLease(request, 'R001')
+  await ensureRobotIdle(request, 'R001')
+  try {
+    const r001 = await resolveRobot(request, 'R001')
+    const base = await snapshot(request)
+    const slot = base.parking_slots[0]
+    const created = await request.post('/api/v1/tasks/patrol', {
+      headers: { Authorization: `Bearer ${accessToken}`, 'Idempotency-Key': crypto.randomUUID() },
+      data: {
+        robot_id: r001.id,
+        target_parking_slot_id: slot.id,
+        trajectory_id: base.trajectories[0]?.id,
+        parameters: {},
+      },
+    })
+    expect(created.ok()).toBeTruthy()
 
-  // 反证：R001 此刻确有活动任务。
-  const after = await snapshot(request)
-  const r001 = after.robots.find((r) => r.vehicle_id === 'R001')
-  expect(after.tasks.some((t) => t.robot_id === r001?.id)).toBeTruthy()
+    // 反证：R001 此刻确有活动任务（按 robot internal UUID 过滤）
+    const active = await getActiveTasksForRobot(request, 'R001')
+    expect(active.length).toBeGreaterThan(0)
 
-  await switchToR002(page, request)
-  await page.goto('/monitor')
-  await expect(page.locator('.device-snapshot')).toBeVisible()
-  await expect(deviceRow(page, '当前任务')).toHaveText('空闲')
-  await expect(deviceRow(page, '任务编号')).toHaveText('--')
+    await switchToR002(page, request)
+    await page.goto('/monitor')
+    await expect(page.locator('.device-snapshot')).toBeVisible()
+    await expect(deviceRow(page, '当前任务')).toHaveText('空闲')
+    await expect(deviceRow(page, '任务编号')).toHaveText('--')
+  } finally {
+    await cleanupRobot(request, 'R001')
+  }
 })
 
 // 4) MEDIA 隔离：R001 的 roof_rgb 是 LIVE（media-test-source），R002 视图不得出现 live tag。
