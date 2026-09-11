@@ -15,6 +15,14 @@ server_final_seal: "PASS"
 
 # —— 仓库治理封板（docs/governance main SHA，可晚于代码基线）——
 repository_consolidation_tag: "baseline/repository-consolidated-2026-09-11"
+repository_main_ci_run_id: "34568195534"
+repository_main_ci_run_number: "80"
+repository_main_ci: "PASS"
+repository_pr_number: "12"
+repository_pr_status: "MERGED_FF"
+field_release_software_gate_run_number: "9"
+field_release_software_gate: "PASS"
+final_repository_sha_source: "repository_consolidation_tag^{commit}"
 
 # —— 分支策略 ——
 development_branch: "main"
