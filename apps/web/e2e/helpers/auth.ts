@@ -88,5 +88,5 @@ export async function loginPage(page: Page, request: APIRequestContext): Promise
     await page.locator('#login-password').fill(changedPassword)
     await page.getByRole('button', { name: '登录', exact: true }).click()
   }
-  await expect(page.getByRole('heading', { name: '停车场巡检地图' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '停车场二维地图' })).toBeVisible()
 }

@@ -89,7 +89,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -r requirements.lock pytest==8.4.1
+      - run: pip install -r requirements.lock pytest==8.4.1 fakeredis==2.31.0 sortedcontainers==2.4.0
       - run: python scripts/check_protocol_drift.py
       - run: pytest services/protocol-tester/tests
 

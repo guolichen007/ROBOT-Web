@@ -4,3 +4,5 @@ pytest==8.4.1
 pytest-cov==6.2.1
 ruff==0.12.9
 types-croniter==6.2.2.20260518
+fakeredis==2.31.0
+sortedcontainers==2.4.0

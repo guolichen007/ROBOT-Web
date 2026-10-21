@@ -14,6 +14,7 @@ x-test-environment: &test-environment
   MOCK_ENABLED: "true"
   MEDIA_PUBLISH_TOKEN: test-media-publisher-token-2026
   MEDIA_TICKET_SECONDS: "2"
+  VEHICLE_AGENT_V1_DOWNLINK_ENABLED: ${TEST_VEHICLE_AGENT_DOWNLINK:-false}
   ALLOWED_ORIGINS: http://localhost:${TEST_HTTP_PORT:-18080},http://127.0.0.1:${TEST_HTTP_PORT:-18080},http://host.docker.internal:${TEST_HTTP_PORT:-18080}
   ASSET_ROOT: /tmp/firebot-test-assets
 
@@ -132,6 +133,31 @@ services:
     command: ["python", "/workspace/services/command-dispatcher/main.py"]
     depends_on:
       migrate: { condition: service_completed_successfully }
+      mosquitto: { condition: service_healthy }
+
+  vehicle-agent-adapter:
+    <<: *python-service
+    command: ["python", "/workspace/services/vehicle-agent-adapter/main.py"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      mosquitto: { condition: service_healthy }
+
+  vehicle-agent-mock-setup:
+    <<: *python-service
+    profiles: [vehicle-agent]
+    command: ["python", "-m", "app.dev.setup_vehicle_agent_mock"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  mock-vehicle-agent:
+    <<: *python-service
+    profiles: [vehicle-agent]
+    command: ["python", "/workspace/services/mock-vehicle-agent/main.py"]
+    environment:
+      <<: *test-environment
+      MOCK_VEHICLE_ID: R001
+    depends_on:
+      vehicle-agent-mock-setup: { condition: service_completed_successfully }
       mosquitto: { condition: service_healthy }
 
   task-worker:

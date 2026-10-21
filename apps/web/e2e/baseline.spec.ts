@@ -42,15 +42,16 @@ test('industrial operations home shows map, roof camera and current control dock
 
   // 等待真实 R001 projection 后再断言，避免 snapshot reactive update 前提前 PASS
   await expect(page.locator('.device-snapshot')).toContainText('R001')
-  await expect(page.getByText('车顶实时相机').first()).toBeVisible()
+  await expect(page.getByRole('heading', { name: '监控相机', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '监测', exact: true }).click()
   // 当前 MOCK 的 estop/safety truth 会让 operationalSituation 正确进入 DEGRADED，
   // 验证正式 banner 语义（不再是旧 .situation-banner count=0）。
   await expect(page.getByText('系统降级，数据需核实')).toBeVisible()
   await expect(page.getByText('数据实时').first()).toBeVisible()
   // 控制 dock 用 state-dependent 动态标签合同，不锁死瞬时标签
   await assertControlDockVisible(page)
-  await expect(page.getByRole('button', { name: '手动控制' })).toHaveCount(0)
-  await expect(page.getByText('烟雾浓度')).toBeVisible()
+  await expect(page.getByRole('button', { name: '手动控制', exact: true })).toHaveCount(1)
+  await expect(page.locator('.hmi-kpis')).toContainText('烟雾')
   expect(getRuntimeErrors()).toEqual([])
 })
 
@@ -109,17 +110,20 @@ test('stop patrol waits for task cancellation, stop ACK and five fresh stationar
   // renderer 先稳定投影 R001（defer 后 host 就绪 + DeviceSnapshot R001 + 待命），
   // 再检查 runtime errors 与按钮，避免把 renderer 崩溃伪装成 button disabled。
   await expect(page.locator('#workspace-alert .monitor-situation-host')).toHaveCount(1)
+  await page.getByRole('button', { name: '监测', exact: true }).click()
   await expect(page.locator('.device-snapshot')).toContainText('R001')
   await expect(page.getByText('待命').first()).toBeVisible()
   expect(getRuntimeErrors()).toEqual([])
 
   try {
+    await page.getByRole('button', { name: '手动控制', exact: true }).click()
     const startButton = page.getByRole('button', { name: '开始巡检' })
     await expect(startButton).toBeEnabled({ timeout: 10_000 })
     await startButton.click()
 
     // 巡检启动三重验证：toast + UI 巡检执行中 + API 存在 active PATROL task（按 robot internal UUID）
     await expect(page.getByText(/巡检任务已创建/)).toBeVisible()
+    await page.getByRole('button', { name: '监测', exact: true }).click()
     await expect(page.getByText('巡检执行中').first()).toBeVisible()
     await expect
       .poll(
@@ -137,6 +141,7 @@ test('stop patrol waits for task cancellation, stop ACK and five fresh stationar
         response.request().method() === 'POST' &&
         new URL(response.url()).pathname.endsWith('/api/v1/robots/R001/stop-operation'),
     )
+    await page.getByRole('button', { name: '手动控制', exact: true }).click()
     await page.getByRole('button', { name: '停止', exact: true }).click()
 
     const stopResponse = await stopResponsePromise
@@ -197,6 +202,7 @@ test('patrol report PDF and Excel use authenticated browser downloads', async ({
     let tasks = (await tasksResponse.json()) as Array<{ id: string; type: string; status: string }>
     let task = tasks.find((item) => item.type === 'PATROL' && item.status === 'SUCCEEDED')
     if (!task) {
+      await page.getByRole('button', { name: '手动控制', exact: true }).click()
       await page.getByRole('button', { name: '开始巡检' }).click()
       await ensureRobotIdle(request, 'R001')
       tasksResponse = await request.get('/api/v1/tasks?limit=1000', {

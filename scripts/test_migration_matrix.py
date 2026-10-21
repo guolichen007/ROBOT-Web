@@ -32,6 +32,7 @@ def main() -> None:
         f"firebot_empty_{suffix}": None,
         f"firebot_rev2_{suffix}": "20260811_0002",
         f"firebot_rev3_{suffix}": "20260812_0003",
+        f"firebot_rev8_{suffix}": "20260902_0008",
     }
     try:
         with admin.connect() as connection:
@@ -45,7 +46,14 @@ def main() -> None:
             engine = create_engine(url)
             with engine.connect() as connection:
                 revision = connection.scalar(text("SELECT version_num FROM alembic_version"))
-                assert revision == "20260902_0008", (name, revision)
+                assert revision == "20261021_0009", (name, revision)
+                default = connection.scalar(
+                    text(
+                        "SELECT column_default FROM information_schema.columns "
+                        "WHERE table_name='robots' AND column_name='agent_protocol'"
+                    )
+                )
+                assert default and "CANONICAL_MQTT" in default, (name, default)
                 for table in (
                     "robot_motion_profiles",
                     "robot_navigation_diagnostics",

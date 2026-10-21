@@ -7,6 +7,7 @@ const STOP_LABELS = /^(停止|已停止|● 停止中)$/
 const HOME_LABELS = /^(返回等待区|已在等待区|继续返回|● 返回中)$/
 
 export async function assertControlDockVisible(page: Page): Promise<void> {
+  await page.getByRole('button', { name: '手动控制', exact: true }).click()
   const dock = page.locator('.operations-command-dock')
   await expect(dock).toBeVisible()
 

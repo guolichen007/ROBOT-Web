@@ -214,4 +214,51 @@ describe('VideoCard WHEP session stability', () => {
     expect(whepPosts()).toBe(0)
     expect(deleteCalls()).toBe(0)
   })
+
+  it('guards rapid repeated clicks while the ticket request is pending', async () => {
+    let resolveTicket!: (value: unknown) => void
+    ticketPost.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveTicket = resolve
+        }),
+    )
+    const wrapper = await mountCard(makeStream())
+    const button = wrapper.find('button')
+    await Promise.all([button.trigger('click'), button.trigger('click')])
+    expect(ticketPost).toHaveBeenCalledTimes(1)
+    resolveTicket({ data: { ticket: 'test-ticket', playback_url: '/media/test/whep' } })
+    await flushPromises()
+    expect(whepPosts()).toBe(1)
+  })
+
+  it('cannot create a peer after becoming inactive during ticket acquisition', async () => {
+    let resolveTicket!: (value: unknown) => void
+    ticketPost.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveTicket = resolve
+        }),
+    )
+    const wrapper = await mountCard(makeStream())
+    await wrapper.find('button').trigger('click')
+    await wrapper.setProps({ active: false })
+    resolveTicket({ data: { ticket: 'test-ticket', playback_url: '/media/test/whep' } })
+    await flushPromises()
+    expect(createdPeers).toHaveLength(0)
+    expect(whepPosts()).toBe(0)
+  })
+
+  it('OFFLINE/CONNECTING/LIVE updates preserve an existing peer and session', async () => {
+    const wrapper = await mountCard(makeStream())
+    await wrapper.find('button').trigger('click')
+    await flushPromises()
+    for (const state of ['LIVE', 'CONNECTING', 'OFFLINE'] as const) {
+      await wrapper.setProps({ stream: makeStream({ state }) })
+      await flushPromises()
+    }
+    expect(createdPeers).toHaveLength(1)
+    expect(whepPosts()).toBe(1)
+    expect(deleteCalls()).toBe(0)
+  })
 })

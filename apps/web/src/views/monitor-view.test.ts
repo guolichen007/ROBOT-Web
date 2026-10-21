@@ -6,6 +6,11 @@ import MonitorView from './MonitorView.vue'
 import { useMonitorStore } from '@/stores/monitor'
 import type { RobotState } from '@/types'
 
+vi.mock('@/lib/api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/api')>()),
+  api: { get: vi.fn().mockResolvedValue({ data: null }), post: vi.fn() },
+}))
+
 // 真实 App shell mount 拓扑：target(#workspace-alert) 与 MonitorView 在同一个父级 mount tick 创建。
 // 不提前 document.body.appendChild(target)，避免掩盖 Teleport target 尚未入 document 的根因。
 const ShellHarness = defineComponent({
@@ -131,6 +136,7 @@ describe('MonitorView renderer regression', () => {
       /emitsOptions|Cannot read properties of null/.test(String(e)),
     )
     expect(fatal).toEqual([])
+    wrapper.unmount()
     spy.mockRestore()
   })
 })

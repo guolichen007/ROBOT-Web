@@ -58,7 +58,7 @@ test('snapshot lists R001 and R002 with robot-owned streams', async ({ request }
 test('monitor device snapshot shows R002 as the active vehicle', async ({ page, request }) => {
   await switchToR002(page, request)
   await page.goto('/monitor')
-  await expect(page.getByRole('heading', { name: '停车场巡检地图' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '停车场二维地图' })).toBeVisible()
   await expect(page.locator('.device-snapshot')).toBeVisible()
   await expect(deviceRow(page, '机器人编号')).toHaveText('R002')
 })
