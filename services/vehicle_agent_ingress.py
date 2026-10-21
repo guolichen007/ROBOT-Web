@@ -269,6 +269,9 @@ def process(name: str, payload: bytes, handle_ack) -> bool:
                 robot.last_seen_at = received if online else None
                 if online and previous_online == "OFFLINE":
                     robot.boot_id = str(uuid4())
+                    # Availability proves connectivity, never the new session's
+                    # chassis/navigation state. Wait for a post-reconnect status.
+                    state["status_received_at"] = None
                 if kind == "status":
                     state["status"] = data
                     state["status_received_at"] = data.get("ts") or (

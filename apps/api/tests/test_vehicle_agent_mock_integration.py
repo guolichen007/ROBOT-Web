@@ -159,6 +159,10 @@ def test_offline_stale_reconnect_and_normalized_telemetry(runtime, client):
     assert state["agent_state"]["telemetry"]["battery"]["percentage"] == 73
     assert not any(state["vehicle_agent_ready"].values())
     runtime.send("availability", "online")
+    runtime.pump()
+    reconnecting = client.get("/api/v1/monitor/snapshot").json()["robots"][0]
+    assert reconnecting["online_state"] == "ONLINE"
+    assert not any(reconnecting["vehicle_agent_ready"].values())
     runtime.send("status", runtime.mock.status())
     runtime.pump()
     state = client.get("/api/v1/monitor/snapshot").json()["robots"][0]
