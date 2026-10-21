@@ -51,8 +51,7 @@ require_sha() {
   fi
   local dirty
   dirty="$(git status --porcelain)"
-  # 服务器模式唯一允许的历史合法 probe（scripts/r1_patrol_probe.sh）；其余任何 dirty 一律 FAIL。
-  dirty="$(printf '%s\n' "$dirty" | grep -v '^?? scripts/r1_patrol_probe.sh$' || true)"
+  # exact-SHA release 必须完全 clean，包含所有 untracked/staged 文件。
   if [ -n "$dirty" ]; then
     echo "ERROR: 工作区不干净（含 untracked/staged 变更），先提交/清理再部署" >&2
     exit 1
