@@ -195,12 +195,23 @@ def expire_sessions_and_commands(db, now: datetime) -> None:
     deadline = now - timedelta(seconds=settings.command_ack_timeout_seconds)
     commands = db.scalars(
         select(Command).where(
-            Command.lifecycle_status == "PUBLISHED", Command.published_at < deadline
+            Command.lifecycle_status.in_(["PUBLISHED", "ACK_ACCEPTED"]),
+            Command.published_at < deadline,
         )
     ).all()
     for command in commands:
+        is_v1 = command.payload_json.get("schema_version") == "vehicle-agent-v1"
+        if command.lifecycle_status == "ACK_ACCEPTED" and not is_v1:
+            continue
+        if (
+            command.payload_json.get("schema_version") == "vehicle-agent-v1"
+            and (now - command.published_at).total_seconds()
+            < settings.vehicle_agent_v1_ack_timeout_seconds
+        ):
+            continue
+        accepted = command.lifecycle_status == "ACK_ACCEPTED"
         command.lifecycle_status = "PUBLISHED_UNCONFIRMED"
-        command.ack_reason = "ACK_TIMEOUT"
+        command.ack_reason = "STATUS_CONFIRMATION_TIMEOUT" if accepted else "ACK_TIMEOUT"
         command_timeout_total.inc()
         queue_event(db, "command.updated", serialize_model(command))
 

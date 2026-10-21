@@ -45,8 +45,27 @@ def assert_robot_can_execute(
             f"机器人状态为 {robot.online_state}，拒绝执行 {action}",
             details={"state": robot.online_state, "action": action},
         )
-    if robot.estop_active and action not in {"emergency_stop", "reset_estop"}:
+    if robot.estop_active and action not in {
+        "emergency_stop",
+        "reset_estop",
+        "ping",
+        "get_status",
+        "get_telemetry",
+    }:
         raise PlatformError("ROBOT_ESTOP_ACTIVE", "软件急停已锁存")
+    if robot.agent_protocol == "VEHICLE_AGENT_V1":
+        from app.modules.commands.vehicle_agent_gate import gate_reason
+
+        reason = gate_reason(db, robot, action)
+        if reason:
+            raise PlatformError(
+                reason, "车辆状态或控制合同不允许此操作", details={"action": action}
+            )
+        if action in {"patrol", "resume_patrol", "navigate", "homing"} and get_redis().exists(
+            f"manual:lease:{robot.id}"
+        ):
+            raise PlatformError("MANUAL_LEASE_CONFLICT", "请先释放手动控制租约")
+        return
     integration = db.get(RobotIntegrationProfile, robot.id)
     if not integration:
         raise PlatformError(
@@ -179,7 +198,9 @@ def build_command_payload(
             details={"vehicle_id": robot.vehicle_id, "command": cmd},
         )
     return {
-        "schema_version": "1.2",
+        "schema_version": "vehicle-agent-v1"
+        if robot.agent_protocol == "VEHICLE_AGENT_V1"
+        else "1.2",
         "message_id": str(uuid4()),
         "type": "command",
         "vehicle_id": robot.vehicle_id,
@@ -222,6 +243,13 @@ def create_durable_command(
         priority=priority,
         task_id=task_id,
     )
+    if robot.agent_protocol == "VEHICLE_AGENT_V1":
+        from services.vehicle_agent_v1 import command_from_canonical
+
+        try:
+            command_from_canonical(payload)
+        except ValueError as exc:
+            raise PlatformError("INVALID_PARAM", "v1 命令参数不符合合同") from exc
     command = Command(
         command_id=payload["command_id"],
         correlation_id=payload["correlation_id"],
