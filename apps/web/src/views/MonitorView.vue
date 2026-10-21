@@ -5,6 +5,8 @@ import MapCanvas from '@/components/MapCanvas.vue'
 import SituationBanner from '@/components/monitor/SituationBanner.vue'
 import MapSelectionBar from '@/components/monitor/MapSelectionBar.vue'
 import VideoSurveillancePanel from '@/components/monitor/VideoSurveillancePanel.vue'
+import VehicleAgentControls from '@/components/monitor/VehicleAgentControls.vue'
+import VehicleAgentKpis from '@/components/monitor/VehicleAgentKpis.vue'
 import PrimaryAlarmPanel from '@/components/monitor/PrimaryAlarmPanel.vue'
 import OperationsCommandDock from '@/components/monitor/OperationsCommandDock.vue'
 import DeviceSnapshot from '@/components/monitor/DeviceSnapshot.vue'
@@ -25,6 +27,9 @@ import type { AlarmTimelineItem, DetectionCoverage, StopOperation } from '@/type
 const auth = useAuthStore()
 const monitor = useMonitorStore()
 const selectedSlotId = ref<string | null>(null)
+const controlTab = ref('auto')
+const mapMode = ref('live')
+const vehicleControls = ref<InstanceType<typeof VehicleAgentControls>>()
 const busyMode = ref('')
 const busyCommand = ref('')
 const timeline = ref<AlarmTimelineItem[]>([])
@@ -134,6 +139,9 @@ const situation = computed(() =>
 const showSituationBanner = computed(() => Boolean(primaryAlarm.value) || situation.value !== 'NORMAL')
 const navigationReason = computed(() => {
   if (!selectedSlot.value?.enabled) return '该车位已禁用'
+  if (robot.value?.agent_protocol === 'VEHICLE_AGENT_V1') {
+    return robot.value.vehicle_agent_ready?.navigate ? '' : '车辆导航或控制合同未就绪'
+  }
   if (!selectedPreset.value) return '车位未显式关联 INSPECTION preset'
   if (activeTask.value) return `存在执行中任务：${activeTask.value.type}`
   if (!robot.value?.autonomous_task_ready?.patrol) return controlReason.value
@@ -298,6 +306,10 @@ async function createManualAlarm() {
   }
 }
 async function navigate() {
+  if (robot.value?.agent_protocol === 'VEHICLE_AGENT_V1') {
+    await vehicleControls.value?.send('navigate')
+    return
+  }
   if (!robot.value || !selectedPreset.value || navigationReason.value) return
   try {
     await api.post(
@@ -496,6 +508,7 @@ onUnmounted(() => {
 
 <template>
   <main class="yd-monitor-view" :class="{ 'is-alarm': Boolean(primaryAlarm) }">
+    <VehicleAgentKpis />
     <div v-if="notice" class="toast">{{ notice }}</div>
     <!-- workspace-alert 与 MonitorView 在同一 App shell mount tick 创建；
          用 Teleport defer 确保 target 在 shell 插入 document 后再解析，避免 target 尚未入 document。 -->
@@ -513,12 +526,20 @@ onUnmounted(() => {
       <section class="panel operations-map-panel">
         <header>
           <div>
-            <h2>停车场巡检地图</h2>
+            <h2>停车场二维地图</h2>
             <span
               >{{ monitor.snapshot.site?.name || '未配置场站' }} · 地图
               {{ monitor.snapshot.map_version?.version || '--' }}</span
             >
           </div>
+          <nav class="hmi-map-tabs" aria-label="地图显示">
+            <button type="button" :aria-pressed="mapMode === 'live'" @click="mapMode = 'live'">
+              实时地图
+            </button>
+            <button type="button" :aria-pressed="mapMode === 'parking'" @click="mapMode = 'parking'">
+              车位地图
+            </button>
+          </nav>
           <div class="map-layer-control">
             <button
               class="layer-trigger"
@@ -547,8 +568,8 @@ onUnmounted(() => {
           :selected-slot-id="selectedSlotId || undefined"
           :target-slot-id="targetSlotId"
           :show-semantic-points="layers.semantic"
-          :show-route="layers.route"
-          :show-coverage="layers.coverage"
+          :show-route="mapMode === 'live' && layers.route"
+          :show-coverage="mapMode === 'live' && layers.coverage"
           @slot-click="selectedSlotId = $event.id"
         />
         <MapSelectionBar
@@ -563,89 +584,150 @@ onUnmounted(() => {
           @alarm="createManualAlarm"
         />
       </section>
-      <aside class="yd-monitor-side" :class="{ 'is-alarm': Boolean(primaryAlarm) }">
-        <VideoSurveillancePanel :streams="monitor.activeRobotStreams" />
-        <template v-if="primaryAlarm">
-          <PrimaryAlarmPanel
-            :alarm="primaryAlarm"
-            :timeline="timeline"
-            :disabled-reason="extinguishReason"
-            :busy-mode="busyMode"
-            :location-label="primaryAlarmLocation"
-            :permissions="{
-              ack: auth.can('alarm.ack'),
-              confirm: auth.can('alarm.confirm'),
-              resolve: auth.can('alarm.resolve'),
-            }"
-            @transition="transition"
-            @execute="dispatch"
+      <VideoSurveillancePanel :streams="monitor.activeRobotStreams" />
+      <aside class="panel hmi-control-rail">
+        <nav class="hmi-control-tabs" aria-label="控制面板">
+          <button
+            v-for="tab in [
+              { id: 'auto', label: '自动导航' },
+              { id: 'manual', label: '手动控制' },
+              { id: 'monitor', label: '监测' },
+            ]"
+            :key="tab.id"
+            type="button"
+            :aria-selected="controlTab === tab.id"
+            @click="controlTab = tab.id"
+          >
+            {{ tab.label }}
+          </button>
+        </nav>
+        <div class="hmi-safety-entry">
+          <button
+            type="button"
+            class="hmi-estop"
+            :disabled="!estopReady || !auth.can('robot.control.estop') || Boolean(busyCommand)"
+            @click="estop"
+          >
+            软件急停
+          </button>
+          <small v-if="!estopReady">急停合同未验证，请使用现场急停装置</small>
+        </div>
+        <div class="hmi-control-scroll">
+          <VehicleAgentControls
+            v-show="controlTab === 'auto'"
+            ref="vehicleControls"
+            v-model:selected-slot-id="selectedSlotId"
+            :slots="monitor.snapshot.parking_slots"
           />
-          <section class="panel secondary-alarms" :class="{ open: otherEventsOpen }">
-            <header>
-              <button class="other-events-toggle" type="button" @click="otherEventsOpen = !otherEventsOpen">
-                <strong>其他事件 ({{ Math.max(0, activeAlarms.length - 1) }})</strong>
-                <span v-if="!otherEventsOpen && activeAlarms.length > 1" class="other-events-summary">
-                  {{ activeAlarms[1]?.event_code }} · {{ alarmTypeLabel(activeAlarms[1]?.fire_type) }}
-                </span>
-                <ChevronDownIcon class="other-events-chevron" :class="{ open: otherEventsOpen }" />
-              </button>
-            </header>
-            <div v-if="otherEventsOpen" class="other-events-list">
-              <button
-                v-for="alarm in activeAlarms.filter((item) => item.id !== primaryAlarmId)"
-                :key="alarm.id"
-                :class="{ active: primaryAlarmId === alarm.id }"
-                @click="primaryAlarmId = alarm.id"
-              >
-                <i :data-level="alarm.severity"></i
-                ><span
-                  >{{ alarm.event_code
-                  }}<small
-                    >{{ alarmTypeLabel(alarm.fire_type) }} · {{ alarmStateLabel(alarm.state) }}</small
-                  ></span
-                ><time>{{
-                  new Date(alarm.last_seen_at).toLocaleTimeString('zh-CN', { hour12: false })
-                }}</time>
-              </button>
-              <div v-if="activeAlarms.length <= 1" class="quiet-state">暂无其他活动事件</div>
-            </div>
+          <section v-show="controlTab === 'monitor'" class="hmi-monitor-details">
+            <template v-if="primaryAlarm">
+              <PrimaryAlarmPanel
+                :alarm="primaryAlarm"
+                :timeline="timeline"
+                :disabled-reason="extinguishReason"
+                :busy-mode="busyMode"
+                :location-label="primaryAlarmLocation"
+                :permissions="{
+                  ack: auth.can('alarm.ack'),
+                  confirm: auth.can('alarm.confirm'),
+                  resolve: auth.can('alarm.resolve'),
+                }"
+                @transition="transition"
+                @execute="dispatch"
+              />
+              <section class="panel secondary-alarms" :class="{ open: otherEventsOpen }">
+                <header>
+                  <button
+                    class="other-events-toggle"
+                    type="button"
+                    @click="otherEventsOpen = !otherEventsOpen"
+                  >
+                    <strong>其他事件 ({{ Math.max(0, activeAlarms.length - 1) }})</strong>
+                    <span v-if="!otherEventsOpen && activeAlarms.length > 1" class="other-events-summary">
+                      {{ activeAlarms[1]?.event_code }} · {{ alarmTypeLabel(activeAlarms[1]?.fire_type) }}
+                    </span>
+                    <ChevronDownIcon class="other-events-chevron" :class="{ open: otherEventsOpen }" />
+                  </button>
+                </header>
+                <div v-if="otherEventsOpen" class="other-events-list">
+                  <button
+                    v-for="alarm in activeAlarms.filter((item) => item.id !== primaryAlarmId)"
+                    :key="alarm.id"
+                    :class="{ active: primaryAlarmId === alarm.id }"
+                    @click="primaryAlarmId = alarm.id"
+                  >
+                    <i :data-level="alarm.severity"></i
+                    ><span
+                      >{{ alarm.event_code
+                      }}<small
+                        >{{ alarmTypeLabel(alarm.fire_type) }} · {{ alarmStateLabel(alarm.state) }}</small
+                      ></span
+                    ><time>{{
+                      new Date(alarm.last_seen_at).toLocaleTimeString('zh-CN', { hour12: false })
+                    }}</time>
+                  </button>
+                  <div v-if="activeAlarms.length <= 1" class="quiet-state">暂无其他活动事件</div>
+                </div>
+              </section>
+            </template>
+            <template v-else>
+              <DeviceSnapshot :robot="robot" :task="activeTask" :stream="roofStream" :freshness="freshness" />
+              <section class="panel yd-patrol-card" :class="patrolCardClass">
+                <img class="patrol-art" :src="patrolArt" alt="" aria-hidden="true" />
+                <div class="patrol-state">
+                  <span class="ptitle">巡检状态</span>
+                  <strong>{{ patrolStatus }}</strong>
+                  <span>{{
+                    vehicleState === 'PAUSED_SAFE'
+                      ? resumeNextSlot
+                        ? `已停止，可从 ${resumeNextSlot} 继续`
+                        : '已停止'
+                      : activeTask
+                        ? `任务进行中 · ${patrolCode}`
+                        : '等待下发任务'
+                  }}</span>
+                </div>
+                <div class="yd-patrol-meta">
+                  <div><span>巡检路线</span><b>右侧全覆盖 S 型</b></div>
+                  <div v-if="liveCheckpoint">
+                    <span>当前巡检</span><b>{{ liveCheckpoint.current_slot_code || '--' }}</b>
+                  </div>
+                  <div v-if="liveCheckpoint">
+                    <span>下一巡检</span><b>{{ liveCheckpoint.next_slot_code || '--' }}</b>
+                  </div>
+                  <div v-if="liveCheckpoint">
+                    <span>已巡检</span><b>{{ liveCheckpoint.index }} / {{ liveCheckpoint.total }}</b>
+                  </div>
+                  <div v-else>
+                    <span>任务进度</span><b>{{ patrolProgress }}%</b>
+                  </div>
+                </div>
+                <ProgressRingGate4 :value="patrolProgress" label="任务进度" />
+              </section>
+            </template>
           </section>
-        </template>
-        <template v-else>
-          <DeviceSnapshot :robot="robot" :task="activeTask" :stream="roofStream" :freshness="freshness" />
-          <section class="panel yd-patrol-card" :class="patrolCardClass">
-            <img class="patrol-art" :src="patrolArt" alt="" aria-hidden="true" />
-            <div class="patrol-state">
-              <span class="ptitle">巡检状态</span>
-              <strong>{{ patrolStatus }}</strong>
-              <span>{{
-                vehicleState === 'PAUSED_SAFE'
-                  ? resumeNextSlot
-                    ? `已停止，可从 ${resumeNextSlot} 继续`
-                    : '已停止'
-                  : activeTask
-                    ? `任务进行中 · ${patrolCode}`
-                    : '等待下发任务'
-              }}</span>
-            </div>
-            <div class="yd-patrol-meta">
-              <div><span>巡检路线</span><b>右侧全覆盖 S 型</b></div>
-              <div v-if="liveCheckpoint">
-                <span>当前巡检</span><b>{{ liveCheckpoint.current_slot_code || '--' }}</b>
-              </div>
-              <div v-if="liveCheckpoint">
-                <span>下一巡检</span><b>{{ liveCheckpoint.next_slot_code || '--' }}</b>
-              </div>
-              <div v-if="liveCheckpoint">
-                <span>已巡检</span><b>{{ liveCheckpoint.index }} / {{ liveCheckpoint.total }}</b>
-              </div>
-              <div v-else>
-                <span>任务进度</span><b>{{ patrolProgress }}%</b>
-              </div>
-            </div>
-            <ProgressRingGate4 :value="patrolProgress" label="任务进度" />
+          <section v-show="controlTab === 'manual'" class="hmi-legacy-controls">
+            <p class="hmi-hint">既有安全、巡检与返航入口。各项操作仍受服务器 readiness 和权限限制。</p>
+            <OperationsCommandDock
+              :busy="busyCommand"
+              :vehicle-state="vehicleState"
+              :reason="dockReason"
+              :estop-active="Boolean(robot?.estop_active)"
+              :at-waiting-area="atWaitingArea"
+              :resume-options="resumeOptions"
+              :patrol-ready="patrolReady"
+              :return-ready="returnReady"
+              :stop-ready="stopReady"
+              :estop-ready="estopReady"
+              :reset-estop-ready="resetEstopReady"
+              @patrol="patrol"
+              @stop="stop"
+              @home="home"
+              @estop="estop"
+              @reset-estop="resetEstop"
+            />
           </section>
-        </template>
+        </div>
       </aside>
     </section>
     <section
@@ -674,26 +756,6 @@ onUnmounted(() => {
         <strong>正在停止车辆任务</strong>
         <span>连续静止帧 {{ stopOperation.stationary_frames }}/5</span>
       </template>
-    </section>
-    <section class="yd-command-dock">
-      <OperationsCommandDock
-        :busy="busyCommand"
-        :vehicle-state="vehicleState"
-        :reason="dockReason"
-        :estop-active="Boolean(robot?.estop_active)"
-        :at-waiting-area="atWaitingArea"
-        :resume-options="resumeOptions"
-        :patrol-ready="patrolReady"
-        :return-ready="returnReady"
-        :stop-ready="stopReady"
-        :estop-ready="estopReady"
-        :reset-estop-ready="resetEstopReady"
-        @patrol="patrol"
-        @stop="stop"
-        @home="home"
-        @estop="estop"
-        @reset-estop="resetEstop"
-      />
     </section>
   </main>
 </template>

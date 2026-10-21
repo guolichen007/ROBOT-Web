@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { api } from '@/lib/api'
-import type { Alarm, MonitorSnapshot, RealtimeEvent, RobotState, Task } from '@/types'
+import type { AgentCommand, Alarm, MonitorSnapshot, RealtimeEvent, RobotState, Task } from '@/types'
 
 const ACTIVE_VEHICLE_KEY = 'firebot.activeVehicleId'
 const ACTIVE_TASK_STATUSES = ['CREATED', 'QUEUED', 'ACCEPTED', 'EXECUTING']
@@ -144,6 +144,10 @@ export const useMonitorStore = defineStore('monitor', () => {
       replaceById(snapshot.value.alarms, event.data as Alarm)
     } else if (event.event_type.startsWith('task.')) {
       replaceById(snapshot.value.tasks, event.data as Task)
+    } else if (event.event_type === 'command.updated') {
+      snapshot.value.commands ??= []
+      replaceById(snapshot.value.commands, event.data as AgentCommand)
+      snapshot.value.commands = snapshot.value.commands.slice(0, 200)
     }
   }
 

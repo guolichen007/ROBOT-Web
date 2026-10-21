@@ -32,6 +32,8 @@ const { now } = useSystemClock()
 let peer: RTCPeerConnection | null = null
 let resourceUrl = ''
 let connecting = false
+let sessionEpoch = 0
+let disposed = false
 
 const canPlay = computed(() => Boolean(props.stream?.stream_id && props.stream.state !== 'DISABLED'))
 const stateText = computed(() => {
@@ -56,6 +58,7 @@ async function waitIce(pc: RTCPeerConnection): Promise<void> {
 }
 
 async function disconnect(): Promise<void> {
+  sessionEpoch += 1
   const old = peer
   peer = null
   if (resourceUrl) {
@@ -74,28 +77,41 @@ async function connect(): Promise<void> {
   if (connecting) return
   const current = peer
   if (current && ['new', 'connecting', 'connected'].includes(current.connectionState)) return
-  if (!canPlay.value || !props.stream) return
+  if (!canPlay.value || !props.stream || !props.active || disposed) return
 
   connecting = true
+  const streamId = props.stream.stream_id
+  await disconnect()
+  const epoch = sessionEpoch
+  const valid = () =>
+    epoch === sessionEpoch &&
+    !disposed &&
+    props.active &&
+    canPlay.value &&
+    props.stream?.stream_id === streamId
   try {
-    await disconnect()
+    if (!valid()) return
     state.value = 'CONNECTING'
     detail.value = ''
-    const ticket = (await api.post('/media/tickets', { stream_id: props.stream.stream_id })).data
+    const ticket = (await api.post('/media/tickets', { stream_id: streamId })).data
+    if (!valid()) return
     const pc = new RTCPeerConnection()
     peer = pc
     pc.addTransceiver('video', { direction: 'recvonly' })
     pc.ontrack = (event) => {
+      if (!valid()) return
       if (video.value) video.value.srcObject = event.streams[0]
       if (pc.connectionState === 'connected') state.value = 'LIVE'
     }
     pc.onconnectionstatechange = () => {
+      if (!valid()) return
       if (pc.connectionState === 'connected' && video.value?.srcObject) state.value = 'LIVE'
       if (['failed', 'disconnected'].includes(pc.connectionState)) state.value = 'ERROR'
     }
     const offer = await pc.createOffer()
     await pc.setLocalDescription(offer)
     await waitIce(pc)
+    if (!valid()) return
     const response = await fetch(ticket.playback_url, {
       method: 'POST',
       credentials: 'same-origin',
@@ -104,9 +120,17 @@ async function connect(): Promise<void> {
     })
     if (!response.ok) throw new Error(`WHEP ${response.status}`)
     const location = response.headers.get('Location')
-    if (location) resourceUrl = new URL(location, window.location.href).toString()
-    await pc.setRemoteDescription({ type: 'answer', sdp: await response.text() })
+    const createdResource = location ? new URL(location, window.location.href).toString() : ''
+    if (!valid()) {
+      if (createdResource)
+        void fetch(createdResource, { method: 'DELETE', credentials: 'same-origin' }).catch(() => undefined)
+      return
+    }
+    resourceUrl = createdResource
+    const answer = await response.text()
+    if (valid()) await pc.setRemoteDescription({ type: 'answer', sdp: answer })
   } catch (reason) {
+    if (!valid()) return
     state.value = 'ERROR'
     detail.value = errorMessage(reason)
   } finally {
@@ -145,7 +169,10 @@ watch(
   },
 )
 
-onUnmounted(() => void disconnect())
+onUnmounted(() => {
+  disposed = true
+  void disconnect()
+})
 </script>
 
 <template>
