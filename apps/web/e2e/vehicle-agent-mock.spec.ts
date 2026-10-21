@@ -15,6 +15,7 @@ test('Browser → API → Outbox → adapter → mock → ACK/status → WS and 
   await page.getByRole('button', { name: '登录', exact: true }).click()
   await expect(page.getByRole('heading', { name: '停车场二维地图' })).toBeVisible()
   await expect(page.locator('.hmi-link-state')).toContainText('已连接')
+  await expect(page.locator('.hmi-kpi[data-stale="false"]')).toHaveCount(5)
   await expect(page.locator('.hmi-camera')).toHaveCount(2)
   await expect(page.getByRole('heading', { name: '监控相机', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: '红外热成像', exact: true })).toBeVisible()

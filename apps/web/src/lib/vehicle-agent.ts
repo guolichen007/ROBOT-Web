@@ -37,7 +37,7 @@ export function agentFreshness(robot: RobotState | undefined, connected: boolean
       !online ||
       (robot?.agent_protocol === 'VEHICLE_AGENT_V1' && robot.agent_state?.telemetry_online !== true) ||
       !Number.isFinite(age) ||
-      age < 0 ||
+      age < -2000 ||
       age > (robot?.integration?.stale_seconds ?? 3) * 1000,
   }
 }

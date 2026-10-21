@@ -185,6 +185,11 @@ describe('vehicle agent HMI', () => {
     expect(agentFreshness(current, true, Date.now()).stale).toBe(true)
     current.agent_state!.telemetry_online = true
     expect(agentFreshness(current, true, Date.now()).stale).toBe(false)
+    // The shared display clock ticks once a second; a just-received frame may
+    // legitimately be newer than that clock value without being future-skewed.
+    const received = Date.parse(current.agent_state!.telemetry_received_at!)
+    expect(agentFreshness(current, true, received - 500).stale).toBe(false)
+    expect(agentFreshness(current, true, received - 3000).stale).toBe(true)
   })
 
   it('allows a distinct stop while a motion command is awaiting ACK', () => {
