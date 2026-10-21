@@ -189,7 +189,7 @@ services:
       migrate: { condition: service_completed_successfully }
       mosquitto: { condition: service_healthy }
     healthcheck:
-      test: ["CMD", "python", "-c", "from app.core.events import get_redis; raise SystemExit(0 if get_redis().get('service:vehicle-agent-adapter:heartbeat') else 1)"]
+      test: ["CMD", "python", "-c", "from app.core.vehicle_agent_health import adapter_healthy; raise SystemExit(0 if adapter_healthy() else 1)"]
       interval: 10s
       timeout: 5s
       retries: 12

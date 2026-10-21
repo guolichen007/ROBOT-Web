@@ -107,7 +107,7 @@ test('Browser → API → Outbox → adapter → mock → ACK/status → WS and 
         expect(after.executions.homing).toBe(before.executions.homing)
         return after.deliveries
       })
-      .toBeGreaterThanOrEqual(before.deliveries + 2)
+      .toBeGreaterThanOrEqual(before.delivery_target)
   }
   await request.post(scenarioUrl, { data: { action: 'arrive' } })
   await expect(page.getByTestId('agent-task-state')).toHaveText('IDLE / 空闲')

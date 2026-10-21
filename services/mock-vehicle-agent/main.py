@@ -163,6 +163,7 @@ def main() -> None:
             def do_POST(self):
                 data = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
                 action = data.get("action")
+                delivery_target = mock.deliveries + (2 if action == "duplicate" else 0)
                 if action == "failure":
                     mock.failure = data.get("code")
                 elif action in {"offline", "online"}:
@@ -185,6 +186,7 @@ def main() -> None:
                         "executions": mock.executions,
                         "last_wire": mock.last_wire,
                         "deliveries": mock.deliveries,
+                        "delivery_target": delivery_target,
                     }
                 ).encode()
                 self.send_response(200)
