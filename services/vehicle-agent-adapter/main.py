@@ -64,12 +64,13 @@ class Adapter:
         self.downlink = downlink
         self.ack_seconds = ack_seconds
 
-    def emit(self, vehicle: str, kind: str, data: dict) -> None:
+    def emit(self, vehicle: str, kind: str, data: dict, *, retained: bool = False) -> None:
         self.publish(
             f"{INTERNAL}/{vehicle}/{kind}",
             json.dumps(
                 {
                     "event_id": str(uuid4()),
+                    "retained": retained,
                     "vehicle_id": vehicle,
                     "kind": kind,
                     "received_at": datetime.now(UTC).isoformat(),
@@ -172,6 +173,12 @@ class Adapter:
         vehicle, kind = parse_topic(name)
         if kind == "cmd":
             return
+        bucket = f"vehicle-agent:rate:{vehicle}:{kind}:{int(time.time())}"
+        count = self.redis.incr(bucket)
+        if count == 1:
+            self.redis.expire(bucket, 2)
+        if count > get_settings().mqtt_rate_limit_per_second:
+            raise ValueError("vehicle_agent message rate exceeded")
         if kind == "ack" and retained:
             raise ValueError("retained ACK forbidden")
         normalized = normalize(kind, data)
@@ -181,7 +188,7 @@ class Adapter:
                 raise ValueError("ACK has no exact vehicle/msg_id correlation")
             self.finish(json.loads(raw), normalized)
         else:
-            self.emit(vehicle, kind, normalized)
+            self.emit(vehicle, kind, normalized, retained=retained)
 
 
 def main() -> None:

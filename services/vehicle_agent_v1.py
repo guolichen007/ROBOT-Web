@@ -89,7 +89,10 @@ class WireCommand(WireModel):
     @model_validator(mode="after")
     def validate_params(self) -> WireCommand:
         if self.command == "start":
-            if self.params != {"with_navigation": True}:
+            if (
+                set(self.params) != {"with_navigation"}
+                or self.params.get("with_navigation") is not True
+            ):
                 raise ValueError("start requires with_navigation=true")
         elif self.command == "navigate":
             if set(self.params) != {"spot"} or not isinstance(self.params["spot"], str):
@@ -103,7 +106,7 @@ class WireCommand(WireModel):
 
 class Ack(WireModel):
     msg_id: UUID
-    success: bool
+    success: bool = Field(strict=True)
     code: str
     message: str = ""
     data: dict[str, Any] = Field(default_factory=dict)
@@ -142,28 +145,33 @@ class CanonicalCommand(WireModel):
     params: dict[str, Any]
 
 
-class AgentTask(WireModel):
+class UplinkModel(WireModel):
+    # status/telemetry 合同列出的是最小字段集；忽略扩展元数据，不赋予其控制含义。
+    model_config = ConfigDict(extra="ignore", allow_inf_nan=False)
+
+
+class AgentTask(UplinkModel):
     state: Literal["idle", "patrol", "homing", "spot"]
     patrol_next: str | int | None = None
     patrol_count: int | None = Field(default=None, ge=0)
-    patrol_paused: bool = False
+    patrol_paused: bool = Field(default=False, strict=True)
 
 
-class Status(WireModel):
-    online: bool
+class Status(UplinkModel):
+    online: bool = Field(strict=True)
     programs: dict[str, bool | str | None] = Field(default_factory=dict)
     task: AgentTask
     ts: AwareDatetime | None = None
 
 
-class Pose(WireModel):
+class Pose(UplinkModel):
     x: float
     y: float
     yaw: float
     frame_id: str
 
 
-class Battery(WireModel):
+class Battery(UplinkModel):
     percentage: float | None = Field(default=None, ge=0, le=100)
     voltage: float | None = None
     current: float | None = None
@@ -172,17 +180,17 @@ class Battery(WireModel):
     charge_state: str | int | None = None
 
 
-class Smog(WireModel):
+class Smog(UplinkModel):
     percentage: float | None = Field(default=None, ge=0, le=100)
     raw: float | None = None
     alarm: bool | None = None
 
 
-class Thermal(WireModel):
+class Thermal(UplinkModel):
     max_temp: float | None = None
 
 
-class Telemetry(WireModel):
+class Telemetry(UplinkModel):
     pose: Pose | None = None
     battery: Battery | None = None
     smog: Smog | None = None
@@ -192,6 +200,28 @@ class Telemetry(WireModel):
 
 def program_ready(value: Any) -> bool:
     return value is True or (isinstance(value, str) and value.lower() in {"running", "ready"})
+
+
+def status_confirms(action: str, status: dict) -> bool:
+    task = status.get("task", {})
+    current = task.get("state")
+    paused = task.get("patrol_paused") is True
+    chassis = status.get("programs", {}).get("chassis")
+    if action == "start":
+        return program_ready(chassis)
+    if action == "close":
+        return chassis is False or (isinstance(chassis, str) and chassis.lower() == "stopped")
+    if action in {"patrol", "resume_patrol"}:
+        return current == "patrol" and not paused
+    if action == "stop_patrol":
+        return paused or current == "idle"
+    if action == "homing":
+        return current == "homing"
+    if action == "navigate":
+        return current == "spot"
+    if action == "stop_navigate":
+        return current == "idle"
+    return action in {"ping", "get_status", "get_telemetry"}
 
 
 def command_from_canonical(payload: dict[str, Any]) -> dict[str, Any]:

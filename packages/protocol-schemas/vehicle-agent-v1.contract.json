@@ -121,7 +121,6 @@
     "Status": {
       "$defs": {
         "AgentTask": {
-          "additionalProperties": false,
           "properties": {
             "state": {
               "enum": [
@@ -174,7 +173,6 @@
           "type": "object"
         }
       },
-      "additionalProperties": false,
       "properties": {
         "online": {
           "title": "Online",
@@ -224,7 +222,6 @@
     "Telemetry": {
       "$defs": {
         "Battery": {
-          "additionalProperties": false,
           "properties": {
             "percentage": {
               "anyOf": [
@@ -308,7 +305,6 @@
           "type": "object"
         },
         "Pose": {
-          "additionalProperties": false,
           "properties": {
             "x": {
               "title": "X",
@@ -337,7 +333,6 @@
           "type": "object"
         },
         "Smog": {
-          "additionalProperties": false,
           "properties": {
             "percentage": {
               "anyOf": [
@@ -382,7 +377,6 @@
           "type": "object"
         },
         "Thermal": {
-          "additionalProperties": false,
           "properties": {
             "max_temp": {
               "anyOf": [
@@ -401,7 +395,6 @@
           "type": "object"
         }
       },
-      "additionalProperties": false,
       "properties": {
         "pose": {
           "anyOf": [

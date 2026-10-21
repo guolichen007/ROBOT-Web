@@ -23,6 +23,7 @@ from app.core.metrics import (
 )
 from app.core.serialization import serialize_model
 from app.db.models import (
+    Command,
     ExtinguishPoint,
     FireEvent,
     InspectionPoint,
@@ -311,6 +312,8 @@ def assemble_robot_state(robot: Robot, raw: str | None) -> dict:
             "name": robot.name,
             "model": robot.model,
             "enabled": robot.enabled,
+            "agent_protocol": robot.agent_protocol,
+            "agent_state": robot.agent_state_json,
             "last_seen_at": robot.last_seen_at.isoformat() if robot.last_seen_at else None,
             "current_map_id": robot.current_map_id,
             "current_map_version": robot.current_map_version,
@@ -425,6 +428,10 @@ def monitor_snapshot(
         "robots": latest,
         "alarms": [serialize_model(x) for x in alarms],
         "tasks": [serialize_model(x) for x in tasks],
+        "commands": [
+            serialize_model(x)
+            for x in db.scalars(select(Command).order_by(Command.issued_at.desc()).limit(200)).all()
+        ],
         "operation_context": build_operation_context(db, robots[0]) if robots else None,
         "operation_contexts": {
             robot.vehicle_id: build_operation_context(db, robot) for robot in robots

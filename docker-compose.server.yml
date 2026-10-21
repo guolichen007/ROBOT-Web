@@ -181,6 +181,19 @@ services:
       timeout: 5s
       retries: 12
 
+  vehicle-agent-adapter:
+    <<: *python-service
+    profiles: [vehicle-agent]
+    command: ["python", "/workspace/services/vehicle-agent-adapter/main.py"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      mosquitto: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "from app.core.events import get_redis; raise SystemExit(0 if get_redis().get('service:vehicle-agent-adapter:heartbeat') else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   task-worker:
     <<: *python-service
     command: ["python", "/workspace/services/task-worker/main.py"]
