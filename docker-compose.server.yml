@@ -96,9 +96,14 @@ services:
     build:
       context: .
       dockerfile: infra/docker/mediamtx.Dockerfile
+    ports:
+      - "${SERVER_TAILSCALE_IP:?SERVER_TAILSCALE_IP is required}:8554:8554/tcp"
+      - "${SERVER_LAN_IP:?SERVER_LAN_IP is required}:8189:8189/udp"
+      - "${SERVER_LAN_IP:?SERVER_LAN_IP is required}:8189:8189/tcp"
     volumes: ["./infra/mediamtx/mediamtx.server.yml:/mediamtx.yml:ro"]
     environment:
       MTX_WEBRTCALLOWORIGINS: ${MEDIAMTX_WEBRTC_ALLOW_ORIGINS}
+      MTX_WEBRTCADDITIONALHOSTS: ${MEDIAMTX_WEBRTC_ADDITIONAL_HOSTS}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "/busybox", "wget", "-q", "-O", "-", "http://127.0.0.1:9997/v3/config/global/get"]
