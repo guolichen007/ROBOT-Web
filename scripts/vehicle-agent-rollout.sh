@@ -13,10 +13,12 @@ v1_required() {
     db_required="$("${COMPOSE[@]}" exec -T api python -c '
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.db.models import Robot
-from sqlalchemy import select
+from sqlalchemy import inspect, text
 with SessionLocal() as db:
-    required = get_settings().vehicle_agent_v1_downlink_enabled or bool(db.scalar(select(Robot.id).where(Robot.enabled.is_(True), Robot.agent_protocol == "VEHICLE_AGENT_V1").limit(1)))
+    columns = {c["name"] for c in inspect(db.get_bind()).get_columns("robots")}
+    required = getattr(get_settings(), "vehicle_agent_v1_downlink_enabled", False)
+    if "agent_protocol" in columns:
+        required = required or bool(db.scalar(text("SELECT id FROM robots WHERE enabled = true AND agent_protocol = :protocol LIMIT 1"), {"protocol": "VEHICLE_AGENT_V1"}))
 print("true" if required else "false")' 2>/dev/null)" || return 1
     case "$db_required" in true) config_required=true ;; false) : ;; *) return 1 ;; esac
   fi

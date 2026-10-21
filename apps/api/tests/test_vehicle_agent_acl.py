@@ -37,3 +37,4 @@ def test_missing_any_required_runtime_acl_permission_fails_closed(line):
 def test_wrong_platform_user_or_conflicting_deny_fails_closed():
     assert not validate_acl(template().replace("user platform", "user historical"))
     assert not validate_acl(template() + "\npattern deny v1/robot/%u/cmd")
+    assert not validate_acl(template() + "\npattern deny #")

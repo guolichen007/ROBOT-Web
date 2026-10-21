@@ -10,7 +10,10 @@ def validate_acl(content: str, platform_user: str = "platform") -> bool:
     patterns = set()
     user = None
     for raw in content.splitlines():
-        parts = raw.split("#", 1)[0].split()
+        # '#' is also an MQTT wildcard (e.g. pattern deny #), not an inline comment.
+        if raw.lstrip().startswith("#"):
+            continue
+        parts = raw.split()
         if not parts:
             continue
         if parts[0] == "user" and len(parts) == 2:

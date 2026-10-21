@@ -39,17 +39,19 @@ $requiredSecrets = @(
     'mosquitto/certs/server.key','mosquitto/passwords','mosquitto/acl','nginx/server.crt','nginx/server.key'
 )
 foreach ($relative in $requiredSecrets) { Require-File (Join-Path $SecretsDir $relative) "secret" }
-$v1Required = $env:VEHICLE_AGENT_V1_ROLLOUT -eq 'true' -or $env:VEHICLE_AGENT_V1_DOWNLINK_ENABLED -eq 'true' -or $envText -match '(?m)^VEHICLE_AGENT_V1_(ROLLOUT|DOWNLINK_ENABLED)=true$'
+$v1Required = $env:VEHICLE_AGENT_V1_ROLLOUT -eq 'true' -or $env:VEHICLE_AGENT_V1_DOWNLINK_ENABLED -eq 'true' -or $env:COMPOSE_PROFILES -match '(^|,)vehicle-agent(,|$)' -or ($envText -replace '["'' \t\r]', '') -match '(?m)^VEHICLE_AGENT_V1_(ROLLOUT|DOWNLINK_ENABLED)=(true|1|yes|on)$'
 $apiId = docker compose --env-file $EnvFile -f docker-compose.server.yml ps -q api 2>$null
 if ($LASTEXITCODE -ne 0) { $errors.Add('Cannot determine v1 rollout requirement') }
-if ($apiId) {
+if ($apiId -and -not $v1Required) {
     $query = @'
 from app.core.config import get_settings
 from app.db.session import SessionLocal
-from app.db.models import Robot
-from sqlalchemy import select
+from sqlalchemy import inspect, text
 with SessionLocal() as db:
-    required = get_settings().vehicle_agent_v1_downlink_enabled or bool(db.scalar(select(Robot.id).where(Robot.enabled.is_(True), Robot.agent_protocol == "VEHICLE_AGENT_V1").limit(1)))
+    columns = {c["name"] for c in inspect(db.get_bind()).get_columns("robots")}
+    required = getattr(get_settings(), "vehicle_agent_v1_downlink_enabled", False)
+    if "agent_protocol" in columns:
+        required = required or bool(db.scalar(text("SELECT id FROM robots WHERE enabled = true AND agent_protocol = :protocol LIMIT 1"), {"protocol": "VEHICLE_AGENT_V1"}))
 print("true" if required else "false")
 '@
     $dbRequired = docker compose --env-file $EnvFile -f docker-compose.server.yml exec -T api python -c $query 2>$null
@@ -61,6 +63,8 @@ if ($v1Required) {
     if ($LASTEXITCODE -ne 0) { $errors.Add('V1 source ACL gate failed') }
     $brokerId = docker compose --env-file $EnvFile -f docker-compose.server.yml ps -q mosquitto 2>$null
     if ($brokerId) {
+        docker compose --env-file $EnvFile -f docker-compose.server.yml exec -T mosquitto sh -c 'grep -Eq "^acl_file[[:space:]]+/mosquitto/secure/acl[[:space:]]*$" /mosquitto/config/mosquitto.conf' *> $null
+        if ($LASTEXITCODE -ne 0) { $errors.Add('V1 active broker ACL config differs from expected path') }
         $activeAcl = docker compose --env-file $EnvFile -f docker-compose.server.yml exec -T mosquitto cat /mosquitto/secure/acl 2>$null
         if ($LASTEXITCODE -ne 0) { $errors.Add('V1 active ACL unreadable') }
         $activeAcl | python scripts/check_vehicle_agent_acl.py -
