@@ -6,6 +6,8 @@ import { useSystemClock } from '@/composables/useSystemClock'
 import { streamStateLabel } from '@/lib/ui-labels'
 import type { StreamInfo } from '@/types'
 
+type PlayerState = 'DISABLED' | 'OFFLINE' | 'CONNECTING' | 'LIVE' | 'ERROR'
+
 const props = withDefaults(
   defineProps<{
     stream?: StreamInfo
@@ -17,16 +19,21 @@ const props = withDefaults(
 )
 const video = ref<HTMLVideoElement>()
 const stage = ref<HTMLDivElement>()
-const state = ref<'DISABLED' | 'OFFLINE' | 'CONNECTING' | 'LIVE' | 'ERROR'>(props.stream?.state || 'OFFLINE')
+
+// 本地播放器状态只描述「当前浏览器播放器」，与媒体源状态严格解耦：
+// 服务端 stream.state 只代表媒体源状态，绝不直接映射为播放器 LIVE。
+function idlePlayerState(): 'DISABLED' | 'OFFLINE' {
+  return props.stream?.state === 'DISABLED' ? 'DISABLED' : 'OFFLINE'
+}
+
+const state = ref<PlayerState>(idlePlayerState())
 const detail = ref('')
 const { now } = useSystemClock()
 let peer: RTCPeerConnection | null = null
 let resourceUrl = ''
+let connecting = false
 
 const canPlay = computed(() => Boolean(props.stream?.stream_id && props.stream.state !== 'DISABLED'))
-const shouldAutoConnect = computed(
-  () => props.active && ['CONNECTING', 'LIVE'].includes(props.stream?.state || 'OFFLINE'),
-)
 const stateText = computed(() => {
   if (state.value === 'DISABLED') return '通道已停用'
   if (state.value === 'CONNECTING') return '正在连接视频'
@@ -57,15 +64,23 @@ async function disconnect(): Promise<void> {
   }
   old?.close()
   if (video.value) video.value.srcObject = null
-  state.value = props.stream?.state || 'OFFLINE'
+  // 播放器回到空闲态，而不是回落到「媒体源状态」。
+  state.value = idlePlayerState()
 }
 
+// 建立播放器会话的唯一入口：用户点击「连接视频」。
+// 普通 WS 更新 / snapshot 刷新 / 机器人状态 / 检测覆盖都不得触发它。
 async function connect(): Promise<void> {
-  await disconnect()
+  if (connecting) return
+  const current = peer
+  if (current && ['new', 'connecting', 'connected'].includes(current.connectionState)) return
   if (!canPlay.value || !props.stream) return
-  state.value = 'CONNECTING'
-  detail.value = ''
+
+  connecting = true
   try {
+    await disconnect()
+    state.value = 'CONNECTING'
+    detail.value = ''
     const ticket = (await api.post('/media/tickets', { stream_id: props.stream.stream_id })).data
     const pc = new RTCPeerConnection()
     peer = pc
@@ -94,6 +109,8 @@ async function connect(): Promise<void> {
   } catch (reason) {
     state.value = 'ERROR'
     detail.value = errorMessage(reason)
+  } finally {
+    connecting = false
   }
 }
 
@@ -106,13 +123,28 @@ async function enterFullscreen(): Promise<void> {
   }
 }
 
+// 只有 stream_id 真正变化才销毁旧会话；不自动连接新流。
 watch(
-  () => [props.stream?.stream_id, props.stream?.state, props.active],
-  () => {
-    if (shouldAutoConnect.value) void connect()
-    else void disconnect()
+  () => props.stream?.stream_id,
+  () => void disconnect(),
+)
+
+// 只有本卡片变为 inactive 才断开。
+watch(
+  () => props.active,
+  (isActive) => {
+    if (!isActive) void disconnect()
   },
 )
+
+// 只有媒体源被明确 DISABLED 才断开；OFFLINE / CONNECTING / LIVE 的变化不得销毁浏览器会话。
+watch(
+  () => props.stream?.state,
+  (next) => {
+    if (next === 'DISABLED') void disconnect()
+  },
+)
+
 onUnmounted(() => void disconnect())
 </script>
 

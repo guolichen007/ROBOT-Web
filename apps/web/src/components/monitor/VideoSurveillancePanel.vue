@@ -1,40 +1,34 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import VideoCard from '@/components/VideoCard.vue'
 import type { StreamInfo } from '@/types'
+
 const props = defineProps<{ streams: StreamInfo[] }>()
-const active = ref('roof_rgb')
+
+// 固定并排展示两路：车顶实时相机 + 顶部热像（底部红外已移除）。
+const CAMS = [
+  { type: 'roof_rgb', label: '车顶实时相机' },
+  { type: 'roof_thermal', label: '顶部热像' },
+] as const
+
 const byType = computed(() => Object.fromEntries(props.streams.map((item) => [item.camera_type, item])))
-const tabs = [
-  { value: 'roof_rgb', label: '车顶实时相机' },
-  { value: 'roof_thermal', label: '顶部热像' },
-  { value: 'bottom_ir', label: '底部红外' },
-]
-const activeStream = computed(() => byType.value[active.value])
-const activeLabel = computed(() => tabs.find((item) => item.value === active.value)?.label || '实时视频')
+const cards = computed(() =>
+  CAMS.map((cam) => ({ type: cam.type, label: cam.label, stream: byType.value[cam.type] })),
+)
 </script>
 <template>
   <section class="panel video-surveillance">
     <header class="video-surveillance-head"><span>实时视频</span></header>
-    <div class="video-tabs" role="tablist">
-      <button
-        v-for="tab in tabs"
-        :key="tab.value"
-        type="button"
-        role="tab"
-        :aria-selected="active === tab.value"
-        :class="['video-tab', { active: active === tab.value }]"
-        @click="active = tab.value"
-      >
-        {{ tab.label }}
-      </button>
+    <div class="video-grid">
+      <VideoCard
+        v-for="card in cards"
+        :key="card.type"
+        class="video-active-card"
+        :stream="card.stream"
+        :title="card.label"
+        :active="true"
+        prominent
+      />
     </div>
-    <VideoCard
-      class="video-active-card"
-      :stream="activeStream"
-      :title="activeLabel"
-      :active="true"
-      prominent
-    />
   </section>
 </template>
