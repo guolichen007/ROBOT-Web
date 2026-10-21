@@ -5,7 +5,7 @@ anyio==4.14.2
 argon2-cffi==25.1.0
 argon2-cffi-bindings==25.1.0
 attrs==26.1.0
-certifi==2026.7.22
+certifi==2026.10.19
 cffi==2.1.1
 charset-normalizer==3.4.9
 click==8.4.2
@@ -26,7 +26,7 @@ openpyxl==3.1.5
 Mako==1.4.1
 MarkupSafe==3.0.3
 paho-mqtt==2.1.0
-Pillow==12.3.0
+Pillow==13.0.0
 prometheus_client==0.22.1
 psycopg==3.2.10
 psycopg-binary==3.2.10
@@ -34,7 +34,7 @@ pycparser==3.0
 pydantic==2.11.7
 pydantic-settings==2.10.1
 pydantic_core==2.33.2
-PyJWT==2.13.0
+PyJWT==2.14.0
 python-dotenv==1.2.2
 python-dateutil==2.9.0.post0
 python-multipart==0.0.30
