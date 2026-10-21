@@ -16,7 +16,7 @@ from app.core.serialization import serialize_model
 from app.db.models import Command, OutboxEvent, Robot
 from app.db.session import SessionLocal
 from redis.exceptions import ResponseError
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from services.protocol import validate_message
 
@@ -45,6 +45,10 @@ def publish_command(payload: dict, qos: int) -> None:
         if robot is None:
             raise ValueError("unknown command vehicle")
         if robot.agent_protocol == "VEHICLE_AGENT_V1":
+            from app.core.vehicle_agent_health import adapter_healthy
+
+            if not adapter_healthy():
+                raise ValueError("v1 adapter unavailable before dispatch")
             if not settings.vehicle_agent_v1_downlink_enabled:
                 raise ValueError("v1 downlink disabled")
             if payload.get("schema_version") != "vehicle-agent-v1":
@@ -194,12 +198,15 @@ def dispatch_next() -> bool:
     with SessionLocal.begin() as db:
         row = db.scalar(
             select(OutboxEvent)
+            .outerjoin(Command, Command.command_id == OutboxEvent.aggregate_id)
             .where(
                 OutboxEvent.status == "PENDING",
                 OutboxEvent.available_at <= datetime.now(UTC),
             )
-            .order_by(OutboxEvent.created_at)
-            .with_for_update(skip_locked=True)
+            .order_by(
+                func.coalesce(Command.priority, 50).desc(), OutboxEvent.created_at, OutboxEvent.id
+            )
+            .with_for_update(skip_locked=True, of=OutboxEvent)
         )
         if not row:
             return False

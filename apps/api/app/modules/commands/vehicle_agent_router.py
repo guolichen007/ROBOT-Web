@@ -90,6 +90,17 @@ def bind_protocol(
         integration = RobotIntegrationProfile(robot_id=robot.id)
         db.add(integration)
     integration.source_kind = payload.protocol
+    settings = get_settings()
+    integration.stale_seconds = (
+        settings.vehicle_agent_v1_status_stale_seconds
+        if payload.protocol == PROTOCOL
+        else settings.robot_stale_seconds
+    )
+    integration.offline_seconds = (
+        settings.vehicle_agent_v1_offline_seconds
+        if payload.protocol == PROTOCOL
+        else settings.robot_offline_seconds
+    )
     integration.control_contract_verified = False
     integration.ack_contract_verified = False
     integration.map_contract_verified = False
@@ -257,6 +268,7 @@ def command(
         params=payload.params,
         task_id=task_id,
         ttl_ms=get_settings().vehicle_agent_v1_ack_timeout_seconds * 1000,
+        priority=90 if action in {"stop_patrol", "stop_navigate"} else 50,
     )
     db.flush()
     result = serialize_model(row)
