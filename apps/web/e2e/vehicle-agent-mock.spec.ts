@@ -77,10 +77,15 @@ test('Browser → API → Outbox → adapter → mock → ACK/status → WS and 
   await act('start')
   await act('navigate')
   await expect(page.getByTestId('agent-task-state')).toHaveText('NAVIGATING / 前往目标')
+  // ACK accepts the goal; no arrival is fabricated while the mock remains spot.
+  await expect(page.getByTestId('agent-task-state')).toHaveText('NAVIGATING / 前往目标')
   await act('stop_navigate')
   await expect(page.getByTestId('agent-task-state')).toHaveText('IDLE / 空闲')
 
   const scenarioUrl = process.env.MOCK_SCENARIO_URL || 'http://127.0.0.1:18765/__mock__/scenario'
+  await request.post(scenarioUrl, { data: { action: 'failure', code: 'NOT_READY' } })
+  await act('start')
+  await expect(page.locator('.hmi-command-error')).toHaveAttribute('data-code', 'NOT_READY')
   await request.post(scenarioUrl, { data: { action: 'failure', code: 'BUSY' } })
   await act('start')
   await expect(page.locator('.hmi-command-error')).toHaveText('mock start: BUSY')
@@ -93,6 +98,21 @@ test('Browser → API → Outbox → adapter → mock → ACK/status → WS and 
   await expect(page.locator('[data-action="homing"]')).toBeEnabled()
   await act('homing')
   await expect(page.getByTestId('agent-task-state')).toHaveText('HOMING / 返航中')
+  if (process.env.VEHICLE_AGENT_CONTAINER_E2E === '1') {
+    const before = await (await request.post(scenarioUrl, { data: { action: 'duplicate' } })).json()
+    await expect
+      .poll(async () => {
+        const after = await (await request.post(scenarioUrl, { data: { action: 'inspect' } })).json()
+        expect(after.last_wire.msg_id).toBe(before.last_wire.msg_id)
+        expect(after.executions.homing).toBe(before.executions.homing)
+        return after.deliveries
+      })
+      .toBeGreaterThanOrEqual(before.deliveries + 2)
+  }
+  await request.post(scenarioUrl, { data: { action: 'arrive' } })
+  await expect(page.getByTestId('agent-task-state')).toHaveText('IDLE / 空闲')
+  await act('navigate')
+  await expect(page.getByTestId('agent-task-state')).toHaveText('NAVIGATING / 前往目标')
   await request.post(scenarioUrl, { data: { action: 'arrive' } })
   await expect(page.getByTestId('agent-task-state')).toHaveText('IDLE / 空闲')
   await act('close')

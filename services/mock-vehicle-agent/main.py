@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from datetime import UTC, datetime
 
@@ -10,6 +11,9 @@ import paho.mqtt.client as mqtt
 from app.core.config import get_settings
 
 from services.vehicle_agent_v1 import WireCommand, program_ready, topic
+
+STATUS_INTERVAL_SECONDS = 5
+TELEMETRY_INTERVAL_SECONDS = 1
 
 
 class MockAgent:
@@ -27,6 +31,8 @@ class MockAgent:
         self.cache: dict[str, tuple[float, dict]] = {}
         self.executions: dict[str, int] = {}
         self.failure: str | None = None
+        self.last_wire: dict = {}
+        self.deliveries = 0
 
     def status(self) -> dict:
         return {
@@ -135,7 +141,11 @@ def main() -> None:
         client.publish(topic(vehicle, "availability"), "online", qos=1, retain=True)
 
     def on_message(client, userdata, message):
-        ack = mock.execute(json.loads(message.payload))
+        if not mock.online:
+            return
+        mock.deliveries += 1
+        mock.last_wire = json.loads(message.payload)
+        ack = mock.execute(mock.last_wire)
         if ack:
             publish("ack", ack)
         publish("status", mock.status(), retain=True)
@@ -143,11 +153,60 @@ def main() -> None:
     client.on_connect, client.on_message = on_connect, on_message
     client.connect(settings.mqtt_host, settings.mqtt_port, keepalive=10)
     client.loop_start()
+    if os.environ.get("MOCK_SCENARIO_ENABLED") == "1":
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        class Scenarios(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+
+            def do_POST(self):
+                data = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
+                action = data.get("action")
+                if action == "failure":
+                    mock.failure = data.get("code")
+                elif action in {"offline", "online"}:
+                    mock.online = action == "online"
+                    publish("availability", action, retain=True)
+                elif action == "arrive":
+                    mock.arrive()
+                elif action == "inspect":
+                    pass
+                elif action == "duplicate":
+                    for _ in range(2):
+                        client.publish(topic(vehicle, "cmd"), json.dumps(mock.last_wire), qos=1)
+                else:
+                    self.send_error(400)
+                    return
+                if action != "inspect":
+                    publish("status", mock.status(), retain=True)
+                body = json.dumps(
+                    {
+                        "executions": mock.executions,
+                        "last_wire": mock.last_wire,
+                        "deliveries": mock.deliveries,
+                    }
+                ).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        threading.Thread(
+            target=ThreadingHTTPServer(("0.0.0.0", 8091), Scenarios).serve_forever, daemon=True
+        ).start()
+    last_status = last_telemetry = float("-inf")
     try:
         while True:
-            publish("status", mock.status(), retain=True)
-            publish("telemetry", mock.telemetry(), qos=0)
-            time.sleep(0.5)
+            now = time.monotonic()
+            if mock.online and now - last_status >= STATUS_INTERVAL_SECONDS:
+                publish("status", mock.status(), retain=True)
+                last_status = now
+            if mock.online and now - last_telemetry >= TELEMETRY_INTERVAL_SECONDS:
+                publish("telemetry", mock.telemetry(), qos=0)
+                last_telemetry = now
+            time.sleep(0.1)
     finally:
         client.publish(
             topic(vehicle, "availability"), "offline", qos=1, retain=True

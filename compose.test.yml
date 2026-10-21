@@ -156,6 +156,8 @@ services:
     environment:
       <<: *test-environment
       MOCK_VEHICLE_ID: R001
+      MOCK_SCENARIO_ENABLED: "1"
+    ports: ["127.0.0.1:18091:8091"]
     depends_on:
       vehicle-agent-mock-setup: { condition: service_completed_successfully }
       mosquitto: { condition: service_healthy }

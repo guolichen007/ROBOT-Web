@@ -188,7 +188,7 @@ jobs:
       - working-directory: apps/web
         run: npx playwright install --with-deps chromium
       - working-directory: apps/web
-        run: npm run test:e2e
+        run: npm run test:e2e -- --grep-invert 'Browser → API → Outbox → adapter'
       - if: always()
         run: docker compose -f compose.test.yml --profile full logs --no-color > e2e-compose.log
       - if: always()
@@ -203,6 +203,50 @@ jobs:
             apps/web/test-results/
       - if: always()
         run: docker compose -f compose.test.yml --profile full down --volumes
+
+  vehicle-agent-container-e2e:
+    runs-on: ubuntu-24.04
+    needs: [backend, frontend, protocol, docs, containers]
+    env:
+      E2E_BASE_URL: http://127.0.0.1:18080
+      E2E_ADMIN_PASSWORD: TestOnly-ChangeMe-2026!
+      TEST_VEHICLE_AGENT_DOWNLINK: "true"
+      VEHICLE_AGENT_MOCK_E2E: "1"
+      VEHICLE_AGENT_CONTAINER_E2E: "1"
+      MOCK_SCENARIO_URL: http://127.0.0.1:18091/__mock__/scenario
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Real PostgreSQL Redis Mosquitto and v1 processes (canonical R001 disabled)
+        run: docker compose -f compose.test.yml --profile full --profile vehicle-agent up -d --build --wait --scale mock-robot=0
+      - working-directory: apps/web
+        run: npm ci --ignore-scripts
+      - working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+      - name: Vehicle agent spec RUN; skipped must equal zero
+        working-directory: apps/web
+        run: |
+          PLAYWRIGHT_JSON_OUTPUT_NAME=vehicle-agent-results.json npx playwright test vehicle-agent-mock.spec.ts --reporter=list,json
+          node ../../scripts/check_vehicle_agent_e2e.cjs vehicle-agent-results.json
+      - if: always()
+        run: docker compose -f compose.test.yml --profile full --profile vehicle-agent logs --no-color > vehicle-agent-compose.log
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: vehicle-agent-container-e2e-diagnostics
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            vehicle-agent-compose.log
+            apps/web/vehicle-agent-results.json
+            apps/web/test-results/
+            apps/web/artifacts/vehicle-agent-hmi-*.png
+      - if: always()
+        run: docker compose -f compose.test.yml --profile full --profile vehicle-agent down --volumes
 
   security:
     runs-on: ubuntu-24.04
