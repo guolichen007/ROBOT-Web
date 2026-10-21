@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from app.core.audit import write_audit
+from app.core.config import get_settings
 from app.core.events import get_redis, queue_event, queue_redis_set
 from app.core.serialization import serialize_model
 from app.db.models import (
@@ -28,10 +29,24 @@ from services.vehicle_agent_v1 import PROTOCOL, Ack, normalize, status_confirms
 INTERNAL = "_platform/vehicle-agent-v1/"
 
 
+def fresh_status_time(robot: Robot, received: datetime) -> datetime | None:
+    if (
+        robot.online_state != "ONLINE"
+        or (robot.agent_state_json or {}).get("availability") == "offline"
+    ):
+        return None
+    value = (robot.agent_state_json or {}).get("status_received_at")
+    if not value:
+        return None
+    timestamp = datetime.fromisoformat(value)
+    age = (received - timestamp).total_seconds()
+    return timestamp if -2 <= age <= get_settings().vehicle_agent_v1_status_stale_seconds else None
+
+
 def converge_commands(db, robot: Robot, received: datetime) -> None:
     state = robot.agent_state_json or {}
     status = state.get("status", {})
-    status_at = state.get("status_received_at")
+    status_at = fresh_status_time(robot, received)
     for command in db.scalars(
         select(Command).where(
             Command.robot_id == robot.id,
@@ -41,7 +56,7 @@ def converge_commands(db, robot: Robot, received: datetime) -> None:
         if command.payload_json.get("schema_version") != "vehicle-agent-v1":
             continue
         query = command.cmd in {"ping", "get_status", "get_telemetry"}
-        if not query and (not status_at or datetime.fromisoformat(status_at) < command.issued_at):
+        if not query and (not status_at or status_at < command.issued_at):
             continue
         if status_confirms(command.cmd, status):
             moving = command.cmd in {"patrol", "resume_patrol", "homing", "navigate"}
@@ -52,7 +67,7 @@ def converge_commands(db, robot: Robot, received: datetime) -> None:
 
 def converge_tasks(db, robot: Robot, received: datetime) -> None:
     status = (robot.agent_state_json or {}).get("status", {})
-    status_at = (robot.agent_state_json or {}).get("status_received_at")
+    status_at = fresh_status_time(robot, received)
     observed = status.get("task", {})
     for task in db.scalars(
         select(Task).where(
@@ -72,17 +87,28 @@ def converge_tasks(db, robot: Robot, received: datetime) -> None:
         )
         if not initiating:
             continue
-        if not status_at or datetime.fromisoformat(status_at) < initiating.issued_at:
+        if (
+            not status_at
+            or status_at < initiating.issued_at
+            or initiating.payload_json.get("target_boot_id") != robot.boot_id
+            or not initiating.published_at
+        ):
             continue
         stop_confirmed = any(
             c.cmd in {"stop_patrol", "stop_navigate"}
             and c.ack_status == "accepted"
-            and datetime.fromisoformat(status_at) >= c.issued_at
+            and status_at >= c.issued_at
             and status_confirms(c.cmd, status)
             for c in commands
         )
-        if initiating.ack_status != "accepted" and not stop_confirmed:
+        if initiating.ack_status == "rejected" and not stop_confirmed:
             continue
+        ack_missing = initiating.ack_status != "accepted"
+        if ack_missing:
+            params["ack_diagnostic"] = "ACK_MISSING"
+            # Preserve transport truth on Command; only Task reflects observation.
+            initiating.ack_reason = "ACK_MISSING"
+            queue_event(db, "command.updated", serialize_model(initiating))
         # An ACK only accepts a goal. Observing spot/homing/patrol proves execution;
         # only a subsequent idle status after execution can complete the task.
         old_status = task.status
@@ -110,7 +136,7 @@ def converge_tasks(db, robot: Robot, received: datetime) -> None:
             task.completed_at = received
         task.parameters_json = params
         if old_status != task.status:
-            if task.status in {"SUCCEEDED", "CANCELLED"}:
+            if task.status in {"SUCCEEDED", "CANCELLED"} and not ack_missing:
                 initiating.lifecycle_status = task.status
                 initiating.terminal_at = received
                 queue_event(db, "command.updated", serialize_model(initiating))
@@ -150,7 +176,19 @@ def handle_v1_ack(db, robot: Robot, data: dict, received: datetime, handle_ack) 
         or robot.boot_id != data["target_boot_id"]
     ):
         return
-    command.ack_payload_json = ack.model_dump(mode="json")
+    synthetic = data.get("ack_source") == "transport_timeout"
+    if synthetic:
+        command.ack_payload_json = {
+            **ack.model_dump(mode="json"),
+            "ack_source": "transport_timeout",
+        }
+        command.lifecycle_status = "PUBLISHED_UNCONFIRMED"
+        command.ack_reason = "ACK_MISSING"
+        command.terminal_at = None
+        queue_event(db, "command.updated", serialize_model(command))
+        converge_tasks(db, robot, received)
+        return
+    command.ack_payload_json = {**ack.model_dump(mode="json"), "ack_source": "vehicle"}
     handle_ack(
         db,
         robot,
@@ -162,18 +200,14 @@ def handle_v1_ack(db, robot: Robot, data: dict, received: datetime, handle_ack) 
         },
         received,
     )
-    if ack.code == "TIMEOUT":
-        command.lifecycle_status = "PUBLISHED_UNCONFIRMED"
-        command.terminal_at = None
-        queue_event(db, "command.updated", serialize_model(command))
     if command.task_id:
         task = db.get(Task, command.task_id)
         if (
             task
-            and task.status == "CANCELLED"
+            and task.status in {"CANCELLED", "SUCCEEDED"}
             and command.cmd in {"patrol", "resume_patrol", "homing", "navigate"}
         ):
-            command.lifecycle_status = "CANCELLED"
+            command.lifecycle_status = task.status if ack.accepted else "ACK_REJECTED"
             command.terminal_at = task.completed_at
             queue_event(db, "command.updated", serialize_model(command))
         elif (
@@ -181,13 +215,11 @@ def handle_v1_ack(db, robot: Robot, data: dict, received: datetime, handle_ack) 
             and task.status not in {"SUCCEEDED", "FAILED", "CANCELLED"}
             and command.cmd in {"patrol", "resume_patrol", "homing", "navigate"}
         ):
-            task.status = "ACCEPTED" if ack.accepted or ack.code == "TIMEOUT" else "FAILED"
+            task.status = "ACCEPTED" if ack.accepted else "FAILED"
             task.accepted_at = received if ack.accepted else None
-            if not ack.accepted and ack.code != "TIMEOUT":
+            if not ack.accepted:
                 task.failure_code, task.failure_message = ack.code, ack.message
                 task.completed_at = received
-            if ack.code == "TIMEOUT":
-                task.phase = "ACK_UNCONFIRMED"
             queue_event(db, "task.updated", serialize_model(task))
     converge_tasks(db, robot, received)
     converge_commands(db, robot, received)
@@ -226,12 +258,8 @@ def process(name: str, payload: bytes, handle_ack) -> bool:
                 robot.boot_id = str(uuid4())
             if kind in {"status", "availability"}:
                 online = data.get("state") == "online" if kind == "availability" else data["online"]
-                # A retained status without source age cannot undo an explicit LWT.
-                if (
-                    kind == "status"
-                    and envelope.get("retained")
-                    and state.get("availability") == "offline"
-                ):
+                # Explicit offline remains authoritative until availability online.
+                if kind == "status" and state.get("availability") == "offline":
                     online = False
                 if kind == "availability":
                     state["availability"] = data["state"]
@@ -243,8 +271,8 @@ def process(name: str, payload: bytes, handle_ack) -> bool:
                     robot.boot_id = str(uuid4())
                 if kind == "status":
                     state["status"] = data
-                    state["status_received_at"] = (
-                        data.get("ts") if envelope.get("retained") else received.isoformat()
+                    state["status_received_at"] = data.get("ts") or (
+                        None if envelope.get("retained") else received.isoformat()
                     )
                     task_state = data["task"]["state"]
                     robot.current_mode = {
@@ -254,6 +282,15 @@ def process(name: str, payload: bytes, handle_ack) -> bool:
                         "spot": "NAVIGATING",
                     }[task_state]
             elif kind == "telemetry":
+                source_at = datetime.fromisoformat(data["ts"]) if data.get("ts") else received
+                age = (received - source_at).total_seconds()
+                if (
+                    not envelope.get("retained")
+                    and state.get("availability") != "offline"
+                    and -2 <= age <= get_settings().vehicle_agent_v1_status_stale_seconds
+                ):
+                    robot.last_seen_at = received
+                    robot.online_state = "ONLINE"
                 state["telemetry_online"] = robot.online_state == "ONLINE"
                 state["telemetry"] = data
                 state["telemetry_received_at"] = received.isoformat()

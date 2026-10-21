@@ -26,7 +26,7 @@ const cards = computed(() => {
             : '--'
       : '在线'
   return [
-    { label: '智能车状态', value: state, stale: !freshness.value.online },
+    { label: '智能车状态', value: state, stale: v1 ? freshness.value.statusStale : !freshness.value.online },
     {
       label: '电池',
       value: metric(v1 ? telemetry?.battery?.percentage : robot?.battery, '%'),

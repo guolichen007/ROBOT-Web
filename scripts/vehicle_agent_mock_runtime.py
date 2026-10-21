@@ -13,7 +13,7 @@ import os
 import queue
 import threading
 import time
-from datetime import UTC
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -147,6 +147,9 @@ class MockRuntime:
         self.messages.put((f"v1/robot/R001/{kind}", json.dumps(data).encode(), False))
 
     def pump(self):
+        self.redis.setex(
+            "service:vehicle-agent-adapter:heartbeat", 5, datetime.now(UTC).isoformat()
+        )
         for _ in range(500):
             try:
                 topic, payload, retained = self.messages.get_nowait()

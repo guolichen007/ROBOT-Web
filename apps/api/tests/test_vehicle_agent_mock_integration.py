@@ -143,7 +143,9 @@ def test_ack_failure_timeout_and_no_fake_success(runtime, client):
     runtime.redis.zadd("vehicle-agent:v1:pending", {correlation: 0})
     runtime.adapter.expire()
     runtime.pump()
-    assert command(client, pending)["ack_reason"] == "TIMEOUT"
+    assert command(client, pending)["ack_reason"] == "ACK_MISSING"
+    assert command(client, pending)["ack_status"] is None
+    assert command(client, pending)["ack_at"] is None
     assert command(client, pending)["lifecycle_status"] == "PUBLISHED_UNCONFIRMED"
     runtime.mock.failure = None
 

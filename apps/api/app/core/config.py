@@ -3,7 +3,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     command_ack_timeout_seconds: int = 3
     vehicle_agent_v1_downlink_enabled: bool = False
     vehicle_agent_v1_ack_timeout_seconds: int = Field(default=90, ge=1, le=240)
+    vehicle_agent_v1_status_stale_seconds: int = Field(default=8, ge=6)
+    vehicle_agent_v1_offline_seconds: int = Field(default=15, ge=10)
+    vehicle_agent_v1_adapter_max_age_seconds: int = Field(default=5, ge=1, le=15)
     event_stream_maxlen: int = 10_000
     media_ticket_seconds: int = 60
     max_mqtt_payload_bytes: int = 256 * 1024
@@ -83,6 +86,12 @@ class Settings(BaseSettings):
     protocol_schema: Path = Field(
         default=Path("/workspace/packages/protocol-schemas/firebot-message-1.2.schema.json")
     )
+
+    @model_validator(mode="after")
+    def validate_v1_liveness(self):
+        if self.vehicle_agent_v1_offline_seconds <= self.vehicle_agent_v1_status_stale_seconds:
+            raise ValueError("v1 offline threshold must exceed status stale threshold")
+        return self
 
     @property
     def origins(self) -> list[str]:

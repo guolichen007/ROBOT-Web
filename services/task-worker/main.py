@@ -211,7 +211,9 @@ def expire_sessions_and_commands(db, now: datetime) -> None:
             continue
         accepted = command.lifecycle_status == "ACK_ACCEPTED"
         command.lifecycle_status = "PUBLISHED_UNCONFIRMED"
-        command.ack_reason = "STATUS_CONFIRMATION_TIMEOUT" if accepted else "ACK_TIMEOUT"
+        command.ack_reason = (
+            "STATUS_CONFIRMATION_TIMEOUT" if accepted else "ACK_MISSING" if is_v1 else "ACK_TIMEOUT"
+        )
         command_timeout_total.inc()
         queue_event(db, "command.updated", serialize_model(command))
 

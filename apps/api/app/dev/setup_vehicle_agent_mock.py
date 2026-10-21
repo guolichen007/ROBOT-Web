@@ -3,7 +3,7 @@
 from sqlalchemy import select
 
 from app.core.config import get_settings
-from app.db.models import Robot, RobotCapability, RobotIntegrationProfile
+from app.db.models import Robot, RobotCapability, RobotIntegrationProfile, User
 from app.db.session import SessionLocal
 from services.vehicle_agent_v1 import COMMANDS, PROTOCOL
 
@@ -17,6 +17,9 @@ def main() -> None:
     ):
         raise RuntimeError("v1 fixture requires explicit mock-only test settings")
     with SessionLocal.begin() as db:
+        admin = db.scalar(select(User).where(User.username == settings.bootstrap_admin_username))
+        if admin:
+            admin.must_change_password = False
         robot = db.scalar(select(Robot).where(Robot.vehicle_id == "R001"))
         if not robot:
             raise RuntimeError("seed test robot first")
@@ -26,6 +29,8 @@ def main() -> None:
         integration = db.get(RobotIntegrationProfile, robot.id)
         assert integration is not None
         integration.source_kind = "MOCK"
+        integration.stale_seconds = settings.vehicle_agent_v1_status_stale_seconds
+        integration.offline_seconds = settings.vehicle_agent_v1_offline_seconds
         integration.control_contract_verified = True
         integration.ack_contract_verified = True
         integration.map_contract_verified = True

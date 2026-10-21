@@ -14,6 +14,7 @@ import paho.mqtt.client as mqtt
 from app.core.config import get_settings
 from app.core.events import get_redis
 from app.core.logging import configure_logging
+from redis.exceptions import WatchError
 
 from services.vehicle_agent_v1 import (
     PROTOCOL,
@@ -134,18 +135,40 @@ class Adapter:
             "data": {},
             "duration_ms": 0,
             "ts": datetime.now(UTC).isoformat(),
+            "ack_source": "transport_timeout",
         }
 
     def finish(self, entry: dict, ack: dict) -> None:
         correlation_key = key(entry["vehicle_id"], entry["msg_id"])
         normalized = {
             **ack,
+            "ack_source": ack.get("ack_source", "vehicle"),
             "command_id": entry["command_id"],
             "message_id": entry["message_id"],
             "target_boot_id": entry["target_boot_id"],
         }
-        if not self.redis.set(correlation_key + ":ack", json.dumps(normalized), ex=86400, nx=True):
-            normalized = json.loads(self.redis.get(correlation_key + ":ack"))
+        # First real vehicle ACK wins. A transport timeout is only an observation
+        # of missing ACK and can be replaced by that exact command's late ACK.
+        cache_key = correlation_key + ":ack"
+        while True:
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(cache_key)
+                    cached = pipe.get(cache_key)
+                    previous = json.loads(cached) if cached else None
+                    if previous and (
+                        previous.get("ack_source") == "vehicle"
+                        or normalized["ack_source"] == "transport_timeout"
+                    ):
+                        normalized = previous
+                        pipe.unwatch()
+                    else:
+                        pipe.multi()
+                        pipe.set(cache_key, json.dumps(normalized), ex=86400)
+                        pipe.execute()
+                    break
+                except WatchError:
+                    continue
         # Emit duplicates too: durable ingress correlation makes this harmless,
         # and it repairs a lost internal publish without re-executing the vehicle.
         self.emit(entry["vehicle_id"], "ack", normalized)

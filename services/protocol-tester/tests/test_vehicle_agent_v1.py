@@ -183,17 +183,22 @@ def test_five_minute_vehicle_dedup_window():
     assert mock.executions["start"] == 2
 
 
-def test_adapter_timeout_and_late_ack_cannot_replace_timeout():
+def test_adapter_timeout_and_late_real_ack_replaces_transport_timeout():
     payload = canonical()
     adapter, redis, published = adapter_for(payload)
     adapter.down("TEST_V1", payload)
     pending_key = next(iter(redis.zrange("vehicle-agent:v1:pending", 0, -1)))
     redis.zadd("vehicle-agent:v1:pending", {pending_key: time.time() - 1})
     adapter.expire()
-    assert json.loads(published[-1][1])["data"]["code"] == "TIMEOUT"
+    assert json.loads(published[-1][1])["data"]["ack_source"] == "transport_timeout"
     ack = MockAgent().execute(command_from_canonical(payload))
     adapter.process(topic("TEST_V1", "ack"), json.dumps(ack).encode())
-    assert json.loads(published[-1][1])["data"]["code"] == "TIMEOUT"
+    assert json.loads(published[-1][1])["data"]["code"] == "OK"
+    assert json.loads(published[-1][1])["data"]["ack_source"] == "vehicle"
+    adapter.finish(
+        json.loads(redis.get(pending_key)), adapter.timeout_ack(json.loads(redis.get(pending_key)))
+    )
+    assert json.loads(published[-1][1])["data"]["code"] == "OK"
 
 
 def test_downlink_disabled_binding_changed_and_payload_reuse_fail_closed():

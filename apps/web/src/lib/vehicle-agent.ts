@@ -31,14 +31,18 @@ export function agentFreshness(robot: RobotState | undefined, connected: boolean
   const online = connected && robot?.online_state === 'ONLINE'
   const received = robot?.agent_state?.telemetry_received_at || robot?.server_received_at
   const age = received ? now - Date.parse(received) : Infinity
+  const statusReceived = robot?.agent_state?.status_received_at
+  const statusAge = statusReceived ? now - Date.parse(statusReceived) : Infinity
+  const threshold = (robot?.integration?.stale_seconds ?? 8) * 1000
   return {
     online,
+    statusStale: !online || !Number.isFinite(statusAge) || statusAge < -2000 || statusAge > threshold,
     stale:
       !online ||
       (robot?.agent_protocol === 'VEHICLE_AGENT_V1' && robot.agent_state?.telemetry_online !== true) ||
       !Number.isFinite(age) ||
       age < -2000 ||
-      age > (robot?.integration?.stale_seconds ?? 3) * 1000,
+      age > threshold,
   }
 }
 

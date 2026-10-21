@@ -70,6 +70,20 @@ function controls() {
 }
 
 describe('vehicle agent HMI', () => {
+  it('marks chassis state stale when telemetry continues but status stops', () => {
+    const monitor = useMonitorStore()
+    monitor.robot!.agent_state!.status_received_at = new Date(Date.now() - 9000).toISOString()
+    monitor.robot!.agent_state!.status!.programs.chassis = true
+    monitor.robot!.agent_state!.telemetry_received_at = new Date().toISOString()
+    monitor.robot!.agent_state!.telemetry_online = true
+    const wrapper = mount(VehicleAgentKpis)
+    mounted.push(wrapper)
+    const state = wrapper.findAll('.hmi-kpi')[0]
+    expect(state.attributes('data-stale')).toBe('true')
+    expect(state.text()).toContain('已启动')
+    expect(state.text()).toContain('陈旧')
+    expect(wrapper.findAll('.hmi-kpi')[1].attributes('data-stale')).toBe('false')
+  })
   it('renders RGB and Thermal simultaneously with no bottom_ir or video tabs', () => {
     const wrapper = mount(VideoSurveillancePanel, {
       props: { streams: [] },
