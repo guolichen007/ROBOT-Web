@@ -1,0 +1,604 @@
+{
+  "version": "vehicle-agent-v1",
+  "topics": {
+    "cmd": {
+      "qos": 1,
+      "retain": false
+    },
+    "ack": {
+      "qos": 1,
+      "retain": false
+    },
+    "status": {
+      "qos": 1,
+      "retain": true
+    },
+    "telemetry": {
+      "qos": 0,
+      "retain": false
+    },
+    "availability": {
+      "qos": 1,
+      "retain": true
+    },
+    "event": {
+      "qos": 1,
+      "retain": false
+    }
+  },
+  "models": {
+    "WireCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "msg_id": {
+          "format": "uuid",
+          "title": "Msg Id",
+          "type": "string"
+        },
+        "command": {
+          "enum": [
+            "start",
+            "close",
+            "patrol",
+            "stop_patrol",
+            "resume_patrol",
+            "homing",
+            "navigate",
+            "stop_navigate",
+            "ping",
+            "get_status",
+            "get_telemetry"
+          ],
+          "title": "Command",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": true,
+          "title": "Params",
+          "type": "object"
+        },
+        "ts": {
+          "format": "date-time",
+          "title": "Ts",
+          "type": "string"
+        }
+      },
+      "required": [
+        "msg_id",
+        "command",
+        "ts"
+      ],
+      "title": "WireCommand",
+      "type": "object"
+    },
+    "Ack": {
+      "additionalProperties": false,
+      "properties": {
+        "msg_id": {
+          "format": "uuid",
+          "title": "Msg Id",
+          "type": "string"
+        },
+        "success": {
+          "title": "Success",
+          "type": "boolean"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        },
+        "data": {
+          "additionalProperties": true,
+          "title": "Data",
+          "type": "object"
+        },
+        "duration_ms": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Duration Ms",
+          "type": "integer"
+        },
+        "ts": {
+          "format": "date-time",
+          "title": "Ts",
+          "type": "string"
+        }
+      },
+      "required": [
+        "msg_id",
+        "success",
+        "code",
+        "ts"
+      ],
+      "title": "Ack",
+      "type": "object"
+    },
+    "Status": {
+      "$defs": {
+        "AgentTask": {
+          "additionalProperties": false,
+          "properties": {
+            "state": {
+              "enum": [
+                "idle",
+                "patrol",
+                "homing",
+                "spot"
+              ],
+              "title": "State",
+              "type": "string"
+            },
+            "patrol_next": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Patrol Next"
+            },
+            "patrol_count": {
+              "anyOf": [
+                {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Patrol Count"
+            },
+            "patrol_paused": {
+              "default": false,
+              "title": "Patrol Paused",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "title": "AgentTask",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "online": {
+          "title": "Online",
+          "type": "boolean"
+        },
+        "programs": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Programs",
+          "type": "object"
+        },
+        "task": {
+          "$ref": "#/$defs/AgentTask"
+        },
+        "ts": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ts"
+        }
+      },
+      "required": [
+        "online",
+        "task"
+      ],
+      "title": "Status",
+      "type": "object"
+    },
+    "Telemetry": {
+      "$defs": {
+        "Battery": {
+          "additionalProperties": false,
+          "properties": {
+            "percentage": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Percentage"
+            },
+            "voltage": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Voltage"
+            },
+            "current": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Current"
+            },
+            "temperature": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Temperature"
+            },
+            "capacity": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Capacity"
+            },
+            "charge_state": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Charge State"
+            }
+          },
+          "title": "Battery",
+          "type": "object"
+        },
+        "Pose": {
+          "additionalProperties": false,
+          "properties": {
+            "x": {
+              "title": "X",
+              "type": "number"
+            },
+            "y": {
+              "title": "Y",
+              "type": "number"
+            },
+            "yaw": {
+              "title": "Yaw",
+              "type": "number"
+            },
+            "frame_id": {
+              "title": "Frame Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "x",
+            "y",
+            "yaw",
+            "frame_id"
+          ],
+          "title": "Pose",
+          "type": "object"
+        },
+        "Smog": {
+          "additionalProperties": false,
+          "properties": {
+            "percentage": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Percentage"
+            },
+            "raw": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Raw"
+            },
+            "alarm": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Alarm"
+            }
+          },
+          "title": "Smog",
+          "type": "object"
+        },
+        "Thermal": {
+          "additionalProperties": false,
+          "properties": {
+            "max_temp": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Max Temp"
+            }
+          },
+          "title": "Thermal",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "properties": {
+        "pose": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Pose"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "battery": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Battery"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "smog": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Smog"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "thermal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Thermal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ts": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ts"
+        }
+      },
+      "title": "Telemetry",
+      "type": "object"
+    },
+    "CanonicalCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "const": "vehicle-agent-v1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "type": {
+          "const": "command",
+          "title": "Type",
+          "type": "string"
+        },
+        "message_id": {
+          "format": "uuid",
+          "title": "Message Id",
+          "type": "string"
+        },
+        "vehicle_id": {
+          "pattern": "^[A-Za-z0-9_-]{1,64}$",
+          "title": "Vehicle Id",
+          "type": "string"
+        },
+        "target_boot_id": {
+          "format": "uuid",
+          "title": "Target Boot Id",
+          "type": "string"
+        },
+        "command_id": {
+          "minLength": 1,
+          "title": "Command Id",
+          "type": "string"
+        },
+        "correlation_id": {
+          "format": "uuid",
+          "title": "Correlation Id",
+          "type": "string"
+        },
+        "task_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Task Id"
+        },
+        "lease_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lease Id"
+        },
+        "control_session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Control Session Id"
+        },
+        "issued_at": {
+          "format": "date-time",
+          "title": "Issued At",
+          "type": "string"
+        },
+        "expires_at": {
+          "format": "date-time",
+          "title": "Expires At",
+          "type": "string"
+        },
+        "ttl_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 240000,
+          "title": "Ttl Ms",
+          "type": "integer"
+        },
+        "priority": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Priority",
+          "type": "integer"
+        },
+        "source": {
+          "const": "WEB",
+          "title": "Source",
+          "type": "string"
+        },
+        "operator_id": {
+          "minLength": 1,
+          "title": "Operator Id",
+          "type": "string"
+        },
+        "cmd": {
+          "title": "Cmd",
+          "type": "string"
+        },
+        "params": {
+          "additionalProperties": true,
+          "title": "Params",
+          "type": "object"
+        }
+      },
+      "required": [
+        "schema_version",
+        "type",
+        "message_id",
+        "vehicle_id",
+        "target_boot_id",
+        "command_id",
+        "correlation_id",
+        "issued_at",
+        "expires_at",
+        "ttl_ms",
+        "priority",
+        "source",
+        "operator_id",
+        "cmd",
+        "params"
+      ],
+      "title": "CanonicalCommand",
+      "type": "object"
+    }
+  }
+}

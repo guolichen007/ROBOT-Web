@@ -44,4 +44,9 @@ def validator_for(schema_version: str) -> Draft202012Validator:
 def validate_message(payload: dict[str, Any]) -> None:
     """Validate a message against the schema matching its schema_version."""
     version = str(payload.get("schema_version") or SCHEMA_VERSION_1_2)
+    if version == "vehicle-agent-v1":
+        from services.vehicle_agent_v1 import command_from_canonical
+
+        command_from_canonical(payload)
+        return
     validator_for(version).validate(payload)

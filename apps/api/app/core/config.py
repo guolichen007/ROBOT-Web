@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     audit_retention_days: int = 365
     manual_lease_ttl_seconds: int = 5
     command_ack_timeout_seconds: int = 3
+    vehicle_agent_v1_downlink_enabled: bool = False
+    vehicle_agent_v1_ack_timeout_seconds: int = Field(default=90, ge=1, le=240)
     event_stream_maxlen: int = 10_000
     media_ticket_seconds: int = 60
     max_mqtt_payload_bytes: int = 256 * 1024

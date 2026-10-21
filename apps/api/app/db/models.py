@@ -219,6 +219,8 @@ class Robot(Base):
     __tablename__ = "robots"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
     vehicle_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    agent_protocol: Mapped[str] = mapped_column(String(32), default="CANONICAL_MQTT")
+    agent_state_json: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict)
     site_id: Mapped[str] = mapped_column(String(36), ForeignKey("sites.id"), index=True)
     name: Mapped[str] = mapped_column(String(128))
     model: Mapped[str] = mapped_column(String(128), default="UNKNOWN")
@@ -647,6 +649,7 @@ class Command(Base):
     ack_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ack_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
     ack_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ack_payload_json: Mapped[dict[str, Any] | None] = mapped_column(JsonType, nullable=True)
     terminal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
