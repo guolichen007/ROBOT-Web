@@ -1,13 +1,15 @@
-#!/usr/bin/env sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
 ENV_FILE="${SERVER_ENV_FILE:-.env.server}"
 SECRETS_DIR="${SECRETS_DIR:-secrets}"
 BACKUP_PATH="${BACKUP_PATH:-backups}"
 errors=0
+COMPOSE=(docker compose --env-file "$ENV_FILE" -f docker-compose.server.yml)
+source scripts/vehicle-agent-rollout.sh
 
 fail() { printf 'ERROR %s\n' "$1" >&2; errors=$((errors + 1)); }
-for command in docker git awk grep sed; do command -v "$command" >/dev/null 2>&1 || fail "missing command: $command"; done
+for command in docker git awk grep sed python3; do command -v "$command" >/dev/null 2>&1 || fail "missing command: $command"; done
 docker info >/dev/null 2>&1 || fail 'Docker Engine unavailable'
 docker compose version >/dev/null 2>&1 || fail 'Docker Compose plugin unavailable'
 [ -f "$ENV_FILE" ] || fail "missing SERVER env: $ENV_FILE"
@@ -70,6 +72,14 @@ if command -v ss >/dev/null 2>&1 && [ "${ALLOW_OCCUPIED_PORTS:-false}" != true ]
   done
 fi
 docker compose --env-file "$ENV_FILE" -f docker-compose.server.yml config --quiet || fail 'SERVER compose config failed'
+
+V1_REQUIRED="$(v1_required)" || { fail 'cannot determine v1 rollout requirement'; V1_REQUIRED=true; }
+if [ "$V1_REQUIRED" = true ]; then
+  python3 scripts/check_vehicle_agent_acl.py "$SECRETS_DIR/mosquitto/acl" || fail 'v1 source ACL missing required permissions'
+  if [ -n "$("${COMPOSE[@]}" ps -q mosquitto 2>/dev/null)" ]; then
+    v1_acl_gate || fail 'v1 active broker ACL missing required permissions'
+  fi
+fi
 
 [ "$errors" -eq 0 ] || { printf 'SERVER_PREFLIGHT=FAIL count=%s\n' "$errors" >&2; exit 1; }
 printf 'SERVER_PREFLIGHT=PASS cpu=%s memory_kib=%s disk_free_kib=%s\n' "$cpu" "$memory_kib" "$disk_kib"

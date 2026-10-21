@@ -115,6 +115,9 @@ if [ "${1:-}" = "--self-test" ]; then
   _check_required_fail API_HEALTH
   _check_required_fail MQTT_INGRESS_HEALTH
   _check_required_fail COMMAND_DISPATCHER_HEALTH
+  _check_required_fail VEHICLE_AGENT_ADAPTER_HEARTBEAT
+  _check_required_fail MOSQUITTO_V1_ACL
+  _check_required_fail ADAPTER_IMAGE_SHA_MATCH
 
   # 全过 → overall PASS
   verify_failed=0
@@ -135,6 +138,14 @@ if [ "${1:-}" = "--self-test" ]; then
 fi
 
 echo "== Firebot SERVER verify =="
+source scripts/vehicle-agent-rollout.sh
+V1_REQUIRED="$(v1_required)" || { echo 'V1_ROLLOUT_REQUIREMENT=FAIL'; verify_failed=1; V1_REQUIRED=true; }
+if [ "$V1_REQUIRED" = true ]; then
+  gate_check VEHICLE_AGENT_ADAPTER_HEALTH service_healthy vehicle-agent-adapter
+  gate_check VEHICLE_AGENT_ADAPTER_HEARTBEAT "${COMPOSE[@]}" exec -T api python -c \
+    'from app.core.vehicle_agent_health import adapter_healthy; raise SystemExit(0 if adapter_healthy() else 1)'
+  gate_check MOSQUITTO_V1_ACL v1_acl_gate
+fi
 echo "SERVER_SHA=$(git rev-parse HEAD)"
 
 # 1) 核心容器健康概览（只覆盖 required 五核心；optional ros-compat 不参与本概览，避免误导性 CHECK）
@@ -231,6 +242,12 @@ INGRESS_IMAGE_REVISION="$(image_revision mqtt-ingress)"
 DISPATCHER_IMAGE_REVISION="$(image_revision command-dispatcher)"
 WORKER_IMAGE_REVISION="$(image_revision task-worker)"
 WEB_IMAGE_REVISION="$(image_revision web)"
+ADAPTER_IMAGE_REVISION="$(image_revision vehicle-agent-adapter)"
+echo "ADAPTER_IMAGE_REVISION=$ADAPTER_IMAGE_REVISION"
+if [ "$V1_REQUIRED" = true ] && [ -n "${VERIFY_SHA:-}" ] && [ "$ADAPTER_IMAGE_REVISION" != "$VERIFY_SHA" ]; then
+  echo 'ADAPTER_IMAGE_SHA_MATCH=FAIL'
+  verify_failed=1
+fi
 echo "API_IMAGE_REVISION=$API_IMAGE_REVISION"
 echo "INGRESS_IMAGE_REVISION=$INGRESS_IMAGE_REVISION"
 echo "DISPATCHER_IMAGE_REVISION=$DISPATCHER_IMAGE_REVISION"

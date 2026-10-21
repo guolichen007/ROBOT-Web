@@ -24,6 +24,13 @@ CURRENT_JSON="$DEPLOY_ROOT/current.json"
 
 CONTROL_PLANE=(api mqtt-ingress command-dispatcher task-worker)
 APP_ALL=(api mqtt-ingress command-dispatcher task-worker web)
+source scripts/vehicle-agent-rollout.sh
+V1_REQUIRED="$(v1_required)" || { echo 'ERROR: cannot determine v1 rollout requirement' >&2; exit 1; }
+if [ "$V1_REQUIRED" = true ]; then
+  COMPOSE+=(--profile vehicle-agent)
+  CONTROL_PLANE+=(vehicle-agent-adapter)
+  APP_ALL+=(vehicle-agent-adapter)
+fi
 
 # ---- 版本 SSOT ----
 current_sha() {
@@ -126,7 +133,7 @@ manifest = {
     "migration_after": mig_after,
     "containers": {},
 }
-for svc in ("api", "mqtt-ingress", "command-dispatcher", "task-worker", "web"):
+for svc in ("api", "mqtt-ingress", "command-dispatcher", "task-worker", "web", "vehicle-agent-adapter"):
     cid = cid_of(svc)
     if cid:
         manifest["containers"][svc] = {
@@ -225,6 +232,9 @@ deploy_scope() {
   shift
   require_sha
   local prev mig_before
+  if [ "$V1_REQUIRED" = true ]; then
+    v1_acl_gate || { echo 'ERROR: active broker v1 ACL gate failed' >&2; exit 1; }
+  fi
   prev="$(current_sha)"          # 部署前 current → 变成 previous
   # migration_before 必须在整个 server deploy 开始时就记录（firebotctl 传 DEPLOY_MIGRATION_BEFORE），
   # 不能等 migrate 之后才取（否则会误记 migration 后的 revision）。
@@ -273,8 +283,24 @@ do_rollback() {
     exit 1
   fi
   echo "  回滚到 previous SHA: $prev"
+  local old_current mig_before
+  old_current="$(current_sha)"
+  mig_before="$(migration_revision)"
   git checkout "$prev"
-  TARGET_SHA="$prev" "$0" all-app
+  # Keep this invocation's service set when rolling back to an older script.
+  # An older all-app implementation may not know about the adapter yet.
+  TARGET_SHA="$prev"
+  PY_IMAGE="firebot-python:$prev"
+  WEB_IMAGE="firebot-web:$prev"
+  recreate "${APP_ALL[@]}"
+  for svc in "${APP_ALL[@]}"; do
+    cid="$(get_service_container_id "$svc")"
+    revision="$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$cid")"
+    [ "$revision" = "$prev" ] || { echo "ROLLBACK_IMAGE_SHA_MATCH=FAIL service=$svc" >&2; exit 1; }
+  done
+  write_ssot "$prev" "$old_current"
+  write_manifest rollback "$old_current" "$mig_before"
+  echo "ROLLBACK=PASS sha=$prev"
 }
 
 case "${1:-}" in
@@ -286,6 +312,9 @@ case "${1:-}" in
   current-revision) echo "$(migration_revision)" ;;
   api) deploy_scope "api" api ;;
   worker) deploy_scope "worker" task-worker ;;
+  adapter)
+    [ "$V1_REQUIRED" = true ] || { echo 'ERROR: set VEHICLE_AGENT_V1_ROLLOUT=true for first adapter rollout' >&2; exit 1; }
+    deploy_scope "adapter" vehicle-agent-adapter ;;
   web) deploy_scope "web" web ;;
   control-plane) deploy_scope "control-plane" "${CONTROL_PLANE[@]}" ;;
   all-app) deploy_scope "all-app" "${APP_ALL[@]}" ;;

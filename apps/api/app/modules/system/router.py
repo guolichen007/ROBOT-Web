@@ -107,6 +107,19 @@ def readiness_payload(db: DbSession) -> dict:
         "last_heartbeat": ros_compat_heartbeat,
         "required": ros_compat_required,
     }
+    from app.core.vehicle_agent_health import adapter_healthy
+
+    v1_required = settings.vehicle_agent_v1_downlink_enabled or bool(
+        db.scalar(
+            select(Robot.id)
+            .where(Robot.enabled.is_(True), Robot.agent_protocol == "VEHICLE_AGENT_V1")
+            .limit(1)
+        )
+    )
+    checks["vehicle_agent_adapter"] = {
+        "ok": adapter_healthy() if checks["redis"]["ok"] else False,
+        "required": v1_required,
+    }
     worker_heartbeat = (
         get_redis().get("service:task-worker:heartbeat")
         if checks.get("redis", {}).get("ok")
@@ -141,6 +154,8 @@ def readiness_payload(db: DbSession) -> dict:
     ok = True
     for name, item in checks.items():
         if name == "ros_compat_adapter" and not ros_compat_required:
+            continue
+        if name == "vehicle_agent_adapter" and not v1_required:
             continue
         if not item["ok"]:
             ok = False

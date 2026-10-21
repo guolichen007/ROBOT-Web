@@ -39,6 +39,34 @@ $requiredSecrets = @(
     'mosquitto/certs/server.key','mosquitto/passwords','mosquitto/acl','nginx/server.crt','nginx/server.key'
 )
 foreach ($relative in $requiredSecrets) { Require-File (Join-Path $SecretsDir $relative) "secret" }
+$v1Required = $env:VEHICLE_AGENT_V1_ROLLOUT -eq 'true' -or $env:VEHICLE_AGENT_V1_DOWNLINK_ENABLED -eq 'true' -or $envText -match '(?m)^VEHICLE_AGENT_V1_(ROLLOUT|DOWNLINK_ENABLED)=true$'
+$apiId = docker compose --env-file $EnvFile -f docker-compose.server.yml ps -q api 2>$null
+if ($LASTEXITCODE -ne 0) { $errors.Add('Cannot determine v1 rollout requirement') }
+if ($apiId) {
+    $query = @'
+from app.core.config import get_settings
+from app.db.session import SessionLocal
+from app.db.models import Robot
+from sqlalchemy import select
+with SessionLocal() as db:
+    required = get_settings().vehicle_agent_v1_downlink_enabled or bool(db.scalar(select(Robot.id).where(Robot.enabled.is_(True), Robot.agent_protocol == "VEHICLE_AGENT_V1").limit(1)))
+print("true" if required else "false")
+'@
+    $dbRequired = docker compose --env-file $EnvFile -f docker-compose.server.yml exec -T api python -c $query 2>$null
+    if ($LASTEXITCODE -ne 0 -or $dbRequired -notin @('true','false')) { $errors.Add('Cannot determine DB v1 rollout requirement') }
+    if ($dbRequired -eq 'true') { $v1Required = $true }
+}
+if ($v1Required) {
+    python scripts/check_vehicle_agent_acl.py (Join-Path $SecretsDir 'mosquitto/acl')
+    if ($LASTEXITCODE -ne 0) { $errors.Add('V1 source ACL gate failed') }
+    $brokerId = docker compose --env-file $EnvFile -f docker-compose.server.yml ps -q mosquitto 2>$null
+    if ($brokerId) {
+        $activeAcl = docker compose --env-file $EnvFile -f docker-compose.server.yml exec -T mosquitto cat /mosquitto/secure/acl 2>$null
+        if ($LASTEXITCODE -ne 0) { $errors.Add('V1 active ACL unreadable') }
+        $activeAcl | python scripts/check_vehicle_agent_acl.py -
+        if ($LASTEXITCODE -ne 0) { $errors.Add('V1 active broker ACL gate failed') }
+    }
+}
 if (-not (Test-Path -LiteralPath $BackupPath)) { New-Item -ItemType Directory -Path $BackupPath | Out-Null }
 $probe = Join-Path $BackupPath '.firebot-write-test'
 try { [IO.File]::WriteAllText($probe, 'ok'); Remove-Item -LiteralPath $probe -Force } catch { $errors.Add("Backup path is not writable: $BackupPath") }

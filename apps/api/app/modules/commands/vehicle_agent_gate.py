@@ -3,6 +3,7 @@
 from datetime import UTC, datetime, timedelta
 
 from app.core.config import get_settings
+from app.core.vehicle_agent_health import adapter_healthy
 from app.db.models import Robot, RobotCapability, RobotIntegrationProfile
 from services.vehicle_agent_v1 import COMMANDS, PROTOCOL, program_ready
 
@@ -16,6 +17,8 @@ def gate_reason(db, robot: Robot, action: str, now: datetime | None = None) -> s
         return "VEHICLE_AGENT_DOWNLINK_DISABLED"
     if not robot.enabled or robot.online_state != "ONLINE":
         return "ROBOT_OFFLINE"
+    if not adapter_healthy():
+        return "VEHICLE_AGENT_ADAPTER_UNAVAILABLE"
     integration = db.get(RobotIntegrationProfile, robot.id)
     if not integration or integration.source_kind not in {PROTOCOL, "MOCK"}:
         return "INTEGRATION_PROFILE_MISSING"
