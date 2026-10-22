@@ -165,6 +165,7 @@ jobs:
           if-no-files-found: error
           retention-days: 90
       - run: python scripts/check_server_surface.py
+      - run: python scripts/check_test_image_isolation.py
 
   containers:
     runs-on: ubuntu-24.04
@@ -176,7 +177,7 @@ jobs:
       - run: SERVER_ENV_FILE=.env.server.example docker compose --env-file .env.server.example -f docker-compose.server.yml config --quiet
       - run: docker build -f infra/docker/python.Dockerfile -t firebot-api:ci .
       - run: docker build -f apps/web/Dockerfile -t firebot-web:ci .
-      - run: docker build -f infra/docker/mediamtx.Dockerfile -t firebot-mediamtx:ci .
+      - run: docker build -f infra/docker/mediamtx.Dockerfile -t firebot-test-mediamtx:ci .
       - run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/aquasecurity/trivy:0.59.1 image --db-repository ghcr.io/aquasecurity/trivy-db:2 --exit-code 1 --severity CRITICAL --ignore-unfixed firebot-api:ci
       - run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/aquasecurity/trivy:0.59.1 image --db-repository ghcr.io/aquasecurity/trivy-db:2 --exit-code 1 --severity CRITICAL --ignore-unfixed firebot-web:ci
 

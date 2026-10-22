@@ -57,7 +57,7 @@ services:
       retries: 30
 
   mediamtx:
-    image: firebot-mediamtx:1.18.2
+    image: ${FIREBOT_TEST_MEDIAMTX_IMAGE:-firebot-test-mediamtx:1.18.2}
     build:
       context: .
       dockerfile: infra/docker/mediamtx.Dockerfile
