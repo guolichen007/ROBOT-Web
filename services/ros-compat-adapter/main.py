@@ -16,6 +16,8 @@ from app.core.events import get_redis
 from app.core.logging import configure_logging
 from app.db.models import Robot, RobotExternalAlias
 from app.db.session import SessionLocal
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from sqlalchemy import select
 
 from services.protocol import validate_message
@@ -460,12 +462,20 @@ class Adapter:
             logger.warning("ROS native payload rejected on %s", message.topic, exc_info=True)
 
 
+def disabled_heartbeat_loop() -> None:
+    while True:
+        try:
+            redis.setex("service:ros-compat-adapter:heartbeat", 5, "DISABLED")
+        except (RedisTimeoutError, RedisConnectionError):
+            logger.warning("Disabled ROS compatibility heartbeat failed; retrying", exc_info=True)
+        time.sleep(2)
+
+
 def main() -> None:
     if not ENABLED:
         logger.info("ROS compatibility mode is disabled")
-        while True:
-            redis.setex("service:ros-compat-adapter:heartbeat", 5, "DISABLED")
-            time.sleep(2)
+        disabled_heartbeat_loop()
+        return
     adapter = Adapter()
 
     def heartbeat() -> None:
