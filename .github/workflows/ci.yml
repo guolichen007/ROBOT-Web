@@ -75,6 +75,14 @@ jobs:
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
       - run: npm ci --ignore-scripts
+      - name: Audit production Critical and retain full audit
+        run: node ../../scripts/audit_web_dependencies.cjs
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: npm-audit-classification
+          if-no-files-found: error
+          path: artifacts/npm-audit-*.json
       - run: npm run lint
       - run: npm run format:check
       - run: npm run typecheck
