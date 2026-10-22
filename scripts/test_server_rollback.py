@@ -73,6 +73,8 @@ git() {
   esac
 }
 source scripts/server-deploy.sh
+DEPLOY_ROOT="$PWD/deployments"
+CURRENT_JSON="$DEPLOY_ROOT/current.json"
 v1_required() { echo true; }
 init_deploy_context
 require_sha() { :; }

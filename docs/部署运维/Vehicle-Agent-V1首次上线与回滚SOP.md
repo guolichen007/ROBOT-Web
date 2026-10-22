@@ -70,6 +70,10 @@ FIRST_CANARY_LEGACY_ROLLBACK_MANIFEST 只允许第一次 canary 显式配置，�
 
 legacy → clean A 成功，随后 clean A → clean B 成功时，previous_runtime_kind 自动变为 exact_sha，previous_sha=A，移除 previous legacy 字段。此后 B → A 使用普通 exact-SHA 回滚，不再依赖首次 snapshot 参数。
 
+发布和显式回滚均在运行态变更前，对 SSOT 目录及本次 manifest 目标目录执行 create/fsync/atomic replace 探测；不改写现有 SSOT 或 manifest。探测失败不构建、不重建。容器切换只是 runtime mutation，只有 SSOT 和原子 manifest 都落盘成功才提交发布成功。
+
+任一终态落盘失败均按强一致策略补偿：输出 FINALIZE_SSOT=FAIL 或 FINALIZE_MANIFEST=FAIL，统一恢复部署前 runtime（legacy/exact 都使用同一选择入口），再修复 current=部署前 runtime、previous=部署前 previous。整体命令仍失败，不得因补偿成功报告发布成功。RUNTIME_COMPENSATION=PASS 只证明运行态已恢复；SSOT_REPAIR=FAIL 或运行态恢复失败时输出 HIGH_PRIORITY_MANUAL_INTERVENTION=YES，保留失败证据并人工核对运行态和 SSOT，不将状态文件当成健康证明。该补偿不执行 DB downgrade/restore 或 ACL 修改。
+
 应用回滚不会自动降级数据库，也不会自动撤销 ACL；这两项必须使用经过审核的兼容和恢复计划。确认无 v1 启用车辆后才可移除 rollout/profile。若 adapter unhealthy 或 ACL 校验失败，发布判定必须 FAIL。
 
 ## all-app 稳定后的 ros-compat 维护刷新

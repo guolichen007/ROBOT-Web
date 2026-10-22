@@ -47,12 +47,16 @@ def write(path, current, previous):
         else:
             raise ValueError("unknown runtime kind")
         runtime(state, prefix)
+    atomic_write(path, state)
+
+
+def atomic_write(path, data):
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=".current-", dir=target.parent)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            json.dump(state, stream, ensure_ascii=False, indent=2)
+            json.dump(data, stream, ensure_ascii=False, indent=2)
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
@@ -62,12 +66,38 @@ def write(path, current, previous):
             Path(temporary).unlink()
 
 
+def probe_write(*paths):
+    """Exercise create/fsync/replace in each actual parent without touching its target."""
+    for path in paths:
+        target = Path(path)
+        if not target.is_absolute() or (target.exists() and not target.is_file()):
+            raise ValueError("invalid finalization destination")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        probes = []
+        try:
+            for _ in range(2):
+                fd, temporary = tempfile.mkstemp(prefix=".write-probe-", dir=target.parent)
+                probes.append(Path(temporary))
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(b"finalization-probe\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+            os.replace(probes[0], probes[1])
+        finally:
+            for temporary in probes:
+                temporary.unlink(missing_ok=True)
+
+
 def main():
     command, path, *args = sys.argv[1:]
     if command == "read":
         print(json.dumps(runtime(load(path), args[0])))
     elif command == "write":
         write(path, *map(json.loads, args))
+    elif command == "write-json":
+        atomic_write(path, json.load(sys.stdin))
+    elif command == "probe-write":
+        probe_write(path, *args)
     elif command == "canary":
         # An explicit exact_sha field marks an already governed clean release.
         # The first-cutover override cannot be reused to hide that release.

@@ -9,6 +9,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from deployment_state import atomic_write, probe_write
 
 ROOT = Path(__file__).resolve().parents[1]
 PROVENANCE = "584efcfda60b8d39c516a9939bc0481609fc6f3c"
@@ -103,6 +106,10 @@ def execute(args):
             out = str(container["running"]).lower() + " " + container["health"]
         elif "org.opencontainers.image.revision" in template:
             out = container["revision"]
+        elif template == "{{.Image}}":
+            out = container["image_id"]
+        elif "StartedAt" in template:
+            out = "2026-10-22T00:00:00Z"
         else:
             return 1, ""
     else:
@@ -140,12 +147,32 @@ except (OSError, ValueError, KeyError, TypeError):
     sys.exit(1)
 """
 
+MANIFEST_WRAPPER = r"""
+import subprocess
+import sys
+from docker_double import execute
+
+def fake_output(args, **kwargs):
+    if args[0] == "git":
+        return "feature/vehicle-agent-hmi-v1"
+    assert args[0] == "docker"
+    code, output = execute(args[1:])
+    if code:
+        raise subprocess.CalledProcessError(code, args)
+    return output
+
+subprocess.check_output = fake_output
+exec(compile(sys.stdin.read(), "manifest-generator", "exec"))
+"""
+
 HARNESS = r"""
 set -euo pipefail
 if command -v cygpath >/dev/null; then TEST_PYTHON="$(cygpath -u "$TEST_PYTHON")"; fi
 python3() {
   if [ "${1:-}" = scripts/legacy_runtime.py ]; then
     shift; command "$TEST_PYTHON" legacy_wrapper.py "$@"
+  elif [ "${1:-}" = - ] && [ "${USE_REAL_MANIFEST:-0}" = 1 ]; then
+    shift; command "$TEST_PYTHON" manifest_wrapper.py "$@"
   else command "$TEST_PYTHON" "$@"; fi
 }
 trace() { printf '%s\n' "$*" >> trace.log; }
@@ -163,11 +190,31 @@ git() {
 }
 source scripts/server-deploy.sh
 CURRENT_JSON="$TEST_CURRENT_JSON"
+DEPLOY_ROOT="$TEST_DEPLOY_ROOT"
 v1_required() { echo true; }
 init_deploy_context
 v1_acl_gate() { trace ACL_READ_ONLY; }
 migration_revision() { trace DB_READ_ONLY; echo 20261021_0009; }
-write_manifest() { trace "MANIFEST $*"; }
+eval "$(declare -f write_manifest | sed '1s/write_manifest/actual_write_manifest/')"
+write_manifest() {
+  trace "MANIFEST $*"
+  [ "${FAIL_MANIFEST:-0}" = 0 ] || return 1
+  if [ "${USE_REAL_MANIFEST:-0}" = 1 ]; then actual_write_manifest "$@"; fi
+}
+eval "$(declare -f deployment_state | sed '1s/deployment_state/actual_deployment_state/')"
+deployment_state() {
+  if [ "$1" = write-json ] && [ "${FAIL_MANIFEST_ATOMIC:-0}" = 1 ]; then return 1; fi
+  if [ "$1" = write ]; then
+    local attempt=0
+    [ ! -f ssot-attempt ] || attempt="$(cat ssot-attempt)"
+    attempt=$((attempt + 1)); printf '%s' "$attempt" > ssot-attempt
+    trace "SSOT_ATTEMPT $attempt"
+    if [ "${FAIL_SSOT:-}" = always ] || { [ "${FAIL_SSOT:-}" = once ] && [ "$attempt" = 1 ]; }; then
+      return 1
+    fi
+  fi
+  actual_deployment_state "$@"
+}
 release_b() {
   unset FIRST_CANARY_LEGACY_ROLLBACK_MANIFEST
   TARGET_SHA="$SHA_B"; PY_IMAGE="firebot-python:$TARGET_SHA"; WEB_IMAGE="firebot-web:$TARGET_SHA"
@@ -234,7 +281,11 @@ class CutoverTests(unittest.TestCase):
                 }
             )
         )
-        for name, content in (("docker_double.py", DOUBLE), ("legacy_wrapper.py", WRAPPER)):
+        for name, content in (
+            ("docker_double.py", DOUBLE),
+            ("legacy_wrapper.py", WRAPPER),
+            ("manifest_wrapper.py", MANIFEST_WRAPPER),
+        ):
             (self.work / name).write_text(content, encoding="utf-8", newline="\n")
 
     def tearDown(self):
@@ -261,6 +312,7 @@ class CutoverTests(unittest.TestCase):
                 **os.environ,
                 "TEST_ROOT": str(self.work),
                 "TEST_CURRENT_JSON": str(self.work / "current.json"),
+                "TEST_DEPLOY_ROOT": str(self.work / "deployments"),
                 "TEST_PYTHON": sys.executable,
                 "TARGET_SHA": A,
                 "SHA_B": B,
@@ -307,6 +359,157 @@ class CutoverTests(unittest.TestCase):
         result = self.run_commands('deploy_scope all-app "${APP_ALL[@]}"\n', FAIL_BUILD="1")
         self.assertEqual(result.returncode, 1, self.output)
         self.assertIn("AUTO_ROLLBACK_LEGACY=PASS", self.output)
+
+    def assert_finalize_failure(self, result, step, kind):
+        self.assertNotEqual(result.returncode, 0, self.output)
+        self.assertIn(f"FINALIZE_{step}=FAIL", self.output)
+        self.assertIn("RUNTIME_COMPENSATION=PASS", self.output)
+        self.assertIn("SSOT_REPAIR=PASS", self.output)
+        self.assertNotIn("DEPLOY=PASS", self.output)
+        state = self.state()
+        self.assertEqual(state["current_runtime_kind"], kind)
+        if kind == "legacy_snapshot":
+            self.assertEqual(state["current_runtime_manifest"], str(self.manifest_path))
+            self.assertEqual(state["current_git_provenance_sha"], PROVENANCE)
+            self.assertEqual(state["previous_sha"], "UNKNOWN")
+            self.assertNotIn("git checkout", self.trace)
+            expected = self.manifest["services"]
+        else:
+            self.assertEqual(state["current_sha"], B)
+            self.assertEqual(state["previous_sha"], A)
+            self.assertIn("git checkout " + B, self.trace)
+            expected = {svc: {"revision": B} for svc in APP_SERVICES if svc != "ros-compat-adapter"}
+        containers = json.loads((self.work / "docker.json").read_text())["containers"]
+        for service, item in expected.items():
+            if kind == "legacy_snapshot":
+                self.assertEqual(containers[service]["image_id"], item["expected_image_id"])
+            else:
+                self.assertEqual(containers[service]["revision"], item["revision"])
+
+    def test_legacy_ssot_finalize_failure_compensates_and_repairs(self):
+        result = self.run_commands('deploy_scope all-app "${APP_ALL[@]}"\n', FAIL_SSOT="once")
+        self.assert_finalize_failure(result, "SSOT", "legacy_snapshot")
+        self.assertEqual((self.work / "ssot-attempt").read_text(), "2")
+        print("FINALIZE_SSOT_FAILURE_COMPENSATED=PASS FINALIZE_LEGACY_COMPENSATION=PASS")
+
+    def test_legacy_manifest_finalize_failure_compensates_and_repairs(self):
+        result = self.run_commands('deploy_scope all-app "${APP_ALL[@]}"\n', FAIL_MANIFEST="1")
+        self.assert_finalize_failure(result, "MANIFEST", "legacy_snapshot")
+        print("FINALIZE_MANIFEST_FAILURE_COMPENSATED=PASS")
+
+    def test_exact_ssot_finalize_failure_compensates_and_repairs(self):
+        (self.work / "current.json").write_text(json.dumps({"current_sha": B, "previous_sha": A}))
+        result = self.run_commands(
+            'unset FIRST_CANARY_LEGACY_ROLLBACK_MANIFEST\ndeploy_scope all-app "${APP_ALL[@]}"\n',
+            FAIL_SSOT="once",
+        )
+        self.assert_finalize_failure(result, "SSOT", "exact_sha")
+        print("FINALIZE_EXACT_SHA_COMPENSATION=PASS")
+
+    def test_exact_manifest_finalize_failure_compensates_and_repairs(self):
+        (self.work / "current.json").write_text(json.dumps({"current_sha": B, "previous_sha": A}))
+        result = self.run_commands(
+            'unset FIRST_CANARY_LEGACY_ROLLBACK_MANIFEST\ndeploy_scope all-app "${APP_ALL[@]}"\n',
+            FAIL_MANIFEST="1",
+        )
+        self.assert_finalize_failure(result, "MANIFEST", "exact_sha")
+
+    def test_ssot_repair_failure_requires_manual_intervention(self):
+        result = self.run_commands('deploy_scope all-app "${APP_ALL[@]}"\n', FAIL_SSOT="always")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("RUNTIME_COMPENSATION=PASS", self.output)
+        self.assertIn("SSOT_REPAIR=FAIL", self.output)
+        self.assertIn("HIGH_PRIORITY_MANUAL_INTERVENTION=YES", self.output)
+        self.assertNotIn("DEPLOY=PASS", self.output)
+
+    def test_runtime_compensation_failure_never_repairs_ssot_to_false_old_runtime(self):
+        result = self.run_commands(
+            'deploy_scope all-app "${APP_ALL[@]}"\n', FAIL_MANIFEST="1", FAIL_STOP="1"
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("RUNTIME_COMPENSATION=FAIL", self.output)
+        self.assertIn("HIGH_PRIORITY_MANUAL_INTERVENTION=YES", self.output)
+        self.assertNotIn("SSOT_REPAIR=PASS", self.output)
+        self.assertEqual(self.state()["current_sha"], A)
+
+    def test_explicit_rollback_manifest_failure_compensates_to_old_current(self):
+        result = self.run_commands(
+            'deploy_scope all-app "${APP_ALL[@]}"\nexport FAIL_MANIFEST=1\ndo_rollback\n'
+        )
+        self.assertNotEqual(result.returncode, 0, self.output)
+        self.assertIn("FINALIZE_MANIFEST=FAIL ROLLBACK=FAIL", self.output)
+        self.assertIn("RUNTIME_COMPENSATION=PASS", self.output)
+        self.assertIn("SSOT_REPAIR=PASS", self.output)
+        self.assertNotIn("ROLLBACK=PASS", self.output)
+        self.assertEqual(self.state()["current_sha"], A)
+        self.assertEqual(self.state()["previous_runtime_kind"], "legacy_snapshot")
+
+    def test_explicit_rollback_ssot_failure_compensates_to_old_current(self):
+        result = self.run_commands(
+            'deploy_scope all-app "${APP_ALL[@]}"\nrm ssot-attempt\n'
+            "export FAIL_SSOT=once\ndo_rollback\n"
+        )
+        self.assertNotEqual(result.returncode, 0, self.output)
+        self.assertIn("FINALIZE_SSOT=FAIL ROLLBACK=FAIL", self.output)
+        self.assertIn("RUNTIME_COMPENSATION=PASS", self.output)
+        self.assertIn("SSOT_REPAIR=PASS", self.output)
+        self.assertNotIn("ROLLBACK=PASS", self.output)
+        self.assertEqual(self.state()["current_sha"], A)
+
+    def test_writable_probe_failure_blocks_build_and_recreate(self):
+        blocked = self.work / "not-a-directory"
+        blocked.write_text("cannot create manifest directory below a file")
+        original = (self.work / "current.json").read_bytes()
+        result = self.run_commands(
+            'deploy_scope all-app "${APP_ALL[@]}"\n', TEST_DEPLOY_ROOT=str(blocked)
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("FINALIZATION_PREFLIGHT=FAIL", self.output)
+        self.assert_no_mutation()
+        self.assertEqual((self.work / "current.json").read_bytes(), original)
+        print("FINALIZATION_PREFLIGHT_FAIL_CLOSED=PASS")
+
+    def test_probe_preserves_existing_targets_and_cleans_temporary_files(self):
+        ssot = self.work / "current.json"
+        manifest = self.work / "manifest.json"
+        before = (ssot.read_bytes(), manifest.read_bytes())
+        probe_write(str(ssot), str(manifest))
+        self.assertEqual((ssot.read_bytes(), manifest.read_bytes()), before)
+        self.assertEqual(list(self.work.glob(".write-probe-*")), [])
+
+    def test_atomic_manifest_failure_leaves_valid_previous_json(self):
+        target = self.work / "release-manifest.json"
+        target.write_text('{"previous":true}\n')
+        before = target.read_bytes()
+        with patch("deployment_state.os.replace", side_effect=OSError("disk failure")):
+            with self.assertRaises(OSError):
+                atomic_write(target, {"new": True})
+        self.assertEqual(target.read_bytes(), before)
+        self.assertEqual(list(self.work.glob(".current-*")), [])
+        atomic_write(target, {"new": True})
+        self.assertEqual(json.loads(target.read_text()), {"new": True})
+
+    def test_real_manifest_pipeline_commits_complete_json(self):
+        result = self.run_commands('deploy_scope all-app "${APP_ALL[@]}"\n', USE_REAL_MANIFEST="1")
+        self.assertEqual(result.returncode, 0, self.output)
+        manifests = list((self.work / "deployments").glob("*/manifest.json"))
+        self.assertEqual(len(manifests), 1)
+        manifest = json.loads(manifests[0].read_text())
+        self.assertEqual(manifest["target_sha"], A)
+        self.assertEqual(manifest["runtime_state"], self.state())
+        self.assertTrue({"api", "web", "vehicle-agent-adapter"} <= manifest["containers"].keys())
+        for item in manifest["containers"].values():
+            self.assertTrue(item["image_id"])
+        self.assertEqual(list(manifests[0].parent.glob(".current-*")), [])
+
+    def test_real_manifest_atomic_failure_triggers_compensation(self):
+        result = self.run_commands(
+            'deploy_scope all-app "${APP_ALL[@]}"\n',
+            USE_REAL_MANIFEST="1",
+            FAIL_MANIFEST_ATOMIC="1",
+        )
+        self.assert_finalize_failure(result, "MANIFEST", "legacy_snapshot")
+        self.assertEqual(list((self.work / "deployments").glob("*/manifest.json")), [])
 
     def test_success_then_explicit_rollback_and_verify_use_snapshot(self):
         result = self.run_commands(

@@ -59,6 +59,33 @@ write_ssot() {
   # $1=current descriptor $2=previous descriptor; provenance is never an exact SHA.
   deployment_state write "$CURRENT_JSON" "$1" "$2"
 }
+finalization_preflight() {
+  FINALIZATION_TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)" || return 1
+  FINALIZATION_MANIFEST_DIR="$DEPLOY_ROOT/${FINALIZATION_TIMESTAMP}-${1:-rollback}"
+  if ! deployment_state probe-write "$CURRENT_JSON" "$FINALIZATION_MANIFEST_DIR/manifest.json"; then
+    echo 'FINALIZATION_PREFLIGHT=FAIL' >&2
+    return 1
+  fi
+  echo 'FINALIZATION_PREFLIGHT=PASS'
+}
+rollback_after_finalize_failure() {
+  # One compensation path for both exact_sha and legacy_snapshot.
+  # A failed compensation never rewrites SSOT as though runtime recovery passed.
+  if restore_runtime "$1"; then
+    echo 'RUNTIME_COMPENSATION=PASS' >&2
+    if write_ssot "$1" "$2"; then
+      echo 'SSOT_REPAIR=PASS' >&2
+    else
+      echo 'SSOT_REPAIR=FAIL' >&2
+      echo 'HIGH_PRIORITY_MANUAL_INTERVENTION=YES' >&2
+    fi
+  else
+    echo 'RUNTIME_COMPENSATION=FAIL' >&2
+    echo 'SSOT_REPAIR=FAIL' >&2
+    echo 'HIGH_PRIORITY_MANUAL_INTERVENTION=YES' >&2
+  fi
+  return 1
+}
 rollback_to_legacy_snapshot() {
   python3 scripts/legacy_runtime.py restore "$1"
 }
@@ -205,12 +232,12 @@ print(db.scalar(text('SELECT version_num FROM alembic_version')) or 'unknown')
 
 write_manifest() {
   local scope="$1" prev="$2" mig_before="$3" ts
-  ts="$(date -u +%Y%m%dT%H%M%SZ)"
-  local dir="$DEPLOY_ROOT/${ts}-${TARGET_SHA}"
-  mkdir -p "$dir"
+  ts="${FINALIZATION_TIMESTAMP:-$(date -u +%Y%m%dT%H%M%SZ)}"
+  local dir="${FINALIZATION_MANIFEST_DIR:-$DEPLOY_ROOT/${ts}-${TARGET_SHA}}"
+  mkdir -p "$dir" || return 1
   local mig_after
   mig_after="$(migration_revision)"
-  python3 - "$TARGET_SHA" "$scope" "$prev" "$ts" "$dir" "$mig_before" "$mig_after" "$ENV_FILE" "$CURRENT_JSON" <<'PY'
+  python3 - "$TARGET_SHA" "$scope" "$prev" "$ts" "$dir" "$mig_before" "$mig_after" "$ENV_FILE" "$CURRENT_JSON" <<'PY' | deployment_state write-json "$dir/manifest.json" || return 1
 import json, subprocess, sys
 target_sha, scope, prev, ts, d, mig_before, mig_after, env_file = sys.argv[1:9]
 with open(sys.argv[9], encoding="utf-8") as stream:
@@ -247,10 +274,9 @@ for svc in ("api", "mqtt-ingress", "command-dispatcher", "task-worker", "web", "
                                        '{{ index .Config.Labels "org.opencontainers.image.revision" }}', cid]),
             "started_at": inspect(["docker", "inspect", "--format", "{{.State.StartedAt}}", cid]),
         }
-with open(d + "/manifest.json", "w", encoding="utf-8") as f:
-    json.dump(manifest, f, ensure_ascii=False, indent=2)
-print(f"  manifest 已写入 {d}/manifest.json")
+print(json.dumps(manifest, ensure_ascii=False))
 PY
+  echo "  manifest 已写入 $dir/manifest.json"
 }
 
 do_status() {
@@ -359,6 +385,7 @@ deploy_scope() {
   fi
   kind="$(runtime_value "$prev_runtime" kind)"
   prev="$(runtime_value "$prev_runtime" sha)"
+  finalization_preflight "$TARGET_SHA" || return 1
   # migration_before 必须在整个 server deploy 开始时就记录（firebotctl 传 DEPLOY_MIGRATION_BEFORE），
   # 不能等 migrate 之后才取（否则会误记 migration 后的 revision）。
   mig_before="${DEPLOY_MIGRATION_BEFORE:-$(migration_revision)}"
@@ -384,8 +411,16 @@ deploy_scope() {
     exit 1
   fi
   # 成功后才更新 SSOT；下一次 clean release 会自然记录 previous=exact_sha。
-  write_ssot "$(exact_runtime "$TARGET_SHA")" "$prev_runtime" || return 1
-  write_manifest "$scope" "$prev" "$mig_before" || return 1
+  if ! write_ssot "$(exact_runtime "$TARGET_SHA")" "$prev_runtime"; then
+    echo 'FINALIZE_SSOT=FAIL' >&2
+    rollback_after_finalize_failure "$prev_runtime" "$prior_previous"
+    return 1
+  fi
+  if ! write_manifest "$scope" "$prev" "$mig_before"; then
+    echo 'FINALIZE_MANIFEST=FAIL' >&2
+    rollback_after_finalize_failure "$prev_runtime" "$prior_previous"
+    return 1
+  fi
   echo "DEPLOY=PASS scope=$scope sha=$TARGET_SHA previous=$prev"
 }
 
@@ -442,10 +477,19 @@ do_rollback() {
     exit 1
   fi
   echo "  回滚到 previous runtime: $kind"
+  finalization_preflight "$(runtime_value "$previous" sha)" || return 1
   mig_before="$(migration_revision)"
   restore_runtime "$previous" || { echo 'ROLLBACK=FAIL' >&2; return 1; }
-  write_ssot "$previous" "$old_current" || { echo 'ROLLBACK=FAIL (SSOT write failed)' >&2; return 1; }
-  write_manifest rollback "$(runtime_value "$old_current" sha)" "$mig_before" || return 1
+  if ! write_ssot "$previous" "$old_current"; then
+    echo 'FINALIZE_SSOT=FAIL ROLLBACK=FAIL' >&2
+    rollback_after_finalize_failure "$old_current" "$previous"
+    return 1
+  fi
+  if ! write_manifest rollback "$(runtime_value "$old_current" sha)" "$mig_before"; then
+    echo 'FINALIZE_MANIFEST=FAIL ROLLBACK=FAIL' >&2
+    rollback_after_finalize_failure "$old_current" "$previous"
+    return 1
+  fi
   echo "ROLLBACK=PASS runtime=$kind sha=$prev"
 }
 
