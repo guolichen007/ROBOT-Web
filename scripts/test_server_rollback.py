@@ -79,6 +79,7 @@ require_sha() { :; }
 v1_acl_gate() { :; }
 current_sha() { if [ "$CALLER" = auto ]; then echo "$PREV"; else echo "$CURRENT"; fi; }
 previous_sha() { echo "$PREV"; }
+runtime_descriptor() { exact_runtime "$("${1}_sha")"; }
 migration_revision() { trace DB_READ_ONLY; echo 20261021_0009; }
 write_ssot() { trace "SSOT $*"; }
 write_manifest() { trace "MANIFEST $*"; }
@@ -113,7 +114,12 @@ class RollbackTests(unittest.TestCase):
             work = Path(directory).resolve()
             self.assertTrue(work.is_relative_to(artifacts.resolve()))
             (work / "scripts").mkdir()
-            for name in ("server-deploy.sh", "vehicle-agent-rollout.sh"):
+            for name in (
+                "server-deploy.sh",
+                "vehicle-agent-rollout.sh",
+                "deployment_state.py",
+                "legacy_runtime.py",
+            ):
                 shutil.copyfile(ROOT / "scripts" / name, work / "scripts" / name)
             (work / "docker-compose.server.yml").write_text(compose([*CORE, ADAPTER]), newline="\n")
             (work / "previous.yml").write_text(historical, encoding="utf-8", newline="\n")

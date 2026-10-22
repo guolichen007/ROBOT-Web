@@ -153,6 +153,7 @@ jobs:
       - run: bash scripts/server-verify.sh --self-test
       - run: bash scripts/test_vehicle_agent_ops.sh
       - run: python scripts/test_server_rollback.py
+      - run: python scripts/test_legacy_cutover.py
       - run: python scripts/generate_ros2_handoff.py
       - run: git diff --exit-code -- integration/ros2
       - run: python scripts/generate_ros2_handoff.py --dist

@@ -1,0 +1,465 @@
+"""Run real deployment callers with persistent, isolated Git/Docker command doubles."""
+
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+PROVENANCE = "584efcfda60b8d39c516a9939bc0481609fc6f3c"
+A, B = "a" * 40, "b" * 40
+LEGACY_SERVICES = [
+    "api",
+    "mqtt-ingress",
+    "command-dispatcher",
+    "task-worker",
+    "web",
+    "ros-compat-adapter",
+]
+APP_SERVICES = [*LEGACY_SERVICES, "vehicle-agent-adapter"]
+
+DOUBLE = r"""
+import json
+import os
+import sys
+from pathlib import Path
+
+root = Path(os.environ["TEST_ROOT"])
+
+def execute(args):
+    with (root / "trace.log").open("a", encoding="utf-8") as stream:
+        stream.write("docker " + " ".join(args) + "\n")
+    state = json.loads((root / "docker.json").read_text())
+    manifest = json.loads((root / "original-manifest.json").read_text())
+    out = ""
+    if args[0] == "image":
+        image = args[-1]
+        if os.environ.get("MISSING_IMAGE") == "1":
+            return 1, ""
+        out = state["images"].get(image, "")
+        if os.environ.get("WRONG_IMAGE") == "1":
+            out = "sha256:" + "0" * 64
+    elif args[0] == "compose":
+        legacy = args.count("-f") == 2
+        verb = next(x for x in args if x in {"config", "up", "ps", "build"})
+        services = manifest["services"] if legacy else state["current_services"]
+        if verb == "config":
+            if "--services" in args:
+                out = "\n".join(services)
+            else:
+                rendered = {k: {"image": v["image_ref"]} for k, v in manifest["services"].items()}
+                if os.environ.get("WRONG_RENDER") == "1":
+                    rendered["api"]["image"] = "unsealed:tag"
+                out = json.dumps({"name": "firebot-server", "services": rendered})
+        elif verb == "build":
+            if os.environ.get("FAIL_BUILD") == "1":
+                return 1, ""
+        elif verb == "up":
+            if not legacy and os.environ.get("FAIL_RECREATE") == "1":
+                return 1, ""
+            selected = [x for x in args[args.index("up") + 1:] if x in state["current_services"]]
+            for service in selected:
+                image = (manifest["services"][service]["expected_image_id"]
+                         if legacy else "sha256:" + "c" * 64)
+                if legacy and os.environ.get("WRONG_CONTAINER_IMAGE") == "1":
+                    image = "sha256:" + "d" * 64
+                state["containers"][service] = {
+                    "image_id": image,
+                    "revision": os.environ.get("FIREBOT_PYTHON_IMAGE", "").split(":")[-1],
+                    "running": os.environ.get("NOT_RUNNING") != "1" or not legacy,
+                    "health": ("unhealthy" if legacy and os.environ.get("UNHEALTHY") == "1"
+                               else "healthy"),
+                }
+                if service == "vehicle-agent-adapter":
+                    state["adapters"] = ["cid-vehicle-agent-adapter"]
+        elif verb == "ps":
+            service = args[-1]
+            if service in state["containers"]:
+                out = "cid-" + service
+    elif args[0] == "ps":
+        assert "label=com.docker.compose.project=firebot-server" in args
+        assert "label=com.docker.compose.service=vehicle-agent-adapter" in args
+        out = "\n".join(state["adapters"])
+    elif args[0] == "stop":
+        if os.environ.get("FAIL_STOP") == "1":
+            return 1, ""
+    elif args[0] == "rm":
+        state["adapters"] = []
+    elif args[0] == "inspect":
+        container = state["containers"].get(args[-1].removeprefix("cid-"))
+        if not container:
+            return 1, ""
+        template = args[2]
+        if "image_id" in template:
+            out = json.dumps(container)
+        elif "State.Running" in template:
+            out = str(container["running"]).lower() + " " + container["health"]
+        elif "org.opencontainers.image.revision" in template:
+            out = container["revision"]
+        else:
+            return 1, ""
+    else:
+        return 1, ""
+    (root / "docker.json").write_text(json.dumps(state))
+    return 0, out
+
+if __name__ == "__main__":
+    code, out = execute(sys.argv[1:])
+    print(out)
+    sys.exit(code)
+"""
+
+WRAPPER = r"""
+import importlib.util
+import subprocess
+import sys
+from docker_double import execute
+
+spec = importlib.util.spec_from_file_location("legacy_runtime", "scripts/legacy_runtime.py")
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+
+def fake_run(args, **kwargs):
+    assert args[0] == "docker"
+    code, stdout = execute(args[1:])
+    return subprocess.CompletedProcess(args, code, stdout, "")
+
+module.subprocess.run = fake_run
+sys.argv = ["scripts/legacy_runtime.py", *sys.argv[1:]]
+try:
+    module.main()
+except (OSError, ValueError, KeyError, TypeError):
+    print("LEGACY_SNAPSHOT=FAIL", file=sys.stderr)
+    sys.exit(1)
+"""
+
+HARNESS = r"""
+set -euo pipefail
+if command -v cygpath >/dev/null; then TEST_PYTHON="$(cygpath -u "$TEST_PYTHON")"; fi
+python3() {
+  if [ "${1:-}" = scripts/legacy_runtime.py ]; then
+    shift; command "$TEST_PYTHON" legacy_wrapper.py "$@"
+  else command "$TEST_PYTHON" "$@"; fi
+}
+trace() { printf '%s\n' "$*" >> trace.log; }
+docker() { command "$TEST_PYTHON" docker_double.py "$@"; }
+git() {
+  trace "git $*"
+  case "$1" in
+    rev-parse) cat head ;;
+    status|cat-file) : ;;
+    checkout)
+      printf '%s' "$2" > head
+      if [ "${HISTORICAL_CHECKOUT:-0}" = 1 ]; then rm scripts/deployment_state.py; fi ;;
+    *) return 1 ;;
+  esac
+}
+source scripts/server-deploy.sh
+CURRENT_JSON="$TEST_CURRENT_JSON"
+v1_required() { echo true; }
+init_deploy_context
+v1_acl_gate() { trace ACL_READ_ONLY; }
+migration_revision() { trace DB_READ_ONLY; echo 20261021_0009; }
+write_manifest() { trace "MANIFEST $*"; }
+release_b() {
+  unset FIRST_CANARY_LEGACY_ROLLBACK_MANIFEST
+  TARGET_SHA="$SHA_B"; PY_IMAGE="firebot-python:$TARGET_SHA"; WEB_IMAGE="firebot-web:$TARGET_SHA"
+  printf '%s' "$TARGET_SHA" > head
+}
+"""
+
+
+class CutoverTests(unittest.TestCase):
+    def setUp(self):
+        artifacts = ROOT / "artifacts"
+        artifacts.mkdir(exist_ok=True)
+        self.temporary = tempfile.TemporaryDirectory(prefix="cutover-test-", dir=artifacts)
+        self.work = Path(self.temporary.name).resolve()
+        self.assertTrue(self.work.is_relative_to(artifacts.resolve()))
+        (self.work / "scripts").mkdir()
+        for name in (
+            "server-deploy.sh",
+            "vehicle-agent-rollout.sh",
+            "deployment_state.py",
+            "legacy_runtime.py",
+        ):
+            shutil.copyfile(ROOT / "scripts" / name, self.work / "scripts" / name)
+        for name in ("legacy.yml", "override.yml", "legacy.env"):
+            (self.work / name).write_text("# sealed fixture\n", encoding="utf-8")
+        (self.work / "docker-compose.server.yml").write_text("# candidate\n")
+        self.manifest = {
+            "schema_version": 1,
+            "runtime_kind": "legacy_snapshot",
+            "project_name": "firebot-server",
+            "source_dir": str(self.work),
+            "compose_file": str(self.work / "legacy.yml"),
+            "env_file": str(self.work / "legacy.env"),
+            "override_file": str(self.work / "override.yml"),
+            "override_sha256": hashlib.sha256(
+                (self.work / "override.yml").read_bytes()
+            ).hexdigest(),
+            "git_provenance_sha": PROVENANCE,
+            "services": {
+                service: {
+                    "image_ref": f"sealed/{service}:s5a",
+                    "expected_image_id": "sha256:" + str(index) * 64,
+                }
+                for index, service in enumerate(LEGACY_SERVICES, 1)
+            },
+        }
+        self.manifest_path = self.work / "manifest.json"
+        self.save_manifest()
+        (self.work / "original-manifest.json").write_text(json.dumps(self.manifest))
+        (self.work / "current.json").write_text(
+            json.dumps({"current_sha": PROVENANCE, "previous_sha": "UNKNOWN"})
+        )
+        (self.work / "head").write_text(A)
+        (self.work / "docker.json").write_text(
+            json.dumps(
+                {
+                    "images": {
+                        item["image_ref"]: item["expected_image_id"]
+                        for item in self.manifest["services"].values()
+                    },
+                    "current_services": APP_SERVICES,
+                    "containers": {},
+                    "adapters": ["new-adapter-a", "new-adapter-b"],
+                }
+            )
+        )
+        for name, content in (("docker_double.py", DOUBLE), ("legacy_wrapper.py", WRAPPER)):
+            (self.work / name).write_text(content, encoding="utf-8", newline="\n")
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def save_manifest(self):
+        self.manifest_path.write_text(json.dumps(self.manifest), encoding="utf-8")
+
+    def run_commands(self, commands, **env):
+        (self.work / "harness.sh").write_text(HARNESS + commands, encoding="utf-8", newline="\n")
+        bash = (
+            str(Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "Git/bin/bash.exe")
+            if os.name == "nt"
+            else "bash"
+        )
+        result = subprocess.run(
+            [bash, "harness.sh"],
+            cwd=self.work,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=60,
+            env={
+                **os.environ,
+                "TEST_ROOT": str(self.work),
+                "TEST_CURRENT_JSON": str(self.work / "current.json"),
+                "TEST_PYTHON": sys.executable,
+                "TARGET_SHA": A,
+                "SHA_B": B,
+                "FIRST_CANARY_LEGACY_ROLLBACK_MANIFEST": str(self.manifest_path),
+                **env,
+            },
+        )
+        self.trace = (
+            (self.work / "trace.log").read_text() if (self.work / "trace.log").exists() else ""
+        )
+        self.output = result.stdout + result.stderr
+        self.assertNotIn("downgrade", self.trace)
+        self.assertNotIn(" restore", self.trace)
+        self.assertNotIn("git checkout " + PROVENANCE, self.trace)
+        for line in self.trace.splitlines():
+            if " up " in line:
+                for service in ("postgres", "redis", "mosquitto", "nginx", "mediamtx"):
+                    self.assertNotIn(service, line.split())
+        return result
+
+    def state(self, name="current.json"):
+        return json.loads((self.work / name).read_text())
+
+    def assert_no_mutation(self):
+        self.assertNotIn(" build ", self.trace)
+        self.assertNotIn(" up ", self.trace)
+        self.assertNotIn("docker stop", self.trace)
+        self.assertEqual(self.state()["current_sha"], PROVENANCE)
+
+    def test_first_canary_failed_recreate_restores_snapshot(self):
+        result = self.run_commands('deploy_scope all-app "${APP_ALL[@]}"\n', FAIL_RECREATE="1")
+        self.assertEqual(result.returncode, 1, self.output)
+        self.assertIn("AUTO_ROLLBACK_MODE=LEGACY_SNAPSHOT", self.output)
+        self.assertIn("AUTO_ROLLBACK_LEGACY=PASS", self.output)
+        self.assertEqual(self.state()["current_runtime_kind"], "legacy_snapshot")
+        self.assertNotIn("current_sha", self.state())
+        up = [line for line in self.trace.splitlines() if "--no-build" in line]
+        self.assertEqual(len(up), 1)
+        self.assertTrue(up[0].endswith(" ".join(LEGACY_SERVICES)))
+        self.assertLess(self.trace.index("docker rm"), self.trace.index("--no-build"))
+        print("FIRST_CANARY_AUTO_ROLLBACK_LEGACY=PASS")
+
+    def test_failed_build_also_restores_snapshot(self):
+        result = self.run_commands('deploy_scope all-app "${APP_ALL[@]}"\n', FAIL_BUILD="1")
+        self.assertEqual(result.returncode, 1, self.output)
+        self.assertIn("AUTO_ROLLBACK_LEGACY=PASS", self.output)
+
+    def test_success_then_explicit_rollback_and_verify_use_snapshot(self):
+        result = self.run_commands(
+            'deploy_scope all-app "${APP_ALL[@]}"\ncp "$CURRENT_JSON" first.json\n'
+            "do_rollback\ndo_status\ndo_verify\n"
+        )
+        self.assertEqual(result.returncode, 0, self.output)
+        self.assertEqual(self.state("first.json")["previous_runtime_kind"], "legacy_snapshot")
+        self.assertNotIn("previous_sha", self.state("first.json"))
+        state = self.state()
+        self.assertEqual(state["current_git_provenance_sha"], PROVENANCE)
+        self.assertEqual(state["current_runtime_manifest"], str(self.manifest_path))
+        self.assertIn("RUNTIME_KIND=legacy_snapshot", self.output)
+        self.assertIn("SERVER_VERIFY=PASS runtime=legacy_snapshot", self.output)
+        self.assertNotIn("git checkout", self.trace)
+        print("FIRST_CANARY_EXPLICIT_ROLLBACK_LEGACY=PASS")
+
+    def test_missing_manifest_fails_before_build(self):
+        self.manifest_path.unlink()
+        result = self.run_commands('deploy_scope all-app "${APP_ALL[@]}"\n')
+        self.assertNotEqual(result.returncode, 0)
+        self.assert_no_mutation()
+
+    def test_tampered_override_fails_before_build(self):
+        (self.work / "override.yml").write_text("# tampered\n")
+        result = self.run_commands('deploy_scope all-app "${APP_ALL[@]}"\n')
+        self.assertNotEqual(result.returncode, 0)
+        self.assert_no_mutation()
+        print("LEGACY_MANIFEST_TAMPER_FAIL_CLOSED=PASS")
+
+    def test_image_ref_id_mismatch_fails_before_build(self):
+        result = self.run_commands('deploy_scope all-app "${APP_ALL[@]}"\n', WRONG_IMAGE="1")
+        self.assertNotEqual(result.returncode, 0)
+        self.assert_no_mutation()
+        print("LEGACY_IMAGE_ID_MISMATCH_FAIL_CLOSED=PASS")
+
+    def test_missing_image_and_render_mismatch_fail_closed(self):
+        for fault in ("MISSING_IMAGE", "WRONG_RENDER"):
+            with self.subTest(fault=fault):
+                result = self.run_commands('deploy_scope all-app "${APP_ALL[@]}"\n', **{fault: "1"})
+                self.assertNotEqual(result.returncode, 0)
+                self.assert_no_mutation()
+
+    def test_unhealthy_not_running_and_container_image_mismatch_fail_rollback(self):
+        for fault in ("UNHEALTHY", "NOT_RUNNING", "WRONG_CONTAINER_IMAGE", "FAIL_STOP"):
+            with self.subTest(fault=fault):
+                docker_state = json.loads((self.work / "docker.json").read_text())
+                docker_state["adapters"] = ["new-adapter-a", "new-adapter-b"]
+                (self.work / "docker.json").write_text(json.dumps(docker_state))
+                result = self.run_commands(
+                    'deploy_scope all-app "${APP_ALL[@]}"\n', FAIL_RECREATE="1", **{fault: "1"}
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("AUTO_ROLLBACK_LEGACY=FAIL", self.output)
+                self.assertNotIn("AUTO_ROLLBACK_LEGACY=PASS", self.output)
+                self.assertEqual(self.state()["current_sha"], PROVENANCE)
+        print("LEGACY_UNHEALTHY_FAIL_CLOSED=PASS")
+
+    def test_manifest_schema_and_paths_fail_closed(self):
+        mutations = [
+            {"schema_version": 2},
+            {"schema_version": True},
+            {"project_name": "other"},
+            {"source_dir": "."},
+            {"env_file": ""},
+            {"compose_file": str(self.work / "absent.yml")},
+            {"password": "must-not-be-accepted"},
+            {"services": {}},
+            {"override_sha256": None},
+        ]
+        original = self.manifest.copy()
+        for change in mutations:
+            with self.subTest(change=change):
+                self.manifest = {**original, **change}
+                self.save_manifest()
+                result = self.run_commands('deploy_scope all-app "${APP_ALL[@]}"\n')
+                self.assertNotEqual(result.returncode, 0)
+                self.assert_no_mutation()
+
+    def test_second_clean_release_restores_exact_sha_rollback(self):
+        result = self.run_commands(
+            'deploy_scope all-app "${APP_ALL[@]}"\ncp "$CURRENT_JSON" first.json\nrelease_b\n'
+            'deploy_scope all-app "${APP_ALL[@]}"\ncp "$CURRENT_JSON" second.json\ndo_rollback\n'
+        )
+        self.assertEqual(result.returncode, 0, self.output)
+        self.assertEqual(self.state("first.json")["previous_runtime_kind"], "legacy_snapshot")
+        second = self.state("second.json")
+        self.assertEqual(second["previous_runtime_kind"], "exact_sha")
+        self.assertEqual(second["previous_sha"], A)
+        self.assertNotIn("previous_runtime_manifest", second)
+        self.assertEqual(self.state()["current_sha"], A)
+        self.assertIn("git checkout " + A, self.trace)
+        self.assertNotIn("--no-build", self.trace)
+        print("NEXT_CLEAN_RELEASE_RESTORES_SHA_ROLLBACK=PASS")
+
+    def test_first_canary_override_cannot_be_reused_on_clean_release(self):
+        result = self.run_commands(
+            'deploy_scope all-app "${APP_ALL[@]}"\ndeploy_scope all-app "${APP_ALL[@]}"\n'
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.trace.count(" build "), 1)
+        self.assertEqual(self.state()["current_sha"], A)
+
+    def test_historical_checkout_without_new_helper_still_writes_ssot(self):
+        (self.work / "current.json").write_text(json.dumps({"current_sha": B, "previous_sha": A}))
+        result = self.run_commands("do_rollback\n", HISTORICAL_CHECKOUT="1")
+        self.assertEqual(result.returncode, 0, self.output)
+        self.assertFalse((self.work / "scripts/deployment_state.py").exists())
+        self.assertEqual(self.state()["current_sha"], A)
+
+    def test_explicit_restore_failure_keeps_ssot_and_never_falls_back_to_git(self):
+        result = self.run_commands(
+            'deploy_scope all-app "${APP_ALL[@]}"\ncp "$CURRENT_JSON" before-rollback.json\n'
+            "export UNHEALTHY=1\ndo_rollback\n"
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ROLLBACK=FAIL", self.output)
+        self.assertNotIn("ROLLBACK=PASS", self.output)
+        self.assertEqual(
+            (self.work / "current.json").read_bytes(),
+            (self.work / "before-rollback.json").read_bytes(),
+        )
+        self.assertNotIn("git checkout", self.trace)
+
+    def test_first_s5b_sop_requires_one_all_app_after_acl_and_migrate(self):
+        sop = (ROOT / "docs/部署运维/Vehicle-Agent-V1首次上线与回滚SOP.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("ACL → migrate → all-app", sop)
+        self.assertIn("禁止 adapter-first", sop)
+        self.assertNotIn("scripts/server-deploy.sh adapter", sop)
+        self.assertIn(
+            "FIRST_CANARY_LEGACY_ROLLBACK_MANIFEST=/opt/firebot/legacy-s5a/manifest.json", sop
+        )
+        self.assertIn("scripts/server-deploy.sh all-app", sop)
+
+    def test_legacy_cutover_requires_explicit_manifest_and_all_app(self):
+        result = self.run_commands("deploy_scope adapter vehicle-agent-adapter\n")
+        self.assertNotEqual(result.returncode, 0)
+        self.assert_no_mutation()
+        (self.work / "current.json").write_text(
+            json.dumps(
+                {
+                    "current_runtime_kind": "legacy_snapshot",
+                    "current_runtime_manifest": str(self.manifest_path),
+                    "current_git_provenance_sha": PROVENANCE,
+                }
+            )
+        )
+        result = self.run_commands(
+            'unset FIRST_CANARY_LEGACY_ROLLBACK_MANIFEST\ndeploy_scope all-app "${APP_ALL[@]}"\n'
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertNotIn(" build ", self.trace)
+
+
+if __name__ == "__main__":
+    unittest.main()

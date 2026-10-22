@@ -11,7 +11,7 @@
 #
 # 服务分组：control-plane = api+mqtt-ingress+command-dispatcher+task-worker
 # 绝不默认重启 postgres/redis/mosquitto/nginx/mediamtx。
-# 版本 SSOT：/opt/firebot/deployments/current.json（current/previous SHA）
+# 版本 SSOT：/opt/firebot/deployments/current.json（current/previous runtime）
 set -euo pipefail
 
 ENV_FILE="${SERVER_ENV_FILE:-.env.server}"
@@ -21,6 +21,10 @@ PY_IMAGE="firebot-python:${TARGET_SHA}"
 WEB_IMAGE="firebot-web:${TARGET_SHA}"
 DEPLOY_ROOT="/opt/firebot/deployments"
 CURRENT_JSON="$DEPLOY_ROOT/current.json"
+# Exact rollback may check out a historical revision without this new helper.
+# Keep its code in the running process so SSOT can still be written afterwards.
+DEPLOYMENT_STATE_CODE="$(cat scripts/deployment_state.py)"
+deployment_state() { python3 -c "$DEPLOYMENT_STATE_CODE" "$@"; }
 
 CONTROL_PLANE=(api mqtt-ingress command-dispatcher task-worker)
 APP_ALL=(api mqtt-ingress command-dispatcher task-worker web)
@@ -36,15 +40,33 @@ init_deploy_context() {
 
 # ---- 版本 SSOT ----
 current_sha() {
-  python3 -c 'import json,sys; print(json.load(open(sys.argv[1],encoding="utf-8")).get("current_sha","UNKNOWN"))' "$CURRENT_JSON" 2>/dev/null || echo "UNKNOWN"
+  runtime_value "$(runtime_descriptor current)" sha
 }
 previous_sha() {
-  python3 -c 'import json,sys; print(json.load(open(sys.argv[1],encoding="utf-8")).get("previous_sha","UNKNOWN"))' "$CURRENT_JSON" 2>/dev/null || echo "UNKNOWN"
+  runtime_value "$(runtime_descriptor previous)" sha
+}
+runtime_descriptor() {
+  deployment_state read "$CURRENT_JSON" "$1"
+}
+runtime_value() {
+  python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get(sys.argv[2],"UNKNOWN"))' "$1" "$2"
+}
+exact_runtime() {
+  printf '{"kind":"exact_sha","sha":"%s"}\n' "$1"
 }
 write_ssot() {
-  # $1=current $2=previous
-  mkdir -p "$DEPLOY_ROOT"
-  printf '{"current_sha": "%s", "previous_sha": "%s"}\n' "$1" "$2" > "$CURRENT_JSON"
+  # $1=current descriptor $2=previous descriptor; provenance is never an exact SHA.
+  deployment_state write "$CURRENT_JSON" "$1" "$2"
+}
+rollback_to_legacy_snapshot() {
+  python3 scripts/legacy_runtime.py restore "$1"
+}
+restore_runtime() {
+  case "$(runtime_value "$1" kind)" in
+    legacy_snapshot) rollback_to_legacy_snapshot "$(runtime_value "$1" manifest)" ;;
+    exact_sha) rollback_to "$(runtime_value "$1" sha)" ;;
+    *) echo 'ROLLBACK_RUNTIME_KIND=FAIL' >&2; return 1 ;;
+  esac
 }
 
 require_sha() {
@@ -187,9 +209,11 @@ write_manifest() {
   mkdir -p "$dir"
   local mig_after
   mig_after="$(migration_revision)"
-  python3 - "$TARGET_SHA" "$scope" "$prev" "$ts" "$dir" "$mig_before" "$mig_after" "$ENV_FILE" <<'PY'
+  python3 - "$TARGET_SHA" "$scope" "$prev" "$ts" "$dir" "$mig_before" "$mig_after" "$ENV_FILE" "$CURRENT_JSON" <<'PY'
 import json, subprocess, sys
 target_sha, scope, prev, ts, d, mig_before, mig_after, env_file = sys.argv[1:9]
+with open(sys.argv[9], encoding="utf-8") as stream:
+    runtime_state = json.load(stream)
 
 def inspect(args):
     try:
@@ -201,7 +225,9 @@ def cid_of(svc):
     return inspect(["docker", "compose", "--env-file", env_file, "-f", "docker-compose.server.yml", "ps", "-q", svc])
 
 manifest = {
-    "target_sha": target_sha,
+    "requested_sha": target_sha,
+    "target_sha": runtime_state.get("current_sha"),
+    "runtime_state": runtime_state,
     "branch": inspect(["git", "branch", "--show-current"]),
     "previous_sha": prev,
     "deploy_scope": scope,
@@ -210,7 +236,7 @@ manifest = {
     "migration_after": mig_after,
     "containers": {},
 }
-for svc in ("api", "mqtt-ingress", "command-dispatcher", "task-worker", "web", "vehicle-agent-adapter"):
+for svc in ("api", "mqtt-ingress", "command-dispatcher", "task-worker", "web", "ros-compat-adapter", "vehicle-agent-adapter"):
     cid = cid_of(svc)
     if cid:
         manifest["containers"][svc] = {
@@ -228,6 +254,13 @@ PY
 
 do_status() {
   echo "== SERVER 部署状态 =="
+  local current
+  current="$(runtime_descriptor current)" || return 1
+  echo "RUNTIME_KIND=$(runtime_value "$current" kind)"
+  if [ "$(runtime_value "$current" kind)" = legacy_snapshot ]; then
+    echo "current_git_provenance_sha=$(runtime_value "$current" git_provenance_sha)"
+    echo "current_runtime_manifest=$(runtime_value "$current" manifest)"
+  fi
   echo "current_sha=$(current_sha)"
   echo "previous_sha=$(previous_sha)"
   echo "git HEAD=$(git rev-parse HEAD)"
@@ -308,18 +341,38 @@ deploy_scope() {
   local scope="$1"
   shift
   require_sha
-  local prev mig_before
+  local prev prev_runtime prior_previous kind mig_before
   if [ "$V1_REQUIRED" = true ]; then
     v1_acl_gate || { echo 'ERROR: active broker v1 ACL gate failed' >&2; exit 1; }
   fi
-  prev="$(current_sha)"          # 部署前 current → 变成 previous
+  prev_runtime="$(runtime_descriptor current)" || return 1
+  prior_previous="$(runtime_descriptor previous)" || return 1
+  if [ -n "${FIRST_CANARY_LEGACY_ROLLBACK_MANIFEST:-}" ]; then
+    [ "$scope" = all-app ] || { echo 'ERROR: first clean cutover requires all-app' >&2; return 1; }
+    python3 scripts/legacy_runtime.py validate "$FIRST_CANARY_LEGACY_ROLLBACK_MANIFEST" || return 1
+    prev_runtime="$(python3 scripts/legacy_runtime.py descriptor "$FIRST_CANARY_LEGACY_ROLLBACK_MANIFEST")" || return 1
+    deployment_state canary "$CURRENT_JSON" "$prev_runtime" || return 1
+  elif [ "$(runtime_value "$prev_runtime" kind)" = legacy_snapshot ]; then
+    echo 'ERROR: legacy cutover requires explicit FIRST_CANARY_LEGACY_ROLLBACK_MANIFEST' >&2
+    return 1
+  fi
+  kind="$(runtime_value "$prev_runtime" kind)"
+  prev="$(runtime_value "$prev_runtime" sha)"
   # migration_before 必须在整个 server deploy 开始时就记录（firebotctl 传 DEPLOY_MIGRATION_BEFORE），
   # 不能等 migrate 之后才取（否则会误记 migration 后的 revision）。
   mig_before="${DEPLOY_MIGRATION_BEFORE:-$(migration_revision)}"
   if ! build_images "$@" || ! recreate "$@"; then
-    echo "SERVER_DEPLOY=FAIL（rollout 失败，自动回滚 $prev）" >&2
-    if [ "$prev" != "UNKNOWN" ]; then
-      if rollback_to "$prev"; then
+    echo "SERVER_DEPLOY=FAIL（rollout 失败，自动回滚 runtime=$kind）" >&2
+    if [ "$kind" = legacy_snapshot ]; then
+      echo 'AUTO_ROLLBACK_MODE=LEGACY_SNAPSHOT' >&2
+      if restore_runtime "$prev_runtime" && write_ssot "$prev_runtime" "$prior_previous"; then
+        echo 'AUTO_ROLLBACK_LEGACY=PASS' >&2
+      else
+        echo 'AUTO_ROLLBACK_LEGACY=FAIL' >&2
+      fi
+    elif [ "$prev" != "UNKNOWN" ]; then
+      echo 'AUTO_ROLLBACK_MODE=EXACT_SHA' >&2
+      if restore_runtime "$prev_runtime"; then
         echo "AUTO_ROLLBACK=PASS（回 $prev）" >&2
       else
         echo "AUTO_ROLLBACK=FAIL（高优先级报警，需人工介入）" >&2
@@ -329,15 +382,21 @@ deploy_scope() {
     fi
     exit 1
   fi
-  # 成功后才更新 SSOT：previous=旧 current，current=TARGET_SHA
-  write_ssot "$TARGET_SHA" "$prev"
-  write_manifest "$scope" "$prev" "$mig_before"
+  # 成功后才更新 SSOT；下一次 clean release 会自然记录 previous=exact_sha。
+  write_ssot "$(exact_runtime "$TARGET_SHA")" "$prev_runtime" || return 1
+  write_manifest "$scope" "$prev" "$mig_before" || return 1
   echo "DEPLOY=PASS scope=$scope sha=$TARGET_SHA previous=$prev"
 }
 
 do_verify() {
   # verify 不需要外部 TARGET_SHA：从 current.json 读期望 SHA
-  local expected
+  local current expected
+  current="$(runtime_descriptor current)" || return 1
+  if [ "$(runtime_value "$current" kind)" = legacy_snapshot ]; then
+    python3 scripts/legacy_runtime.py verify "$(runtime_value "$current" manifest)" || return 1
+    echo 'SERVER_VERIFY=PASS runtime=legacy_snapshot'
+    return 0
+  fi
   expected="$(current_sha)"
   if [ "$expected" = "UNKNOWN" ]; then
     echo "SERVER_VERIFY=FAIL（无 current.json，先 deploy）" >&2
@@ -348,24 +407,28 @@ do_verify() {
 }
 
 do_rollback() {
-  local prev
-  prev="$(previous_sha)"
-  if [ "$prev" = "UNKNOWN" ] || [ "$prev" = "$(current_sha)" ]; then
+  local prev previous old_current kind mig_before
+  previous="$(runtime_descriptor previous)" || return 1
+  old_current="$(runtime_descriptor current)" || return 1
+  kind="$(runtime_value "$previous" kind)"
+  prev="$(runtime_value "$previous" sha)"
+  if [ "$kind" = exact_sha ] && { [ "$prev" = UNKNOWN ] || [ "$prev" = "$(current_sha)" ]; }; then
     echo "ERROR: 没有可回滚的 previous SHA（$prev）" >&2
     exit 1
   fi
-  echo "  回滚到 previous SHA: $prev"
-  local old_current mig_before
-  old_current="$(current_sha)"
+  echo "  回滚到 previous runtime: $kind"
   mig_before="$(migration_revision)"
-  rollback_to "$prev" || { echo 'ROLLBACK=FAIL' >&2; return 1; }
-  write_ssot "$prev" "$old_current"
-  write_manifest rollback "$old_current" "$mig_before"
-  echo "ROLLBACK=PASS sha=$prev"
+  restore_runtime "$previous" || { echo 'ROLLBACK=FAIL' >&2; return 1; }
+  write_ssot "$previous" "$old_current" || { echo 'ROLLBACK=FAIL (SSOT write failed)' >&2; return 1; }
+  write_manifest rollback "$(runtime_value "$old_current" sha)" "$mig_before" || return 1
+  echo "ROLLBACK=PASS runtime=$kind sha=$prev"
 }
 
 if [[ "${BASH_SOURCE[0]}" = "$0" ]]; then
-init_deploy_context
+case "${1:-}" in
+  status|verify|rollback) ;; # Runtime-based inspection/recovery does not guess rollout from the DB.
+  *) init_deploy_context ;;
+esac
 case "${1:-}" in
   status) do_status ;;
   preflight) do_preflight ;;
