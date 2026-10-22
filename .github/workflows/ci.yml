@@ -135,6 +135,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
         with:
           python-version: "3.12"
@@ -142,6 +144,7 @@ jobs:
       - run: python scripts/check_repository_policy.py
       - run: bash scripts/server-verify.sh --self-test
       - run: bash scripts/test_vehicle_agent_ops.sh
+      - run: python scripts/test_server_rollback.py
       - run: python scripts/generate_ros2_handoff.py
       - run: git diff --exit-code -- integration/ros2
       - run: python scripts/generate_ros2_handoff.py --dist

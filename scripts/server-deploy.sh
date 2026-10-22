@@ -25,12 +25,14 @@ CURRENT_JSON="$DEPLOY_ROOT/current.json"
 CONTROL_PLANE=(api mqtt-ingress command-dispatcher task-worker)
 APP_ALL=(api mqtt-ingress command-dispatcher task-worker web)
 source scripts/vehicle-agent-rollout.sh
-V1_REQUIRED="$(v1_required)" || { echo 'ERROR: cannot determine v1 rollout requirement' >&2; exit 1; }
-if [ "$V1_REQUIRED" = true ]; then
-  COMPOSE+=(--profile vehicle-agent)
-  CONTROL_PLANE+=(vehicle-agent-adapter)
-  APP_ALL+=(vehicle-agent-adapter)
-fi
+init_deploy_context() {
+  V1_REQUIRED="$(v1_required)" || { echo 'ERROR: cannot determine v1 rollout requirement' >&2; return 1; }
+  if [ "$V1_REQUIRED" = true ]; then
+    COMPOSE+=(--profile vehicle-agent)
+    CONTROL_PLANE+=(vehicle-agent-adapter)
+    APP_ALL+=(vehicle-agent-adapter)
+  fi
+}
 
 # ---- 版本 SSOT ----
 current_sha() {
@@ -87,11 +89,86 @@ recreate() {
   local services=("$@")
   echo "  重建服务：${services[*]}"
   FIREBOT_PYTHON_IMAGE="$PY_IMAGE" FIREBOT_WEB_IMAGE="$WEB_IMAGE" \
-    "${COMPOSE[@]}" up -d --no-deps --wait "${services[@]}"
+    "${COMPOSE[@]}" up -d --no-deps --wait "${services[@]}" || return 1
   # --wait 后检查 required services healthy（fail-closed，统一走 docker inspect）
   for svc in "${services[@]}"; do
     service_healthy "$svc" || { echo "ERROR: $svc 未 healthy" >&2; return 1; }
   done
+}
+
+compose_project_name() {
+  "${COMPOSE[@]}" config --format json |
+    python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])'
+}
+
+rollback_service_set() {
+  # Read the checked-out rollback target, including services behind profiles.
+  local defined svc
+  defined="$("${COMPOSE[@]}" --profile '*' config --services)" || return 1
+  ROLLBACK_SERVICES=()
+  for svc in api mqtt-ingress command-dispatcher task-worker web; do
+    grep -Fxq "$svc" <<< "$defined" || { echo "ROLLBACK_SERVICE_MISSING=$svc" >&2; return 1; }
+    ROLLBACK_SERVICES+=("$svc")
+  done
+  ROLLBACK_HAS_ADAPTER=false
+  if grep -Fxq vehicle-agent-adapter <<< "$defined"; then
+    ROLLBACK_SERVICES+=(vehicle-agent-adapter)
+    ROLLBACK_HAS_ADAPTER=true
+  fi
+  echo "ROLLBACK_SERVICE_SET=${ROLLBACK_SERVICES[*]}"
+}
+
+rollback_adapter_ids() {
+  # Project labels also find orphaned/stopped instances after the service is
+  # removed from the old Compose file; never inspect or stop another project.
+  docker ps -a -q --filter "label=com.docker.compose.project=$1" \
+    --filter label=com.docker.compose.service=vehicle-agent-adapter
+}
+
+rollback_adapter_absent() {
+  local remaining
+  remaining="$(rollback_adapter_ids "$1")" || return 1
+  [ -z "$remaining" ] || { echo 'ADAPTER_POST_ROLLBACK=FAIL_PRESENT' >&2; return 1; }
+  echo 'ADAPTER_POST_ROLLBACK=ABSENT'
+}
+
+rollback_to() {
+  # Shared by explicit rollback and failed-rollout recovery. No DB downgrade.
+  local prev="$1" project target_project ids cid revision svc
+  local adapter_ids=()
+  [[ "$prev" =~ ^[0-9a-f]{40}$ ]] || return 1
+  git cat-file -e "$prev:docker-compose.server.yml" || return 1
+  project="$(compose_project_name)" || return 1
+  [ -n "$project" ] || return 1
+  ids="$(rollback_adapter_ids "$project")" || return 1
+  if [ -n "$ids" ]; then
+    mapfile -t adapter_ids <<< "$ids"
+    # Stop/remove the new adapter BEFORE any old control-plane service starts.
+    # A post-adapter target recreates its own exact-SHA adapter below.
+    docker stop "${adapter_ids[@]}" || return 1
+    docker rm "${adapter_ids[@]}" || return 1
+  fi
+  rollback_adapter_absent "$project" || return 1
+  git checkout "$prev" || return 1
+  [ "$(git rev-parse HEAD)" = "$prev" ] || return 1
+  TARGET_SHA="$prev"
+  PY_IMAGE="firebot-python:$prev"
+  WEB_IMAGE="firebot-web:$prev"
+  target_project="$(compose_project_name)" || return 1
+  [ "$target_project" = "$project" ] || { echo 'ROLLBACK_PROJECT_MISMATCH=FAIL' >&2; return 1; }
+  rollback_service_set || return 1
+  APP_ALL=("${ROLLBACK_SERVICES[@]}")
+  recreate "${ROLLBACK_SERVICES[@]}" || return 1
+  for svc in "${ROLLBACK_SERVICES[@]}"; do
+    cid="$(get_service_container_id "$svc")" || return 1
+    revision="$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$cid")" || return 1
+    [ "$revision" = "$prev" ] || { echo "ROLLBACK_IMAGE_SHA_MATCH=FAIL service=$svc" >&2; return 1; }
+  done
+  if [ "$ROLLBACK_HAS_ADAPTER" = false ]; then
+    rollback_adapter_absent "$project" || return 1
+  else
+    echo 'ADAPTER_POST_ROLLBACK=HEALTHY_PREVIOUS_SHA'
+  fi
 }
 
 migration_revision() {
@@ -242,12 +319,7 @@ deploy_scope() {
   if ! build_images "$@" || ! recreate "$@"; then
     echo "SERVER_DEPLOY=FAIL（rollout 失败，自动回滚 $prev）" >&2
     if [ "$prev" != "UNKNOWN" ]; then
-      git checkout "$prev" 2>/dev/null || true
-      FIREBOT_PYTHON_IMAGE="firebot-python:$prev" FIREBOT_WEB_IMAGE="firebot-web:$prev" \
-        "${COMPOSE[@]}" up -d --no-deps "${APP_ALL[@]}" 2>/dev/null || true
-      local ok=1
-      for svc in "${APP_ALL[@]}"; do service_healthy "$svc" || ok=0; done
-      if [ "$ok" = "1" ]; then
+      if rollback_to "$prev"; then
         echo "AUTO_ROLLBACK=PASS（回 $prev）" >&2
       else
         echo "AUTO_ROLLBACK=FAIL（高优先级报警，需人工介入）" >&2
@@ -286,23 +358,14 @@ do_rollback() {
   local old_current mig_before
   old_current="$(current_sha)"
   mig_before="$(migration_revision)"
-  git checkout "$prev"
-  # Keep this invocation's service set when rolling back to an older script.
-  # An older all-app implementation may not know about the adapter yet.
-  TARGET_SHA="$prev"
-  PY_IMAGE="firebot-python:$prev"
-  WEB_IMAGE="firebot-web:$prev"
-  recreate "${APP_ALL[@]}"
-  for svc in "${APP_ALL[@]}"; do
-    cid="$(get_service_container_id "$svc")"
-    revision="$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$cid")"
-    [ "$revision" = "$prev" ] || { echo "ROLLBACK_IMAGE_SHA_MATCH=FAIL service=$svc" >&2; exit 1; }
-  done
+  rollback_to "$prev" || { echo 'ROLLBACK=FAIL' >&2; return 1; }
   write_ssot "$prev" "$old_current"
   write_manifest rollback "$old_current" "$mig_before"
   echo "ROLLBACK=PASS sha=$prev"
 }
 
+if [[ "${BASH_SOURCE[0]}" = "$0" ]]; then
+init_deploy_context
 case "${1:-}" in
   status) do_status ;;
   preflight) do_preflight ;;
@@ -325,3 +388,4 @@ case "${1:-}" in
     exit 1
     ;;
 esac
+fi
