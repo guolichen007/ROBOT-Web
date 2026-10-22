@@ -70,9 +70,11 @@ def execute(args):
                     image = "sha256:" + "d" * 64
                 state["containers"][service] = {
                     "image_id": image,
-                    "revision": os.environ.get("FIREBOT_PYTHON_IMAGE", "").split(":")[-1],
+                    "revision": ("wrong" if os.environ.get("WRONG_REVISION") == "1"
+                                 else os.environ.get("FIREBOT_PYTHON_IMAGE", "").split(":")[-1]),
                     "running": os.environ.get("NOT_RUNNING") != "1" or not legacy,
-                    "health": ("unhealthy" if legacy and os.environ.get("UNHEALTHY") == "1"
+                    "health": ("unhealthy" if (legacy and os.environ.get("UNHEALTHY") == "1")
+                               or os.environ.get("UNHEALTHY_REFRESH") == "1"
                                else "healthy"),
                 }
                 if service == "vehicle-agent-adapter":
@@ -399,6 +401,62 @@ class CutoverTests(unittest.TestCase):
         self.assertIn("git checkout " + A, self.trace)
         self.assertNotIn("--no-build", self.trace)
         print("NEXT_CLEAN_RELEASE_RESTORES_SHA_ROLLBACK=PASS")
+
+    def test_refresh_same_sha_preserves_ssot_bytes_and_only_recreates_ros(self):
+        # Deliberately preserve unusual formatting and unrelated audit metadata.
+        original = (
+            '{ "current_sha": "' + A + '", "previous_sha": "' + B + '",\n'
+            '  "current_runtime_kind": "exact_sha", "previous_runtime_kind": "exact_sha",'
+            ' "audit_marker": "preserve-me" }\n'
+        ).encode()
+        (self.work / "current.json").write_bytes(original)
+        result = self.run_commands("do_refresh_ros_compat\n")
+        self.assertEqual(result.returncode, 0, self.output)
+        self.assertEqual((self.work / "current.json").read_bytes(), original)
+        self.assertIn("ROS_COMPAT_REFRESH=PASS", self.output)
+        self.assertIn("SSOT_CHANGED=NO", self.output)
+        mutations = [
+            line for line in self.trace.splitlines() if " build " in line or " up " in line
+        ]
+        self.assertEqual(len(mutations), 2, self.trace)
+        for line in mutations:
+            self.assertTrue(line.endswith(" ros-compat-adapter"), line)
+        self.assertNotIn("ACL_READ_ONLY", self.trace)
+        self.assertNotIn("DB_READ_ONLY", self.trace)
+        self.assertNotIn("MANIFEST", self.trace)
+        self.assertNotIn("docker stop", self.trace)
+        print("ROS_COMPAT_REFRESH=PASS ROS_COMPAT_REFRESH_SSOT_CHANGED=NO")
+
+    def test_refresh_rejects_mismatched_sha_and_legacy_before_build(self):
+        states = [
+            {"current_runtime_kind": "exact_sha", "current_sha": B},
+            {
+                "current_runtime_kind": "legacy_snapshot",
+                "current_runtime_manifest": str(self.manifest_path),
+                "current_git_provenance_sha": A,
+            },
+        ]
+        for state in states:
+            with self.subTest(state=state):
+                original = json.dumps(state).encode()
+                (self.work / "current.json").write_bytes(original)
+                result = self.run_commands("do_refresh_ros_compat\n")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual((self.work / "current.json").read_bytes(), original)
+                self.assertNotIn(" build ", self.trace)
+                self.assertNotIn(" up ", self.trace)
+
+    def test_refresh_failures_do_not_write_ssot_or_report_success(self):
+        original = json.dumps(
+            {"current_runtime_kind": "exact_sha", "current_sha": A, "previous_sha": B}
+        ).encode()
+        (self.work / "current.json").write_bytes(original)
+        for fault in ("FAIL_BUILD", "FAIL_RECREATE", "WRONG_REVISION", "UNHEALTHY_REFRESH"):
+            with self.subTest(fault=fault):
+                result = self.run_commands("do_refresh_ros_compat\n", **{fault: "1"})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn("ROS_COMPAT_REFRESH=PASS", self.output)
+                self.assertEqual((self.work / "current.json").read_bytes(), original)
 
     def test_first_canary_override_cannot_be_reused_on_clean_release(self):
         result = self.run_commands(

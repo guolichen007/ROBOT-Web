@@ -7,6 +7,7 @@
 #   TARGET_SHA=<40SHA> ./server-deploy.sh api|web|worker|control-plane|all-app
 #   TARGET_SHA=<40SHA> ./server-deploy.sh verify
 #   TARGET_SHA=<40SHA> ./server-deploy.sh rollback
+#   TARGET_SHA=<40SHA> ./server-deploy.sh refresh-ros-compat # 同 SHA 维护，不改 SSOT
 #   ./server-deploy.sh status                              # 读 current.json，不需 TARGET_SHA
 #
 # 服务分组：control-plane = api+mqtt-ingress+command-dispatcher+task-worker
@@ -406,6 +407,30 @@ do_verify() {
   VERIFY_SHA="$expected" scripts/server-verify.sh
 }
 
+do_refresh_ros_compat() {
+  require_sha
+  local current before after cid revision
+  current="$(runtime_descriptor current)" || return 1
+  if [ "$(runtime_value "$current" kind)" != exact_sha ] || \
+     [ "$(runtime_value "$current" sha)" != "$TARGET_SHA" ]; then
+    echo 'ROS_COMPAT_REFRESH=FAIL (requires current exact_sha == TARGET_SHA)' >&2
+    return 1
+  fi
+  before="$(sha256sum "$CURRENT_JSON" | cut -d' ' -f1)" || return 1
+  # Maintenance never invokes deploy_scope/write_ssot or changes previous runtime.
+  if ! build_images ros-compat-adapter || ! recreate ros-compat-adapter; then
+    echo 'ROS_COMPAT_REFRESH=FAIL (build or health)' >&2
+    return 1
+  fi
+  cid="$(get_service_container_id ros-compat-adapter)" || return 1
+  revision="$(docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$cid")" || return 1
+  [ "$revision" = "$TARGET_SHA" ] || { echo 'ROS_COMPAT_REFRESH=FAIL (revision)' >&2; return 1; }
+  after="$(sha256sum "$CURRENT_JSON" | cut -d' ' -f1)" || return 1
+  [ "$before" = "$after" ] || { echo 'ROS_COMPAT_REFRESH=FAIL SSOT_CHANGED=YES' >&2; return 1; }
+  echo 'ROS_COMPAT_REFRESH=PASS'
+  echo 'SSOT_CHANGED=NO'
+}
+
 do_rollback() {
   local prev previous old_current kind mig_before
   previous="$(runtime_descriptor previous)" || return 1
@@ -426,7 +451,7 @@ do_rollback() {
 
 if [[ "${BASH_SOURCE[0]}" = "$0" ]]; then
 case "${1:-}" in
-  status|verify|rollback) ;; # Runtime-based inspection/recovery does not guess rollout from the DB.
+  status|verify|rollback|refresh-ros-compat) ;; # Do not guess rollout from the DB for recovery/maintenance.
   *) init_deploy_context ;;
 esac
 case "${1:-}" in
@@ -445,9 +470,10 @@ case "${1:-}" in
   control-plane) deploy_scope "control-plane" "${CONTROL_PLANE[@]}" ;;
   all-app) deploy_scope "all-app" "${APP_ALL[@]}" ;;
   verify) do_verify ;;
+  refresh-ros-compat) do_refresh_ros_compat ;;
   rollback) do_rollback ;;
   *)
-    echo "用法: TARGET_SHA=<40SHA> $0 status|preflight|migrate|api|worker|web|control-plane|all-app|verify|rollback" >&2
+    echo "用法: TARGET_SHA=<40SHA> $0 status|preflight|migrate|api|worker|web|control-plane|all-app|verify|rollback|refresh-ros-compat" >&2
     exit 1
     ;;
 esac

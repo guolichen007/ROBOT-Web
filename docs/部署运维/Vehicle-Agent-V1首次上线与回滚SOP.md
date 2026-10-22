@@ -72,6 +72,12 @@ legacy → clean A 成功，随后 clean A → clean B 成功时，previous_runt
 
 应用回滚不会自动降级数据库，也不会自动撤销 ACL；这两项必须使用经过审核的兼容和恢复计划。确认无 v1 启用车辆后才可移除 rollout/profile。若 adapter unhealthy 或 ACL 校验失败，发布判定必须 FAIL。
 
+## all-app 稳定后的 ros-compat 维护刷新
+
+首次 all-app 稳定并经批准后，可按需运行 `TARGET_SHA=<current_sha> scripts/server-deploy.sh refresh-ros-compat`。要求 clean checkout、current_runtime_kind=exact_sha 且 current_sha==TARGET_SHA；legacy runtime 或 SHA 不一致均在 build 前拒绝。
+
+该命令仅构建该 SHA 的 Python 镜像、重建 ros-compat-adapter，验证 running/healthy 与 revision；不经 deploy_scope，不写 current.json，不移动 current/previous SHA 或 runtime kind。成功必须输出 ROS_COMPAT_REFRESH=PASS、SSOT_CHANGED=NO，SSOT byte-for-byte 不变。失败不得伪报成功，也不会连带重建其他应用或基础服务。不要用 adapter deploy 替代维护刷新，更不能在首次 all-app 前借维护命令跳过前置要求。
+
 ## ACK 诊断
 
 `transport_timeout` 只表示 90 秒窗口未收到车端 ACK，Command 保留 `ACK_MISSING`、空 ack_at/ack_status 和未确认状态。同 vehicle/msg_id/command_id/message_id/boot 的真实晚到 ACK 可覆盖它；首个真实 ACK 不被重复 ACK 或后续计时器覆盖。新鲜 status 可让 Task 反映 observed running/completed，但不会伪造 accepted ACK；`parameters_json.ack_diagnostic` 保留缺失事实。boot 改变后旧 ACK 拒绝。
