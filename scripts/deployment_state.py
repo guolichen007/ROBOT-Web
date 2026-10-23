@@ -1,0 +1,140 @@
+"""Read old SHA-only SSOT and atomically persist explicit runtime descriptors."""
+
+import json
+import os
+import re
+import sys
+import tempfile
+from pathlib import Path
+
+
+def load(path):
+    if not Path(path).exists():
+        return {}
+    state = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(state, dict):
+        raise ValueError("invalid deployment state")
+    return state
+
+
+def runtime(state, prefix):
+    kind = state.get(f"{prefix}_runtime_kind", "exact_sha")
+    if kind == "exact_sha":
+        sha = state.get(f"{prefix}_sha", "UNKNOWN")
+        if sha != "UNKNOWN" and not re.fullmatch(r"[0-9a-f]{40}", sha):
+            raise ValueError("invalid exact SHA")
+        return {"kind": kind, "sha": sha}
+    if kind == "legacy_snapshot":
+        manifest = state.get(f"{prefix}_runtime_manifest", "")
+        provenance = state.get(f"{prefix}_git_provenance_sha", "")
+        if not manifest or not Path(manifest).is_absolute():
+            raise ValueError("legacy runtime requires an absolute manifest path")
+        if provenance and not re.fullmatch(r"[0-9a-f]{40}", provenance):
+            raise ValueError("invalid provenance SHA")
+        return {"kind": kind, "manifest": manifest, "git_provenance_sha": provenance}
+    raise ValueError("unknown runtime kind")
+
+
+def write(path, current, previous):
+    state = {}
+    for prefix, descriptor in (("current", current), ("previous", previous)):
+        state[f"{prefix}_runtime_kind"] = descriptor["kind"]
+        if descriptor["kind"] == "exact_sha":
+            state[f"{prefix}_sha"] = descriptor["sha"]
+        elif descriptor["kind"] == "legacy_snapshot":
+            state[f"{prefix}_runtime_manifest"] = descriptor["manifest"]
+            state[f"{prefix}_git_provenance_sha"] = descriptor["git_provenance_sha"]
+        else:
+            raise ValueError("unknown runtime kind")
+        runtime(state, prefix)
+    atomic_write(path, state)
+
+
+def fsync_parent_directory(path):
+    # Windows cannot open directory FDs via os.open; production and Ubuntu CI
+    # take the POSIX path below. Never suppress a production open/fsync failure.
+    if os.name == "nt":
+        return
+    directory_fd = os.open(Path(path).parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def atomic_write(path, data):
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=".current-", dir=target.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(data, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, target)
+        fsync_parent_directory(target)
+    finally:
+        if Path(temporary).exists():
+            Path(temporary).unlink()
+
+
+def probe_write(*paths):
+    """Exercise create/fsync/replace in each actual parent without touching its target."""
+    for path in paths:
+        target = Path(path)
+        if not target.is_absolute() or (target.exists() and not target.is_file()):
+            raise ValueError("invalid finalization destination")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        probes = []
+        try:
+            for _ in range(2):
+                fd, temporary = tempfile.mkstemp(prefix=".write-probe-", dir=target.parent)
+                probes.append(Path(temporary))
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(b"finalization-probe\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+            os.replace(probes[0], probes[1])
+            fsync_parent_directory(probes[1])
+        finally:
+            for temporary in probes:
+                temporary.unlink(missing_ok=True)
+
+
+def main():
+    command, path, *args = sys.argv[1:]
+    if command == "read":
+        print(json.dumps(runtime(load(path), args[0])))
+    elif command == "write":
+        write(path, *map(json.loads, args))
+    elif command == "write-json":
+        atomic_write(path, json.load(sys.stdin))
+    elif command == "probe-write":
+        probe_write(path, *args)
+    elif command == "canary":
+        # An explicit exact_sha field marks an already governed clean release.
+        # The first-cutover override cannot be reused to hide that release.
+        state = load(path)
+        descriptor = json.loads(args[0])
+        if state.get("current_runtime_kind") == "exact_sha":
+            raise ValueError("first-canary override is not allowed on a clean release")
+        current = runtime(state, "current")
+        if current["kind"] == "legacy_snapshot":
+            if current != descriptor:
+                raise ValueError("first-canary manifest differs from current legacy runtime")
+        elif current["sha"] != "UNKNOWN" and current["sha"] != descriptor["git_provenance_sha"]:
+            raise ValueError("legacy provenance differs from old SSOT")
+    else:
+        raise ValueError("unknown deployment state command")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError, KeyError, TypeError):
+        print(
+            "DEPLOYMENT_STATE=FAIL (invalid runtime state or first-canary selection)",
+            file=sys.stderr,
+        )
+        sys.exit(1)

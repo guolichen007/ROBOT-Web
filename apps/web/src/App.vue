@@ -283,7 +283,8 @@ function onUserMenuClick(data: { value?: unknown }): void {
       <main class="workspace">
         <div id="workspace-alert" class="workspace-alert"></div>
         <header class="topbar">
-          <div class="status-area">
+          <div v-if="isMonitor" class="hmi-title"><h1>智能灭火机器人监控系统</h1></div>
+          <div v-else class="status-area">
             <div class="status-primary">
               <span class="status-cell"
                 ><LinkIcon class="status-icon" :class="sevLabel(sevClass.link)" /><span>链路状态</span
@@ -342,6 +343,9 @@ function onUserMenuClick(data: { value?: unknown }): void {
             </div>
           </div>
           <div class="user-side">
+            <span v-if="isMonitor" class="hmi-link-state" :data-connected="monitor.connected"
+              >● {{ monitor.connected ? '已连接' : '未连接' }}</span
+            >
             <time>{{ clock }}</time>
             <t-dropdown
               :options="[{ content: '退出登录', value: 'logout' }]"

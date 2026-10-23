@@ -48,7 +48,7 @@ services:
     networks: [firebot]
 
   mediamtx:
-    image: firebot-mediamtx:1.18.2
+    image: ${FIREBOT_DEV_MEDIAMTX_IMAGE:-firebot-dev-mediamtx:1.18.2}
     build:
       context: .
       dockerfile: infra/docker/mediamtx.Dockerfile

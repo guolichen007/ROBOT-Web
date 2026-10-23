@@ -10,6 +10,9 @@ export interface UserProfile {
 }
 
 export interface RobotState {
+  agent_protocol?: 'CANONICAL_MQTT' | 'VEHICLE_AGENT_V1' | 'ROS_COMPAT'
+  vehicle_agent_ready?: Record<string, boolean>
+  agent_state?: AgentState
   id?: string
   vehicle_id: string
   name?: string
@@ -65,7 +68,7 @@ export interface DataChannel {
 }
 
 export interface IntegrationProfile {
-  source_kind: 'CANONICAL_MQTT' | 'ROS_COMPAT' | 'MOCK'
+  source_kind: 'CANONICAL_MQTT' | 'ROS_COMPAT' | 'MOCK' | 'VEHICLE_AGENT_V1'
   upstream_protocol?: string | null
   control_contract_verified: boolean
   ack_contract_verified: boolean
@@ -236,6 +239,7 @@ export interface OperationContext {
 }
 
 export interface MonitorSnapshot {
+  commands?: AgentCommand[]
   snapshot_watermark: string
   site: Record<string, any> | null
   map: Record<string, any> | null
@@ -251,6 +255,40 @@ export interface MonitorSnapshot {
   navigation_presets?: NavigationPreset[]
   operation_context?: OperationContext | null
   operation_contexts?: Record<string, OperationContext>
+}
+
+export interface AgentState {
+  telemetry_online?: boolean
+  availability?: 'online' | 'offline'
+  status_received_at?: string | null
+  telemetry_received_at?: string | null
+  receive_latency_ms?: number | null
+  status?: {
+    online: boolean
+    programs: Record<string, boolean | string | null>
+    task: {
+      state: 'idle' | 'patrol' | 'homing' | 'spot'
+      patrol_paused: boolean
+      patrol_next?: string | number | null
+      patrol_count?: number | null
+    }
+  }
+  telemetry?: {
+    battery?: { percentage?: number | null } | null
+    thermal?: { max_temp?: number | null } | null
+    smog?: { percentage?: number | null; alarm?: boolean | null } | null
+  }
+}
+
+export interface AgentCommand {
+  id: string
+  command_id: string
+  robot_id: string
+  cmd: string
+  lifecycle_status: string
+  issued_at: string
+  ack_reason?: string | null
+  ack_payload_json?: { code: string; message: string; success: boolean } | null
 }
 
 export interface RealtimeEvent {

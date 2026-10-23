@@ -10,11 +10,11 @@ prometheus-client==0.22.1
 psycopg[binary]==3.2.10
 pydantic==2.11.7
 pydantic-settings==2.10.1
-PyJWT==2.13.0
+PyJWT==2.14.0
 openpyxl==3.1.5
 python-multipart==0.0.30
 redis==6.4.0
 reportlab==5.0.0
 SQLAlchemy==2.0.43
 uvicorn[standard]==0.35.0
-Pillow==12.3.0
+Pillow==13.0.0

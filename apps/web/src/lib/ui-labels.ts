@@ -75,6 +75,9 @@ export const localizationLabel = map(
 export const taskTypeLabel = map(
   {
     PATROL: '巡检任务',
+    V1_PATROL: '巡逻任务',
+    V1_HOMING: '返航',
+    V1_NAVIGATE: '前往目标',
     EXTINGUISH: '灭火任务',
     NAVIGATE: '导航任务',
     NAVIGATE_TO_PRESET: '前往预设点',

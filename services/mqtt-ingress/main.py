@@ -454,6 +454,11 @@ def process_internal_compat(topic: str, payload: bytes, received: datetime) -> b
         # SQL integration/capability/channel facts are refreshed separately.
         raw = redis.get(f"robot:{vehicle_id}:latest")
         latest = json.loads(raw) if raw else {"vehicle_id": vehicle_id}
+        if (
+            latest.get("agent_protocol") == "VEHICLE_AGENT_V1"
+            or redis.get(f"vehicle-agent:protocol:{vehicle_id}") == "VEHICLE_AGENT_V1"
+        ):
+            return True
         latest.update(
             {
                 "linear": msg.get("planar_speed"),
@@ -487,6 +492,8 @@ def process_internal_compat(topic: str, payload: bytes, received: datetime) -> b
         robot = robot_for(db, vehicle_id)
         if not robot:
             mqtt_invalid_total.labels(reason="unknown_vehicle").inc()
+            return True
+        if robot.agent_protocol == "VEHICLE_AGENT_V1":
             return True
         profile = db.get(RobotIntegrationProfile, robot.id)
         if not profile:
@@ -887,6 +894,10 @@ def process(topic: str, payload: bytes) -> None:
         mqtt_payload_rejected_total.labels(reason="payload_too_large").inc()
         increment_mqtt_metric("invalid:payload_too_large")
         return
+    from services.vehicle_agent_ingress import process as process_vehicle_agent
+
+    if process_vehicle_agent(topic, payload, handle_ack):
+        return
     if process_internal_compat(topic, payload, received):
         return
     try:
@@ -947,6 +958,8 @@ def process(topic: str, payload: bytes) -> None:
             if not robot:
                 mqtt_invalid_total.labels(reason="unknown_vehicle").inc()
                 increment_mqtt_metric("invalid:unknown_vehicle")
+            elif robot.agent_protocol == "VEHICLE_AGENT_V1":
+                increment_mqtt_metric("invalid:agent_protocol_mismatch")
             elif not accept_boot_session(db, robot, msg, received):
                 mqtt_invalid_total.labels(reason="ended_or_unknown_boot").inc()
             else:
@@ -1088,6 +1101,7 @@ def on_connect(client, userdata, flags, reason_code, properties):
     ):
         client.subscribe(f"robot/+/{topic}", qos=1)
         client.subscribe(f"_platform/compat/+/{topic}", qos=1)
+    client.subscribe("_platform/vehicle-agent-v1/+/+", qos=1)
     for topic in (
         "compat_status",
         "compat_battery",

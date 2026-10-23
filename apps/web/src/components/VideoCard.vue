@@ -6,6 +6,8 @@ import { useSystemClock } from '@/composables/useSystemClock'
 import { streamStateLabel } from '@/lib/ui-labels'
 import type { StreamInfo } from '@/types'
 
+type PlayerState = 'DISABLED' | 'OFFLINE' | 'CONNECTING' | 'LIVE' | 'ERROR'
+
 const props = withDefaults(
   defineProps<{
     stream?: StreamInfo
@@ -17,16 +19,23 @@ const props = withDefaults(
 )
 const video = ref<HTMLVideoElement>()
 const stage = ref<HTMLDivElement>()
-const state = ref<'DISABLED' | 'OFFLINE' | 'CONNECTING' | 'LIVE' | 'ERROR'>(props.stream?.state || 'OFFLINE')
+
+// 本地播放器状态只描述「当前浏览器播放器」，与媒体源状态严格解耦：
+// 服务端 stream.state 只代表媒体源状态，绝不直接映射为播放器 LIVE。
+function idlePlayerState(): 'DISABLED' | 'OFFLINE' {
+  return props.stream?.state === 'DISABLED' ? 'DISABLED' : 'OFFLINE'
+}
+
+const state = ref<PlayerState>(idlePlayerState())
 const detail = ref('')
 const { now } = useSystemClock()
 let peer: RTCPeerConnection | null = null
 let resourceUrl = ''
+let connecting = false
+let sessionEpoch = 0
+let disposed = false
 
 const canPlay = computed(() => Boolean(props.stream?.stream_id && props.stream.state !== 'DISABLED'))
-const shouldAutoConnect = computed(
-  () => props.active && ['CONNECTING', 'LIVE'].includes(props.stream?.state || 'OFFLINE'),
-)
 const stateText = computed(() => {
   if (state.value === 'DISABLED') return '通道已停用'
   if (state.value === 'CONNECTING') return '正在连接视频'
@@ -49,6 +58,7 @@ async function waitIce(pc: RTCPeerConnection): Promise<void> {
 }
 
 async function disconnect(): Promise<void> {
+  sessionEpoch += 1
   const old = peer
   peer = null
   if (resourceUrl) {
@@ -57,30 +67,51 @@ async function disconnect(): Promise<void> {
   }
   old?.close()
   if (video.value) video.value.srcObject = null
-  state.value = props.stream?.state || 'OFFLINE'
+  // 播放器回到空闲态，而不是回落到「媒体源状态」。
+  state.value = idlePlayerState()
 }
 
+// 建立播放器会话的唯一入口：用户点击「连接视频」。
+// 普通 WS 更新 / snapshot 刷新 / 机器人状态 / 检测覆盖都不得触发它。
 async function connect(): Promise<void> {
+  if (connecting) return
+  const current = peer
+  if (current && ['new', 'connecting', 'connected'].includes(current.connectionState)) return
+  if (!canPlay.value || !props.stream || !props.active || disposed) return
+
+  connecting = true
+  const streamId = props.stream.stream_id
   await disconnect()
-  if (!canPlay.value || !props.stream) return
-  state.value = 'CONNECTING'
-  detail.value = ''
+  const epoch = sessionEpoch
+  const valid = () =>
+    epoch === sessionEpoch &&
+    !disposed &&
+    props.active &&
+    canPlay.value &&
+    props.stream?.stream_id === streamId
   try {
-    const ticket = (await api.post('/media/tickets', { stream_id: props.stream.stream_id })).data
+    if (!valid()) return
+    state.value = 'CONNECTING'
+    detail.value = ''
+    const ticket = (await api.post('/media/tickets', { stream_id: streamId })).data
+    if (!valid()) return
     const pc = new RTCPeerConnection()
     peer = pc
     pc.addTransceiver('video', { direction: 'recvonly' })
     pc.ontrack = (event) => {
+      if (!valid()) return
       if (video.value) video.value.srcObject = event.streams[0]
       if (pc.connectionState === 'connected') state.value = 'LIVE'
     }
     pc.onconnectionstatechange = () => {
+      if (!valid()) return
       if (pc.connectionState === 'connected' && video.value?.srcObject) state.value = 'LIVE'
       if (['failed', 'disconnected'].includes(pc.connectionState)) state.value = 'ERROR'
     }
     const offer = await pc.createOffer()
     await pc.setLocalDescription(offer)
     await waitIce(pc)
+    if (!valid()) return
     const response = await fetch(ticket.playback_url, {
       method: 'POST',
       credentials: 'same-origin',
@@ -89,11 +120,21 @@ async function connect(): Promise<void> {
     })
     if (!response.ok) throw new Error(`WHEP ${response.status}`)
     const location = response.headers.get('Location')
-    if (location) resourceUrl = new URL(location, window.location.href).toString()
-    await pc.setRemoteDescription({ type: 'answer', sdp: await response.text() })
+    const createdResource = location ? new URL(location, window.location.href).toString() : ''
+    if (!valid()) {
+      if (createdResource)
+        void fetch(createdResource, { method: 'DELETE', credentials: 'same-origin' }).catch(() => undefined)
+      return
+    }
+    resourceUrl = createdResource
+    const answer = await response.text()
+    if (valid()) await pc.setRemoteDescription({ type: 'answer', sdp: answer })
   } catch (reason) {
+    if (!valid()) return
     state.value = 'ERROR'
     detail.value = errorMessage(reason)
+  } finally {
+    connecting = false
   }
 }
 
@@ -106,14 +147,32 @@ async function enterFullscreen(): Promise<void> {
   }
 }
 
+// 只有 stream_id 真正变化才销毁旧会话；不自动连接新流。
 watch(
-  () => [props.stream?.stream_id, props.stream?.state, props.active],
-  () => {
-    if (shouldAutoConnect.value) void connect()
-    else void disconnect()
+  () => props.stream?.stream_id,
+  () => void disconnect(),
+)
+
+// 只有本卡片变为 inactive 才断开。
+watch(
+  () => props.active,
+  (isActive) => {
+    if (!isActive) void disconnect()
   },
 )
-onUnmounted(() => void disconnect())
+
+// 只有媒体源被明确 DISABLED 才断开；OFFLINE / CONNECTING / LIVE 的变化不得销毁浏览器会话。
+watch(
+  () => props.stream?.state,
+  (next) => {
+    if (next === 'DISABLED') void disconnect()
+  },
+)
+
+onUnmounted(() => {
+  disposed = true
+  void disconnect()
+})
 </script>
 
 <template>

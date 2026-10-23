@@ -6,7 +6,7 @@
   height: 100%;
   min-height: 0;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   gap: 10px;
   overflow: hidden;
 }
@@ -80,7 +80,7 @@
   min-height: 0;
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1.58fr) minmax(390px, 0.92fr);
+  grid-template-columns: minmax(0, 3fr) minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
 }
 .yd-monitor-core > * {
@@ -479,7 +479,7 @@
   min-height: 0;
   overflow: hidden;
   display: grid;
-  grid-template-rows: 44px 42px minmax(0, 1fr);
+  grid-template-rows: 44px minmax(0, 1fr);
 }
 .video-surveillance-head {
   display: flex;
@@ -490,27 +490,12 @@
   color: var(--yd-text);
   border-bottom: 1px solid var(--yd-border-soft);
 }
-.video-tabs {
-  display: flex;
-  align-items: flex-end;
-  gap: 26px;
-  padding: 0 14px;
-  border-bottom: 1px solid var(--yd-border-soft);
-}
-.video-tab {
-  height: 42px;
-  border: 0;
-  background: transparent;
-  color: var(--yd-text-2);
-  font-size: 13px;
-}
-.video-tab:hover {
-  color: var(--yd-primary);
-}
-.video-tab.active {
-  color: var(--yd-primary);
-  font-weight: 700;
-  border-bottom: 3px solid var(--yd-primary);
+.video-grid {
+  display: grid;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 10px;
+  min-height: 0;
 }
 .video-active-card {
   height: 100%;
@@ -1145,4 +1130,243 @@
 .alarm-empty strong {
   font-size: 15px;
   color: var(--yd-text-2);
+}
+
+/* 工业 HMI：地图 60% / 同时显示双视频 20% / 可滚动控制 20%。 */
+.hmi-title {
+  flex: 1;
+  min-width: 0;
+}
+.hmi-title h1 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 1px;
+  color: #19334d;
+}
+.hmi-link-state {
+  color: #8a4650;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.hmi-link-state[data-connected='true'] {
+  color: #1a856c;
+}
+.hmi-kpis {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+.hmi-kpi {
+  min-width: 0;
+  padding: 16px 18px;
+  display: grid;
+  gap: 5px;
+  border-top: 3px solid #2a73bb;
+}
+.hmi-kpi > span {
+  color: var(--yd-text-2);
+  font-size: 13px;
+}
+.hmi-kpi strong {
+  font-size: 26px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+.hmi-kpi small {
+  color: #368371;
+  font-size: 11px;
+}
+.hmi-kpi[data-stale='true'] {
+  border-top-color: #b0b8c2;
+}
+.hmi-kpi[data-stale='true'] strong,
+.hmi-kpi[data-stale='true'] small {
+  color: #7a8795;
+}
+.hmi-camera {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: 28px minmax(0, 1fr);
+  gap: 5px;
+}
+.hmi-camera h3 {
+  margin: 0;
+  font-size: 13px;
+  color: var(--yd-text-2);
+  font-weight: 500;
+}
+.hmi-control-rail {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.hmi-control-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--yd-border-soft);
+  flex: 0 0 44px;
+}
+.hmi-control-tabs button {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: var(--yd-text-2);
+  font-size: 13px;
+}
+.hmi-control-tabs button[aria-selected='true'] {
+  border-bottom-color: #2676ba;
+  color: #2676ba;
+  font-weight: 700;
+}
+.hmi-control-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 14px;
+}
+.hmi-task {
+  display: grid;
+  gap: 9px;
+  padding: 14px;
+  border-radius: 6px;
+  background: #eef4fa;
+  color: #254e79;
+}
+.hmi-task span {
+  font-size: 12px;
+}
+.hmi-task strong {
+  font-size: 15px;
+}
+.hmi-auto-controls h3 {
+  margin: 22px 0 12px;
+  color: #30465e;
+  font-size: 13px;
+  font-weight: 600;
+}
+.hmi-command-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.hmi-command-grid button {
+  min-height: 40px;
+  border: 1px solid #276dac;
+  background: #2777bb;
+  color: white;
+  border-radius: 5px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.hmi-command-grid .hmi-command-stop {
+  color: #4d6076;
+  background: white;
+  border-color: #c8d2df;
+}
+.hmi-command-grid button:disabled {
+  color: #9aa7b5;
+  background: #f3f5f7;
+  border-color: #e0e5eb;
+  cursor: not-allowed;
+}
+.hmi-command-grid button[aria-busy='true'] {
+  color: #2676ba;
+  background: #eef6ff;
+}
+.hmi-slot-label {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: #65758a;
+  font-size: 12px;
+}
+.hmi-slot-label select {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  border-radius: 5px;
+  border: 1px solid #c8d2df;
+  padding: 0 10px;
+  background: white;
+  color: #30465e;
+}
+.hmi-hint {
+  font-size: 12px;
+  color: #7b8798;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.hmi-command-error {
+  font-size: 12px;
+  color: #b13c39;
+  background: #fff1ef;
+  padding: 10px;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+.hmi-map-tabs {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+}
+.hmi-map-tabs button {
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 4px;
+  color: #6f7c8e;
+  background: transparent;
+  white-space: nowrap;
+  font-size: 12px;
+}
+.hmi-map-tabs button[aria-pressed='true'] {
+  background: #edf4fc;
+  color: #2676ba;
+}
+.hmi-safety-entry {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--yd-border-soft);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px 10px;
+  align-items: center;
+}
+.hmi-estop {
+  background: #fff4f3;
+  border: 1px solid #d98983;
+  border-radius: 4px;
+  padding: 5px 14px;
+  color: #bd4741;
+  cursor: pointer;
+}
+.hmi-estop:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.hmi-safety-entry small {
+  color: #94716c;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.hmi-monitor-details {
+  display: grid;
+  gap: 10px;
+}
+.operations-map-panel > .map-canvas {
+  position: relative;
+}
+.hmi-legacy-controls .operations-command-dock {
+  padding: 10px;
+}
+.hmi-legacy-controls .dock-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+}
+.hmi-legacy-controls .dock-status {
+  display: block;
+  overflow-wrap: anywhere;
 }

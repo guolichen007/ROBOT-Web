@@ -96,9 +96,14 @@ services:
     build:
       context: .
       dockerfile: infra/docker/mediamtx.Dockerfile
+    ports:
+      - "${SERVER_TAILSCALE_IP:?SERVER_TAILSCALE_IP is required}:8554:8554/tcp"
+      - "${SERVER_LAN_IP:?SERVER_LAN_IP is required}:8189:8189/udp"
+      - "${SERVER_LAN_IP:?SERVER_LAN_IP is required}:8189:8189/tcp"
     volumes: ["./infra/mediamtx/mediamtx.server.yml:/mediamtx.yml:ro"]
     environment:
       MTX_WEBRTCALLOWORIGINS: ${MEDIAMTX_WEBRTC_ALLOW_ORIGINS}
+      MTX_WEBRTCADDITIONALHOSTS: ${MEDIAMTX_WEBRTC_ADDITIONAL_HOSTS}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "/busybox", "wget", "-q", "-O", "-", "http://127.0.0.1:9997/v3/config/global/get"]
@@ -172,6 +177,19 @@ services:
       mosquitto: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "python", "-c", "from app.core.events import get_redis; r=get_redis(); raise SystemExit(0 if r.get('service:command-dispatcher:outbox-heartbeat') and r.get('service:command-dispatcher:safety-heartbeat') else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  vehicle-agent-adapter:
+    <<: *python-service
+    profiles: [vehicle-agent]
+    command: ["python", "/workspace/services/vehicle-agent-adapter/main.py"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      mosquitto: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "from app.core.vehicle_agent_health import adapter_healthy; raise SystemExit(0 if adapter_healthy() else 1)"]
       interval: 10s
       timeout: 5s
       retries: 12

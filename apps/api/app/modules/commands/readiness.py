@@ -145,7 +145,18 @@ def robot_readiness(db: Session, robot: Robot) -> dict[str, Any]:
     ]
     if unsupported:
         reasons.append("UNSUPPORTED_COMMANDS:" + ",".join(unsupported))
+    v1_readiness = {}
+    if robot.agent_protocol == "VEHICLE_AGENT_V1":
+        from app.modules.commands.vehicle_agent_gate import gate_reason
+        from services.vehicle_agent_v1 import BUSINESS_COMMANDS
+
+        v1_readiness = {action: not gate_reason(db, robot, action) for action in BUSINESS_COMMANDS}
+        # Legacy operations must never publish legacy safety/motion on a v1 vehicle.
+        safety = dict.fromkeys(SAFETY_COMMANDS, False)
+        autonomous = dict.fromkeys(AUTONOMOUS_COMMANDS, False)
+        manual_ready = False
     return {
+        "vehicle_agent_ready": v1_readiness,
         "monitor_ready": online,
         "safety_command_ready": safety,
         "manual_control_ready": manual_ready,

@@ -58,7 +58,8 @@ test('snapshot lists R001 and R002 with robot-owned streams', async ({ request }
 test('monitor device snapshot shows R002 as the active vehicle', async ({ page, request }) => {
   await switchToR002(page, request)
   await page.goto('/monitor')
-  await expect(page.getByRole('heading', { name: '停车场巡检地图' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '停车场二维地图' })).toBeVisible()
+  await page.getByRole('button', { name: '监测', exact: true }).click()
   await expect(page.locator('.device-snapshot')).toBeVisible()
   await expect(deviceRow(page, '机器人编号')).toHaveText('R002')
 })
@@ -89,6 +90,7 @@ test('R001 active task does not leak into the R002 monitor view', async ({ page,
 
     await switchToR002(page, request)
     await page.goto('/monitor')
+    await page.getByRole('button', { name: '监测', exact: true }).click()
     await expect(page.locator('.device-snapshot')).toBeVisible()
     await expect(deviceRow(page, '当前任务')).toHaveText('空闲')
     await expect(deviceRow(page, '任务编号')).toHaveText('--')
@@ -103,7 +105,7 @@ test('R001 live media does not leak into the R002 video panel', async ({ page, r
   await page.goto('/monitor')
   await expect(page.locator('.video-surveillance')).toBeVisible()
   await expect(page.locator('.video-live-tag')).toHaveCount(0)
-  await expect(page.locator('.video-placeholder strong')).toContainText('视频未连接')
+  await expect(page.locator('.video-placeholder strong')).toHaveText(['视频未连接', '视频未连接'])
 })
 
 // 5) 刷新持久化：整页 reload 后 active vehicle 仍为 R002。

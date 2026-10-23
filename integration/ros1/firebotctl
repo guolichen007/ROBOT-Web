@@ -73,15 +73,12 @@ require_sha() {
 }
 
 # 自动同步批准 SHA：fetch + checkout --detach，禁止 reset/stash/改代码。
-# mode=server 允许唯一既有 probe（scripts/r1_patrol_probe.sh）；mode=vehicle 要求完全 clean。
+# 服务器和车端的 exact-SHA release 均要求完全 clean。
 release_sync() {
   local sha="$1" mode="${2:-vehicle}"
   require_sha "$sha"
   local dirty
   dirty="$(git -C "$REPO_DIR" status --porcelain 2>/dev/null)"
-  if [ "$mode" = "server" ]; then
-    dirty="$(printf '%s\n' "$dirty" | grep -v '^?? scripts/r1_patrol_probe.sh$' || true)"
-  fi
   if [ -n "$dirty" ]; then
     echo "ERROR: ROBOT-Web 工作区不干净（含 untracked/staged 变更），禁止自动 checkout" >&2
     exit 1

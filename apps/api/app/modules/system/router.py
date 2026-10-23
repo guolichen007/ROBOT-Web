@@ -23,6 +23,7 @@ from app.core.metrics import (
 )
 from app.core.serialization import serialize_model
 from app.db.models import (
+    Command,
     ExtinguishPoint,
     FireEvent,
     InspectionPoint,
@@ -106,6 +107,19 @@ def readiness_payload(db: DbSession) -> dict:
         "last_heartbeat": ros_compat_heartbeat,
         "required": ros_compat_required,
     }
+    from app.core.vehicle_agent_health import adapter_healthy
+
+    v1_required = settings.vehicle_agent_v1_downlink_enabled or bool(
+        db.scalar(
+            select(Robot.id)
+            .where(Robot.enabled.is_(True), Robot.agent_protocol == "VEHICLE_AGENT_V1")
+            .limit(1)
+        )
+    )
+    checks["vehicle_agent_adapter"] = {
+        "ok": adapter_healthy() if checks["redis"]["ok"] else False,
+        "required": v1_required,
+    }
     worker_heartbeat = (
         get_redis().get("service:task-worker:heartbeat")
         if checks.get("redis", {}).get("ok")
@@ -140,6 +154,8 @@ def readiness_payload(db: DbSession) -> dict:
     ok = True
     for name, item in checks.items():
         if name == "ros_compat_adapter" and not ros_compat_required:
+            continue
+        if name == "vehicle_agent_adapter" and not v1_required:
             continue
         if not item["ok"]:
             ok = False
@@ -311,6 +327,8 @@ def assemble_robot_state(robot: Robot, raw: str | None) -> dict:
             "name": robot.name,
             "model": robot.model,
             "enabled": robot.enabled,
+            "agent_protocol": robot.agent_protocol,
+            "agent_state": robot.agent_state_json,
             "last_seen_at": robot.last_seen_at.isoformat() if robot.last_seen_at else None,
             "current_map_id": robot.current_map_id,
             "current_map_version": robot.current_map_version,
@@ -425,6 +443,10 @@ def monitor_snapshot(
         "robots": latest,
         "alarms": [serialize_model(x) for x in alarms],
         "tasks": [serialize_model(x) for x in tasks],
+        "commands": [
+            serialize_model(x)
+            for x in db.scalars(select(Command).order_by(Command.issued_at.desc()).limit(200)).all()
+        ],
         "operation_context": build_operation_context(db, robots[0]) if robots else None,
         "operation_contexts": {
             robot.vehicle_id: build_operation_context(db, robot) for robot in robots

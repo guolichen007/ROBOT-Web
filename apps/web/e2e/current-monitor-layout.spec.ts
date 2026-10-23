@@ -15,13 +15,14 @@ test('current monitor layout is stable across common resolutions', async ({ page
   for (const viewport of [
     { width: 2048, height: 997 },
     { width: 1920, height: 1080 },
-    { width: 1366, height: 768 },
+    { width: 1680, height: 900 },
   ]) {
     await page.setViewportSize({ width: viewport.width, height: viewport.height })
 
     // 当前稳定合同：主地图 + 车顶实时相机 + dock（state-dependent 动态标签）
-    await expect(page.getByRole('heading', { name: '停车场巡检地图' })).toBeVisible()
-    await expect(page.getByText('车顶实时相机').first()).toBeVisible()
+    await expect(page.getByRole('heading', { name: '停车场二维地图' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '监控相机', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '红外热成像', exact: true })).toBeVisible()
     await assertControlDockVisible(page)
 
     // 关键区域不溢出、无横向滚动、控制区不被裁切

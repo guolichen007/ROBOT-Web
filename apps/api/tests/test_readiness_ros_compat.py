@@ -9,12 +9,16 @@ class _FakeDb:
     def execute(self, _stmt):
         return None
 
+    def scalar(self, _stmt):
+        # This fixture represents a canonical-only fleet with no enabled v1 robot.
+        return None
+
 
 def _heartbeats(monkeypatch, ros_compat_mode: bool, ros_compat_heartbeat: bool) -> dict:
     from app.core import config as config_mod
 
     settings = config_mod.get_settings()
-    settings.ros_compat_mode = ros_compat_mode
+    monkeypatch.setattr(settings, "ros_compat_mode", ros_compat_mode)
 
     # 模拟所有基础依赖 OK
     monkeypatch.setattr("app.modules.system.router.bounded_tcp_probe", lambda *a, **k: (True, None))

@@ -13,10 +13,10 @@ from app.core.config import get_settings
 from app.core.events import get_redis, queue_event
 from app.core.logging import configure_logging
 from app.core.serialization import serialize_model
-from app.db.models import Command, OutboxEvent
+from app.db.models import Command, OutboxEvent, Robot
 from app.db.session import SessionLocal
 from redis.exceptions import ResponseError
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from services.protocol import validate_message
 
@@ -39,8 +39,34 @@ def publish_command(payload: dict, qos: int) -> None:
     expires = datetime.fromisoformat(payload["expires_at"])
     if expires <= datetime.now(UTC):
         raise TimeoutError("command expired before publish")
+    destination = f"robot/{payload['vehicle_id']}/command"
+    with SessionLocal() as db:
+        robot = db.scalar(select(Robot).where(Robot.vehicle_id == payload["vehicle_id"]))
+        if robot is None:
+            raise ValueError("unknown command vehicle")
+        if robot.agent_protocol == "VEHICLE_AGENT_V1":
+            from app.core.vehicle_agent_health import adapter_healthy
+
+            if not adapter_healthy():
+                raise ValueError("v1 adapter unavailable before dispatch")
+            if not settings.vehicle_agent_v1_downlink_enabled:
+                raise ValueError("v1 downlink disabled")
+            if payload.get("schema_version") != "vehicle-agent-v1":
+                raise ValueError("legacy command forbidden on v1 transport")
+            if payload["target_boot_id"] != robot.boot_id:
+                raise ValueError("v1 boot changed before dispatch")
+            destination = f"_platform/vehicle-agent-v1/{robot.vehicle_id}/command"
+            redis.setex(
+                f"vehicle-agent:binding:{robot.vehicle_id}",
+                300,
+                f"VEHICLE_AGENT_V1:{robot.boot_id}",
+            )
+        elif payload.get("schema_version") == "vehicle-agent-v1":
+            raise ValueError("v1 command forbidden on legacy transport")
+        elif robot.agent_protocol == "ROS_COMPAT":
+            raise ValueError("ROS_COMPAT downlink is not implemented")
     info = client.publish(
-        f"robot/{payload['vehicle_id']}/command",
+        destination,
         json.dumps(payload, ensure_ascii=False),
         qos=qos,
         retain=False,
@@ -166,48 +192,56 @@ def process_safety_events(events: list) -> None:
             redis.xack("firebot:safety_commands", "dispatchers", stream_id)
 
 
+def dispatch_next() -> bool:
+    """One transactional Outbox cycle, shared by the worker and mock integration tests."""
+    redis.setex("service:command-dispatcher:outbox-heartbeat", 5, datetime.now(UTC).isoformat())
+    with SessionLocal.begin() as db:
+        row = db.scalar(
+            select(OutboxEvent)
+            .outerjoin(Command, Command.command_id == OutboxEvent.aggregate_id)
+            .where(
+                OutboxEvent.status == "PENDING",
+                OutboxEvent.available_at <= datetime.now(UTC),
+            )
+            .order_by(
+                func.coalesce(Command.priority, 50).desc(), OutboxEvent.created_at, OutboxEvent.id
+            )
+            .with_for_update(skip_locked=True, of=OutboxEvent)
+        )
+        if not row:
+            return False
+        command = db.scalar(select(Command).where(Command.command_id == row.aggregate_id))
+        try:
+            publish_command(row.payload_json, qos=1)
+            row.status = "PUBLISHED"
+            row.published_at = datetime.now(UTC)
+            row.attempts += 1
+            if command:
+                command.lifecycle_status = "PUBLISHED"
+                command.published_at = row.published_at
+                queue_event(db, "command.updated", serialize_model(command))
+        except TimeoutError:
+            row.status = "EXPIRED"
+            row.last_error = "expired"
+            if command:
+                command.lifecycle_status = "EXPIRED"
+                command.terminal_at = datetime.now(UTC)
+                queue_event(db, "command.updated", serialize_model(command))
+        except Exception as exc:
+            row.attempts += 1
+            row.last_error = str(exc)[:500]
+            row.available_at = datetime.now(UTC) + timedelta(
+                seconds=min(30, 2 ** min(row.attempts, 5))
+            )
+            logger.warning("outbox publish failed", exc_info=True)
+    return True
+
+
 def outbox_loop() -> None:
     while True:
         try:
-            redis.setex(
-                "service:command-dispatcher:outbox-heartbeat", 5, datetime.now(UTC).isoformat()
-            )
-            with SessionLocal.begin() as db:
-                row = db.scalar(
-                    select(OutboxEvent)
-                    .where(
-                        OutboxEvent.status == "PENDING",
-                        OutboxEvent.available_at <= datetime.now(UTC),
-                    )
-                    .order_by(OutboxEvent.created_at)
-                    .with_for_update(skip_locked=True)
-                )
-                if not row:
-                    time.sleep(0.25)
-                    continue
-                command = db.scalar(select(Command).where(Command.command_id == row.aggregate_id))
-                try:
-                    publish_command(row.payload_json, qos=1)
-                    row.status = "PUBLISHED"
-                    row.published_at = datetime.now(UTC)
-                    row.attempts += 1
-                    if command:
-                        command.lifecycle_status = "PUBLISHED"
-                        command.published_at = row.published_at
-                        queue_event(db, "command.updated", serialize_model(command))
-                except TimeoutError:
-                    row.status = "EXPIRED"
-                    row.last_error = "expired"
-                    if command:
-                        command.lifecycle_status = "EXPIRED"
-                        command.terminal_at = datetime.now(UTC)
-                except Exception as exc:
-                    row.attempts += 1
-                    row.last_error = str(exc)[:500]
-                    row.available_at = datetime.now(UTC) + timedelta(
-                        seconds=min(30, 2 ** min(row.attempts, 5))
-                    )
-                    logger.warning("outbox publish failed", exc_info=True)
+            if not dispatch_next():
+                time.sleep(0.25)
         except Exception:
             logger.exception("dispatcher cycle failed; retrying")
             time.sleep(1)
