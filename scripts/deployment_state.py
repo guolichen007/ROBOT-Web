@@ -50,6 +50,18 @@ def write(path, current, previous):
     atomic_write(path, state)
 
 
+def fsync_parent_directory(path):
+    # Windows cannot open directory FDs via os.open; production and Ubuntu CI
+    # take the POSIX path below. Never suppress a production open/fsync failure.
+    if os.name == "nt":
+        return
+    directory_fd = os.open(Path(path).parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
 def atomic_write(path, data):
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -61,6 +73,7 @@ def atomic_write(path, data):
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, target)
+        fsync_parent_directory(target)
     finally:
         if Path(temporary).exists():
             Path(temporary).unlink()
@@ -83,6 +96,7 @@ def probe_write(*paths):
                     stream.flush()
                     os.fsync(stream.fileno())
             os.replace(probes[0], probes[1])
+            fsync_parent_directory(probes[1])
         finally:
             for temporary in probes:
                 temporary.unlink(missing_ok=True)

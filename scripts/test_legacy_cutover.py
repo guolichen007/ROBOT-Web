@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -11,7 +12,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from deployment_state import atomic_write, probe_write
+from deployment_state import atomic_write, fsync_parent_directory, probe_write
 
 ROOT = Path(__file__).resolve().parents[1]
 PROVENANCE = "584efcfda60b8d39c516a9939bc0481609fc6f3c"
@@ -165,6 +166,39 @@ subprocess.check_output = fake_output
 exec(compile(sys.stdin.read(), "manifest-generator", "exec"))
 """
 
+STATE_WRAPPER = r"""
+import json
+import os
+import sys
+from pathlib import Path
+
+code, *args = sys.argv[1:]
+sys.argv = [sys.argv[0], *args]
+namespace = {"__name__": "cached_deployment_state"}
+exec(compile(code, "cached-deployment-state", "exec"), namespace)
+original = namespace["fsync_parent_directory"]
+root = Path(os.environ["TEST_ROOT"])
+action = args[0]
+expected = {"ssot": "write", "manifest": "write-json", "probe": "probe-write"}
+
+def fail_directory_once(path):
+    marker = root / "directory-fsync-failure.json"
+    if action == expected[os.environ["DIRECTORY_FSYNC_FAULT"]] and not marker.exists():
+        evidence = {"action": action, "replaced_file_exists": Path(path).is_file()}
+        if action != "probe-write":
+            evidence["visible_json"] = json.loads(Path(path).read_text(encoding="utf-8"))
+        marker.write_text(json.dumps(evidence), encoding="utf-8")
+        raise OSError("injected directory fsync failure after replace")
+    return original(path)
+
+namespace["fsync_parent_directory"] = fail_directory_once
+try:
+    namespace["main"]()
+except (OSError, ValueError, KeyError, TypeError):
+    print("DEPLOYMENT_STATE=FAIL (directory fsync)", file=sys.stderr)
+    sys.exit(1)
+"""
+
 HARNESS = r"""
 set -euo pipefail
 if command -v cygpath >/dev/null; then TEST_PYTHON="$(cygpath -u "$TEST_PYTHON")"; fi
@@ -173,6 +207,9 @@ python3() {
     shift; command "$TEST_PYTHON" legacy_wrapper.py "$@"
   elif [ "${1:-}" = - ] && [ "${USE_REAL_MANIFEST:-0}" = 1 ]; then
     shift; command "$TEST_PYTHON" manifest_wrapper.py "$@"
+  elif [ "${1:-}" = -c ] && [ "${2:-}" = "$DEPLOYMENT_STATE_CODE" ] &&
+       [ -n "${DIRECTORY_FSYNC_FAULT:-}" ]; then
+    shift; command "$TEST_PYTHON" state_wrapper.py "$@"
   else command "$TEST_PYTHON" "$@"; fi
 }
 trace() { printf '%s\n' "$*" >> trace.log; }
@@ -285,6 +322,7 @@ class CutoverTests(unittest.TestCase):
             ("docker_double.py", DOUBLE),
             ("legacy_wrapper.py", WRAPPER),
             ("manifest_wrapper.py", MANIFEST_WRAPPER),
+            ("state_wrapper.py", STATE_WRAPPER),
         ):
             (self.work / name).write_text(content, encoding="utf-8", newline="\n")
 
@@ -488,6 +526,106 @@ class CutoverTests(unittest.TestCase):
         self.assertEqual(list(self.work.glob(".current-*")), [])
         atomic_write(target, {"new": True})
         self.assertEqual(json.loads(target.read_text()), {"new": True})
+
+    def test_atomic_write_orders_file_fsync_replace_and_directory_fsync(self):
+        target = self.work / "durable.json"
+        events = []
+        original_fsync, original_replace = os.fsync, os.replace
+
+        def tracked_fsync(fd):
+            events.append("directory_fsync" if stat.S_ISDIR(os.fstat(fd).st_mode) else "file_fsync")
+            return original_fsync(fd)
+
+        def tracked_replace(source, destination):
+            events.append("replace")
+            return original_replace(source, destination)
+
+        def tracked_parent(path):
+            events.append("parent_directory")
+            return fsync_parent_directory(path)
+
+        with (
+            patch("deployment_state.os.fsync", side_effect=tracked_fsync),
+            patch("deployment_state.os.replace", side_effect=tracked_replace),
+            patch("deployment_state.fsync_parent_directory", side_effect=tracked_parent),
+        ):
+            atomic_write(target, {"durable": True})
+        expected = ["file_fsync", "replace", "parent_directory"]
+        if os.name != "nt":
+            expected.append("directory_fsync")
+        self.assertEqual(events, expected)
+        self.assertEqual(json.loads(target.read_text()), {"durable": True})
+
+    def test_atomic_write_directory_fsync_failure_after_replace_is_failure(self):
+        target = self.work / "not-yet-durable.json"
+        with patch("deployment_state.fsync_parent_directory", side_effect=OSError("directory I/O")):
+            with self.assertRaises(OSError):
+                atomic_write(target, {"visible_but_not_confirmed_durable": True})
+        self.assertEqual(
+            json.loads(target.read_text()), {"visible_but_not_confirmed_durable": True}
+        )
+        self.assertEqual(list(self.work.glob(".current-*")), [])
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "real directory fsync requires Linux")
+    def test_real_linux_directory_fd_fsync_and_close(self):
+        target = self.work / "real-linux.json"
+        directory_fds = []
+        original_fsync = os.fsync
+
+        def observe(fd):
+            if stat.S_ISDIR(os.fstat(fd).st_mode):
+                directory_fds.append(fd)
+            return original_fsync(fd)
+
+        with (
+            patch("deployment_state.os.open", wraps=os.open) as opened,
+            patch("deployment_state.os.fsync", side_effect=observe),
+        ):
+            atomic_write(target, {"real_linux": True})
+        self.assertEqual(len(directory_fds), 1)
+        opened.assert_any_call(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+        with self.assertRaises(OSError):
+            os.fstat(directory_fds[0])  # finally closed the real directory FD.
+        with patch("deployment_state.os.fsync", side_effect=OSError("directory I/O")):
+            with patch("deployment_state.os.close", wraps=os.close) as closed:
+                with self.assertRaises(OSError):
+                    fsync_parent_directory(target)
+                closed.assert_called_once()
+        print("DIRECTORY_FSYNC_REAL_LINUX=PASS")
+
+    def test_ssot_directory_fsync_failure_after_replace_compensates(self):
+        result = self.run_commands(
+            'deploy_scope all-app "${APP_ALL[@]}"\n', DIRECTORY_FSYNC_FAULT="ssot"
+        )
+        self.assert_finalize_failure(result, "SSOT", "legacy_snapshot")
+        evidence = json.loads((self.work / "directory-fsync-failure.json").read_text())
+        self.assertTrue(evidence["replaced_file_exists"])
+        self.assertEqual(evidence["visible_json"]["current_sha"], A)
+        print("SSOT_DIRECTORY_FSYNC_FAILURE_COMPENSATED=PASS")
+
+    def test_manifest_directory_fsync_failure_after_replace_compensates(self):
+        result = self.run_commands(
+            'deploy_scope all-app "${APP_ALL[@]}"\n',
+            USE_REAL_MANIFEST="1",
+            DIRECTORY_FSYNC_FAULT="manifest",
+        )
+        self.assert_finalize_failure(result, "MANIFEST", "legacy_snapshot")
+        evidence = json.loads((self.work / "directory-fsync-failure.json").read_text())
+        self.assertTrue(evidence["replaced_file_exists"])
+        self.assertEqual(evidence["visible_json"]["target_sha"], A)
+        print("MANIFEST_DIRECTORY_FSYNC_FAILURE_COMPENSATED=PASS")
+
+    def test_probe_directory_fsync_failure_blocks_all_runtime_mutation(self):
+        before = (self.work / "current.json").read_bytes()
+        result = self.run_commands(
+            'deploy_scope all-app "${APP_ALL[@]}"\n', DIRECTORY_FSYNC_FAULT="probe"
+        )
+        self.assertNotEqual(result.returncode, 0, self.output)
+        self.assertIn("FINALIZATION_PREFLIGHT=FAIL", self.output)
+        self.assert_no_mutation()
+        self.assertEqual((self.work / "current.json").read_bytes(), before)
+        self.assertEqual(list((self.work / "deployments").rglob(".write-probe-*")), [])
+        print("PREFLIGHT_DIRECTORY_FSYNC_FAIL_CLOSED=PASS")
 
     def test_real_manifest_pipeline_commits_complete_json(self):
         result = self.run_commands('deploy_scope all-app "${APP_ALL[@]}"\n', USE_REAL_MANIFEST="1")

@@ -72,6 +72,8 @@ legacy → clean A 成功，随后 clean A → clean B 成功时，previous_runt
 
 发布和显式回滚均在运行态变更前，对 SSOT 目录及本次 manifest 目标目录执行 create/fsync/atomic replace 探测；不改写现有 SSOT 或 manifest。探测失败不构建、不重建。容器切换只是 runtime mutation，只有 SSOT 和原子 manifest 都落盘成功才提交发布成功。
 
+Linux 上 SSOT/manifest 在文件 fsync、rename 后还必须 fsync 父目录，预检也实际验证该能力；目录 open/fsync 失败会使落盘或预检失败。Windows 本地兼容分支显式跳过目录 FD，不能作为 Linux durability 验收证据，Ubuntu CI 必须真实执行。directory fsync 解决 rename 后的文件系统 crash durability，不能使 Docker runtime、PostgreSQL 和 filesystem 成为跨系统 ACID transaction。服务器故障恢复时仍须三方核验实际容器 revision、current.json 和 manifest，不能只凭任一文件判定运行态正确。
+
 任一终态落盘失败均按强一致策略补偿：输出 FINALIZE_SSOT=FAIL 或 FINALIZE_MANIFEST=FAIL，统一恢复部署前 runtime（legacy/exact 都使用同一选择入口），再修复 current=部署前 runtime、previous=部署前 previous。整体命令仍失败，不得因补偿成功报告发布成功。RUNTIME_COMPENSATION=PASS 只证明运行态已恢复；SSOT_REPAIR=FAIL 或运行态恢复失败时输出 HIGH_PRIORITY_MANUAL_INTERVENTION=YES，保留失败证据并人工核对运行态和 SSOT，不将状态文件当成健康证明。该补偿不执行 DB downgrade/restore 或 ACL 修改。
 
 应用回滚不会自动降级数据库，也不会自动撤销 ACL；这两项必须使用经过审核的兼容和恢复计划。确认无 v1 启用车辆后才可移除 rollout/profile。若 adapter unhealthy 或 ACL 校验失败，发布判定必须 FAIL。
