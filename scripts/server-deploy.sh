@@ -340,9 +340,10 @@ write_manifest() {
   python3 - "$TARGET_SHA" "$scope" "$prev" "$ts" "$dir" "$mig_before" "$mig_after" "$ENV_FILE" "$CURRENT_JSON" "$COMPOSE_FILES" "${DOCKER[@]}" <<'PY' | deployment_state write-json "$dir/manifest.json" || return 1
 import json, subprocess, sys
 target_sha, scope, prev, ts, d, mig_before, mig_after, env_file = sys.argv[1:9]
-compose_files = sys.argv[9].split()
-docker_cmd = sys.argv[10:]
-with open(sys.argv[8], encoding="utf-8") as stream:
+current_json_path = sys.argv[9]
+compose_files = sys.argv[10].split()
+docker_cmd = sys.argv[11:]
+with open(current_json_path, encoding="utf-8") as stream:
     runtime_state = json.load(stream)
 
 def inspect(args):
