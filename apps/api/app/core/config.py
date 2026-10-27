@@ -165,7 +165,12 @@ class Settings(BaseSettings):
         client.tls_insecure_set(False)
 
     def mqtt_connect_properties(self, *, durable: bool = False):
-        """MQTT5 CONNECT 属性：Session Expiry Interval（durable 客户端短时恢复 QoS1 业务事件）。"""
+        """MQTT5 CONNECT 属性：Session Expiry Interval（durable 客户端短时恢复 QoS1 业务事件）。
+
+        paho 2.x 的 Properties 用法：先以包类型构造，再动态赋值属性（名称不带空格），
+        不接受 __init__ 关键字参数。
+        """
+        from paho.mqtt.packettypes import PacketTypes
         from paho.mqtt.properties import Properties
 
         expiry = (
@@ -173,7 +178,9 @@ class Settings(BaseSettings):
             if durable
             else self.mqtt_session_expiry_seconds
         )
-        return Properties(SessionExpiryInterval=expiry)
+        props = Properties(PacketTypes.CONNECT)
+        props.SessionExpiryInterval = expiry
+        return props
 
     def assert_profile_safety(self) -> None:
         if self.app_env != "server":
@@ -220,6 +227,16 @@ class Settings(BaseSettings):
 
 
 @lru_cache
+def mqtt_message_expiry_properties(interval: int):
+    """MQTT5 PUBLISH Message Expiry Interval（paho 2.x：先构造再赋值属性）。"""
+    from paho.mqtt.packettypes import PacketTypes
+    from paho.mqtt.properties import Properties
+
+    props = Properties(PacketTypes.PUBLISH)
+    props.MessageExpiryInterval = interval
+    return props
+
+
 def get_settings() -> Settings:
     settings = Settings()
     settings.assert_profile_safety()

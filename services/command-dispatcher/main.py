@@ -10,7 +10,7 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import paho.mqtt.client as mqtt
-from app.core.config import get_settings
+from app.core.config import get_settings, mqtt_message_expiry_properties
 from app.core.events import get_redis, queue_event
 from app.core.logging import configure_logging
 from app.core.serialization import serialize_model
@@ -80,7 +80,7 @@ def publish_command(payload: dict, qos: int) -> None:
         json.dumps(payload, ensure_ascii=False),
         qos=qos,
         retain=False,
-        properties=mqtt.Properties(MessageExpiryInterval=expiry_interval),
+        properties=mqtt_message_expiry_properties(expiry_interval),
     )
     info.wait_for_publish(timeout=3)
     if not info.is_published():

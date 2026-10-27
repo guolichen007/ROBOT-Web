@@ -14,7 +14,7 @@ from typing import Any
 from uuid import uuid4
 
 import paho.mqtt.client as mqtt
-from app.core.config import get_settings
+from app.core.config import get_settings, mqtt_message_expiry_properties
 from app.core.events import get_redis
 from app.core.logging import configure_logging
 from redis.exceptions import WatchError
@@ -243,7 +243,7 @@ def main() -> None:
         name: str, payload: str, qos: int, retain: bool, message_expiry: int | None = None
     ) -> None:
         props = (
-            mqtt.Properties(MessageExpiryInterval=message_expiry) if message_expiry else None
+            mqtt_message_expiry_properties(message_expiry) if message_expiry else None
         )
         info = client.publish(name, payload, qos=qos, retain=retain, properties=props)
         if info.rc != mqtt.MQTT_ERR_SUCCESS:
