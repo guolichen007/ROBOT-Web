@@ -65,6 +65,8 @@ class MockRuntime:
             "http://127.0.0.1:18765,http://127.0.0.1:15173,http://localhost:15173"
         )
         self.settings.vehicle_agent_v1_downlink_enabled = True
+        # mock 闭环下行限单辆车（与生产 allowlist 二级门同语义）
+        self.settings.vehicle_agent_v1_downlink_allowlist = "R001"
         self.settings.cookie_secure = False
         self.redis = FakeRedis(decode_responses=True)
         self.redis_patch = patch("app.core.events.Redis.from_url", return_value=self.redis)

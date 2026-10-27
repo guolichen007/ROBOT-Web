@@ -9,6 +9,8 @@ from uuid import uuid4
 import pytest
 from fakeredis import FakeRedis
 
+from app.core.config import get_settings
+
 from scripts.generate_vehicle_agent_contract import contract
 from scripts.vehicle_agent_mock_runtime import load_service
 from services.vehicle_agent_v1 import (
@@ -23,6 +25,13 @@ from services.vehicle_agent_v1 import (
     status_confirms,
     topic,
 )
+
+@pytest.fixture(autouse=True)
+def _allow_test_vehicles():
+    """协议级测试允许 R001/R002 下行（与生产 allowlist 二级门同语义，测试环境专用）。"""
+    get_settings().vehicle_agent_v1_downlink_enabled = True
+    get_settings().vehicle_agent_v1_downlink_allowlist = "R001,R002,TEST_V1"
+
 
 Adapter = load_service("vehicle-agent-adapter").Adapter
 MockAgent = load_service("mock-vehicle-agent").MockAgent

@@ -92,6 +92,8 @@ class Adapter:
             raise ValueError("vehicle/topic mismatch")
         if not self.downlink:
             raise ValueError("vehicle_agent downlink disabled")
+        if not get_settings().vehicle_downlink_allowed(vehicle):
+            raise ValueError("vehicle not in v1 downlink allowlist")
         binding = f"{PROTOCOL}:{payload['target_boot_id']}"
         if self.redis.get(f"vehicle-agent:binding:{vehicle}") != binding:
             raise ValueError("binding/boot no longer active")

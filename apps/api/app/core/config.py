@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     manual_lease_ttl_seconds: int = 5
     command_ack_timeout_seconds: int = 3
     vehicle_agent_v1_downlink_enabled: bool = False
+    # 二级下行安全门：即使 global downlink=true，也仅 allowlist 内车辆具备下行资格
+    # （禁止一开总开关所有车辆同时获得下行）。默认空 = 无车可下行。
+    vehicle_agent_v1_downlink_allowlist: str = ""
     vehicle_agent_v1_ack_timeout_seconds: int = Field(default=90, ge=1, le=240)
     vehicle_agent_v1_status_stale_seconds: int = Field(default=8, ge=6)
     vehicle_agent_v1_offline_seconds: int = Field(default=15, ge=10)
@@ -102,6 +105,21 @@ class Settings(BaseSettings):
         if self.vehicle_agent_v1_offline_seconds <= self.vehicle_agent_v1_status_stale_seconds:
             raise ValueError("v1 offline threshold must exceed status stale threshold")
         return self
+
+    @property
+    def vehicle_downlink_allowlist_set(self) -> set[str]:
+        return {
+            item.strip()
+            for item in self.vehicle_agent_v1_downlink_allowlist.split(",")
+            if item.strip()
+        }
+
+    def vehicle_downlink_allowed(self, vehicle_id: str) -> bool:
+        """global downlink=true 且 vehicle_id 在 allowlist 中才允许下行。"""
+        return (
+            self.vehicle_agent_v1_downlink_enabled
+            and vehicle_id in self.vehicle_downlink_allowlist_set
+        )
 
     @property
     def origins(self) -> list[str]:

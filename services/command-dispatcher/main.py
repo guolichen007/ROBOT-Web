@@ -62,6 +62,8 @@ def publish_command(payload: dict, qos: int) -> None:
                 raise ValueError("v1 adapter unavailable before dispatch")
             if not settings.vehicle_agent_v1_downlink_enabled:
                 raise ValueError("v1 downlink disabled")
+            if not settings.vehicle_downlink_allowed(robot.vehicle_id):
+                raise ValueError("vehicle not in v1 downlink allowlist")
             if payload.get("schema_version") != "vehicle-agent-v1":
                 raise ValueError("legacy command forbidden on v1 transport")
             if payload["target_boot_id"] != robot.boot_id:
