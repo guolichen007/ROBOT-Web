@@ -123,7 +123,11 @@ class MockRuntime:
                 return True
 
         class Client:
-            def publish(client_self, topic, payload, qos=1, retain=False):
+            def is_connected(client_self):
+                # mock 闭环中 dispatcher 恒视为已连接（R2-7 心跳绑定连接）
+                return True
+
+            def publish(client_self, topic, payload, qos=1, retain=False, properties=None):
                 self.publish(topic, payload, qos, retain)
                 return Info()
 
@@ -137,8 +141,8 @@ class MockRuntime:
         self.app = app
         self.running = False
 
-    def publish(self, topic, payload, qos, retain):
-        self.published.append((topic, payload, qos, retain))
+    def publish(self, topic, payload, qos, retain, message_expiry=None):
+        self.published.append((topic, payload, qos, retain, message_expiry))
         self.messages.put(
             (topic, payload.encode() if isinstance(payload, str) else payload, retain)
         )

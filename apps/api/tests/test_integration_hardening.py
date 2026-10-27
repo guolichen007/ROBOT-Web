@@ -298,13 +298,16 @@ def test_ingress_depth_video_and_rate_protection() -> None:
     assert ingress.dedup_ttl("alarm") == 86400
 
 
-def test_dispatcher_consumer_identity_is_unique() -> None:
+def test_dispatcher_consumer_identity_is_stable_per_process() -> None:
+    # R2-6：client id 稳定（同进程恒等）保证 MQTT 会话连续性；
+    # 生产为单副本部署约束，多副本必须用 FIREBOT_SERVICE_INSTANCE_ID 显式区分
+    #（safety stream 消费组内同名 consumer 只会有一个活跃消费）。
     dispatcher = load_service(
         "firebot_command_dispatcher_test", "services/command-dispatcher/main.py"
     )
     first = dispatcher.dispatcher_instance_id()
     second = dispatcher.dispatcher_instance_id()
-    assert first != second
+    assert first == second
     assert first.startswith("command-dispatcher-")
 
 
