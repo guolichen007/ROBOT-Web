@@ -112,6 +112,9 @@ chmod 600 "$RUNTIME_ROOT/env/.env.server"
 if grep -Eq 'REPLACE_|CHANGE_ME|TODO|example\.invalid' "$RUNTIME_ROOT/env/.env.server"; then
   fail "env 模板仍含占位符"
 fi
+# compose 插值变量的唯一可靠来源是 --env-file（sudo 会剥离 shell 导出的变量）；
+# 基座 env_file 字段依赖 SERVER_ENV_FILE 插值，必须写入 env 文件本身（绝对路径）。
+printf 'SERVER_ENV_FILE=%s/env/.env.server\n' "$RUNTIME_ROOT" >> "$RUNTIME_ROOT/env/.env.server"
 
 # ---- BOOTSTRAP_LOCAL_ONLY 标记 ----
 {

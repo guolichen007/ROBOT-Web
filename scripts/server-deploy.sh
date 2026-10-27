@@ -43,6 +43,22 @@ for f in $COMPOSE_FILES; do COMPOSE+=(-f "$f"); done
 TARGET_SHA="${TARGET_SHA:-}"
 PY_IMAGE="firebot-python:${TARGET_SHA}"
 WEB_IMAGE="firebot-web:${TARGET_SHA}"
+
+# sudo 会重置环境变量（env_reset）：compose 插值所需的镜像变量必须经 `sudo -n env` 显式传递
+# （其余插值变量一律以 --env-file 为唯一来源，见 .env.server 内的 SERVER_ENV_FILE）。
+compose_env_run() {
+  local pairs=() var
+  for var in FIREBOT_PYTHON_IMAGE FIREBOT_WEB_IMAGE FIREBOT_MEDIAMTX_IMAGE; do
+    [ -n "${!var:-}" ] && pairs+=("$var=${!var}")
+  done
+  if [ "${DOCKER[0]}" = "sudo" ]; then
+    # DOCKER=(sudo -n docker)：env 必须在 docker 之前 → sudo -n env K=V docker compose ...
+    "${DOCKER[@]:0:${#DOCKER[@]}-1}" env "${pairs[@]}" "${DOCKER[@]: -1}" \
+      "${COMPOSE[@]:${#DOCKER[@]}}" "$@"
+  else
+    env "${pairs[@]}" "${COMPOSE[@]}" "$@"
+  fi
+}
 # Exact rollback may check out a historical revision without this new helper.
 # Keep its code in the running process so SSOT can still be written afterwards.
 DEPLOYMENT_STATE_CODE="$(cat scripts/deployment_state.py)"
@@ -177,7 +193,7 @@ build_images() {
   local services=("$@")
   echo "  构建不可变镜像（tag=$TARGET_SHA）：${services[*]}"
   FIREBOT_PYTHON_IMAGE="$PY_IMAGE" FIREBOT_WEB_IMAGE="$WEB_IMAGE" \
-    "${COMPOSE[@]}" build --build-arg SOURCE_REVISION="$TARGET_SHA" "${services[@]}"
+    compose_env_run build --build-arg SOURCE_REVISION="$TARGET_SHA" "${services[@]}"
 }
 
 get_service_container_id() {
@@ -195,7 +211,7 @@ recreate() {
   local services=("$@")
   echo "  重建服务：${services[*]}"
   FIREBOT_PYTHON_IMAGE="$PY_IMAGE" FIREBOT_WEB_IMAGE="$WEB_IMAGE" \
-    "${COMPOSE[@]}" up -d --no-deps --wait "${services[@]}" || return 1
+    compose_env_run up -d --no-deps --wait "${services[@]}" || return 1
   # --wait 后检查 required services healthy（fail-closed，统一走 docker inspect）
   for svc in "${services[@]}"; do
     service_healthy "$svc" || { echo "ERROR: $svc 未 healthy" >&2; return 1; }
@@ -399,7 +415,7 @@ do_status() {
 do_preflight() {
   require_sha
   SERVER_ENV_FILE="$ENV_FILE" UPDATE_MODE=true scripts/server-preflight.sh
-  FIREBOT_PYTHON_IMAGE="$PY_IMAGE" FIREBOT_WEB_IMAGE="$WEB_IMAGE" "${COMPOSE[@]}" config --quiet
+  FIREBOT_PYTHON_IMAGE="$PY_IMAGE" FIREBOT_WEB_IMAGE="$WEB_IMAGE" compose_env_run config --quiet
   echo "PREFLIGHT=PASS sha=$TARGET_SHA"
 }
 
@@ -429,7 +445,7 @@ do_bootstrap() {
     exit 1
   fi
   echo "  执行 fresh migration（alembic upgrade head + seed）"
-  FIREBOT_PYTHON_IMAGE="$PY_IMAGE" "${COMPOSE[@]}" run --rm migrate || exit 1
+  FIREBOT_PYTHON_IMAGE="$PY_IMAGE" compose_env_run run --rm migrate || exit 1
   write_ssot "$(exact_runtime "$TARGET_SHA")" "$(none_runtime)"
   echo "BOOTSTRAP=PASS sha=$TARGET_SHA previous=none"
 }
@@ -442,7 +458,7 @@ do_migrate() {
   fi
   build_images api
   echo "  执行 one-shot migrate（alembic upgrade head + seed）"
-  FIREBOT_PYTHON_IMAGE="$PY_IMAGE" "${COMPOSE[@]}" run --rm migrate
+  FIREBOT_PYTHON_IMAGE="$PY_IMAGE" compose_env_run run --rm migrate
   echo "MIGRATE=PASS sha=$TARGET_SHA"
 }
 
