@@ -1086,7 +1086,8 @@ def service_heartbeat(realtime_client, durable_client) -> None:
         time.sleep(1)
 
 
-# R2-6 主题分流：realtime（clean session，高频遥测无离线 backlog）/ durable（持久会话短时恢复业务事件）。
+# R2-6 主题分流：realtime（clean session，高频遥测无离线 backlog）/
+# durable（持久会话短时恢复业务事件）。
 REALTIME_TOPICS = ("availability", "heartbeat", "capabilities", "location", "status", "sensor")
 DURABLE_TOPICS = ("alarm", "task_status", "command_ack")
 V1_REALTIME_TOPICS = ("status", "telemetry", "availability")
@@ -1159,7 +1160,8 @@ def client_main(client, *, durable: bool, clean_start: bool) -> None:
 
 def main() -> None:
     # 双 client（R2-6）：realtime 高频遥测 clean session（断线不 backlog、恢复不先回放历史位置）；
-    # durable 固定 client id + persistent session（600s）短时恢复 command_ack/task_status/alarm/event。
+    # durable 固定 client id + persistent session（600s）短时恢复
+    # command_ack/task_status/alarm/event。
     realtime = make_client("firebot-mqtt-ingress-realtime", durable=False)
     durable_client = make_client("firebot-mqtt-ingress-durable", durable=True)
     threading.Thread(target=service_heartbeat, args=(realtime, durable_client), daemon=True).start()

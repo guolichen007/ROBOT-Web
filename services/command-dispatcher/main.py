@@ -47,7 +47,8 @@ def publish_command(payload: dict, qos: int) -> None:
     if expires <= now:
         raise TimeoutError("command expired before publish")
     # MQTT5 Message Expiry Interval（R2-8）：max(1, ceil(remaining))；
-    # broker 对持久会话离线队列中的过期消息到期即弃（第二层防护），车辆仍必须校验 payload.expires_at。
+    # broker 对持久会话离线队列中的过期消息到期即弃（第二层防护），
+    # 车辆仍必须校验 payload.expires_at。
     expiry_interval = max(1, math.ceil((expires - now).total_seconds()))
     destination = f"robot/{payload['vehicle_id']}/command"
     with SessionLocal() as db:
