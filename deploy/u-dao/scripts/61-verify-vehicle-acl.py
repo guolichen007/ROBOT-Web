@@ -83,12 +83,17 @@ def main() -> int:
         return result["rc"]
 
     def subscribe_result(username: str, password: str, topic: str) -> bool:
-        """SUBACK 首个 reason code 是否为授权（0/1/2）。"""
-        result: dict = {"allowed": None}
+        """mosquitto 对订阅 ACL 拒绝表现为「SUBACK granted 但不投递」——
+        以 broker 实际投递结果判定：订阅后用 platform 账号向该 topic 发布探针，
+        观察目标客户端是否收到（不以 SUBACK reason code 代替）。"""
+        result: dict = {"subscribed": False, "delivered": False}
 
         def on_subscribe(client, userdata, mid, reason_codes, properties):
-            code = reason_codes[0] if isinstance(reason_codes[0], int) else reason_codes[0].value
-            result["allowed"] = code != NOT_AUTHORIZED
+            result["subscribed"] = True
+
+        def on_message(client, userdata, message):
+            if message.topic == topic:
+                result["delivered"] = True
 
         def on_connect(client, userdata, flags, reason_code, properties):
             if reason_code == 0:
@@ -97,25 +102,47 @@ def main() -> int:
         client = make_client(username, password)
         client.on_connect = on_connect
         client.on_subscribe = on_subscribe
+        client.on_message = on_message
         client.connect(args.mqtt_host, args.mqtt_port, keepalive=5)
         client.loop_start()
         for _ in range(50):
-            if result["allowed"] is not None:
+            if result["subscribed"]:
                 break
             time.sleep(0.1)
+        if result["subscribed"]:
+            # platform 探针发布
+            probe = make_client("platform", platform_password)
+
+            def probe_connect(probe_client, userdata, flags, reason_code, properties):
+                if reason_code == 0:
+                    probe_client.publish(topic, b'{"acl_probe_sub":1}', qos=1)
+
+            probe.on_connect = probe_connect
+            probe.connect(args.mqtt_host, args.mqtt_port, keepalive=5)
+            probe.loop_start()
+            for _ in range(30):
+                if result["delivered"]:
+                    break
+                time.sleep(0.1)
+            probe.loop_stop()
+            probe.disconnect()
         client.loop_stop()
         client.disconnect()
-        return bool(result["allowed"])
+        return result["delivered"]
 
     def publish_result(username: str, password: str, topic: str) -> bool:
-        """PUBACK 收到且连接未被 broker 断开 = ALLOW（mosquitto 对拒绝的 publish 会断开客户端）。"""
-        result: dict = {"acked": False, "disconnected": False}
+        """PUBACK reason code 判定（mosquitto 对拒绝的 publish 返回 PUBACK RC=135）。
 
-        def on_disconnect(client, userdata, flags, reason_code, properties):
-            result["disconnected"] = True
+        paho 的 MQTTMessageInfo 不暴露 PUBACK reason code，须经 on_publish 回调获取；
+        不使用「未收到消息」代替授权判定。
+        """
+        result: dict = {"puback_rc": None}
+
+        def on_publish(client, userdata, mid, reason_code, properties):
+            result["puback_rc"] = reason_code
 
         client = make_client(username, password)
-        client.on_disconnect = on_disconnect
+        client.on_publish = on_publish
         client.connect(args.mqtt_host, args.mqtt_port, keepalive=5)
         client.loop_start()
         for _ in range(30):
@@ -125,12 +152,12 @@ def main() -> int:
         if client.is_connected():
             info = client.publish(topic, b'{"acl_probe":1}', qos=1)
             info.wait_for_publish(timeout=5)
-            result["acked"] = info.is_published() and not result["disconnected"]
-        else:
-            result["disconnected"] = True
         client.loop_stop()
         client.disconnect()
-        return result["acked"]
+        # PUBACK reason code 判定：Success(0)=ALLOW；Not authorized(135)=DENY；
+        # 未收到 PUBACK（连接被断/超时）=DENY。
+        rc_value = getattr(result["puback_rc"], "value", result["puback_rc"])
+        return rc_value == 0
 
     # ---- 认证 ----
     check(f"{vehicle} 认证", connect_result(vehicle, vehicle_password) == 0)

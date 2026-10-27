@@ -52,10 +52,15 @@ verify_only() {
 
 # ---- 生成 ----
 onboard() {
-  local force=false
+  local force=false reuse=false
   [ "$MODE" = "--force" ] && force=true
-  if [ -d "$VEHICLE_DIR" ] && [ "$force" != true ]; then
+  [ "${2:-}" = "--reuse" ] && reuse=true
+  if [ -d "$VEHICLE_DIR" ] && [ "$force" != true ] && [ "$reuse" != true ]; then
     fail "$VEHICLE_ID 凭据已存在（--force 重建会使旧密码失效）"
+  fi
+  if [ "$reuse" = true ]; then
+    echo "REUSE（凭据已存在，仅激活）"
+    return 0
   fi
   detect_docker
   umask 077
@@ -103,6 +108,25 @@ onboard() {
   echo "  note=ACL 由 acl.example 的 pattern %u 自动隔离；broker 生效需 --apply（SIGHUP 原地 reload）"
 }
 
+# ---- 同步 mosquitto 运行卷（broker 从 mosquitto_config 卷读文件；宿主 runtime 文件需先同步）----
+sync_config_volume() {
+  detect_docker
+  "${DOCKER[@]}" run --rm \
+    -v "$RUNTIME_ROOT/secrets/mosquitto:/source:ro" \
+    -v u-dao-firebot_mosquitto_config:/target \
+    busybox:1.37.0-musl sh -c 'mkdir -p /target/certs &&
+      cp /source/passwords /target/passwords &&
+      cp /source/acl /target/acl &&
+      cp /source/certs/ca.crt /target/certs/ca.crt &&
+      cp /source/certs/server.crt /target/certs/server.crt &&
+      cp /source/certs/server.key /target/certs/server.key &&
+      chown -R 1883:1883 /target &&
+      chmod 750 /target /target/certs &&
+      chmod 640 /target/passwords /target/acl /target/certs/ca.crt /target/certs/server.crt /target/certs/server.key' \
+    || fail "mosquitto 配置卷同步失败"
+  echo "CONFIG_VOLUME_SYNC=PASS"
+}
+
 # ---- 激活：对运行中的 u-dao-firebot mosquitto 容器发 SIGHUP 原地 reload（不重启、不断已有连接）----
 reload_broker() {
   detect_docker
@@ -127,7 +151,8 @@ reload_broker() {
 case "$MODE" in
   --verify) verify_only ;;
   --apply)
-    onboard
+    onboard "$VEHICLE_ID" --reuse
+    sync_config_volume
     reload_broker
     verify_only ;;
   *) onboard ;;
