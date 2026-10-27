@@ -37,4 +37,9 @@ grep -q 'srtPublishPassphrase: "' "$RUNTIME_ROOT/env/mediamtx.server.u-dao.yml" 
   || fail "渲染结果与模板一致（passphrase 未注入）"
 
 cp "$REPO_ROOT/deploy/u-dao/ingress/conf.d/firebot.conf.template" "$INGRESS_CONF_D/firebot.conf"
-echo "RENDER_RUNTIME_CONFIG=PASS mediamtx=$RUNTIME_ROOT/env/mediamtx.server.u-dao.yml ingress=$INGRESS_CONF_D/firebot.conf"
+
+# firebot edge 配置同样走 runtime 渲染（compose v5 对 override 内相对路径的解析基准存在偏移，
+# override 一律使用 runtime 绝对路径挂载，规避解析歧义）。
+cp "$REPO_ROOT/infra/nginx/nginx.edge.http.conf" "$RUNTIME_ROOT/env/nginx.edge.http.conf"
+chmod 644 "$RUNTIME_ROOT/env/nginx.edge.http.conf"
+echo "RENDER_RUNTIME_CONFIG=PASS mediamtx=$RUNTIME_ROOT/env/mediamtx.server.u-dao.yml edge=$RUNTIME_ROOT/env/nginx.edge.http.conf ingress=$INGRESS_CONF_D/firebot.conf"

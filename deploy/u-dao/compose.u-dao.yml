@@ -70,7 +70,9 @@ services:
     ports: !override
       - "127.0.0.1:18080:80" # 仅本机调试；对外入口是 shared ingress 的 18000/18443
     volumes: !override
-      - ../../infra/nginx/nginx.edge.http.conf:/etc/nginx/nginx.conf:ro
+      # edge 配置经 03-render-runtime-config.sh 渲染到 runtime（compose v5 对 override 相对路径
+      # 解析基准存在偏移，override 一律用 runtime 绝对路径）
+      - /srv/u-dao/projects/firebot/runtime/env/nginx.edge.http.conf:/etc/nginx/nginx.conf:ro
     networks:
       firebot: {}
       u-dao-ingress:
