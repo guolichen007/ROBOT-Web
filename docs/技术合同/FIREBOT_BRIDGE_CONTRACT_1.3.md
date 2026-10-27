@@ -20,7 +20,9 @@
 
 ## 2. MQTT Contract（服务器 ↔ 车端 Bridge）
 
-Broker：`100.110.31.112:8883`（TLS，项目 CA）。schema_version = `1.3`（服务器兼容 1.2/1.3）。
+Broker 地址属部署参数，不在 wire 合同内固定；U-Dao 生产：`firebot.youdaozd.com:8883`
+（TLS，U-Dao private CA）。旧现场 `100.110.31.112`（Tailscale）为**历史现场方案（NOT FOR PRODUCTION）**。
+schema_version = `1.3`（服务器兼容 1.2/1.3）。
 
 ### 2.1 通用消息头（vehicleBase，所有上行消息必带）
 ```json

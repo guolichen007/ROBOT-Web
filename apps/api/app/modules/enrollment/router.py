@@ -62,7 +62,8 @@ def activate(req: ActivateRequest) -> ActivateResponse:
         mqtt_username=device_id,
         mqtt_password=cred["mqtt_password"],
         device_token=cred.get("device_token", ""),
-        ca_cert=cred.get("ca_cert", "/etc/firebot/production-ca.crt"),
+        # MQTT 信任锚（车端 /etc/firebot/mqtt-ca.crt）；HTTPS 走系统 CA，不复用本字段
+        ca_cert=cred.get("ca_cert", "/etc/firebot/mqtt-ca.crt"),
         site_code=cred.get("site_code", ""),
         map_code=cred.get("map_code", ""),
         map_version=cred.get("map_version", ""),

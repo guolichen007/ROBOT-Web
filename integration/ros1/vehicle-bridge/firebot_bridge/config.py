@@ -45,12 +45,15 @@ class Config:
     """车端 Bridge 全部配置，均来自环境变量（见 config/bridge.env.example）。"""
 
     # ---- MQTT ----
-    mqtt_host: str = os.environ.get("FIREBOT_MQTT_HOST", "100.110.31.112")
+    # 生产语义：host 必须显式来自 bridge.env（firebotctl enroll 写入 firebot.youdaozd.com）；
+    # 无默认值——缺失由 validate() fail-closed（旧 Tailscale IP 默认已废弃）。
+    mqtt_host: str = os.environ.get("FIREBOT_MQTT_HOST", "")
     mqtt_port: int = int(os.environ.get("FIREBOT_MQTT_PORT", "8883"))
     # MQTT username 由 DEVICE_ID 派生，不单独手填；空则 validate() 回落到 vehicle_id。
     mqtt_username: str = os.environ.get("FIREBOT_MQTT_USERNAME", "")
     mqtt_password: str = os.environ.get("FIREBOT_MQTT_PASSWORD", "")
-    ca_cert: str = os.environ.get("FIREBOT_CA_CERT", "/etc/firebot/production-ca.crt")
+    # MQTT 信任锚 = U-Dao private CA（与 HTTPS 系统 CA 严格分离；CA 证书本身不是 secret）
+    ca_cert: str = os.environ.get("FIREBOT_CA_CERT", "/etc/firebot/mqtt-ca.crt")
     # TLS：生产 true；本地联调测试可设 false（连无 TLS 测试 broker）
     mqtt_tls: bool = _env_bool("FIREBOT_MQTT_TLS", True)
 
@@ -138,6 +141,13 @@ class Config:
             sys.exit(1)
         if not self.mqtt_username:
             self.mqtt_username = self.vehicle_id
+        if not self.mqtt_host:
+            print(
+                "ERROR: FIREBOT_MQTT_HOST 未设置（生产为 firebot.youdaozd.com，"
+                "由 firebotctl vehicle enroll 生成 /etc/firebot/bridge.env；禁止 IP/Tailscale fallback）",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         if not self.mqtt_password:
             print(
                 "ERROR: FIREBOT_MQTT_PASSWORD 未设置（应从 /etc/firebot/bridge-secret.env 或 "

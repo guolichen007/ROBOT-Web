@@ -13,6 +13,7 @@
 #   firebotctl vehicle stop control                   # 只停 control
 #   firebotctl vehicle capability stop-only|patrol    # 受控能力提升（自动重启 Bridge）
 #   firebotctl vehicle location enable                # 受控开启 location（先验地图/AMCL/odom）
+#   firebotctl vehicle media-secret check             # 媒体 secret 落盘规范检查（值不回显）
 #   firebotctl vehicle profile-sync                   # 从 profile 重新生成 bridge.env
 #   firebotctl vehicle support-bundle                 # 脱敏诊断包
 #   firebotctl vehicle rollback                       # 回滚 previous
@@ -54,14 +55,16 @@ server_base_url() { echo "${FIREBOT_SERVER_URL%/}"; }
 
 server_get_assignment() {
   local did="$1"
-  curl -sf --cacert /etc/firebot/production-ca.crt \
+  # HTTPS 信任 = Ubuntu 系统 CA store（正式 API 使用 TrustAsia 公网证书）；禁止 --cacert / -k
+  curl -sf \
     -H "X-Device-Token: $(device_token_value)" \
     "$(server_base_url)/api/v1/robots/$did/assignment/device" 2>/dev/null || true
 }
 
 server_put_assignment() {
   local did="$1" path="$2" json_body="$3"
-  curl -sf --cacert /etc/firebot/production-ca.crt \
+  # 同上：系统 CA，无 --cacert / -k
+  curl -sf \
     -X PUT -H "Content-Type: application/json" -H "X-Device-Token: $(device_token_value)" \
     -d "$json_body" \
     "$(server_base_url)/api/v1/robots/$did/assignment/$path" 2>/dev/null || true
@@ -134,6 +137,12 @@ def load_kv(path):
     return d
 assignment = load_kv(assignment_path)
 
+# 生产语义：MQTT host 必须来自服务器 assignment（firebot.youdaozd.com）；
+# 缺失即失败，绝不 fallback 到 Tailscale/IP（旧 100.110.31.112 默认已废弃）。
+if not assignment.get("MQTT_HOST"):
+    print("ERROR: assignment 缺少 MQTT_HOST（先 firebotctl vehicle enroll 或 profile-sync）", file=sys.stderr)
+    sys.exit(1)
+
 # 轻量 YAML 解析（仅取我们需要的标量键，不引入第三方依赖）
 profile = {}
 cur = None
@@ -166,9 +175,10 @@ lines = [
     "",
     "FIREBOT_VEHICLE_ID=%s" % device_id,
     "FIREBOT_MQTT_USERNAME=%s" % device_id,
-    "FIREBOT_MQTT_HOST=%s" % assignment.get("MQTT_HOST", "100.110.31.112"),
+    "FIREBOT_MQTT_HOST=%s" % assignment.get("MQTT_HOST", ""),
     "FIREBOT_MQTT_PORT=%s" % assignment.get("MQTT_PORT", "8883"),
-    "FIREBOT_CA_CERT=/etc/firebot/production-ca.crt",
+    # MQTT 信任锚 = U-Dao private CA（与 HTTPS 系统 CA 严格分离，P0-3）
+    "FIREBOT_CA_CERT=/etc/firebot/mqtt-ca.crt",
     "",
     "FIREBOT_SITE_CODE=%s" % assignment.get("SITE_CODE", ""),
     "FIREBOT_MAP_CODE=%s" % assignment.get("MAP_CODE", ""),
@@ -222,10 +232,21 @@ cmd_vehicle() {
       done
       [ -n "$server" ] || { echo "ERROR: 未配置 enrollment 服务器地址（/etc/firebot/bootstrap.env 的 FIREBOT_SERVER_URL）" >&2; exit 1; }
       [ -n "$token" ] || { echo "ERROR: 缺少 --token（由服务器 firebotctl fleet register 签发）" >&2; exit 1; }
+      # 正式 bootstrap（P0-4）：必须 https:// + 公网域名；禁止 http、IP、Tailscale hostname。
+      case "$server" in
+        https://*) : ;;
+        *) echo "ERROR: enrollment 服务器必须为 https:// 正式域名（禁止 http/IP/Tailscale）" >&2; exit 1 ;;
+      esac
+      local server_host
+      server_host="$(printf '%s' "$server" | sed -E 's#^https://([^/:]+).*#\1#')"
+      if printf '%s' "$server_host" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$|^100\.(64|68|110)\.|tailscale'; then
+        echo "ERROR: 禁止 IP/Tailscale enrollment 地址（必须为正式公网域名）" >&2
+        exit 1
+      fi
       # 真实验证 token + 取得 per-device credential（服务器一次性消费，重放会 401）。
-      # 必须验证 CA（--cacert），禁止 -k。
+      # HTTPS 信任 = Ubuntu 系统 CA store（TrustAsia 公网证书）；禁止 --cacert / -k。
       local resp
-      resp="$(curl -sf --cacert /etc/firebot/production-ca.crt -X POST "$server" \
+      resp="$(curl -sf -X POST "$server" \
         -H 'Content-Type: application/json' \
         -d "{\"device_id\":\"$did\",\"token\":\"$token\"}" 2>/dev/null || true)"
       if [ -z "$resp" ]; then
@@ -312,6 +333,9 @@ print(pid)
     location)
       [ "${1:-}" = "enable" ] || { echo "用法: firebotctl vehicle location enable" >&2; exit 1; }
       enable_location ;;
+    media-secret)
+      [ "${1:-}" = "check" ] || { echo "用法: firebotctl vehicle media-secret check" >&2; exit 1; }
+      check_media_secret ;;
     profile-sync)
       local did; did="$(read_device_id)"
       local pid; pid="$(grep -E '^PROFILE_ID=' "$DEVICE_ENV" 2>/dev/null | cut -d= -f2- || echo "$DEFAULT_PROFILE")"
@@ -455,6 +479,35 @@ enable_location() {
   echo "LOCATION_PROMOTION=PASS"
 }
 
+# ---- 媒体 secret 安全落盘规范（P1：本阶段只建规范/检查入口，不向真实 R001 下发）----
+# 车端正式文件：/etc/firebot/media-secret.env（0600 root:root，绝不进 bridge.env/repo/log/报告）
+#   未来安全下发内容：
+#     FIREBOT_SRT_PUBLISH_TOKEN=<R001 per-vehicle SRT publish token（HMAC 派生）>
+#     FIREBOT_SRT_PASSPHRASE=<platform shared SRT encryption passphrase>
+#   视频链：真实相机 → RTSP/SDK → 车端 FFmpeg/GStreamer → SRT firebot.youdaozd.com:8890
+#           → R001-roof_rgb / R001-roof_thermal（H.264 + yuv420p；视频不塞进 ROS/Bridge）
+check_media_secret() {
+  local f="/etc/firebot/media-secret.env"
+  local errors=0
+  if [ ! -f "$f" ]; then
+    echo "MEDIA_SECRET=NOT_CONFIGURED（$f 不存在；真实 R001 视频接入前由 OWNER 安全下发）"
+    return 0
+  fi
+  mode="$(stat -c '%a' "$f" 2>/dev/null || echo 0)"
+  owner="$(stat -c '%u:%g' "$f" 2>/dev/null || echo '?:?')"
+  [ "$mode" = "600" ] || { echo "ERROR: $f 权限必须 600（当前 $mode）" >&2; errors=1; }
+  [ "$owner" = "0:0" ] || { echo "ERROR: $f 必须 root:root（当前 $owner）" >&2; errors=1; }
+  for key in FIREBOT_SRT_PUBLISH_TOKEN FIREBOT_SRT_PASSPHRASE; do
+    if grep -qE "^$key=.+" "$f" 2>/dev/null; then
+      echo "MEDIA_SECRET_KEY $key=PRESENT（值不回显）"
+    else
+      echo "ERROR: $f 缺少非空 $key" >&2
+      errors=1
+    fi
+  done
+  [ "$errors" -eq 0 ] && echo "MEDIA_SECRET=READY（值不回显）" || { echo "MEDIA_SECRET=INVALID" >&2; return 1; }
+}
+
 # ---- 脱敏 support bundle ----
 vehicle_support_bundle() {
   local did; did="$(read_device_id)"
@@ -513,7 +566,7 @@ cmd_server() {
 # ================= 舰队 =================
 cmd_fleet() {
   local sub="${1:-}"; shift || true
-  # fleet-register 依赖 ./secrets/mosquitto 等相对路径，必须 cd 到仓库根执行。
+  # fleet-register（U-Dao 生产语义）：复用 canonical onboarding，不操作 ./secrets、不重启 broker。
   (
     cd "$REPO_DIR"
     case "$sub" in
@@ -539,6 +592,7 @@ print_help() {
   echo "  firebotctl vehicle start base|navigation|control       模块化启动"
   echo "  firebotctl vehicle capability stop-only|patrol         能力提升"
   echo "  firebotctl vehicle location enable                     定位开启"
+  echo "  firebotctl vehicle media-secret check                  媒体 secret 落盘规范检查"
   echo "  firebotctl vehicle rollback / support-bundle           回滚 / 诊断包"
   echo "  firebotctl server deploy --sha <SHA> / verify / rollback  服务器部署/验收/回滚"
   echo "  firebotctl fleet register <设备编号>                    设备签发"
