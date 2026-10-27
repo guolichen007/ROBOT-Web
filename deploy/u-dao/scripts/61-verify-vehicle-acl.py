@@ -27,10 +27,12 @@ def main() -> int:
     parser.add_argument("--mqtt-host", default="127.0.0.1")
     parser.add_argument("--mqtt-port", type=int, default=18883)
     parser.add_argument("--ca-file", default="/runtime/secrets/mosquitto/certs/ca.crt")
-    parser.add_argument("--vehicle-password-file",
-                        default="/runtime/secrets/vehicles/{v}/mqtt_password")
-    parser.add_argument("--platform-password-file",
-                        default="/runtime/secrets/app/mqtt_platform_password")
+    parser.add_argument(
+        "--vehicle-password-file", default="/runtime/secrets/vehicles/{v}/mqtt_password"
+    )
+    parser.add_argument(
+        "--platform-password-file", default="/runtime/secrets/app/mqtt_platform_password"
+    )
     args = parser.parse_args()
 
     vehicle = args.vehicle
@@ -47,9 +49,7 @@ def main() -> int:
         with open(path, encoding="utf-8") as stream:
             return stream.read().strip()
 
-    vehicle_password = read_password(
-        args.vehicle_password_file.replace("{v}", vehicle)
-    )
+    vehicle_password = read_password(args.vehicle_password_file.replace("{v}", vehicle))
     platform_password = read_password(args.platform_password_file)
 
     def make_client(username: str, password: str) -> mqtt.Client:
@@ -165,25 +165,41 @@ def main() -> int:
     check(f"{vehicle} 错误密码拒绝", connect_result(vehicle, vehicle_password + "WRONG") != 0)
 
     # ---- R001 自己的授权 ----
-    check(f"{vehicle} subscribe robot/{vehicle}/command ALLOW",
-          subscribe_result(vehicle, vehicle_password, f"robot/{vehicle}/command"))
-    check(f"{vehicle} subscribe v1/robot/{vehicle}/cmd ALLOW",
-          subscribe_result(vehicle, vehicle_password, f"v1/robot/{vehicle}/cmd"))
-    check(f"{vehicle} publish robot/{vehicle}/heartbeat ALLOW",
-          publish_result(vehicle, vehicle_password, f"robot/{vehicle}/heartbeat"))
-    check(f"{vehicle} publish v1/robot/{vehicle}/telemetry ALLOW",
-          publish_result(vehicle, vehicle_password, f"v1/robot/{vehicle}/telemetry"))
+    check(
+        f"{vehicle} subscribe robot/{vehicle}/command ALLOW",
+        subscribe_result(vehicle, vehicle_password, f"robot/{vehicle}/command"),
+    )
+    check(
+        f"{vehicle} subscribe v1/robot/{vehicle}/cmd ALLOW",
+        subscribe_result(vehicle, vehicle_password, f"v1/robot/{vehicle}/cmd"),
+    )
+    check(
+        f"{vehicle} publish robot/{vehicle}/heartbeat ALLOW",
+        publish_result(vehicle, vehicle_password, f"robot/{vehicle}/heartbeat"),
+    )
+    check(
+        f"{vehicle} publish v1/robot/{vehicle}/telemetry ALLOW",
+        publish_result(vehicle, vehicle_password, f"v1/robot/{vehicle}/telemetry"),
+    )
 
     # ---- 跨车拒绝 ----
     other = "R002"
-    check(f"{vehicle} subscribe robot/{other}/command DENY",
-          not subscribe_result(vehicle, vehicle_password, f"robot/{other}/command"))
-    check(f"{vehicle} subscribe v1/robot/{other}/cmd DENY",
-          not subscribe_result(vehicle, vehicle_password, f"v1/robot/{other}/cmd"))
-    check(f"{vehicle} publish robot/{other}/heartbeat DENY",
-          not publish_result(vehicle, vehicle_password, f"robot/{other}/heartbeat"))
-    check(f"{vehicle} publish v1/robot/{other}/telemetry DENY",
-          not publish_result(vehicle, vehicle_password, f"v1/robot/{other}/telemetry"))
+    check(
+        f"{vehicle} subscribe robot/{other}/command DENY",
+        not subscribe_result(vehicle, vehicle_password, f"robot/{other}/command"),
+    )
+    check(
+        f"{vehicle} subscribe v1/robot/{other}/cmd DENY",
+        not subscribe_result(vehicle, vehicle_password, f"v1/robot/{other}/cmd"),
+    )
+    check(
+        f"{vehicle} publish robot/{other}/heartbeat DENY",
+        not publish_result(vehicle, vehicle_password, f"robot/{other}/heartbeat"),
+    )
+    check(
+        f"{vehicle} publish v1/robot/{other}/telemetry DENY",
+        not publish_result(vehicle, vehicle_password, f"v1/robot/{other}/telemetry"),
+    )
 
     # ---- 平台账号参考（正常运维通道不受影响）----
     check("platform 账号仍可用", connect_result("platform", platform_password) == 0)
