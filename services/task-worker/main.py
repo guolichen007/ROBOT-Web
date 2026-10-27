@@ -192,6 +192,20 @@ def expire_sessions_and_commands(db, now: datetime) -> None:
             session.state = "EXPIRED"
             session.ended_at = now
             session.end_reason = "LEASE_TTL"
+    # QUEUED 过期终态（R2-8）：outbox 长期滞留（如中断期间）且已过期的命令
+    # 置 EXPIRED，不得等 broker 补发或复活执行。
+    queued_expired = db.scalars(
+        select(Command).where(
+            Command.lifecycle_status == "QUEUED",
+            Command.expires_at < now,
+        )
+    ).all()
+    for command in queued_expired:
+        command.lifecycle_status = "EXPIRED"
+        command.terminal_at = now
+        command.ack_reason = "QUEUED_EXPIRED"
+        command_timeout_total.inc()
+        queue_event(db, "command.updated", serialize_model(command))
     deadline = now - timedelta(seconds=settings.command_ack_timeout_seconds)
     commands = db.scalars(
         select(Command).where(
