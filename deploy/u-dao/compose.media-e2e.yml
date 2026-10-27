@@ -1,0 +1,46 @@
+# U-Dao 合成视频 E2E（SRT → MediaMTX）：RGB/thermal 双流独立实例。
+# 仅验收用，测完即停（down），不作为正式后台服务（R2-21 合成源语义）。
+# 前置：firebot 栈已运行（mediamtx 在 u-dao-firebot_firebot 网络，SRT 8890/udp）。
+# 用法（在 release/repo 根，真值来自 runtime secret 文件，勿写死）：
+#   注意：sudo 会重置环境变量，compose 插值变量必须经 `sudo -n env K=V` 传递。
+#   sudo -n env \
+#     MEDIA_E2E_PUBLISH_TOKEN="$(cat /srv/u-dao/projects/firebot/runtime/secrets/app/media_publish_token)" \
+#     MEDIA_E2E_SRT_PASSPHRASE="$(cat /srv/u-dao/projects/firebot/runtime/secrets/app/srt_publish_passphrase)" \
+#     docker compose -p u-dao-media-e2e -f deploy/u-dao/compose.media-e2e.yml up -d --build
+#   ...验收（scripts/check_srt_whep_e2e.py）...
+#   sudo -n docker compose -p u-dao-media-e2e -f deploy/u-dao/compose.media-e2e.yml down
+name: u-dao-media-e2e
+
+services:
+  rgb:
+    image: u-dao-media-e2e-source:v1
+    build:
+      context: ${MEDIA_E2E_CONTEXT:-..}
+      dockerfile: infra/docker/media-test-source.Dockerfile
+    environment:
+      MEDIA_STREAM_ID: R001-roof_rgb
+      OUTPUT_PROTOCOL: srt
+      MEDIA_SRT_ORIGIN: srt://mediamtx:8890
+      MEDIA_PUBLISH_TOKEN: ${MEDIA_E2E_PUBLISH_TOKEN:?MEDIA_E2E_PUBLISH_TOKEN required}
+      SRT_PUBLISH_PASSPHRASE: ${MEDIA_E2E_SRT_PASSPHRASE:?MEDIA_E2E_SRT_PASSPHRASE required}
+    restart: "no"
+    networks: [firebot-net]
+
+  thermal:
+    image: u-dao-media-e2e-source:v1
+    build:
+      context: ${MEDIA_E2E_CONTEXT:-..}
+      dockerfile: infra/docker/media-test-source.Dockerfile
+    environment:
+      MEDIA_STREAM_ID: R001-roof_thermal
+      OUTPUT_PROTOCOL: srt
+      MEDIA_SRT_ORIGIN: srt://mediamtx:8890
+      MEDIA_PUBLISH_TOKEN: ${MEDIA_E2E_PUBLISH_TOKEN:?MEDIA_E2E_PUBLISH_TOKEN required}
+      SRT_PUBLISH_PASSPHRASE: ${MEDIA_E2E_SRT_PASSPHRASE:?MEDIA_E2E_SRT_PASSPHRASE required}
+    restart: "no"
+    networks: [firebot-net]
+
+networks:
+  firebot-net:
+    external: true
+    name: u-dao-firebot_firebot
