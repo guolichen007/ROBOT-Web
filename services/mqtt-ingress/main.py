@@ -1075,65 +1075,108 @@ def process(topic: str, payload: bytes) -> None:
     redis.delete(pending_key)
 
 
-def service_heartbeat() -> None:
+def service_heartbeat(realtime_client, durable_client) -> None:
     while True:
         try:
-            redis.setex("service:mqtt-ingress:heartbeat", 5, datetime.now(UTC).isoformat())
+            # 心跳绑定连接（R2-7）：healthcheck 暴露 unhealthy，恢复靠 paho 有界重连
+            if realtime_client.is_connected() and durable_client.is_connected():
+                redis.setex("service:mqtt-ingress:heartbeat", 5, datetime.now(UTC).isoformat())
         except Exception:
             logger.warning("MQTT ingress heartbeat store unavailable", exc_info=True)
         time.sleep(1)
+
+
+# R2-6 主题分流：realtime（clean session，高频遥测无离线 backlog）/ durable（持久会话短时恢复业务事件）。
+REALTIME_TOPICS = ("availability", "heartbeat", "capabilities", "location", "status", "sensor")
+DURABLE_TOPICS = ("alarm", "task_status", "command_ack")
+V1_REALTIME_TOPICS = ("status", "telemetry", "availability")
+V1_DURABLE_TOPICS = ("ack", "event")
+COMPAT_REALTIME_TOPICS = (
+    "compat_status",
+    "compat_battery",
+    "compat_odom",
+    "compat_nav_status",
+    "compat_nav_result",
+)
 
 
 def on_connect(client, userdata, flags, reason_code, properties):
     if reason_code != 0:
         logger.error("MQTT connect failed: %s", reason_code)
         return
-    for topic in (
-        "availability",
-        "heartbeat",
-        "capabilities",
-        "location",
-        "status",
-        "sensor",
-        "alarm",
-        "task_status",
-        "command_ack",
-    ):
-        client.subscribe(f"robot/+/{topic}", qos=1)
-        client.subscribe(f"_platform/compat/+/{topic}", qos=1)
-    client.subscribe("_platform/vehicle-agent-v1/+/+", qos=1)
-    for topic in (
-        "compat_status",
-        "compat_battery",
-        "compat_odom",
-        "compat_nav_status",
-        "compat_nav_result",
-    ):
-        client.subscribe(f"_platform/compat/+/{topic}", qos=1)
-    logger.info("MQTT ingress connected")
+    durable = bool(userdata)
+    if durable:
+        for topic in DURABLE_TOPICS:
+            client.subscribe(f"robot/+/{topic}", qos=1)
+            client.subscribe(f"_platform/compat/+/{topic}", qos=1)
+        for topic in V1_DURABLE_TOPICS:
+            client.subscribe(f"_platform/vehicle-agent-v1/+/{topic}", qos=1)
+    else:
+        for topic in REALTIME_TOPICS:
+            client.subscribe(f"robot/+/{topic}", qos=1)
+            client.subscribe(f"_platform/compat/+/{topic}", qos=1)
+        for topic in V1_REALTIME_TOPICS:
+            client.subscribe(f"_platform/vehicle-agent-v1/+/{topic}", qos=1)
+        for topic in COMPAT_REALTIME_TOPICS:
+            client.subscribe(f"_platform/compat/+/{topic}", qos=1)
+    logger.info("MQTT ingress %s connected", "durable" if durable else "realtime")
 
 
 def on_message(client, userdata, message):
     process(message.topic, message.payload)
 
 
-def main() -> None:
-    threading.Thread(target=service_heartbeat, daemon=True).start()
+def make_client(client_id: str, durable: bool) -> mqtt.Client:
     client = mqtt.Client(
-        mqtt.CallbackAPIVersion.VERSION2, client_id="firebot-mqtt-ingress", protocol=mqtt.MQTTv5
+        mqtt.CallbackAPIVersion.VERSION2,
+        client_id=client_id,
+        protocol=mqtt.MQTTv5,
+        userdata=durable,
     )
     if settings.mqtt_username:
         client.username_pw_set(settings.mqtt_username, settings.effective_mqtt_password)
     settings.configure_mqtt_client(client)
     client.on_connect = on_connect
     client.on_message = on_message
+    return client
+
+
+def client_main(client, *, durable: bool, clean_start: bool) -> None:
     while True:
         try:
-            client.connect(settings.mqtt_host, settings.mqtt_port, keepalive=30)
+            client.connect(
+                settings.mqtt_host,
+                settings.mqtt_port,
+                keepalive=30,
+                clean_start=clean_start,
+                properties=settings.mqtt_connect_properties(durable=durable),
+            )
             client.loop_forever(retry_first_connection=True)
         except Exception:
-            logger.exception("MQTT ingress loop failed")
+            logger.exception("MQTT ingress %s loop failed", "durable" if durable else "realtime")
             time.sleep(3)
+
+
+def main() -> None:
+    # 双 client（R2-6）：realtime 高频遥测 clean session（断线不 backlog、恢复不先回放历史位置）；
+    # durable 固定 client id + persistent session（600s）短时恢复 command_ack/task_status/alarm/event。
+    realtime = make_client("firebot-mqtt-ingress-realtime", durable=False)
+    durable_client = make_client("firebot-mqtt-ingress-durable", durable=True)
+    threading.Thread(target=service_heartbeat, args=(realtime, durable_client), daemon=True).start()
+    threading.Thread(
+        target=client_main,
+        args=(realtime,),
+        kwargs={"durable": False, "clean_start": True},
+        daemon=True,
+    ).start()
+    threading.Thread(
+        target=client_main,
+        args=(durable_client,),
+        kwargs={"durable": True, "clean_start": False},
+        daemon=True,
+    ).start()
+    while True:
+        time.sleep(3600)
 
 
 if __name__ == "__main__":
