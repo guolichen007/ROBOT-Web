@@ -4,7 +4,15 @@
 set -uo pipefail
 
 ENV_FILE="${SERVER_ENV_FILE:-.env.server}"
-COMPOSE=(docker compose --env-file "$ENV_FILE" -f docker-compose.server.yml)
+COMPOSE_FILES="${FIREBOT_COMPOSE_FILES:-docker-compose.server.yml}"
+source scripts/docker_cmd.sh
+if [ "${1:-}" = "--self-test" ]; then
+  DOCKER=(docker)
+else
+  docker_cmd_detect || { echo 'DOCKER_CMD=FAIL' >&2; exit 1; }
+fi
+COMPOSE=("${DOCKER[@]}" compose --env-file "$ENV_FILE")
+for f in $COMPOSE_FILES; do COMPOSE+=(-f "$f"); done
 
 verify_failed=0
 
@@ -18,7 +26,7 @@ service_healthy() {
   local cid
   cid="$(get_service_container_id "$1")"
   [ -n "$cid" ] || return 1
-  docker inspect --format '{{.State.Running}} {{.State.Health.Status}}' "$cid" 2>/dev/null | grep -q '^true healthy$'
+  "${DOCKER[@]}" inspect --format '{{.State.Running}} {{.State.Health.Status}}' "$cid" 2>/dev/null | grep -q '^true healthy$'
 }
 
 # 从实际运行的 api 容器读有效 ROS_COMPAT_MODE（.env.server 传给 compose，不自动 export 给本 shell）。
@@ -26,7 +34,7 @@ api_container_env() {
   local cid
   cid="$(get_service_container_id api)"
   [ -n "$cid" ] || return 1
-  docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$cid" 2>/dev/null
+  "${DOCKER[@]}" inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$cid" 2>/dev/null
 }
 
 effective_ros_compat_mode() {
@@ -235,7 +243,7 @@ image_revision() {
   local cid
   cid="$(get_service_container_id "$1")"
   [ -n "$cid" ] || { echo "UNKNOWN"; return; }
-  docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$cid" 2>/dev/null || echo "UNKNOWN"
+  "${DOCKER[@]}" inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "$cid" 2>/dev/null || echo "UNKNOWN"
 }
 API_IMAGE_REVISION="$(image_revision api)"
 INGRESS_IMAGE_REVISION="$(image_revision mqtt-ingress)"

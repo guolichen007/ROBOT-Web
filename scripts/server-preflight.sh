@@ -10,14 +10,15 @@ BACKUP_PATH="${BACKUP_PATH:-backups}"
 U_DAO_MODE="${U_DAO_MODE:-0}"
 errors=0
 COMPOSE_FILES="${FIREBOT_COMPOSE_FILES:-docker-compose.server.yml}"
-COMPOSE=(docker compose --env-file "$ENV_FILE")
+source scripts/docker_cmd.sh
+docker_cmd_detect || fail 'Docker Engine unavailable（docker 与 sudo -n docker 均不可用）'
+COMPOSE=("${DOCKER[@]}" compose --env-file "$ENV_FILE")
 for f in $COMPOSE_FILES; do COMPOSE+=(-f "$f"); done
 source scripts/vehicle-agent-rollout.sh
 
 fail() { printf 'ERROR %s\n' "$1" >&2; errors=$((errors + 1)); }
-for command in docker git awk grep sed python3; do command -v "$command" >/dev/null 2>&1 || fail "missing command: $command"; done
-docker info >/dev/null 2>&1 || fail 'Docker Engine unavailable'
-docker compose version >/dev/null 2>&1 || fail 'Docker Compose plugin unavailable'
+for command in git awk grep sed python3; do command -v "$command" >/dev/null 2>&1 || fail "missing command: $command"; done
+"${DOCKER[@]}" compose version >/dev/null 2>&1 || fail 'Docker Compose plugin unavailable'
 [ -f "$ENV_FILE" ] || fail "missing SERVER env: $ENV_FILE"
 if [ -f "$ENV_FILE" ]; then
   grep -Eq 'REPLACE_|CHANGE_ME|TODO|example\.invalid' "$ENV_FILE" && fail 'SERVER env contains placeholder' || true
@@ -104,7 +105,7 @@ firebot_owns_port() {
   esac
   [ -n "$svc" ] || return 1
   cid="$("${COMPOSE[@]}" ps -q "$svc" 2>/dev/null || true)"
-  [ -n "$cid" ] && docker port "$cid" "$port" >/dev/null 2>&1
+  [ -n "$cid" ] && "${DOCKER[@]}" port "$cid" "$port" >/dev/null 2>&1
 }
 
 firebot_owns_cloud_port() {
@@ -119,13 +120,12 @@ firebot_owns_cloud_port() {
   esac
   [ -n "$svc" ] || return 1
   cid="$("${COMPOSE[@]}" ps -q "$svc" 2>/dev/null || true)"
-  [ -n "$cid" ] && docker port "$cid" "$target" >/dev/null 2>&1
+  [ -n "$cid" ] && "${DOCKER[@]}" port "$cid" "$target" >/dev/null 2>&1
 }
 
 # shared ingress（platform 资源）为 80/443 的合法 owner
 ingress_owns_80_443() {
-  command -v docker >/dev/null 2>&1 || return 1
-  docker compose -p u-dao-ingress ps -q 2>/dev/null | grep -q .
+  "${DOCKER[@]}" compose -p u-dao-ingress ps -q 2>/dev/null | grep -q .
 }
 
 if command -v ss >/dev/null 2>&1 && [ "${ALLOW_OCCUPIED_PORTS:-false}" != true ]; then

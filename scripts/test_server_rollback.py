@@ -18,6 +18,7 @@ ADAPTER = "vehicle-agent-adapter"
 
 HARNESS = r"""
 set -euo pipefail
+export DOCKER_CMD_SKIP_DETECT=1
 if command -v cygpath >/dev/null; then TEST_PYTHON="$(cygpath -u "$TEST_PYTHON")"; fi
 python3() { command "$TEST_PYTHON" "$@"; }
 trace() { printf '%s\n' "$*" >> trace.log; }
@@ -118,6 +119,7 @@ class RollbackTests(unittest.TestCase):
             (work / "scripts").mkdir()
             for name in (
                 "server-deploy.sh",
+                "docker_cmd.sh",
                 "vehicle-agent-rollout.sh",
                 "deployment_state.py",
                 "legacy_runtime.py",
