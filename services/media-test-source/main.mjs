@@ -14,13 +14,12 @@ const srtPassphrase = process.env.SRT_PUBLISH_PASSPHRASE || ''
 function buildTarget() {
   if (outputProtocol === 'srt') {
     // SRT 鉴权：streamid=publish:<path>:<user>:<pass>（MediaMTX authHTTP 校验 password==发布 token）。
-    // SRT 加密：passphrase 与鉴权 token 严格独立（R2-16），不得复用。
+    // 注意：streamid 的分号分隔结构必须保持原文；token/passphrase 作为“值”需编码
+    // （base64 含 '+'，ffmpeg 会对查询值做 URL 解码，'+' 会被解码为空格导致鉴权/加密失败）。
     const streamid = `publish:${streamId}:u-dao:${encodeURIComponent(token)}`
-    const url = new URL(srtOrigin)
-    url.searchParams.set('streamid', streamid)
-    if (srtPassphrase) url.searchParams.set('passphrase', srtPassphrase)
-    url.searchParams.set('pkt_size', '1316')
-    return url.toString()
+    let query = `streamid=${streamid}&pkt_size=1316`
+    if (srtPassphrase) query += `&passphrase=${encodeURIComponent(srtPassphrase)}`
+    return `${srtOrigin}?${query}`
   }
   return `${rtspOrigin}/${encodeURIComponent(streamId)}?token=${encodeURIComponent(token)}`
 }

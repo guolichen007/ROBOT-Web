@@ -15,8 +15,10 @@ services:
   rgb:
     image: u-dao-media-e2e-source:v1
     build:
-      context: ${MEDIA_E2E_CONTEXT:-..}
+      context: ${MEDIA_E2E_CONTEXT:-../..}
       dockerfile: infra/docker/media-test-source.Dockerfile
+      args:
+        APK_REPOSITORY_BASE: ${MEDIA_E2E_APK_BASE:-mirrors.cloud.tencent.com/alpine}
     environment:
       MEDIA_STREAM_ID: R001-roof_rgb
       OUTPUT_PROTOCOL: srt
@@ -29,8 +31,10 @@ services:
   thermal:
     image: u-dao-media-e2e-source:v1
     build:
-      context: ${MEDIA_E2E_CONTEXT:-..}
+      context: ${MEDIA_E2E_CONTEXT:-../..}
       dockerfile: infra/docker/media-test-source.Dockerfile
+      args:
+        APK_REPOSITORY_BASE: ${MEDIA_E2E_APK_BASE:-mirrors.cloud.tencent.com/alpine}
     environment:
       MEDIA_STREAM_ID: R001-roof_thermal
       OUTPUT_PROTOCOL: srt
