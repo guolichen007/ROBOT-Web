@@ -27,6 +27,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from scripts.redact_secrets import redact_secrets
+
 ROOT = Path(__file__).resolve().parents[1]
 FAILURES: list[str] = []
 
@@ -93,7 +95,9 @@ def srt_publish(token: str, passphrase: str, stream_id: str, expect_ok: bool) ->
     check(
         f"SRT publish {stream_id} (expect {'OK' if expect_ok else 'FAIL'})",
         (result.returncode == 0) == expect_ok,
-        f"rc={result.returncode} err={result.stderr[-300:]}",
+        # P0-B：ffmpeg/libSRT stderr 含完整 SRT URL（streamid token + passphrase），
+        # 输出前必须 redact（scripts/redact_secrets.py，有单测）。
+        f"rc={result.returncode} err={redact_secrets(result.stderr)[-300:]}",
     )
 
 
@@ -128,7 +132,7 @@ def mediamtx_api(path: str) -> dict:
         ],
         timeout=60,
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 0, redact_secrets(result.stderr)
     return json.loads(result.stdout)
 
 

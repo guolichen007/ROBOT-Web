@@ -58,7 +58,7 @@ jobs:
       - run: python scripts/test_migration_matrix.py
       - working-directory: apps/api
         run: alembic upgrade head && python -m app.db.seed
-      - run: pytest apps/api/tests services/protocol-tester/tests
+      - run: pytest apps/api/tests services/protocol-tester/tests scripts/test_secret_redaction.py
       - working-directory: apps/api
         run: alembic downgrade base && alembic upgrade head && python -m app.db.seed
 
@@ -179,6 +179,10 @@ jobs:
       - run: docker build -f infra/docker/python.Dockerfile -t firebot-api:ci .
       - run: docker build -f apps/web/Dockerfile -t firebot-web:ci .
       - run: docker build -f infra/docker/mediamtx.Dockerfile -t firebot-test-mediamtx:ci .
+      # P0-A：公网媒体端口绑定启动级回归（真实 docker run + docker port；8189 双绑定负例）
+      - run: python3 scripts/test_public_bind.py
+      # P0-B：Node 侧 secret redaction 单测（media-test-source，node --test）
+      - run: node --test services/media-test-source/test/redact.test.mjs
       - run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/aquasecurity/trivy:0.59.1 image --db-repository ghcr.io/aquasecurity/trivy-db:2 --exit-code 1 --severity CRITICAL --ignore-unfixed firebot-api:ci
       - run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock ghcr.io/aquasecurity/trivy:0.59.1 image --db-repository ghcr.io/aquasecurity/trivy-db:2 --exit-code 1 --severity CRITICAL --ignore-unfixed firebot-web:ci
 

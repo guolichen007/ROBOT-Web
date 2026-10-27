@@ -1,5 +1,6 @@
 import http from 'node:http'
 import { spawn } from 'node:child_process'
+import { redact } from './lib/redact.mjs'
 
 // 合成视频测试源（RGB/thermal 双流可多实例）。
 // 输出协议：OUTPUT_PROTOCOL=rtsp（默认，?token=）或 srt（streamid 携带发布 token + 独立加密 passphrase）。
@@ -57,9 +58,18 @@ let ready = false
 let lastError = null
 const ffmpeg = spawn('ffmpeg', args, { stdio: ['ignore', 'inherit', 'pipe'] })
 ffmpeg.stderr.setEncoding('utf8')
+// P0-B：ffmpeg/libSRT stderr 可能包含完整 SRT URL（streamid 内发布 token + passphrase
+// 查询值）。按行缓冲 + redact 后才写 console/持久日志，避免跨 chunk 切分造成漏脱敏。
+let stderrPending = ''
 ffmpeg.stderr.on('data', (data) => {
-  lastError = String(data).trim().slice(-1000)
-  process.stderr.write(data)
+  stderrPending += String(data)
+  let idx
+  while ((idx = stderrPending.indexOf('\n')) !== -1) {
+    const line = redact(stderrPending.slice(0, idx + 1))
+    stderrPending = stderrPending.slice(idx + 1)
+    lastError = (lastError + line).slice(-1000)
+    process.stderr.write(line)
+  }
 })
 ffmpeg.on('spawn', () => {
   setTimeout(() => {
@@ -80,6 +90,11 @@ ffmpeg.on('spawn', () => {
 })
 ffmpeg.on('exit', (code) => {
   ready = false
+  // 退出前冲刷行缓冲（同样经 redact），确保任何残留 stderr 都不带 credential 落盘
+  if (stderrPending) {
+    lastError = (lastError + redact(stderrPending)).slice(-1000)
+    stderrPending = ''
+  }
   console.error(JSON.stringify({ service: 'media-test-source', status: 'failed', code, lastError }))
   setTimeout(() => process.exit(code || 1), 500)
 })

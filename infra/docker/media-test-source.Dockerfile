@@ -18,7 +18,8 @@ RUN printf 'https://%s/v3.24/main\nhttps://%s/v3.24/community\n' \
     && ffmpeg -hide_banner -encoders 2>/dev/null | grep -q libx264
 
 WORKDIR /source
-COPY services/media-test-source/main.mjs ./main.mjs
+# lib/redact.mjs 为 main.mjs 的脱敏依赖（P0-B），必须一并拷贝
+COPY services/media-test-source/ ./
 
 USER node
 CMD ["node", "/source/main.mjs"]

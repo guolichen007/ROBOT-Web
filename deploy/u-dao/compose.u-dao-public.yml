@@ -9,7 +9,13 @@
 #     WEBRTC_PUBLIC_BIND_TCP=0.0.0.0:8189:8189/tcp \
 #     docker compose -f docker-compose.server.yml -f deploy/u-dao/compose.u-dao.yml \
 #                    -f deploy/u-dao/compose.u-dao-public.yml ...
-# 注意：本层不使用 !override（与云层按四元组合并）——本地验收端口与公网端口并存。
+# 端口语义（P0-A 修正）：
+#   - mosquitto：四元组 ADD 合并（公网 8883 与云层 loopback 18883 宿主端口号不同，可并存）。
+#   - mediamtx：!override 整属性替换——8189 端口保持（port preservation）在云层绑
+#     127.0.0.1:8189，若以四元组 ADD 叠加 0.0.0.0:8189 会形成同一宿主端口的
+#     loopback+wildcard 双绑定，Docker 实际启动必然 EADDRINUSE（公网激活实测证实，
+#     scripts/test_public_bind.py 有启动级回归锁定）。公网模式以完整端口集替换：
+#     loopback 18554/18890 保留（本机测试），公网 SRT/WebRTC 由四个 fail-closed 变量插值。
 # 公网规划：80/443 由 platform shared ingress 承担（不在此文件）；Firebot 公网仅：
 #   8883/tcp（MQTT TLS）、8890/udp（SRT）、8189/udp+tcp（WebRTC ICE）。
 # 禁止公网：1883、5432、6379、8554、8889、9997、9998、18080（本文件不定义即不暴露）。
@@ -21,7 +27,9 @@ services:
       - "${MQTT_PUBLIC_BIND:?MQTT_PUBLIC_BIND required (e.g. 0.0.0.0:8883:8883)}"
 
   mediamtx:
-    ports:
+    ports: !override
+      - "127.0.0.1:18554:8554/tcp"
+      - "127.0.0.1:18890:8890/udp"
       - "${SRT_PUBLIC_BIND:?SRT_PUBLIC_BIND required (e.g. 0.0.0.0:8890:8890/udp)}"
       - "${WEBRTC_PUBLIC_BIND_UDP:?WEBRTC_PUBLIC_BIND_UDP required (e.g. 0.0.0.0:8189:8189/udp)}"
       - "${WEBRTC_PUBLIC_BIND_TCP:?WEBRTC_PUBLIC_BIND_TCP required (e.g. 0.0.0.0:8189:8189/tcp)}"

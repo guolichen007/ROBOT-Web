@@ -20,6 +20,9 @@
 #   bash deploy/u-dao/scripts/60-onboard-vehicle.sh R002 --apply
 #   bash deploy/u-dao/scripts/60-onboard-vehicle.sh R002 --force
 #   bash deploy/u-dao/scripts/60-onboard-vehicle.sh R002 --verify
+#   bash deploy/u-dao/scripts/60-onboard-vehicle.sh R002 --resync-srt
+#     （P0-B：master media_publish_token / srt_publish_passphrase 旋转后，重派生本车
+#       SRT token 与 passphrase 副本；不触碰 MQTT 凭据、不 reload broker）
 set -euo pipefail
 
 VEHICLE_ID="${1:-}"
@@ -142,6 +145,18 @@ live_acl_verify() {
     || fail "live ACL verify 失败（VEHICLE_ACL_LIVE）"
 }
 
+# ---- SRT 凭据重派生（P0-B：master token/passphrase 旋转后同步单车副本；MQTT 不动）----
+resync_srt() {
+  [ -d "$VEHICLE_DIR" ] || fail "$VEHICLE_ID 凭据目录不存在（先执行默认生成）"
+  MASTER_TOKEN="$(cat "$RUNTIME_ROOT/secrets/app/media_publish_token")"
+  SRT_TOKEN="$(printf 'vehicle-srt:%s' "$VEHICLE_ID" | \
+    openssl dgst -sha256 -hmac "$MASTER_TOKEN" | awk '{print $2}')"
+  printf '%s' "$SRT_TOKEN" > "$VEHICLE_DIR/srt_publish_token"
+  cp "$RUNTIME_ROOT/secrets/app/srt_publish_passphrase" "$VEHICLE_DIR/srt_publish_passphrase"
+  chmod 600 "$VEHICLE_DIR/srt_publish_token" "$VEHICLE_DIR/srt_publish_passphrase"
+  echo "ONBOARD_RESYNC_SRT=PASS vehicle=$VEHICLE_ID（仅重派生 SRT token/passphrase 副本；MQTT 凭据未动）"
+}
+
 # ---- 激活：password_file 更新 → 卷同步 → SIGHUP → verify → live ACL verify ----
 activate() {
   update_password_file
@@ -154,6 +169,7 @@ activate() {
 
 case "$MODE" in
   --verify) verify_only ;;
+  --resync-srt) resync_srt ;;
   --apply)
     if credentials_exist; then
       echo "REUSE（凭据已存在，不旋转；直接激活）"

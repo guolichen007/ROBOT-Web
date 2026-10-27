@@ -300,6 +300,45 @@ def test_public_profile_fail_closed() -> None:
             "public WebRTC 8189 udp+tcp 公网",
             has_port(mtx, 8189, "udp", "0.0.0.0") and has_port(mtx, 8189, "tcp", "0.0.0.0"),
         )
+        # P0-A：mediamtx 公网层 !override 整属性替换——不得残留 loopback 8189
+        # （否则与 0.0.0.0:8189 同宿主端口双绑定，Docker 启动必然 EADDRINUSE）。
+        check(
+            "public mediamtx 无 loopback 8189（P0-A !override）",
+            not has_port(mtx, 8189, "tcp", "127.0.0.1")
+            and not has_port(mtx, 8189, "udp", "127.0.0.1"),
+        )
+        expected_mtx = {
+            ("127.0.0.1", "18554", "8554", "tcp"),
+            ("127.0.0.1", "18890", "8890", "udp"),
+            ("0.0.0.0", "8890", "8890", "udp"),
+            ("0.0.0.0", "8189", "8189", "udp"),
+            ("0.0.0.0", "8189", "8189", "tcp"),
+        }
+        actual_mtx = {
+            (
+                str(p.get("host_ip")),
+                str(p.get("published")),
+                str(p.get("target")),
+                p.get("protocol"),
+            )
+            for p in mtx
+        }
+        check(
+            "public mediamtx 端口集精确匹配（完整替换语义）",
+            actual_mtx == expected_mtx,
+            f"diff={actual_mtx ^ expected_mtx}",
+        )
+        # 通用断言：任何服务不得在同一宿主端口上同时绑 127.0.0.1 与 0.0.0.0
+        duplicate = []
+        for svc, spec in cfg["services"].items():
+            seen = {}
+            for p in spec.get("ports", []) or []:
+                key = (p.get("published"), p.get("protocol"))
+                seen.setdefault(key, set()).add(p.get("host_ip"))
+            for key, ips in seen.items():
+                if "127.0.0.1" in ips and "0.0.0.0" in ips:
+                    duplicate.append((svc, key))
+        check("public 无同一宿主端口 loopback+wildcard 双绑定", not duplicate, str(duplicate))
         nginx_ports = ports_of(cfg, "nginx")
         check(
             "public 无 forbidden 公网端口",
