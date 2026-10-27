@@ -67,9 +67,15 @@ onboard() {
   printf '%s' "$MQTT_PW" > "$VEHICLE_DIR/mqtt_password"
   chmod 600 "$VEHICLE_DIR/mqtt_password"
 
-  # SRT 凭据（与 MQTT 密码、全局 token 均独立）
-  openssl rand -base64 36 | tr -d '\n' > "$VEHICLE_DIR/srt_publish_token"
-  openssl rand -base64 36 | tr -d '\n' > "$VEHICLE_DIR/srt_publish_passphrase"
+  # per-vehicle SRT 发布 token：HMAC-SHA256(master, "vehicle-srt:"+vehicle_id) 确定性派生
+  # （与 API authorize_media 同算法；不存库、泄露无法推他车 token）
+  MASTER_TOKEN="$(cat "$RUNTIME_ROOT/secrets/app/media_publish_token")"
+  SRT_TOKEN="$(printf 'vehicle-srt:%s' "$VEHICLE_ID" | \
+    openssl dgst -sha256 -hmac "$MASTER_TOKEN" | awk '{print $2}')"
+  printf '%s' "$SRT_TOKEN" > "$VEHICLE_DIR/srt_publish_token"
+  # SRT 链路加密 passphrase：平台共享（PLATFORM_SHARED_SRT_ENCRYPTION_PASSPHRASE），
+  # 非 per-vehicle；身份隔离由 per-vehicle token 承担，链路加密由平台统一密钥承担。
+  cp "$RUNTIME_ROOT/secrets/app/srt_publish_passphrase" "$VEHICLE_DIR/srt_publish_passphrase"
   chmod 600 "$VEHICLE_DIR/srt_publish_token" "$VEHICLE_DIR/srt_publish_passphrase"
 
   # passwords 文件更新（mosquitto_passwd 追加；容器内 root 产物 chown 回 ubuntu）
@@ -83,19 +89,46 @@ onboard() {
   sudo -n chown ubuntu:ubuntu "$RUNTIME_ROOT/secrets/mosquitto/passwords" || fail "chown passwords 失败"
   chmod 640 "$RUNTIME_ROOT/secrets/mosquitto/passwords"
 
+  # 凭据语义说明（交付文档，不含真值）
+  {
+    echo "# $VEHICLE_ID 凭据交付说明"
+    echo "mqtt_password        = $VEHICLE_ID 的 MQTT 密码（MQTT username == vehicle_id）"
+    echo "srt_publish_token    = per-vehicle SRT 发布 token（HMAC 派生，身份/发布授权隔离）"
+    echo "srt_publish_passphrase = PLATFORM_SHARED_SRT_ENCRYPTION_PASSPHRASE（平台共享链路加密，非 per-vehicle）"
+  } > "$VEHICLE_DIR/README.txt"
+  chmod 600 "$VEHICLE_DIR/README.txt"
   echo "ONBOARD=PASS vehicle=$VEHICLE_ID"
   echo "  mqtt_username=$VEHICLE_ID（值不回显）"
-  echo "  files=$VEHICLE_DIR/{mqtt_password,srt_publish_token,srt_publish_passphrase}"
-  echo "  note=ACL 由 acl.example 的 pattern %u 自动隔离；broker 生效需 --apply 或手动 reload"
+  echo "  files=$VEHICLE_DIR/{mqtt_password,srt_publish_token,srt_publish_passphrase,README.txt}"
+  echo "  note=ACL 由 acl.example 的 pattern %u 自动隔离；broker 生效需 --apply（SIGHUP 原地 reload）"
+}
+
+# ---- 激活：对运行中的 u-dao-firebot mosquitto 容器发 SIGHUP 原地 reload（不重启、不断已有连接）----
+reload_broker() {
+  detect_docker
+  # 通过 compose project/service labels 精确定位（禁止 hardcode 容器名）
+  local cids
+  cids="$("${DOCKER[@]}" ps -q -f "label=com.docker.compose.project=u-dao-firebot" \
+           -f "label=com.docker.compose.service=mosquitto" 2>/dev/null || true)"
+  local count
+  count="$(printf '%s\n' "$cids" | grep -c .)"
+  if [ "$count" -eq 0 ]; then
+    fail "未找到 u-dao-firebot mosquitto 容器（0 个）"
+  elif [ "$count" -gt 1 ]; then
+    fail "找到 $count 个 mosquitto 容器（必须恰好 1 个）"
+  fi
+  "${DOCKER[@]}" kill --signal HUP "$cids" || fail "SIGHUP 发送失败"
+  sleep 2
+  "${DOCKER[@]}" inspect --format '{{.State.Running}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' "$cids" \
+    | grep -qE '^true( healthy)?$' || fail "HUP 后 broker 未保持 running/healthy"
+  echo "RELOAD=PASS（SIGHUP 原地 reload；未重启 broker）"
 }
 
 case "$MODE" in
   --verify) verify_only ;;
   --apply)
     onboard
-    detect_docker
-    "${DOCKER[@]}" compose -p u-dao-firebot --env-file "$RUNTIME_ROOT/env/.env.server" \
-      restart mosquitto >/dev/null 2>&1 || fail "mosquitto reload 失败"
+    reload_broker
     verify_only ;;
   *) onboard ;;
 esac

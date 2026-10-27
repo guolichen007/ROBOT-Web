@@ -420,42 +420,74 @@ def test_media_publish_requires_registered_path_and_secret() -> None:
 
 
 def test_media_srt_publish_uses_streamid_password() -> None:
-    """SRT 发布凭据经 streamid（MediaMTX 映射 password 字段）；禁止用 token 字段绕过。"""
+    """SRT 发布凭据经 streamid（MediaMTX 映射 user/password 字段）。
+
+    user 非空 → per-vehicle HMAC 判定（user 必须为流所属 vehicle_id）；
+    user 空 + token → bootstrap/synthetic 全局 token 直通；禁止用 token 字段绕过 per-vehicle。
+    """
+    from app.modules.media.router import vehicle_srt_publish_token
+
     with TestClient(app) as client:
-        token = get_settings().effective_media_publish_token
+        r001_token = vehicle_srt_publish_token("R001")
+        global_token = get_settings().effective_media_publish_token
         valid = client.post(
             "/api/v1/media/authorize",
             json={
                 "action": "publish",
                 "path": "R001-roof_rgb",
                 "protocol": "srt",
-                "user": "u-dao",
-                "password": token,
+                "user": "R001",
+                "password": r001_token,
             },
         )
         assert valid.status_code == 200
+        # 旧全局 token 语义（user=u-dao）不再被接受（per-vehicle 模式 user 必须匹配车辆）
+        legacy_style = client.post(
+            "/api/v1/media/authorize",
+            json={
+                "action": "publish",
+                "path": "R001-roof_rgb",
+                "protocol": "srt",
+                "user": "u-dao",
+                "password": global_token,
+            },
+        )
+        assert legacy_style.status_code == 401
         wrong_pass = client.post(
             "/api/v1/media/authorize",
             json={
                 "action": "publish",
                 "path": "R001-roof_rgb",
                 "protocol": "srt",
-                "user": "u-dao",
+                "user": "R001",
                 "password": "WRONG",
             },
         )
         assert wrong_pass.status_code == 401
-        # SRT 协议不得走 token 字段（即使值正确）
+        # per-vehicle 模式（user 非空）下 token 字段无效（即使值正确）
         token_field = client.post(
             "/api/v1/media/authorize",
             json={
                 "action": "publish",
                 "path": "R001-roof_rgb",
                 "protocol": "srt",
-                "token": token,
+                "user": "R001",
+                "token": global_token,
             },
         )
         assert token_field.status_code == 401
+        # bootstrap/synthetic 全局 token 直通（user 空）
+        synthetic = client.post(
+            "/api/v1/media/authorize",
+            json={
+                "action": "publish",
+                "path": "R001-roof_rgb",
+                "protocol": "srt",
+                "token": global_token,
+                "password": "",
+            },
+        )
+        assert synthetic.status_code == 200
 
 
 def _task_for_stop(db, *, robot: Robot, user: User, version: MapVersion) -> Task:
