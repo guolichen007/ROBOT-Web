@@ -26,6 +26,14 @@ class Settings(BaseSettings):
     mqtt_ca_file: str | None = None
     mqtt_client_cert_file: str | None = None
     mqtt_client_key_file: str | None = None
+    # MQTT5 会话语义（R2-6/7）：全部客户端经 configure_mqtt_client/mqtt_connect_properties 统一注入。
+    # realtime 客户端（高频遥测）保持 clean session（无离线 backlog）；
+    # durable 客户端（command_ack/task_status/alarm/event）用固定 client id + Session Expiry 短时恢复。
+    mqtt_clean_start: bool = True
+    mqtt_session_expiry_seconds: int = Field(default=0, ge=0)
+    mqtt_durable_session_expiry_seconds: int = Field(default=600, ge=0)
+    mqtt_reconnect_min_delay: float = Field(default=1.0, ge=0.1)
+    mqtt_reconnect_max_delay: float = Field(default=30.0, ge=1.0)
     media_publish_token: str = "dev-media-publisher-token"
     media_publish_token_file: str | None = None
 
@@ -141,6 +149,12 @@ class Settings(BaseSettings):
         return self._read_secret(self.media_publish_token, self.media_publish_token_file)
 
     def configure_mqtt_client(self, client) -> None:
+        # 有界重连退避（R2-7）：短暂断连靠 paho 自动重连恢复，
+        # 不依赖「healthcheck unhealthy → Docker 重启」假设。
+        client.reconnect_delay_set(
+            min_delay=self.mqtt_reconnect_min_delay,
+            max_delay=self.mqtt_reconnect_max_delay,
+        )
         if not self.mqtt_tls:
             return
         client.tls_set(
@@ -149,6 +163,17 @@ class Settings(BaseSettings):
             keyfile=self.mqtt_client_key_file,
         )
         client.tls_insecure_set(False)
+
+    def mqtt_connect_properties(self, *, durable: bool = False):
+        """MQTT5 CONNECT 属性：Session Expiry Interval（durable 客户端短时恢复 QoS1 业务事件）。"""
+        from paho.mqtt.properties import Properties
+
+        expiry = (
+            self.mqtt_durable_session_expiry_seconds
+            if durable
+            else self.mqtt_session_expiry_seconds
+        )
+        return Properties(SessionExpiryInterval=expiry)
 
     def assert_profile_safety(self) -> None:
         if self.app_env != "server":
