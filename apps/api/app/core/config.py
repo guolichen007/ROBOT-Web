@@ -26,9 +26,11 @@ class Settings(BaseSettings):
     mqtt_ca_file: str | None = None
     mqtt_client_cert_file: str | None = None
     mqtt_client_key_file: str | None = None
-    # MQTT5 会话语义（R2-6/7）：全部客户端经 configure_mqtt_client/mqtt_connect_properties 统一注入。
+    # MQTT5 会话语义（R2-6/7）：全部客户端经 configure_mqtt_client/
+    # mqtt_connect_properties 统一注入。
     # realtime 客户端（高频遥测）保持 clean session（无离线 backlog）；
-    # durable 客户端（command_ack/task_status/alarm/event）用固定 client id + Session Expiry 短时恢复。
+    # durable 客户端（command_ack/task_status/alarm/event）用固定 client id
+    # + Session Expiry 短时恢复。
     mqtt_clean_start: bool = True
     mqtt_session_expiry_seconds: int = Field(default=0, ge=0)
     mqtt_durable_session_expiry_seconds: int = Field(default=600, ge=0)
@@ -226,7 +228,6 @@ class Settings(BaseSettings):
             raise RuntimeError("; ".join(errors))
 
 
-@lru_cache
 def mqtt_message_expiry_properties(interval: int):
     """MQTT5 PUBLISH Message Expiry Interval（paho 2.x：先构造再赋值属性）。"""
     from paho.mqtt.packettypes import PacketTypes
@@ -237,6 +238,7 @@ def mqtt_message_expiry_properties(interval: int):
     return props
 
 
+@lru_cache
 def get_settings() -> Settings:
     settings = Settings()
     settings.assert_profile_safety()
