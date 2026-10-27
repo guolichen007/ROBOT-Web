@@ -11,6 +11,12 @@ metrics: yes
 metricsAddress: :9998
 rtsp: yes
 rtspAddress: :8554
+# SRT（v1.18.2 已确认支持 srt/srtAddress；authMethod http 覆盖 SRT，
+# 发布凭据经 streamid=publish:<path>:<user>:<pass> 传入，token 放 password 字段）。
+# 车端上云媒体链：Camera RTSP → 车端 FFmpeg/GStreamer → SRT → MediaMTX → WHEP/WebRTC。
+# MediaMTX 不是 transcoder：发布端必须输出 H.264 + yuv420p（V1 浏览器基准合同）。
+srt: yes
+srtAddress: :8890
 webrtc: yes
 webrtcAddress: :8889
 webrtcLocalUDPAddress: :8189
@@ -18,3 +24,7 @@ webrtcLocalTCPAddress: :8189
 webrtcAllowOrigins: []
 paths:
   all_others:
+    # SRT 发布加密 passphrase（与发布鉴权 token 独立，禁止复用）。
+    # 本仓库文件不包含真实值：U-Dao 部署由 render 脚本从
+    # runtime/secrets/app/srt_publish_passphrase 生成运行时配置并卷覆盖本文件。
+    srtPublishPassphrase:

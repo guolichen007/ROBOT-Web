@@ -1,0 +1,70 @@
+# U-Dao 云部署 override（与 docker-compose.server.yml 基座配合，compose -f 基座 -f 本文件）。
+# 原则（见 docs/部署运维/U-Dao云服务器部署.md）：
+#   - 全部宿主端口只绑 127.0.0.1，公网暴露由 OWNER 后续统一决策（安全组不改）。
+#   - Firebot 不占宿主 80/443；入口经 platform 资源 shared ingress（project u-dao-ingress）。
+#   - 本文件由 release 树内路径引用（../../infra/...），secrets/env 指向 runtime 绝对路径。
+#   - ports 用 !override 整属性替换（compose 四元组合并语义下，仅改绑定 IP 会造成双发布）。
+name: u-dao-firebot
+
+services:
+  mosquitto:
+    ports: !override
+      - "127.0.0.1:18883:8883"
+
+  mediamtx:
+    ports: !override
+      - "127.0.0.1:18554:8554/tcp"
+      - "127.0.0.1:18890:8890/udp"
+      - "127.0.0.1:8189:8189/udp" # WebRTC ICE：端口保持（port preservation），公网规划亦以 8189 为 canonical
+      - "127.0.0.1:8189:8189/tcp"
+    volumes:
+      # 运行时渲染的 mediamtx 配置（含 SRT 发布 passphrase 真值，600，不入 Git）
+      - /srv/u-dao/projects/firebot/runtime/env/mediamtx.server.u-dao.yml:/mediamtx.yml:ro
+
+  nginx:
+    ports: !override
+      - "127.0.0.1:18080:80" # 仅本机调试；对外入口是 shared ingress 的 18000/18443
+    volumes: !override
+      - ../../infra/nginx/nginx.edge.http.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      firebot: {}
+      u-dao-ingress:
+        aliases: [firebot-edge]
+
+  api:
+    # TLS 由 shared ingress 终结：信任 ingress 网段的 X-Forwarded-* 头（COOKIE_SECURE 依赖）
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --workers
+      - "2"
+      - --proxy-headers
+      - --forwarded-allow-ips
+      - 10.240.0.0/16
+
+  mosquitto-config-init:
+    volumes:
+      - /srv/u-dao/projects/firebot/runtime/secrets/mosquitto:/source:ro
+      - mosquitto_config:/target
+
+secrets:
+  database_url: { file: /srv/u-dao/projects/firebot/runtime/secrets/app/database_url }
+  redis_url: { file: /srv/u-dao/projects/firebot/runtime/secrets/app/redis_url }
+  postgres_password: { file: /srv/u-dao/projects/firebot/runtime/secrets/postgres/password }
+  redis_password: { file: /srv/u-dao/projects/firebot/runtime/secrets/redis/password }
+  jwt_secret: { file: /srv/u-dao/projects/firebot/runtime/secrets/app/jwt_secret }
+  refresh_secret: { file: /srv/u-dao/projects/firebot/runtime/secrets/app/refresh_secret }
+  csrf_secret: { file: /srv/u-dao/projects/firebot/runtime/secrets/app/csrf_secret }
+  bootstrap_admin_password: { file: /srv/u-dao/projects/firebot/runtime/secrets/app/bootstrap_admin_password }
+  mqtt_platform_password: { file: /srv/u-dao/projects/firebot/runtime/secrets/app/mqtt_platform_password }
+  mqtt_ca: { file: /srv/u-dao/projects/firebot/runtime/secrets/mosquitto/certs/ca.crt }
+  media_publish_token: { file: /srv/u-dao/projects/firebot/runtime/secrets/app/media_publish_token }
+
+networks:
+  u-dao-ingress:
+    external: true
+    name: u-dao-ingress

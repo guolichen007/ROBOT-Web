@@ -1,0 +1,66 @@
+# Firebot 路由片段模板 —— U-Dao shared ingress（platform 资源）的 conf.d 挂载用。
+# 本文件由 Firebot 仓库提供，platform 实例化时复制到 /srv/u-dao/platform/ingress/conf.d/firebot.conf。
+# 所有权：shared ingress 属于 platform（project u-dao-ingress），不属于 Firebot 生命周期；
+# Firebot 的部署/回滚脚本禁止操作 u-dao-ingress project。
+# upstream 使用 resolve：firebot edge 容器重建后由 Docker DNS 重新解析，无需人工 reload
+# （reload 兜底流程见 deploy/u-dao/ingress/README.md）。
+upstream firebot_edge {
+  zone firebot_edge 64k;
+  server firebot-edge:80 resolve;
+}
+
+map $http_upgrade $firebot_connection_upgrade { default upgrade; '' close; }
+
+# BOOTSTRAP_LOCAL_ONLY 验收监听：127.0.0.1 高端口。
+# 生产 80/443 由 platform 主配置统一开放（listen 80/443 + 正式 TLS 证书），本片段不改动即可。
+server {
+  listen 127.0.0.1:18000;
+  server_name firebot.local;
+
+  location = /health/live {
+    proxy_pass http://firebot_edge;
+  }
+  location / {
+    proxy_pass http://firebot_edge;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $firebot_connection_upgrade;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 3600s;
+  }
+}
+
+# bootstrap HTTPS（COOKIE_SECURE=true 的完整登录/HMI E2E 走此端口）
+server {
+  listen 127.0.0.1:18443 ssl;
+  server_name firebot.local;
+  ssl_certificate /etc/nginx/tls/server.crt;
+  ssl_certificate_key /etc/nginx/tls/server.key;
+  ssl_protocols TLSv1.2 TLSv1.3;
+  ssl_session_tickets off;
+
+  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+  add_header X-Content-Type-Options "nosniff" always;
+  add_header Referrer-Policy "no-referrer" always;
+  add_header X-Frame-Options "DENY" always;
+  add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https: wss:; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+  add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
+
+  location = /health/live {
+    proxy_pass http://firebot_edge;
+  }
+  location / {
+    proxy_pass http://firebot_edge;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $firebot_connection_upgrade;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_read_timeout 3600s;
+  }
+}

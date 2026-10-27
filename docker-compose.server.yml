@@ -97,9 +97,14 @@ services:
       context: .
       dockerfile: infra/docker/mediamtx.Dockerfile
     ports:
-      - "${SERVER_TAILSCALE_IP:?SERVER_TAILSCALE_IP is required}:8554:8554/tcp"
-      - "${SERVER_LAN_IP:?SERVER_LAN_IP is required}:8189:8189/udp"
-      - "${SERVER_LAN_IP:?SERVER_LAN_IP is required}:8189:8189/tcp"
+      # 注：原为 ${...:?} 强制变量。compose 按文件解析先于 override 合并，基座 :? 会使
+      # U-Dao cloud override 永远无法渲染，故软化为 :-127.0.0.1。
+      # legacy 现场缺失变量的 fail-closed 语义由 scripts/server-preflight.sh 恢复
+      # （缺变量/占位 IP → SERVER_PREFLIGHT=FAIL），并有 legacy 渲染回归测试锁定。
+      # U-Dao 云模式通过 deploy/u-dao/compose.u-dao.yml 的 ports !override 整属性替换。
+      - "${SERVER_TAILSCALE_IP:-127.0.0.1}:8554:8554/tcp"
+      - "${SERVER_LAN_IP:-127.0.0.1}:8189:8189/udp"
+      - "${SERVER_LAN_IP:-127.0.0.1}:8189:8189/tcp"
     volumes: ["./infra/mediamtx/mediamtx.server.yml:/mediamtx.yml:ro"]
     environment:
       MTX_WEBRTCALLOWORIGINS: ${MEDIAMTX_WEBRTC_ALLOW_ORIGINS}
