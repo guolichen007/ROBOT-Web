@@ -2,6 +2,7 @@
 .env.*
 !.env.example
 !.env.server.example
+!.env.u-dao.example
 __pycache__/
 *.py[cod]
 .pytest_cache/
