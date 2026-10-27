@@ -1,21 +1,33 @@
 #!/usr/bin/env bash
-# U-Dao 平台侧单车凭据生成（语义对应 firebotctl vehicle onboard；车端 firebotctl 流程不变）。
+# U-Dao 平台侧单车凭据生成与激活（语义对应 firebotctl vehicle onboard；车端 firebotctl 流程不变）。
+#
+# 幂等语义：
+#   默认（无 flag）   只生成凭据；已存在 → FAIL（提示 --apply 或 --force）
+#   --apply           ensure：不存在则生成，存在则不旋转；随后
+#                     password_file 更新 → 同步 mosquitto_config 卷 → SIGHUP 原地 reload
+#                     → verify → broker 行为级 live ACL verify（61-verify-vehicle-acl.py）
+#   --force           明确旋转凭据（旧车端 credential 失效警告）+ 更新 + 同步 + SIGHUP + verify
+#
 # 生成（全部只写 runtime，不入 Git，不回显）：
-#   R<id> MQTT username（== vehicle_id，与 acl.example 的 pattern 约定一致）
-#   R<id> MQTT password（追加到 runtime/secrets/mosquitto/passwords）
-#   R<id> SRT publish credential（token）与独立加密 passphrase
-# ACL 无需修改：acl.example 的 `pattern %u` 自动按 username 隔离（只写自己遥测、只读自己命令）。
+#   <id> MQTT username（== vehicle_id，与 acl.example pattern 约定一致）
+#   <id> MQTT password（追加 runtime/secrets/mosquitto/passwords）
+#   <id> SRT publish token（HMAC-SHA256(master, "vehicle-srt:"+id) 确定性派生）
+#   <id> SRT 链路加密 passphrase（平台共享副本，PLATFORM_SHARED_SRT_ENCRYPTION_PASSPHRASE）
+# ACL 无需修改：acl.example 的 `pattern %u` 自动按 username 隔离。
+#
 # 用法：
-#   bash deploy/u-dao/scripts/60-onboard-vehicle.sh R001            # 生成凭据（幂等保护）
-#   bash deploy/u-dao/scripts/60-onboard-vehicle.sh R001 --force    # 重建凭据（旧密码失效）
-#   bash deploy/u-dao/scripts/60-onboard-vehicle.sh R001 --verify   # 只读校验
-#   bash deploy/u-dao/scripts/60-onboard-vehicle.sh R001 --apply    # 生成 + reload mosquitto（激活）
+#   bash deploy/u-dao/scripts/60-onboard-vehicle.sh R002
+#   bash deploy/u-dao/scripts/60-onboard-vehicle.sh R002 --apply
+#   bash deploy/u-dao/scripts/60-onboard-vehicle.sh R002 --force
+#   bash deploy/u-dao/scripts/60-onboard-vehicle.sh R002 --verify
 set -euo pipefail
 
 VEHICLE_ID="${1:-}"
 MODE="${2:-}"
 RUNTIME_ROOT="${U_DAO_RUNTIME_ROOT:-/srv/u-dao/projects/firebot/runtime}"
+REPO_ROOT="${U_DAO_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 MOSQ_IMG="eclipse-mosquitto:2.1.2-alpine"
+ACL_IMAGE="${ACL_CHECK_IMAGE:-firebot-python-test:u-dao}"
 VEHICLE_DIR="$RUNTIME_ROOT/secrets/vehicles/$VEHICLE_ID"
 
 fail() { echo "ONBOARD=FAIL: $1" >&2; exit 1; }
@@ -34,67 +46,23 @@ detect_docker() {
   fi
 }
 
-# ---- 只读校验 ----
-verify_only() {
-  local errors=0
-  [ -f "$VEHICLE_DIR/mqtt_password" ] || { echo "ERROR 缺少 $VEHICLE_DIR/mqtt_password"; errors=1; }
-  [ -f "$VEHICLE_DIR/srt_publish_token" ] || { echo "ERROR 缺少 $VEHICLE_DIR/srt_publish_token"; errors=1; }
-  [ -f "$VEHICLE_DIR/srt_publish_passphrase" ] || { echo "ERROR 缺少 $VEHICLE_DIR/srt_publish_passphrase"; errors=1; }
-  grep -q "^$VEHICLE_ID:" "$RUNTIME_ROOT/secrets/mosquitto/passwords" \
-    || { echo "ERROR passwords 未包含用户 $VEHICLE_ID"; errors=1; }
-  grep -q "pattern write robot/%u/command_ack" "$RUNTIME_ROOT/secrets/mosquitto/acl" \
-    || { echo "ERROR acl 缺少 pattern 模板"; errors=1; }
-  for f in "$VEHICLE_DIR"/mqtt_password "$VEHICLE_DIR"/srt_publish_token "$VEHICLE_DIR"/srt_publish_passphrase; do
-    [ -f "$f" ] && { mode="$(stat -c '%a' "$f")"; case "$mode" in 600|400) : ;; *) echo "ERROR 权限异常 $f ($mode)"; errors=1 ;; esac; }
-  done
-  [ "$errors" -eq 0 ] && echo "ONBOARD_VERIFY=PASS vehicle=$VEHICLE_ID" || return 1
+credentials_exist() {
+  [ -f "$VEHICLE_DIR/mqtt_password" ] && [ -f "$VEHICLE_DIR/srt_publish_token" ]
 }
 
-# ---- 生成 ----
-onboard() {
-  local force=false reuse=false
-  [ "$MODE" = "--force" ] && force=true
-  [ "${2:-}" = "--reuse" ] && reuse=true
-  if [ -d "$VEHICLE_DIR" ] && [ "$force" != true ] && [ "$reuse" != true ]; then
-    fail "$VEHICLE_ID 凭据已存在（--force 重建会使旧密码失效）"
-  fi
-  if [ "$reuse" = true ]; then
-    echo "REUSE（凭据已存在，仅激活）"
-    return 0
-  fi
-  detect_docker
+# ---- 生成凭据（真值不入 Git、不回显）----
+generate_credentials() {
   umask 077
   mkdir -p "$VEHICLE_DIR"
   chmod 700 "$VEHICLE_DIR"
-
-  # MQTT password（车辆用户名 == vehicle_id）
   MQTT_PW="$(openssl rand -base64 32)"
   printf '%s' "$MQTT_PW" > "$VEHICLE_DIR/mqtt_password"
-  chmod 600 "$VEHICLE_DIR/mqtt_password"
-
-  # per-vehicle SRT 发布 token：HMAC-SHA256(master, "vehicle-srt:"+vehicle_id) 确定性派生
-  # （与 API authorize_media 同算法；不存库、泄露无法推他车 token）
   MASTER_TOKEN="$(cat "$RUNTIME_ROOT/secrets/app/media_publish_token")"
   SRT_TOKEN="$(printf 'vehicle-srt:%s' "$VEHICLE_ID" | \
     openssl dgst -sha256 -hmac "$MASTER_TOKEN" | awk '{print $2}')"
   printf '%s' "$SRT_TOKEN" > "$VEHICLE_DIR/srt_publish_token"
-  # SRT 链路加密 passphrase：平台共享（PLATFORM_SHARED_SRT_ENCRYPTION_PASSPHRASE），
-  # 非 per-vehicle；身份隔离由 per-vehicle token 承担，链路加密由平台统一密钥承担。
   cp "$RUNTIME_ROOT/secrets/app/srt_publish_passphrase" "$VEHICLE_DIR/srt_publish_passphrase"
-  chmod 600 "$VEHICLE_DIR/srt_publish_token" "$VEHICLE_DIR/srt_publish_passphrase"
-
-  # passwords 文件更新（mosquitto_passwd 追加；容器内 root 产物 chown 回 ubuntu）
-  if [ "$force" = true ]; then
-    "${DOCKER[@]}" run --rm -v "$RUNTIME_ROOT/secrets/mosquitto:/work:rw" "$MOSQ_IMG" \
-      sh -c "mosquitto_passwd -b /work/passwords '$VEHICLE_ID' '$MQTT_PW'" 2>/dev/null
-  else
-    "${DOCKER[@]}" run --rm -v "$RUNTIME_ROOT/secrets/mosquitto:/work:rw" "$MOSQ_IMG" \
-      mosquitto_passwd -b /work/passwords "$VEHICLE_ID" "$MQTT_PW" 2>/dev/null
-  fi
-  sudo -n chown ubuntu:ubuntu "$RUNTIME_ROOT/secrets/mosquitto/passwords" || fail "chown passwords 失败"
-  chmod 640 "$RUNTIME_ROOT/secrets/mosquitto/passwords"
-
-  # 凭据语义说明（交付文档，不含真值）
+  chmod 600 "$VEHICLE_DIR/mqtt_password" "$VEHICLE_DIR/srt_publish_token" "$VEHICLE_DIR/srt_publish_passphrase"
   {
     echo "# $VEHICLE_ID 凭据交付说明"
     echo "mqtt_password        = $VEHICLE_ID 的 MQTT 密码（MQTT username == vehicle_id）"
@@ -102,13 +70,18 @@ onboard() {
     echo "srt_publish_passphrase = PLATFORM_SHARED_SRT_ENCRYPTION_PASSPHRASE（平台共享链路加密，非 per-vehicle）"
   } > "$VEHICLE_DIR/README.txt"
   chmod 600 "$VEHICLE_DIR/README.txt"
-  echo "ONBOARD=PASS vehicle=$VEHICLE_ID"
-  echo "  mqtt_username=$VEHICLE_ID（值不回显）"
-  echo "  files=$VEHICLE_DIR/{mqtt_password,srt_publish_token,srt_publish_passphrase,README.txt}"
-  echo "  note=ACL 由 acl.example 的 pattern %u 自动隔离；broker 生效需 --apply（SIGHUP 原地 reload）"
 }
 
-# ---- 同步 mosquitto 运行卷（broker 从 mosquitto_config 卷读文件；宿主 runtime 文件需先同步）----
+# ---- 更新 password_file（mosquitto_passwd；容器内 root 产物 chown 回 ubuntu）----
+update_password_file() {
+  detect_docker
+  "${DOCKER[@]}" run --rm -v "$RUNTIME_ROOT/secrets/mosquitto:/work:rw" "$MOSQ_IMG" \
+    mosquitto_passwd -b /work/passwords "$VEHICLE_ID" "$(cat "$VEHICLE_DIR/mqtt_password")" 2>/dev/null
+  sudo -n chown ubuntu:ubuntu "$RUNTIME_ROOT/secrets/mosquitto/passwords" || fail "chown passwords 失败"
+  chmod 640 "$RUNTIME_ROOT/secrets/mosquitto/passwords"
+}
+
+# ---- 同步 mosquitto 运行卷（broker 从 mosquitto_config 卷读文件）----
 sync_config_volume() {
   detect_docker
   "${DOCKER[@]}" run --rm \
@@ -127,20 +100,14 @@ sync_config_volume() {
   echo "CONFIG_VOLUME_SYNC=PASS"
 }
 
-# ---- 激活：对运行中的 u-dao-firebot mosquitto 容器发 SIGHUP 原地 reload（不重启、不断已有连接）----
+# ---- SIGHUP 原地 reload（label 精确定位；0/>1 容器 FAIL；不重启 broker）----
 reload_broker() {
   detect_docker
-  # 通过 compose project/service labels 精确定位（禁止 hardcode 容器名）
-  local cids
+  local cids count
   cids="$("${DOCKER[@]}" ps -q -f "label=com.docker.compose.project=u-dao-firebot" \
            -f "label=com.docker.compose.service=mosquitto" 2>/dev/null || true)"
-  local count
   count="$(printf '%s\n' "$cids" | grep -c .)"
-  if [ "$count" -eq 0 ]; then
-    fail "未找到 u-dao-firebot mosquitto 容器（0 个）"
-  elif [ "$count" -gt 1 ]; then
-    fail "找到 $count 个 mosquitto 容器（必须恰好 1 个）"
-  fi
+  [ "$count" -eq 1 ] || fail "mosquitto 容器数=$count（必须恰好 1 个）"
   "${DOCKER[@]}" kill --signal HUP "$cids" || fail "SIGHUP 发送失败"
   sleep 2
   "${DOCKER[@]}" inspect --format '{{.State.Running}} {{if .State.Health}}{{.State.Health.Status}}{{end}}' "$cids" \
@@ -148,12 +115,64 @@ reload_broker() {
   echo "RELOAD=PASS（SIGHUP 原地 reload；未重启 broker）"
 }
 
+# ---- 只读校验（文件存在/权限/ACL 模板）----
+verify_only() {
+  local errors=0
+  [ -f "$VEHICLE_DIR/mqtt_password" ] || { echo "ERROR 缺少 $VEHICLE_DIR/mqtt_password"; errors=1; }
+  [ -f "$VEHICLE_DIR/srt_publish_token" ] || { echo "ERROR 缺少 $VEHICLE_DIR/srt_publish_token"; errors=1; }
+  [ -f "$VEHICLE_DIR/srt_publish_passphrase" ] || { echo "ERROR 缺少 $VEHICLE_DIR/srt_publish_passphrase"; errors=1; }
+  grep -q "^$VEHICLE_ID:" "$RUNTIME_ROOT/secrets/mosquitto/passwords" \
+    || { echo "ERROR passwords 未包含用户 $VEHICLE_ID"; errors=1; }
+  grep -q "pattern write robot/%u/command_ack" "$RUNTIME_ROOT/secrets/mosquitto/acl" \
+    || { echo "ERROR acl 缺少 pattern 模板"; errors=1; }
+  for f in "$VEHICLE_DIR"/mqtt_password "$VEHICLE_DIR"/srt_publish_token "$VEHICLE_DIR"/srt_publish_passphrase; do
+    [ -f "$f" ] && { mode="$(stat -c '%a' "$f")"; case "$mode" in 600|400) : ;; *) echo "ERROR 权限异常 $f ($mode)"; errors=1 ;; esac; }
+  done
+  [ "$errors" -eq 0 ] && echo "ONBOARD_VERIFY=PASS vehicle=$VEHICLE_ID" || return 1
+}
+
+# ---- broker 行为级 live ACL verify（61-verify-vehicle-acl.py，容器内执行）----
+live_acl_verify() {
+  detect_docker
+  "${DOCKER[@]}" run --rm --network host \
+    -v "$REPO_ROOT:/workspace:ro" \
+    -v "$RUNTIME_ROOT:/runtime:ro" \
+    "$ACL_IMAGE" python3 deploy/u-dao/scripts/61-verify-vehicle-acl.py \
+    --vehicle "$VEHICLE_ID" --mqtt-host 127.0.0.1 --mqtt-port 18883 \
+    || fail "live ACL verify 失败（VEHICLE_ACL_LIVE）"
+}
+
+# ---- 激活：password_file 更新 → 卷同步 → SIGHUP → verify → live ACL verify ----
+activate() {
+  update_password_file
+  sync_config_volume
+  reload_broker
+  verify_only
+  live_acl_verify
+  echo "ONBOARD_APPLY=PASS vehicle=$VEHICLE_ID"
+}
+
 case "$MODE" in
   --verify) verify_only ;;
   --apply)
-    onboard "$VEHICLE_ID" --reuse
-    sync_config_volume
-    reload_broker
-    verify_only ;;
-  *) onboard ;;
+    if credentials_exist; then
+      echo "REUSE（凭据已存在，不旋转；直接激活）"
+    else
+      generate_credentials
+      echo "GENERATED（首次生成）"
+    fi
+    activate ;;
+  --force)
+    echo "WARN 将旋转 $VEHICLE_ID 凭据：旧车端 MQTT credential 会失效（值不回显）"
+    generate_credentials
+    activate
+    echo "ONBOARD_ROTATE=PASS vehicle=$VEHICLE_ID" ;;
+  *)
+    if credentials_exist; then
+      fail "$VEHICLE_ID 凭据已存在（使用 --apply 激活，或 --force 旋转）"
+    fi
+    generate_credentials
+    update_password_file
+    echo "ONBOARD=PASS vehicle=$VEHICLE_ID（仅生成，未激活；broker 生效需 --apply）"
+    echo "  files=$VEHICLE_DIR/{mqtt_password,srt_publish_token,srt_publish_passphrase,README.txt}" ;;
 esac

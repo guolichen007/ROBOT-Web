@@ -182,8 +182,8 @@ def main() -> int:
         publish_result(vehicle, vehicle_password, f"v1/robot/{vehicle}/telemetry"),
     )
 
-    # ---- 跨车拒绝 ----
-    other = "R002"
+    # ---- 跨车拒绝（参照车辆取非自身：默认 R002，若被测即 R002 则取 R001）----
+    other = "R001" if vehicle == "R002" else "R002"
     check(
         f"{vehicle} subscribe robot/{other}/command DENY",
         not subscribe_result(vehicle, vehicle_password, f"robot/{other}/command"),

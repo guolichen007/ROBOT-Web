@@ -3,7 +3,7 @@
 #   变量：__PUBLIC_DOMAIN__ / __PUBLIC_TLS_CERT__ / __PUBLIC_TLS_KEY__
 # 生成目标：/srv/u-dao/platform/ingress/conf.d/firebot-public.conf
 # 本文件不改变 bootstrap 18000/18443；必须显式激活；nginx -t 通过后才 reload。
-resolver 127.0.0.11 valid=10s ipv6=off;
+# 注意：resolver 已由 bootstrap 片段（firebot.conf）在 http 级定义，本片段不得重复定义。
 
 map $http_upgrade $firebot_public_connection_upgrade { default upgrade; '' close; }
 

@@ -1,0 +1,11 @@
+# U-Dao shared ingress 公网 override（platform 资源；必须显式 -f 加载，默认 NOT ACTIVE）。
+# 与 platform base compose 合并使用（bootstrap 18000/18443 安全共存）：
+#   docker compose -p u-dao-ingress \
+#     -f /srv/u-dao/platform/ingress/docker-compose.yml \
+#     -f /srv/u-dao/platform/ingress/compose.public.yml up -d
+# Firebot 项目不拥有也不得 down 本 project；公网 80/443 仅属于 u-dao-ingress。
+services:
+  nginx:
+    ports:
+      - "80:80"
+      - "443:443"

@@ -107,12 +107,43 @@ else
   echo "SKIP public compose render（docker 不可用）"
 fi
 
-# ---- 3.5) shared ingress 生产模板与端口（模板存在 + 端口 80/443 仅由平台层定义）----
+# ---- 3.5) shared ingress 生产模板与端口（80/443 只属于 u-dao-ingress）----
 INGRESS_TEMPLATE="$REPO_ROOT/deploy/u-dao/ingress/conf.d/firebot.public.conf.template"
 [ -f "$INGRESS_TEMPLATE" ] || fail "缺少 ingress 生产模板 $INGRESS_TEMPLATE"
 ok "ingress 生产模板存在（80 redirect + 443 ssl，需 70-prepare-public-ingress.sh 显式激活）"
-PUBLIC_COMPOSE_PORTS="$REPO_ROOT/deploy/u-dao/ingress/compose.public.yml.template"
-[ -f "$PUBLIC_COMPOSE_PORTS" ] && ok "ingress 公网端口模板存在（80/443）" || fail "缺少 ingress 公网端口模板"
+PUBLIC_OVERRIDE="$REPO_ROOT/deploy/u-dao/ingress/compose.public.yml"
+[ -f "$PUBLIC_OVERRIDE" ] || fail "缺少 ingress 公网 override $PUBLIC_OVERRIDE"
+# 可渲染校验（与 platform base compose 合并）
+BASE_COMPOSE="${U_DAO_INGRESS_ROOT:-/srv/u-dao/platform/ingress}/docker-compose.yml"
+if [ -f "$BASE_COMPOSE" ] && command -v docker >/dev/null 2>&1 \
+    && (docker info >/dev/null 2>&1 || sudo -n docker info >/dev/null 2>&1); then
+  D=(docker)
+  docker info >/dev/null 2>&1 || D=(sudo -n docker)
+  if "${D[@]}" compose -p u-dao-ingress -f "$BASE_COMPOSE" -f "$PUBLIC_OVERRIDE" config --quiet 2>/dev/null; then
+    ok "platform public compose render PASS（80/443 仅属于 u-dao-ingress）"
+    cfg="$("${D[@]}" compose -p u-dao-ingress -f "$BASE_COMPOSE" -f "$PUBLIC_OVERRIDE" config --format json 2>/dev/null || true)"
+    echo "$cfg" | python3 -I -c "
+import json, sys
+cfg = json.load(sys.stdin)
+assert set(cfg.get('services', {})) == {'nginx'}, 'ingress project 只含 nginx'
+ports = [str(p.get('published')) for p in cfg['services']['nginx'].get('ports', []) or []]
+assert '80' in ports and '443' in ports, f'missing 80/443: {ports}'
+assert '18000' in ports and '18443' in ports, f'bootstrap 端口缺失: {ports}'
+print('OK 80/443 属于 u-dao-ingress；bootstrap 18000/18443 共存')
+" || fail "80/443 ownership 断言失败"
+  else
+    fail "platform public compose render 失败"
+  fi
+else
+  echo "SKIP platform public compose render（base compose 或 docker 不可用）"
+fi
+# Firebot compose 不拥有 80/443（静态断言 + 渲染断言）
+if grep -qE '"\$\{SERVER_HTTP_PORT:-80\}:80"' "$REPO_ROOT/docker-compose.server.yml"; then
+  # 基座保留 legacy 80/443（旧现场）；U-Dao override 必须 !override 掉（由 test_compose_render 锁定）
+  ok "U-Dao override 已移除 Firebot 80/443（render 测试锁定）"
+else
+  fail "基座 compose 80/443 定义异常"
+fi
 
 # ---- 4) DOWNLINK 恒 false + allowlist 空 ----
 if [ -f "$ENV_FILE" ] && grep -qE '^VEHICLE_AGENT_V1_DOWNLINK_ENABLED=true' "$ENV_FILE"; then

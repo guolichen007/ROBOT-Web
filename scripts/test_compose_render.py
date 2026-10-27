@@ -242,6 +242,73 @@ def run_preflight(
     return proc
 
 
+def test_public_profile_fail_closed() -> None:
+    """公网差异层 fail-closed：缺 bind 变量 render 必须失败；
+    显式提供后 80/443 仅属 u-dao-ingress。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        env = Path(tmp) / ".env.server"
+        env.write_text(
+            "APP_ENV=server\nENABLE_API_DOCS=false\n"
+            f"SERVER_ENV_FILE={env}\n"
+            "MEDIAMTX_WEBRTC_ALLOW_ORIGINS=https://firebot.example\n"
+            "MEDIAMTX_WEBRTC_ADDITIONAL_HOSTS=firebot.example\n"
+            "POSTGRES_DB=firebot\nPOSTGRES_USER=firebot\n",
+            encoding="utf-8",
+        )
+        files = [
+            "docker-compose.server.yml",
+            "deploy/u-dao/compose.u-dao.yml",
+            "deploy/u-dao/compose.u-dao-public.yml",
+        ]
+        cmd = [COMPOSE, "compose", "--env-file", str(env)]
+        for f in files:
+            cmd += ["-f", str(ROOT / f)]
+        cmd += ["config", "--quiet"]
+        proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=120)
+        check("public profile 缺变量 render FAIL（fail-closed）", proc.returncode != 0)
+        # 显式提供变量后 render 成功且端口断言正确
+        public_env = {
+            "MQTT_PUBLIC_BIND": "0.0.0.0:8883:8883",
+            "SRT_PUBLIC_BIND": "0.0.0.0:8890:8890/udp",
+            "WEBRTC_PUBLIC_BIND_UDP": "0.0.0.0:8189:8189/udp",
+            "WEBRTC_PUBLIC_BIND_TCP": "0.0.0.0:8189:8189/tcp",
+        }
+        proc2 = subprocess.run(
+            cmd,
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env={**os.environ, **public_env},
+        )
+        check("public profile 提供变量 render PASS", proc2.returncode == 0, proc2.stderr[-300:])
+        cfg = json.loads(
+            subprocess.run(
+                cmd[:-2] + ["config", "--format", "json"],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                env={**os.environ, **public_env},
+            ).stdout
+        )
+        mosq = ports_of(cfg, "mosquitto")
+        mtx = ports_of(cfg, "mediamtx")
+        check("public mosquitto 8883 公网", has_port(mosq, 8883, "tcp", "0.0.0.0"))
+        check("public SRT 8890/udp 公网", has_port(mtx, 8890, "udp", "0.0.0.0"))
+        check(
+            "public WebRTC 8189 udp+tcp 公网",
+            has_port(mtx, 8189, "udp", "0.0.0.0") and has_port(mtx, 8189, "tcp", "0.0.0.0"),
+        )
+        nginx_ports = ports_of(cfg, "nginx")
+        check(
+            "public 无 forbidden 公网端口",
+            not has_port(mtx, 8554, "tcp", "0.0.0.0")
+            and not has_port(nginx_ports, 80, "tcp", "0.0.0.0")
+            and not has_port(nginx_ports, 443, "tcp", "0.0.0.0"),
+        )
+
+
 def test_legacy_preflight_fail_closed() -> None:
     """R2-12：legacy 模式缺 SERVER_TAILSCALE_IP/SERVER_LAN_IP 必须 FAIL
     （基座 :? 软化后的语义恢复）。"""
@@ -276,6 +343,7 @@ def test_legacy_preflight_fail_closed() -> None:
 def main() -> int:
     test_legacy_render()
     test_u_dao_render()
+    test_public_profile_fail_closed()
     test_legacy_preflight_fail_closed()
     if FAILURES:
         print(f"\nCOMPOSE_RENDER_TEST=FAIL count={len(FAILURES)}")
