@@ -405,7 +405,7 @@ do_preflight() {
 
 db_has_schema() {
   local out
-  out="$("${COMPOSE[@]}" exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT to_regclass(\x27public.alembic_version\x27)"' 2>/dev/null || true)"
+  out="$("${COMPOSE[@]}" exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT to_regclass('"'"'public.alembic_version'"'"')"' 2>/dev/null || true)"
   printf '%s\n' "$out" | grep -q alembic_version
 }
 
@@ -512,7 +512,7 @@ do_backup_verify() {
     exit 1
   fi
   local tables robots users commands
-  tables="$("${COMPOSE[@]}" exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d firebot_backup_verify -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema=\x27public\x27"')"
+  tables="$("${COMPOSE[@]}" exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d firebot_backup_verify -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='"'"'public'"'"'"')"
   robots="$("${COMPOSE[@]}" exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d firebot_backup_verify -tAc "SELECT count(*) FROM robots"')"
   users="$("${COMPOSE[@]}" exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d firebot_backup_verify -tAc "SELECT count(*) FROM users"')"
   commands="$("${COMPOSE[@]}" exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d firebot_backup_verify -tAc "SELECT count(*) FROM commands"')"
