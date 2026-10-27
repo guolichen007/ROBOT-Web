@@ -1,0 +1,21 @@
+# U-Dao 公网部署差异层（PUBLIC_PROFILE，默认不加载、不激活）。
+# 部署命令必须显式加入本文件才允许公网绑定；LOCAL_CLOUD_E2E 的 127.0.0.1 安全语义不变。
+# 用法（显式三文件）：
+#   docker compose -f docker-compose.server.yml -f deploy/u-dao/compose.u-dao.yml \
+#                  -f deploy/u-dao/compose.u-dao-public.yml ...
+# 注意：本层不使用 !override（与云层按四元组合并）——本地验收端口与公网端口并存。
+# 公网规划：80/443 由 platform shared ingress 承担（不在此文件）；Firebot 公网仅：
+#   8883/tcp（MQTT TLS）、8890/udp（SRT）、8189/udp+tcp（WebRTC ICE）。
+# 禁止公网：1883、5432、6379、8554、8889、9997、9998、18080（本文件不定义即不暴露）。
+name: u-dao-firebot
+
+services:
+  mosquitto:
+    ports:
+      - "${MQTT_PUBLIC_BIND:-0.0.0.0:8883:8883}"
+
+  mediamtx:
+    ports:
+      - "${SRT_PUBLIC_BIND:-0.0.0.0:8890:8890/udp}"
+      - "${WEBRTC_PUBLIC_BIND_UDP:-0.0.0.0:8189:8189/udp}"
+      - "${WEBRTC_PUBLIC_BIND_TCP:-0.0.0.0:8189:8189/tcp}"
