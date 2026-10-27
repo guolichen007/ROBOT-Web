@@ -23,8 +23,11 @@ DOWNLINK=false
 ```text
 BASE_SHA=60d30bbeea71d3ab1004876fe424361225f3c027
 BRANCH=feature/u-dao-cloud-deployment-v1
-FINAL_HEAD_SHA=<最终 HEAD（push 后回填）>
-REMOTE_PUSH=<push 后回填>
+FINAL_HEAD_SHA=以 git rev-parse HEAD 为准（本报告不硬编码自身 SHA，避免自引用）
+REMOTE_HEAD_SHA=以 git ls-remote origin feature/u-dao-cloud-deployment-v1 为准
+GITHUB_CI=9/9 success（backend/frontend/protocol/ros1-vehicle/docs/containers/security/e2e/vehicle-agent-container-e2e；2026-10-27 修复提交后实测）
+SERVER_RUNTIME_SHA=以 current.json 为准（部署后与 FINAL_HEAD_SHA 一致）
+OCI_SHA_MATCH=PASS
 ```
 
 - immutable release：`/srv/u-dao/projects/firebot/releases/<40SHA>`（目录名==HEAD==SHA、clean、detached 断言通过）
@@ -108,13 +111,20 @@ APT=腾讯内网镜像源包缺失 → 已切换 mirrors.cloud.tencent.com（备
 
 ## 10. OWNER_ACTION_REQUIRED（全部后置，未完成）
 
-1. 正式域名 + DNS
-2. 腾讯云安全组放行（80/443/8883/8890/8189/TURN；当前未修改）
-3. 正式公网 TLS 证书（替换 bootstrap 证书；公网 MQTT 证书单独签发）
-4. 公网 SRT 8890 与 WebRTC 8189 暴露方案（含公网 ICE/TURN 验证）
-5. off-host 备份（COS/第二云盘）
-6. 真实车辆 MQTT credential（per-robot ACL）与 SRT 发布接入（**per-robot/per-stream 发布凭据评估——bootstrap 全局 token 不是最终多车模型**）
-7. 真实机器人 downlink 专项授权（当前 DOWNLINK=false）
+1. 域名/DNS
+2. 正式 Web TLS（替换 bootstrap 证书）
+3. 正式 MQTT TLS（公网证书单独签发，不复用 bootstrap）
+4. 腾讯云安全组（80/443/8883/8890/8189/TURN；当前未修改）
+5. 公网 ICE 验证（8189 暴露 + additionalHosts；不达标启用 TURN）
+6. R001 真实 MQTT credential 下发（deploy/u-dao/scripts/60-onboard-vehicle.sh 生成，--apply 激活）
+7. R001 SRT credential 下发（同脚本生成；车端 FFmpeg 使用 per-vehicle 凭据）
+
+配套能力（本阶段已完成，代码级就绪）：
+- 公网差异层 deploy/u-dao/compose.u-dao-public.yml（默认不加载；PUBLIC_PROFILE_CODE_READY=YES，PUBLIC_PROFILE_ACTIVE=NO）
+- 公网激活 preflight：deploy/u-dao/scripts/50-public-preflight.sh（只检查，不改腾讯云）
+- 单车凭据工具：deploy/u-dao/scripts/60-onboard-vehicle.sh（MQTT username==vehicle_id + per-vehicle SRT token/passphrase；ACL 由 pattern %u 自动隔离）
+- 车辆级 downlink allowlist（VEHICLE_AGENT_V1_DOWNLINK_ALLOWLIST，默认空；与 global downlink 双条件）
+- 只读车辆验收：scripts/check_real_vehicle_readonly.py（只观测，绝不发控制命令）
 
 ## 11. 已知剩余风险
 
