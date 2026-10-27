@@ -6,7 +6,10 @@ x-python-service: &python-service
     context: .
     dockerfile: infra/docker/python.Dockerfile
     args:
-      # U-Dao：runtime env 注入腾讯云 PyPI 镜像；CI/旧现场为空走默认 pypi.org
+      # 经 --env-file 插值（compose v5 的 run 不支持 --build-arg，构建参数统一走文件）：
+      #   SOURCE_REVISION：OCI revision 标签（U-Dao 由部署包装写入 runtime env）
+      #   PIP_INDEX_URL：U-Dao 注入腾讯云 PyPI 镜像；CI/旧现场为空走默认 pypi.org
+      SOURCE_REVISION: ${SOURCE_REVISION:-}
       PIP_INDEX_URL: ${PIP_INDEX_URL:-}
   env_file: ${SERVER_ENV_FILE:-.env.server}
   secrets:
@@ -218,6 +221,8 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
+      args:
+        SOURCE_REVISION: ${SOURCE_REVISION:-}
     restart: unless-stopped
     networks: [firebot]
     healthcheck:
