@@ -29,6 +29,11 @@ def main() -> int:
     parser.add_argument("--vehicle", default="R001")
     parser.add_argument("--duration", type=int, default=60)
     parser.add_argument("--streams", default="rgb,thermal")
+    parser.add_argument(
+        "--require-offline-cycle",
+        action="store_true",
+        help="现场 LWT 模式：要求观测到 offline 后再恢复 online（需人工断网配合）",
+    )
     parser.add_argument("--mqtt-host", default="127.0.0.1")
     parser.add_argument("--mqtt-port", type=int, default=18883)
     parser.add_argument("--ca-file", default="/runtime/secrets/mosquitto/certs/ca.crt")
@@ -102,12 +107,29 @@ def main() -> int:
     client.loop_start()
 
     deadline = time.time() + args.duration
+    saw_online = False
     while time.time() < deadline:
         time.sleep(1)
-        if offline_seen:
+        if samples["availability"]:
+            saw_online = True
+        if args.require_offline_cycle and offline_seen and saw_online:
+            break
+        if not args.require_offline_cycle and offline_seen:
             break
     client.loop_stop()
     client.disconnect()
+
+    if args.require_offline_cycle:
+        if offline_seen:
+            print("PASS 观测到 LWT offline（断网期间）")
+            print(
+                "PASS 已恢复 online（重连后 availability online）"
+                if saw_online
+                else "FAIL 未在窗口内恢复 online"
+            )
+        else:
+            print("FAIL 窗口内未观测到 offline（请人工断开 R001 网络后重跑本模式）")
+        check("REAL_ROBOT_LWT_RECOVERY", offline_seen and saw_online)
 
     # ---- 判定 ----
     print(f"== 观察 {args.duration}s 结果 ==")
@@ -124,8 +146,8 @@ def main() -> int:
         check("boot_id 一致", len(boots) == 1, str(boots))
         vids = {p.get("vehicle_id") for p in all_samples if p.get("vehicle_id")}
         check(f"identity 正确（{args.vehicle}）", vids == {args.vehicle}, str(vids))
-    # 跨车隔离：本订阅只含本车 topic；若收到任何非本车 topic → 违规
-    check("ACL/订阅隔离（未收到跨车消息）", True)  # 订阅本身限定本车；跨车由 ACL 层保证
+    # ACL 行为级验证独立执行（deploy/u-dao/scripts/61-verify-vehicle-acl.py），
+    # 本 checker 只负责真实车辆遥测观测，不伪造 ACL PASS。
 
     # ---- 流就绪（可选）----
     streams = [s.strip() for s in args.streams.split(",") if s.strip()]
