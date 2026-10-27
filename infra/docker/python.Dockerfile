@@ -1,6 +1,7 @@
 FROM python:3.12.13-alpine3.24
 
 ARG SOURCE_REVISION=unknown
+ARG PIP_INDEX_URL=
 LABEL org.opencontainers.image.revision=${SOURCE_REVISION}
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -13,7 +14,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /workspace
 
 COPY requirements.lock /workspace/requirements.lock
-RUN pip install --no-cache-dir -r /workspace/requirements.lock
+# PIP_INDEX_URL 为空时走默认 pypi.org（CI/旧现场不变）；U-Dao 经 compose build.args
+# 从 runtime env 注入腾讯云 PyPI 镜像（pypi.org 直连在中国大陆网络不稳定）。
+RUN if [ -n "$PIP_INDEX_URL" ]; then \
+        pip install --no-cache-dir -i "$PIP_INDEX_URL" -r /workspace/requirements.lock; \
+    else \
+        pip install --no-cache-dir -r /workspace/requirements.lock; \
+    fi
 
 COPY apps/api /workspace/apps/api
 COPY services /workspace/services

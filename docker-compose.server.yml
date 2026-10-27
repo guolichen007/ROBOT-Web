@@ -5,6 +5,9 @@ x-python-service: &python-service
   build:
     context: .
     dockerfile: infra/docker/python.Dockerfile
+    args:
+      # U-Dao：runtime env 注入腾讯云 PyPI 镜像；CI/旧现场为空走默认 pypi.org
+      PIP_INDEX_URL: ${PIP_INDEX_URL:-}
   env_file: ${SERVER_ENV_FILE:-.env.server}
   secrets:
     - database_url

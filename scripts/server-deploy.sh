@@ -445,7 +445,7 @@ do_bootstrap() {
     exit 1
   fi
   echo "  执行 fresh migration（alembic upgrade head + seed）"
-  FIREBOT_PYTHON_IMAGE="$PY_IMAGE" compose_env_run run --rm migrate || exit 1
+  FIREBOT_PYTHON_IMAGE="$PY_IMAGE" compose_env_run run --rm --build-arg SOURCE_REVISION="$TARGET_SHA" migrate || exit 1
   write_ssot "$(exact_runtime "$TARGET_SHA")" "$(none_runtime)"
   echo "BOOTSTRAP=PASS sha=$TARGET_SHA previous=none"
 }
@@ -458,7 +458,7 @@ do_migrate() {
   fi
   build_images api
   echo "  执行 one-shot migrate（alembic upgrade head + seed）"
-  FIREBOT_PYTHON_IMAGE="$PY_IMAGE" compose_env_run run --rm migrate
+  FIREBOT_PYTHON_IMAGE="$PY_IMAGE" compose_env_run run --rm --build-arg SOURCE_REVISION="$TARGET_SHA" migrate
   echo "MIGRATE=PASS sha=$TARGET_SHA"
 }
 
