@@ -7,9 +7,8 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from fakeredis import FakeRedis
-
 from app.core.config import get_settings
+from fakeredis import FakeRedis
 
 from scripts.generate_vehicle_agent_contract import contract
 from scripts.vehicle_agent_mock_runtime import load_service
@@ -25,6 +24,7 @@ from services.vehicle_agent_v1 import (
     status_confirms,
     topic,
 )
+
 
 @pytest.fixture(autouse=True)
 def _allow_test_vehicles():

@@ -16,7 +16,6 @@
 
 import argparse
 import json
-import ssl
 import subprocess
 import sys
 import time
@@ -32,18 +31,17 @@ def main() -> int:
     parser.add_argument("--streams", default="rgb,thermal")
     parser.add_argument("--mqtt-host", default="127.0.0.1")
     parser.add_argument("--mqtt-port", type=int, default=18883)
-    parser.add_argument("--ca-file",
-                        default="/runtime/secrets/mosquitto/certs/ca.crt")
+    parser.add_argument("--ca-file", default="/runtime/secrets/mosquitto/certs/ca.crt")
     parser.add_argument("--mqtt-username", default="platform")
-    parser.add_argument("--mqtt-password-file",
-                        default="/runtime/secrets/app/mqtt_platform_password")
+    parser.add_argument(
+        "--mqtt-password-file", default="/runtime/secrets/app/mqtt_platform_password"
+    )
     args = parser.parse_args()
 
     failures: list[str] = []
     seen: Counter = Counter()
-    samples: dict[str, list] = {k: [] for k in
-                                ("availability", "heartbeat", "status", "telemetry", "capabilities")}
-    boot_id: str | None = None
+    kinds = ("availability", "heartbeat", "status", "telemetry", "capabilities")
+    samples: dict[str, list] = {k: [] for k in kinds}
     offline_seen = False
 
     def check(name: str, cond: bool, detail: str = "") -> None:
@@ -60,8 +58,16 @@ def main() -> int:
             print(f"FAIL MQTT connect: {reason_code}")
             return
         print(f"PASS MQTT TLS 连接成功（{args.mqtt_host}:{args.mqtt_port}）")
-        for kind in ("availability", "heartbeat", "status", "telemetry", "capabilities",
-                     "command_ack", "event", "location"):
+        for kind in (
+            "availability",
+            "heartbeat",
+            "status",
+            "telemetry",
+            "capabilities",
+            "command_ack",
+            "event",
+            "location",
+        ):
             client.subscribe(f"robot/{args.vehicle}/{kind}", qos=1)
         client.subscribe(f"v1/robot/{args.vehicle}/+", qos=1)
 
@@ -82,9 +88,11 @@ def main() -> int:
             global offline_seen
             offline_seen = True
 
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
-                         client_id=f"readonly-check-{int(time.time())}",
-                         protocol=mqtt.MQTTv5)
+    client = mqtt.Client(
+        mqtt.CallbackAPIVersion.VERSION2,
+        client_id=f"readonly-check-{int(time.time())}",
+        protocol=mqtt.MQTTv5,
+    )
     client.username_pw_set(args.mqtt_username, password)
     client.tls_set(ca_certs=args.ca_file)
     client.tls_insecure_set(False)
@@ -121,14 +129,28 @@ def main() -> int:
 
     # ---- 流就绪（可选）----
     streams = [s.strip() for s in args.streams.split(",") if s.strip()]
-    if streams and subprocess.run(["docker", "info"], capture_output=True, timeout=30).returncode == 0:
+    if (
+        streams
+        and subprocess.run(["docker", "info"], capture_output=True, timeout=30).returncode == 0
+    ):
         for stream in streams:
             try:
                 out = subprocess.run(
-                    ["docker", "exec", "-T", "u-dao-firebot-mediamtx-1",
-                     "/busybox", "wget", "-q", "-O", "-",
-                     "http://127.0.0.1:9997/v3/paths/list"],
-                    capture_output=True, text=True, timeout=30,
+                    [
+                        "docker",
+                        "exec",
+                        "-T",
+                        "u-dao-firebot-mediamtx-1",
+                        "/busybox",
+                        "wget",
+                        "-q",
+                        "-O",
+                        "-",
+                        "http://127.0.0.1:9997/v3/paths/list",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
                 )
                 items = json.loads(out.stdout).get("items", [])
                 by_name = {e["name"]: e for e in items} if isinstance(items, list) else {}
