@@ -123,10 +123,20 @@ def test_u_dao_render() -> None:
         check("u-dao 顶层 external u-dao-ingress",
               top_nets.get("u-dao-ingress", {}).get("external") is True
               and top_nets["u-dao-ingress"].get("name") == "u-dao-ingress")
-        for name in ("database_url", "redis_url", "jwt_secret", "mqtt_platform_password",
-                     "media_publish_token", "mqtt_ca"):
-            check(f"u-dao secret {name} 指向 runtime 绝对路径",
-                  name in cfg.get("secrets", {}), f"missing secret {name}")
+        # secrets 分发模式：file 型 compose secret 是绑定挂载（保留宿主 600 权限），
+        # 容器内非 root 用户不可读 → 改为 app-secrets-init 拷入具名卷分发（宿主文件 600/ubuntu 不变）。
+        check("u-dao app-secrets-init 存在",
+              "app-secrets-init" in cfg.get("services", {}), "missing app-secrets-init")
+        check("u-dao 顶层 app_secrets 具名卷",
+              "app_secrets" in cfg.get("volumes", {}), str(cfg.get("volumes")))
+        for svc in ("api", "migrate", "mqtt-ingress", "command-dispatcher", "task-worker",
+                    "postgres", "redis", "mosquitto"):
+            svc_vols = {v.get("target"): v for v in cfg["services"][svc].get("volumes", [])}
+            check(f"u-dao {svc} 挂载 app_secrets:/run/secrets",
+                  svc_vols.get("/run/secrets", {}).get("source") == "app_secrets",
+                  str(svc_vols.get("/run/secrets")))
+            check(f"u-dao {svc} 无 file 型 compose secret",
+                  not cfg["services"][svc].get("secrets"), str(cfg["services"][svc].get("secrets")))
         # srt_publish_passphrase 不经过 compose secret：由 runtime 渲染的
         # mediamtx.server.u-dao.yml（per-path srtPublishPassphrase）注入，见 mediamtx 卷断言。
         # mediamtx 挂载运行时渲染配置

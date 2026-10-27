@@ -2,14 +2,59 @@
 # 原则（见 docs/部署运维/U-Dao云服务器部署.md）：
 #   - 全部宿主端口只绑 127.0.0.1，公网暴露由 OWNER 后续统一决策（安全组不改）。
 #   - Firebot 不占宿主 80/443；入口经 platform 资源 shared ingress（project u-dao-ingress）。
-#   - 本文件由 release 树内路径引用（../../infra/...），secrets/env 指向 runtime 绝对路径。
+#   - 本文件由 release 树内路径引用（../../infra/...）；env 经 SERVER_ENV_FILE 绝对路径，
+#     secrets 经 app-secrets-init 从 runtime 拷入具名卷（宿主文件始终 600/ubuntu）。
 #   - ports 用 !override 整属性替换（compose 四元组合并语义下，仅改绑定 IP 会造成双发布）。
 name: u-dao-firebot
 
 services:
+  # 运行时 secret 分发（compose file 型 secret 是绑定挂载，保留宿主 600 权限会导致
+  # 容器内非 root 用户无法读取；本服务按 mosquitto-config-init 同款模式拷入具名卷：
+  # 宿主文件始终 600/ubuntu，容器内按消费者分发——app 文件 600:10001、postgres/redis 444）。
+  app-secrets-init:
+    image: busybox:1.37.0-musl
+    command:
+      - sh
+      - -c
+      - >-
+        mkdir -p /target &&
+        cp /source/app/* /target/ &&
+        cp /source/postgres/password /target/postgres_password &&
+        cp /source/redis/password /target/redis_password &&
+        cp /source/mosquitto/certs/ca.crt /target/mqtt_ca &&
+        chown -R 10001:10001 /target &&
+        chmod 600 /target/database_url /target/redis_url /target/jwt_secret
+        /target/refresh_secret /target/csrf_secret /target/bootstrap_admin_password
+        /target/media_publish_token /target/srt_publish_passphrase /target/mqtt_ca &&
+        chmod 444 /target/mqtt_platform_password /target/postgres_password /target/redis_password
+    volumes:
+      - /srv/u-dao/projects/firebot/runtime/secrets:/source:ro
+      - app_secrets:/target
+    restart: "no"
+    networks: [firebot]
+
   mosquitto:
+    secrets: !reset []
+    volumes:
+      - app_secrets:/run/secrets:ro
+    depends_on:
+      app-secrets-init: { condition: service_completed_successfully }
     ports: !override
       - "127.0.0.1:18883:8883"
+
+  postgres:
+    secrets: !reset []
+    volumes:
+      - app_secrets:/run/secrets:ro
+    depends_on:
+      app-secrets-init: { condition: service_completed_successfully }
+
+  redis:
+    secrets: !reset []
+    volumes:
+      - app_secrets:/run/secrets:ro
+    depends_on:
+      app-secrets-init: { condition: service_completed_successfully }
 
   mediamtx:
     ports: !override
@@ -32,6 +77,11 @@ services:
         aliases: [firebot-edge]
 
   api:
+    secrets: !reset []
+    volumes:
+      - app_secrets:/run/secrets:ro
+    depends_on:
+      app-secrets-init: { condition: service_completed_successfully }
     # TLS 由 shared ingress 终结：信任 ingress 网段的 X-Forwarded-* 头（COOKIE_SECURE 依赖）
     command:
       - uvicorn
@@ -46,23 +96,56 @@ services:
       - --forwarded-allow-ips
       - 10.240.0.0/16
 
+  migrate:
+    secrets: !reset []
+    volumes:
+      - app_secrets:/run/secrets:ro
+    depends_on:
+      app-secrets-init: { condition: service_completed_successfully }
+
+  mqtt-ingress:
+    secrets: !reset []
+    volumes:
+      - app_secrets:/run/secrets:ro
+    depends_on:
+      app-secrets-init: { condition: service_completed_successfully }
+
+  command-dispatcher:
+    secrets: !reset []
+    volumes:
+      - app_secrets:/run/secrets:ro
+    depends_on:
+      app-secrets-init: { condition: service_completed_successfully }
+
+  task-worker:
+    secrets: !reset []
+    volumes:
+      - app_secrets:/run/secrets:ro
+    depends_on:
+      app-secrets-init: { condition: service_completed_successfully }
+
+  ros-compat-adapter:
+    secrets: !reset []
+    volumes:
+      - app_secrets:/run/secrets:ro
+    depends_on:
+      app-secrets-init: { condition: service_completed_successfully }
+
+  vehicle-agent-adapter:
+    secrets: !reset []
+    volumes:
+      - app_secrets:/run/secrets:ro
+    depends_on:
+      app-secrets-init: { condition: service_completed_successfully }
+
   mosquitto-config-init:
     volumes:
       - /srv/u-dao/projects/firebot/runtime/secrets/mosquitto:/source:ro
       - mosquitto_config:/target
 
-secrets:
-  database_url: { file: /srv/u-dao/projects/firebot/runtime/secrets/app/database_url }
-  redis_url: { file: /srv/u-dao/projects/firebot/runtime/secrets/app/redis_url }
-  postgres_password: { file: /srv/u-dao/projects/firebot/runtime/secrets/postgres/password }
-  redis_password: { file: /srv/u-dao/projects/firebot/runtime/secrets/redis/password }
-  jwt_secret: { file: /srv/u-dao/projects/firebot/runtime/secrets/app/jwt_secret }
-  refresh_secret: { file: /srv/u-dao/projects/firebot/runtime/secrets/app/refresh_secret }
-  csrf_secret: { file: /srv/u-dao/projects/firebot/runtime/secrets/app/csrf_secret }
-  bootstrap_admin_password: { file: /srv/u-dao/projects/firebot/runtime/secrets/app/bootstrap_admin_password }
-  mqtt_platform_password: { file: /srv/u-dao/projects/firebot/runtime/secrets/app/mqtt_platform_password }
-  mqtt_ca: { file: /srv/u-dao/projects/firebot/runtime/secrets/mosquitto/certs/ca.crt }
-  media_publish_token: { file: /srv/u-dao/projects/firebot/runtime/secrets/app/media_publish_token }
+
+volumes:
+  app_secrets:
 
 networks:
   u-dao-ingress:
