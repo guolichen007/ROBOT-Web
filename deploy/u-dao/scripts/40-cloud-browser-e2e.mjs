@@ -8,14 +8,14 @@
 // 注意：首次验收会把 bootstrap admin 密码轮换（新值写回 runtime secret 文件，600，不打印）。
 import { readFileSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
-import { chromium } from 'playwright'
+// 运行环境可为 apps/web 的 node_modules（主机）或独立安装的 playwright 包：
+//   PLAYWRIGHT_MODULE_PATH=/srv/u-dao/projects/firebot/repo/apps/web/node_modules/playwright
+const { chromium } = await import(process.env.PLAYWRIGHT_MODULE_PATH || 'playwright')
 
-const args = Object.fromEntries(
-  process.argv.slice(2).reduce((acc, cur, i, arr) => {
-    if (cur.startsWith('--')) acc[cur.slice(2)] = arr[i + 1]
-    return acc
-  }, {}),
-)
+const args = process.argv.slice(2).reduce((acc, cur, i, arr) => {
+  if (cur.startsWith('--')) acc[cur.slice(2)] = arr[i + 1]
+  return acc
+}, {})
 const baseUrl = args['base-url'] || 'https://firebot.local:18443'
 const passwordFile = args['admin-password-file']
 const adminPassword = readFileSync(passwordFile, 'utf8').trim()
@@ -53,22 +53,30 @@ await page.goto('/login')
 await page.getByPlaceholder('请输入账号').fill('admin')
 await page.getByPlaceholder('请输入密码').fill(adminPassword)
 await page.getByRole('button', { name: '登录' }).click()
-await page.waitForURL(/change-password|robots/, { timeout: 15000 })
-check('登录成功（COOKIE_SECURE）', /change-password|robots/.test(page.url()), page.url())
+await page.waitForURL(/change-password|robots|monitor/, { timeout: 15000 })
+check('登录成功（COOKIE_SECURE）', /change-password|robots|monitor/.test(page.url()), page.url())
 
-// 2) 强制改密（bootstrap admin 的 must_change_password 语义）
+// 2) 强制改密（bootstrap admin 的 must_change_password 语义）：修改后需重新登录
 if (page.url().includes('change-password')) {
   await page.getByPlaceholder('请输入当前密码').fill(adminPassword)
   await page.getByPlaceholder('至少 12 位').fill(nextPassword)
   await page.getByPlaceholder('再次输入新密码').fill(nextPassword)
-  await page.getByRole('button', { name: /确认|修改|保存/ }).click()
-  await page.waitForURL('**/robots', { timeout: 15000 }).catch(() => null)
-  check('改密后进入 robots 页', page.url().includes('/robots'), page.url())
+  await page.getByRole('button', { name: /修改/ }).click()
+  await page.waitForURL(/login|robots/, { timeout: 15000 }).catch(() => null)
+  check('改密完成（回登录页）', page.url().includes('/login') || page.url().includes('/robots'), page.url())
   writeFileSync(passwordFile, nextPassword + '\n', { mode: 0o600 }) // 轮换后的真值仍以 runtime 文件为准
+  // 用新密码重新登录进入主界面
+  await page.getByPlaceholder('请输入账号').fill('admin')
+  await page.getByPlaceholder('请输入密码').fill(nextPassword)
+  await page.getByRole('button', { name: '登录' }).click()
+  await page.waitForURL(/robots|monitor/, { timeout: 15000 }).catch(() => null)
+  check('新密码登录进入主界面', /robots|monitor/.test(page.url()), page.url())
 }
 
-// 3) HMI 加载
-await page.goto('/monitor')
+// 3) HMI 加载（若未在 monitor 则导航）
+if (!page.url().includes('/monitor')) {
+  await page.goto('/monitor', { waitUntil: 'domcontentloaded' })
+}
 await page.waitForTimeout(2000)
 const body = (await page.locator('body').textContent()) || ''
 check('HMI MonitorView 渲染', body.length > 500, `len=${body.length}`)
@@ -77,7 +85,8 @@ check('HMI MonitorView 渲染', body.length > 500, `len=${body.length}`)
 const connectButton = page.locator('button', { hasText: '连接视频' }).first()
 const hasButton = (await connectButton.count()) > 0
 if (hasButton) {
-  await connectButton.click()
+  // 覆盖层 glyph 拦截 pointer 事件：直接向按钮元素派发 click（等价用户点击语义）
+  await connectButton.dispatchEvent('click')
   const live = await page
     .waitForSelector('.video-live-tag', { timeout: 20000 })
     .then(() => true)

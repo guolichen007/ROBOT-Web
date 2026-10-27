@@ -54,7 +54,8 @@ def has_port(ports: list[dict], published, protocol: str, host_ip=None) -> bool:
 
 
 def test_legacy_render() -> None:
-    """旧现场表面回归锁：渲染结果必须与历史行为一致（RTSP 绑 Tailscale、WebRTC 绑 LAN、80/443/8883）。"""
+    """旧现场表面回归锁：渲染结果必须与历史行为一致
+    （RTSP 绑 Tailscale、WebRTC 绑 LAN、80/443/8883）。"""
     with tempfile.TemporaryDirectory() as tmp:
         env = Path(tmp) / ".env.server"
         env.write_text(
@@ -67,7 +68,8 @@ def test_legacy_render() -> None:
             encoding="utf-8",
         )
         cfg = compose_config(env, ["docker-compose.server.yml"])
-        check("legacy name=firebot-server", cfg.get("name") == "firebot-server", str(cfg.get("name")))
+        check("legacy name=firebot-server", cfg.get("name") == "firebot-server",
+              str(cfg.get("name")))
         check("legacy mosquitto 8883:8883", has_port(ports_of(cfg, "mosquitto"), 8883, "tcp"))
         check("legacy nginx 80", has_port(ports_of(cfg, "nginx"), 80, "tcp"))
         check("legacy nginx 443", has_port(ports_of(cfg, "nginx"), 443, "tcp"))
@@ -86,7 +88,8 @@ RUNTIME = "/srv/u-dao/projects/firebot/runtime"
 
 
 def test_u_dao_render() -> None:
-    """U-Dao 云模式渲染：全部 127.0.0.1 高端口、无 443、secrets 绝对路径、edge 别名入 ingress 网络。"""
+    """U-Dao 云模式渲染：全部 127.0.0.1 高端口、无 443、secrets 绝对路径、
+    edge 别名入 ingress 网络。"""
     with tempfile.TemporaryDirectory() as tmp:
         env = Path(tmp) / ".env.server"
         # 云 env 刻意不定义 SERVER_TAILSCALE_IP/SERVER_LAN_IP（基座必须能无它们渲染）
@@ -109,7 +112,8 @@ def test_u_dao_render() -> None:
         check("u-dao mediamtx 127.0.0.1:8189 udp+tcp（端口保持）",
               has_port(ports_of(cfg, "mediamtx"), 8189, "udp", "127.0.0.1")
               and has_port(ports_of(cfg, "mediamtx"), 8189, "tcp", "127.0.0.1"))
-        check("u-dao nginx 127.0.0.1:18080:80", has_port(ports_of(cfg, "nginx"), 18080, "tcp", "127.0.0.1"))
+        check("u-dao nginx 127.0.0.1:18080:80",
+              has_port(ports_of(cfg, "nginx"), 18080, "tcp", "127.0.0.1"))
         check("u-dao nginx 无 443", not has_port(ports_of(cfg, "nginx"), 443, "tcp"))
         check("u-dao 无 0.0.0.0 绑定", all(p.get("host_ip", "0.0.0.0") != "0.0.0.0"
                                         for svc in cfg["services"] for p in ports_of(cfg, svc)))
@@ -124,7 +128,8 @@ def test_u_dao_render() -> None:
               top_nets.get("u-dao-ingress", {}).get("external") is True
               and top_nets["u-dao-ingress"].get("name") == "u-dao-ingress")
         # secrets 分发模式：file 型 compose secret 是绑定挂载（保留宿主 600 权限），
-        # 容器内非 root 用户不可读 → 改为 app-secrets-init 拷入具名卷分发（宿主文件 600/ubuntu 不变）。
+        # 容器内非 root 用户不可读 → 改为 app-secrets-init 拷入具名卷分发
+        # （宿主文件 600/ubuntu 不变）。
         check("u-dao app-secrets-init 存在",
               "app-secrets-init" in cfg.get("services", {}), "missing app-secrets-init")
         check("u-dao 顶层 app_secrets 具名卷",
@@ -140,7 +145,10 @@ def test_u_dao_render() -> None:
         # srt_publish_passphrase 不经过 compose secret：由 runtime 渲染的
         # mediamtx.server.u-dao.yml（per-path srtPublishPassphrase）注入，见 mediamtx 卷断言。
         # mediamtx 挂载运行时渲染配置
-        mtx_vols = {v.get("target"): v.get("source") for v in cfg["services"]["mediamtx"].get("volumes", [])}
+        mtx_vols = {
+            v.get("target"): v.get("source")
+            for v in cfg["services"]["mediamtx"].get("volumes", [])
+        }
         check("u-dao mediamtx 配置指向 runtime 渲染 yml",
               mtx_vols.get("/mediamtx.yml") == f"{RUNTIME}/env/mediamtx.server.u-dao.yml",
               str(mtx_vols.get("/mediamtx.yml")))
@@ -150,11 +158,16 @@ def docker_directly_accessible() -> bool:
     return subprocess.run([COMPOSE, "info"], capture_output=True, timeout=60).returncode == 0
 
 
-def run_preflight(env_file: Path, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
-    """preflight 需要 docker daemon；无 docker group 权限时用 sudo -n env 包装（CI 直连分支不变）。"""
+def run_preflight(
+    env_file: Path, extra_env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
+    """preflight 需要 docker daemon；无 docker group 权限时用
+    sudo -n env 包装（CI 直连分支不变）。"""
     base_env = dict(extra_env or {})
     base_env.setdefault("U_DAO_MODE", "0")
-    base_env.update({"SERVER_ENV_FILE": str(env_file), "BACKUP_PATH": str(env_file.parent / "backups")})
+    base_env.update(
+        {"SERVER_ENV_FILE": str(env_file), "BACKUP_PATH": str(env_file.parent / "backups")}
+    )
     if docker_directly_accessible():
         env = {**os.environ, **base_env}
         return subprocess.run(["bash", "scripts/server-preflight.sh"], cwd=ROOT,
@@ -163,13 +176,15 @@ def run_preflight(env_file: Path, extra_env: dict[str, str] | None = None) -> su
         ["bash", "scripts/server-preflight.sh"]
     proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=180)
     # 清理 root 产生的文件，保证 TemporaryDirectory 可回收
-    subprocess.run(["sudo", "-n", "chown", "-R", f"{os.getuid()}:{os.getgid()}", str(env_file.parent)],
+    subprocess.run(
+        ["sudo", "-n", "chown", "-R", f"{os.getuid()}:{os.getgid()}", str(env_file.parent)],
                    capture_output=True, timeout=60)
     return proc
 
 
 def test_legacy_preflight_fail_closed() -> None:
-    """R2-12：legacy 模式缺 SERVER_TAILSCALE_IP/SERVER_LAN_IP 必须 FAIL（基座 :? 软化后的语义恢复）。"""
+    """R2-12：legacy 模式缺 SERVER_TAILSCALE_IP/SERVER_LAN_IP 必须 FAIL
+    （基座 :? 软化后的语义恢复）。"""
     with tempfile.TemporaryDirectory() as tmp:
         env = Path(tmp) / ".env.server"
         env.write_text("APP_ENV=server\nENABLE_API_DOCS=false\n", encoding="utf-8")
@@ -185,7 +200,15 @@ def test_legacy_preflight_fail_closed() -> None:
         proc2 = run_preflight(env2)
         check("legacy preflight 占位 IP → FAIL", proc2.returncode != 0)
         # U-Dao 模式定义 Tailscale 变量 → FAIL
-        proc3 = run_preflight(env2, {"U_DAO_MODE": "1", "FIREBOT_RUNTIME_ROOT": str(tmp), "FIREBOT_COMPOSE_FILES": "docker-compose.server.yml deploy/u-dao/compose.u-dao.yml"})
+        proc3 = run_preflight(
+            env2,
+            {
+                "U_DAO_MODE": "1",
+                "FIREBOT_RUNTIME_ROOT": str(tmp),
+                "FIREBOT_COMPOSE_FILES":
+                "docker-compose.server.yml deploy/u-dao/compose.u-dao.yml",
+            },
+        )
         check("u-dao preflight 定义 SERVER_TAILSCALE_IP → FAIL", proc3.returncode != 0)
 
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """U-Dao cloud deploy state-machine tests（fresh bootstrap / first release / second release /
-rollback / u-dao guard / release immutable guard），command-double 模式复用 test_server_rollback.py 思路。
+rollback / u-dao guard / release immutable guard），command-double 模式复用
+test_server_rollback.py 思路。
 
 Usage: python3 scripts/test_cloud_deploy.py
 """
@@ -36,7 +37,8 @@ docker() {
       case "$verb" in
         config)
           if [[ "$*" == *--services* ]]; then
-            printf 'api\nmqtt-ingress\ncommand-dispatcher\ntask-worker\nweb\npostgres\nredis\nmosquitto\nnginx\nmediamtx\nros-compat-adapter\nvehicle-agent-adapter\n'
+            printf 'api\nmqtt-ingress\ncommand-dispatcher\ntask-worker\nweb\npostgres\nredis\n' \
+                'mosquitto\nnginx\nmediamtx\nros-compat-adapter\nvehicle-agent-adapter\n'
           else printf '{"name":"u-dao-firebot"}\n'; fi ;;
         ps) local svc="${@: -1}"; [ ! -f "cid-$svc" ] || printf 'cid-%s\n' "$svc" ;;
         up)
@@ -126,7 +128,8 @@ class CloudDeployTests(unittest.TestCase):
             result = subprocess.run(["bash", "harness.sh"], cwd=work, capture_output=True,
                                     text=True, encoding="utf-8", env=env, timeout=60)
             self.assertEqual(result.returncode, expect_rc,
-                             f"case={case} rc={result.returncode}\nstdout:\n{result.stdout}\nstderr:\n{result.stderr}")
+                             f"case={case} rc={result.returncode}\n"
+                             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}")
             return result
 
     def state(self, result) -> dict:
@@ -231,11 +234,15 @@ class SsotFileTests(unittest.TestCase):
                 "previous_runtime_kind": "none",
             })
             # 独立 case 名避免与 HARNESS 内置 case 块重复执行 deploy_scope
-            harness = HARNESS + "\ncase \"$CASE\" in\n  ssot-case) deploy_scope all-app api mqtt-ingress command-dispatcher task-worker web ;;\nesac\n"
+            harness = HARNESS + (
+                "\ncase \"$CASE\" in\n  ssot-case) deploy_scope all-app "
+                "api mqtt-ingress command-dispatcher task-worker web ;;\nesac\n"
+            )
             (work / "harness.sh").write_text(harness, encoding="utf-8", newline="\n")
             env = {**os.environ, "CASE": "ssot-case", "TARGET_SHA": SHA1,
                    "TEST_PYTHON": sys.executable,
-                   "FIREBOT_COMPOSE_FILES": "docker-compose.server.yml deploy/u-dao/compose.u-dao.yml"}
+                   "FIREBOT_COMPOSE_FILES":
+                   "docker-compose.server.yml deploy/u-dao/compose.u-dao.yml"}
             result = subprocess.run(["bash", "harness.sh"], cwd=work, capture_output=True,
                                     text=True, encoding="utf-8", env=env, timeout=60)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -265,7 +272,10 @@ class ReleaseGuardTests(unittest.TestCase):
         artifacts.mkdir(exist_ok=True)
         base = Path(tempfile.mkdtemp(prefix="release-guard-", dir=artifacts)).resolve()
         subprocess.run(["git", "init", "-q", "-b", "main", str(base)], check=True)
-        subprocess.run(["git", "-C", str(base), "config", "user.email", "test@example.com"], check=True)
+        subprocess.run(
+            ["git", "-C", str(base), "config", "user.email", "test@example.com"],
+            check=True,
+        )
         subprocess.run(["git", "-C", str(base), "config", "user.name", "t"], check=True)
         (base / "f.txt").write_text("x")
         subprocess.run(["git", "-C", str(base), "add", "f.txt"], check=True)
@@ -292,7 +302,8 @@ class ReleaseGuardTests(unittest.TestCase):
         harness = (
             'set -euo pipefail\n'
             'export DOCKER_CMD_SKIP_DETECT=1\n'
-            'if command -v cygpath >/dev/null; then TEST_PYTHON="$(cygpath -u "$TEST_PYTHON")"; fi\n'
+            'if command -v cygpath >/dev/null; then TEST_PYTHON="$(cygpath -u "$TEST_PYTHON")";' \
+                'fi\n'
             'python3() { command "$TEST_PYTHON" "$@"; }\n'
             'git() { case "$1" in -C) command git "$@" ;; *) return 1 ;; esac; }\n'
             'source scripts/server-deploy.sh\n'

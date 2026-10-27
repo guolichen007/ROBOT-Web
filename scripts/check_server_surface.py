@@ -47,7 +47,10 @@ def check_legacy() -> None:
     assert "Content-Security-Policy" in nginx
     assert "Permissions-Policy" in nginx
     assert "ENABLE_API_DOCS=false" in env_example
-    print("legacy server surface OK: 80/443/8883; RTSP bound to SERVER_TAILSCALE_IP, WebRTC bound to SERVER_LAN_IP")
+    print(
+        "legacy server surface OK: 80/443/8883; RTSP bound to SERVER_TAILSCALE_IP,"
+        " WebRTC bound to SERVER_LAN_IP"
+    )
 
 
 def check_u_dao() -> None:
@@ -65,7 +68,9 @@ def check_u_dao() -> None:
     )
     for binding in expected:
         assert binding in override, f"missing cloud binding {binding}"
-    assert override.count("ports: !override") == 3, "cloud override must !override ports of mosquitto/mediamtx/nginx"
+    assert override.count("ports: !override") == 3, (
+        "cloud override must !override ports of mosquitto/mediamtx/nginx"
+    )
     # 宿主绑定不得为全接口（"0.0.0.0" 仅允许出现在容器内监听，如 api --host 0.0.0.0）
     # 权威校验：test_compose_render.py 对渲染后 host_ip 的断言。
     for forbidden in (":5432", ":6379", ":9997", ":8889", ":1883", ":443"):
@@ -76,7 +81,10 @@ def check_u_dao() -> None:
     assert "proxy_set_header Authorization $http_authorization" in edge
     assert "server_tokens off" in edge
     assert "location ~ ^/api/(docs|openapi\\.json) { return 404; }" in edge
-    print("u-dao server surface OK: loopback-only high ports; no 80/443; SRT listener enabled; edge forwards XFP/Authorization")
+    print(
+        "u-dao server surface OK: loopback-only high ports; no 80/443;"
+        " SRT listener enabled; edge forwards XFP/Authorization"
+    )
 
 
 if args.mode == "legacy":

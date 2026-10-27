@@ -20,11 +20,9 @@
 import argparse
 import http.cookiejar
 import json
-import shutil
 import ssl
 import subprocess
 import sys
-import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -44,7 +42,9 @@ def check(name: str, cond: bool, detail: str = "") -> None:
 def docker() -> list[str]:
     if subprocess.run(["docker", "info"], capture_output=True, timeout=60).returncode == 0:
         return ["docker"]
-    if subprocess.run(["sudo", "-n", "docker", "info"], capture_output=True, timeout=60).returncode == 0:
+    if subprocess.run(
+        ["sudo", "-n", "docker", "info"], capture_output=True, timeout=60
+    ).returncode == 0:
         return ["sudo", "-n", "docker"]
     raise RuntimeError("docker 与 sudo -n docker 均不可用")
 
@@ -74,16 +74,18 @@ def srt_publish(token: str, passphrase: str, stream_id: str, expect_ok: bool) ->
 def mediamtx_api(path: str) -> dict:
     """容器内访问 MediaMTX v3 API（action=api 免鉴权，仅容器内 9997）。"""
     d = docker()
-    cid = run(d + ["compose", "-p", "u-dao-firebot", "ps", "-q", "mediamtx"], timeout=60)
+    cid = run(d + ["ps", "-q", "-f", "label=com.docker.compose.project=u-dao-firebot",
+                   "-f", "label=com.docker.compose.service=mediamtx"], timeout=60)
     assert cid.returncode == 0 and cid.stdout.strip(), "mediamtx 容器未运行"
-    result = run(d + ["exec", "-T", cid.stdout.strip(),
+    # Docker 29 已移除 exec 的 -T 速记；非 tty stdin 下不加 -T 亦不分配 tty
+    result = run(d + ["exec", cid.stdout.strip(),
                       "/busybox", "wget", "-q", "-O", "-",
                       f"http://127.0.0.1:9997{path}"], timeout=60)
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
 
 
-def login(base_url: str, admin_password: str) -> http.cookiejar.CookieJar:
+def login(base_url: str, admin_password: str) -> tuple[object, str]:
     jar = http.cookiejar.CookieJar()
     opener = urllib.request.build_opener(
         urllib.request.HTTPSHandler(context=ssl._create_unverified_context()),
@@ -95,16 +97,17 @@ def login(base_url: str, admin_password: str) -> http.cookiejar.CookieJar:
         headers={"Content-Type": "application/json"},
     )
     with opener.open(req, timeout=30) as resp:
-        body = json.loads(resp.read())
+        payload = json.loads(resp.read())
         assert resp.status == 200, f"login failed {resp.status}"
-    return opener
+    # API 需要 Bearer（refresh cookie 仅用于续期）；media ticket/WHEP 请求显式携带
+    return opener, payload["access_token"]
 
 
-def whep_flow(opener, base_url: str, stream_id: str) -> None:
+def whep_flow(opener, base_url: str, stream_id: str, token: str) -> None:
     req = urllib.request.Request(
         f"{base_url}/api/v1/media/tickets",
         data=json.dumps({"stream_id": stream_id}).encode(),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
     )
     with opener.open(req, timeout=30) as resp:
         ticket = json.loads(resp.read())
@@ -135,7 +138,7 @@ def whep_flow(opener, base_url: str, stream_id: str) -> None:
         sdp = exc.read().decode()
         status = exc.code
     check(f"WHEP POST {stream_id} 返回 201", status == 201, f"status={status}")
-    check(f"WHEP answer 含 127.0.0.1:8189 ICE candidate（端口保持）",
+    check("WHEP answer 含 127.0.0.1:8189 ICE candidate（端口保持）",
           "127.0.0.1 8189" in sdp or "127.0.0.1:8189" in sdp,
           sdp[:400])
 
@@ -159,20 +162,25 @@ def main() -> int:
     # 2) 双流就绪（由 compose.media-e2e 正例发布器提供）
     paths = mediamtx_api("/v3/paths/list")
     items = paths.get("items", {})
-    for stream_id, camera in (("R001-roof_rgb", "roof_rgb"), ("R001-roof_thermal", "roof_thermal")):
+    if isinstance(items, list):
+        items = {entry["name"]: entry for entry in items}
+    streams = (("R001-roof_rgb", "roof_rgb"), ("R001-roof_thermal", "roof_thermal"))
+    for stream_id, _camera in streams:
         entry = items.get(stream_id)
         check(f"流注册 {stream_id} ready", bool(entry and entry.get("ready")),
               json.dumps(entry)[:200] if entry else "missing")
         if entry:
-            tracks = entry.get("tracks") or []
-            codecs = [(t.get("codec"), t.get("pixFmt")) for t in tracks]
-            check(f"{stream_id} codec H264+yuv420p（V1 浏览器合同）",
-                  ("H264", "yuv420p") in codecs, str(codecs))
+            # MediaMTX v3 API 不暴露 pixFmt：codec 合同断言 H264；
+            # yuv420p 由发布端强制（media-test-source 输出 -pix_fmt yuv420p，ready 日志有证据）
+            tracks = entry.get("tracks2") or entry.get("tracks") or []
+            codecs = [t.get("codec") for t in tracks]
+            check(f"{stream_id} codec H264（V1 浏览器合同；yuv420p 由发布端强制）",
+                  "H264" in codecs, str(codecs))
 
     # 3) 票据 + WHEP + ICE（bootstrap HTTPS；HTTP 仅 health，完整 auth 必须走 18443）
-    opener = login(args.base_url, admin_password)
-    whep_flow(opener, args.base_url, "R001-roof_rgb")
-    whep_flow(opener, args.base_url, "R001-roof_thermal")
+    opener, token = login(args.base_url, admin_password)
+    whep_flow(opener, args.base_url, "R001-roof_rgb", token)
+    whep_flow(opener, args.base_url, "R001-roof_thermal", token)
 
     if FAILURES:
         print(f"\nSRT_WHEP_E2E=FAIL count={len(FAILURES)}")
