@@ -56,7 +56,12 @@ compose_env_run() {
     "${DOCKER[@]:0:${#DOCKER[@]}-1}" env "${pairs[@]}" "${DOCKER[@]: -1}" \
       "${COMPOSE[@]:${#DOCKER[@]}}" "$@"
   else
-    env "${pairs[@]}" "${COMPOSE[@]}" "$@"
+    # plain docker 分支用前缀赋值形式（`env` 会绕过 shell 函数，测试 harness 的 docker()
+    # mock 与真实生产语义都不受影响）
+    FIREBOT_PYTHON_IMAGE="${FIREBOT_PYTHON_IMAGE:-}" \
+      FIREBOT_WEB_IMAGE="${FIREBOT_WEB_IMAGE:-}" \
+      FIREBOT_MEDIAMTX_IMAGE="${FIREBOT_MEDIAMTX_IMAGE:-}" \
+      "${COMPOSE[@]}" "$@"
   fi
 }
 # Exact rollback may check out a historical revision without this new helper.
@@ -138,6 +143,20 @@ restore_runtime() {
     exact_sha) rollback_to "$(runtime_value "$1" sha)" ;;
     *) echo 'ROLLBACK_RUNTIME_KIND=FAIL' >&2; return 1 ;;
   esac
+}
+
+# U-Dao：每发布镜像 tag 写入 runtime env 文件（compose 插值的唯一可靠来源——sudo env_reset
+# 会剥离 CLI 环境变量，实测存在偶发失效；CLI env 仅作 legacy 兜底）。
+write_runtime_image_tags() {
+  [ "$U_DAO_MODE" = 1 ] || return 0
+  [ -f "$ENV_FILE" ] || return 0
+  local tmp
+  tmp="$(mktemp)"
+  grep -vE '^FIREBOT_(PYTHON|WEB)_IMAGE=' "$ENV_FILE" > "$tmp" 2>/dev/null || true
+  printf 'FIREBOT_PYTHON_IMAGE=%s\nFIREBOT_WEB_IMAGE=%s\n' "$PY_IMAGE" "$WEB_IMAGE" >> "$tmp"
+  chmod --reference="$ENV_FILE" "$tmp"
+  mv "$tmp" "$ENV_FILE"
+  echo "  runtime env 镜像 tag 已更新：$PY_IMAGE / $WEB_IMAGE"
 }
 
 require_sha() {
@@ -430,6 +449,7 @@ do_bootstrap() {
   # fresh server 显式流程：基础服务 + fresh DB（alembic upgrade head + seed）+ SSOT(previous=none)。
   # 禁止伪造 BACKUP_VERIFIED / legacy_snapshot / previous SHA（R2-8）。
   require_sha
+  write_runtime_image_tags
   if [ -f "$CURRENT_JSON" ]; then
     echo "ERROR: bootstrap 仅限 fresh server（$CURRENT_JSON 已存在）；后续更新走 deploy 子命令" >&2
     exit 1
@@ -562,6 +582,7 @@ deploy_scope() {
   if [ "$V1_REQUIRED" = true ]; then
     v1_acl_gate || { echo 'ERROR: active broker v1 ACL gate failed' >&2; exit 1; }
   fi
+  write_runtime_image_tags
   prev_runtime="$(runtime_descriptor current)" || return 1
   prior_previous="$(runtime_descriptor previous)" || return 1
   if [ -n "${FIRST_CANARY_LEGACY_ROLLBACK_MANIFEST:-}" ]; then
