@@ -73,6 +73,12 @@ services:
       # edge 配置经 03-render-runtime-config.sh 渲染到 runtime（compose v5 对 override 相对路径
       # 解析基准存在偏移，override 一律用 runtime 绝对路径）
       - /srv/u-dao/projects/firebot/runtime/env/nginx.edge.http.conf:/etc/nginx/nginx.conf:ro
+    # 云模式 edge 为 HTTP-only（TLS 由 shared ingress 终结）：基座 https healthcheck 不适用
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/health/live >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
     networks:
       firebot: {}
       u-dao-ingress:
