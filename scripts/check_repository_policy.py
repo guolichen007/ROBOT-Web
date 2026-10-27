@@ -50,6 +50,7 @@ marker_allow = {
     "scripts/server-preflight.sh",
     "deploy/u-dao/scripts/02-gen-bootstrap-secrets.sh",
     "deploy/u-dao/scripts/50-public-preflight.sh",
+    "deploy/u-dao/scripts/70-prepare-public-ingress.sh",
     "apps/api/app/core/config.py",
     # The handoff generator intentionally emits OWNER-supplied placeholders.
     "scripts/generate_ros2_handoff.py",

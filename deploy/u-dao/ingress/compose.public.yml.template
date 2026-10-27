@@ -1,0 +1,9 @@
+# U-Dao shared ingress 生产公网端口模板（platform 资源，默认 NOT ACTIVE）。
+# 由 deploy/u-dao/scripts/70-prepare-public-ingress.sh 在 OWNER 提供正式域名/TLS 后
+# 合并进 /srv/u-dao/platform/ingress/docker-compose.yml 的 nginx 服务 ports（模板参考）。
+# 不改变 bootstrap 18000/18443；必须显式激活。
+# 合并后的 nginx ports 应为（bootstrap + 生产并存）：
+#   - "127.0.0.1:18000:18000"
+#   - "127.0.0.1:18443:18443"
+#   - "80:80"
+#   - "443:443"

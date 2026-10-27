@@ -1,0 +1,52 @@
+# Firebot 生产公网路由片段模板（PUBLIC_INGRESS，默认不存在/不激活）。
+# 由 deploy/u-dao/scripts/70-prepare-public-ingress.sh 在 OWNER 提供正式域名/TLS 后生成：
+#   变量：__PUBLIC_DOMAIN__ / __PUBLIC_TLS_CERT__ / __PUBLIC_TLS_KEY__
+# 生成目标：/srv/u-dao/platform/ingress/conf.d/firebot-public.conf
+# 本文件不改变 bootstrap 18000/18443；必须显式激活；nginx -t 通过后才 reload。
+resolver 127.0.0.11 valid=10s ipv6=off;
+
+map $http_upgrade $firebot_public_connection_upgrade { default upgrade; '' close; }
+
+# 生产 80：仅 health 放行，其余 301 → https
+server {
+  listen 80;
+  server_name __PUBLIC_DOMAIN__;
+  set $firebot_edge_upstream firebot-edge:80;
+
+  location = /health/live {
+    proxy_pass http://$firebot_edge_upstream;
+  }
+  location / {
+    return 301 https://$host$request_uri;
+  }
+}
+
+# 生产 443：正式证书终结 TLS → firebot-edge
+server {
+  listen 443 ssl;
+  server_name __PUBLIC_DOMAIN__;
+  ssl_certificate __PUBLIC_TLS_CERT__;
+  ssl_certificate_key __PUBLIC_TLS_KEY__;
+  ssl_protocols TLSv1.2 TLSv1.3;
+  ssl_session_tickets off;
+
+  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+  add_header X-Content-Type-Options "nosniff" always;
+  add_header Referrer-Policy "no-referrer" always;
+  add_header X-Frame-Options "DENY" always;
+  add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https: wss:; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+  add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
+
+  set $firebot_edge_upstream firebot-edge:80;
+  location / {
+    proxy_pass http://$firebot_edge_upstream;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $firebot_public_connection_upgrade;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_read_timeout 3600s;
+  }
+}

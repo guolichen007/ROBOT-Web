@@ -107,11 +107,23 @@ else
   echo "SKIP public compose render（docker 不可用）"
 fi
 
-# ---- 4) DOWNLINK 恒 false ----
+# ---- 3.5) shared ingress 生产模板与端口（模板存在 + 端口 80/443 仅由平台层定义）----
+INGRESS_TEMPLATE="$REPO_ROOT/deploy/u-dao/ingress/conf.d/firebot.public.conf.template"
+[ -f "$INGRESS_TEMPLATE" ] || fail "缺少 ingress 生产模板 $INGRESS_TEMPLATE"
+ok "ingress 生产模板存在（80 redirect + 443 ssl，需 70-prepare-public-ingress.sh 显式激活）"
+PUBLIC_COMPOSE_PORTS="$REPO_ROOT/deploy/u-dao/ingress/compose.public.yml.template"
+[ -f "$PUBLIC_COMPOSE_PORTS" ] && ok "ingress 公网端口模板存在（80/443）" || fail "缺少 ingress 公网端口模板"
+
+# ---- 4) DOWNLINK 恒 false + allowlist 空 ----
 if [ -f "$ENV_FILE" ] && grep -qE '^VEHICLE_AGENT_V1_DOWNLINK_ENABLED=true' "$ENV_FILE"; then
   fail "VEHICLE_AGENT_V1_DOWNLINK_ENABLED 不得为 true（公网激活前）"
 else
   ok "DOWNLINK=false"
+fi
+if [ -f "$ENV_FILE" ] && grep -qE '^VEHICLE_AGENT_V1_DOWNLINK_ALLOWLIST=[^[:space:]]+' "$ENV_FILE"; then
+  fail "VEHICLE_AGENT_V1_DOWNLINK_ALLOWLIST 必须为空（公网激活前）"
+else
+  ok "DOWNLINK_ALLOWLIST=empty"
 fi
 
 # ---- 结论 ----
