@@ -116,7 +116,11 @@ def media_ticket(
 @router.post("/authorize", include_in_schema=False)
 def authorize_media(payload: MediaAuthRequest, db: DbSession) -> dict:
     if payload.action == "publish":
-        if payload.token != get_settings().effective_media_publish_token:
+        # SRT 发布凭据经 streamid=publish:<path>:<user>:<pass> 传入（MediaMTX 将 user/password
+        # 映射进 body，token 放 password 字段，JWT 因 SRT streamid 512 字符上限不适用）；
+        # RTSP 走 ?token= query（payload.token）。两种协议校验同一 publish token + 流注册表。
+        candidate = payload.password if payload.protocol == "srt" else payload.token
+        if candidate != get_settings().effective_media_publish_token:
             raise PlatformError("AUTH_REQUIRED", "媒体发布凭据无效", status_code=401)
         stream = db.scalar(select(StreamRegistry).where(StreamRegistry.stream_id == payload.path))
         if not stream:

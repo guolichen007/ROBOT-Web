@@ -416,6 +416,45 @@ def test_media_publish_requires_registered_path_and_secret() -> None:
         assert unknown.status_code == 403
 
 
+def test_media_srt_publish_uses_streamid_password() -> None:
+    """SRT 发布凭据经 streamid（MediaMTX 映射 password 字段）；禁止用 token 字段绕过。"""
+    with TestClient(app) as client:
+        token = get_settings().effective_media_publish_token
+        valid = client.post(
+            "/api/v1/media/authorize",
+            json={
+                "action": "publish",
+                "path": "R001-roof_rgb",
+                "protocol": "srt",
+                "user": "u-dao",
+                "password": token,
+            },
+        )
+        assert valid.status_code == 200
+        wrong_pass = client.post(
+            "/api/v1/media/authorize",
+            json={
+                "action": "publish",
+                "path": "R001-roof_rgb",
+                "protocol": "srt",
+                "user": "u-dao",
+                "password": "WRONG",
+            },
+        )
+        assert wrong_pass.status_code == 401
+        # SRT 协议不得走 token 字段（即使值正确）
+        token_field = client.post(
+            "/api/v1/media/authorize",
+            json={
+                "action": "publish",
+                "path": "R001-roof_rgb",
+                "protocol": "srt",
+                "token": token,
+            },
+        )
+        assert token_field.status_code == 401
+
+
 def _task_for_stop(db, *, robot: Robot, user: User, version: MapVersion) -> Task:
     task = Task(
         task_code=f"STOP-TEST-{uuid4()}",
