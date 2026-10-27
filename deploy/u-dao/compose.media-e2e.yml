@@ -3,8 +3,11 @@
 # 前置：firebot 栈已运行（mediamtx 在 u-dao-firebot_firebot 网络，SRT 8890/udp）。
 # 用法（在 release/repo 根，真值来自 runtime secret 文件，勿写死）：
 #   注意：sudo 会重置环境变量，compose 插值变量必须经 `sudo -n env K=V` 传递。
+#   MEDIA_E2E_PUBLISH_TOKEN 现为 R001 的 per-vehicle HMAC 派生 token：
+#     R001_TOKEN=$(printf 'vehicle-srt:R001' | openssl dgst -sha256 \
+#       -hmac "$(cat /srv/u-dao/projects/firebot/runtime/secrets/app/media_publish_token)" | awk '{print $2}')
 #   sudo -n env \
-#     MEDIA_E2E_PUBLISH_TOKEN="$(cat /srv/u-dao/projects/firebot/runtime/secrets/app/media_publish_token)" \
+#     MEDIA_E2E_PUBLISH_TOKEN="$R001_TOKEN" \
 #     MEDIA_E2E_SRT_PASSPHRASE="$(cat /srv/u-dao/projects/firebot/runtime/secrets/app/srt_publish_passphrase)" \
 #     docker compose -p u-dao-media-e2e -f deploy/u-dao/compose.media-e2e.yml up -d --build
 #   ...验收（scripts/check_srt_whep_e2e.py）...
@@ -21,6 +24,7 @@ services:
         APK_REPOSITORY_BASE: ${MEDIA_E2E_APK_BASE:-mirrors.cloud.tencent.com/alpine}
     environment:
       MEDIA_STREAM_ID: R001-roof_rgb
+      SRT_USER: R001
       OUTPUT_PROTOCOL: srt
       MEDIA_SRT_ORIGIN: srt://mediamtx:8890
       MEDIA_PUBLISH_TOKEN: ${MEDIA_E2E_PUBLISH_TOKEN:?MEDIA_E2E_PUBLISH_TOKEN required}
@@ -37,6 +41,7 @@ services:
         APK_REPOSITORY_BASE: ${MEDIA_E2E_APK_BASE:-mirrors.cloud.tencent.com/alpine}
     environment:
       MEDIA_STREAM_ID: R001-roof_thermal
+      SRT_USER: R001
       OUTPUT_PROTOCOL: srt
       MEDIA_SRT_ORIGIN: srt://mediamtx:8890
       MEDIA_PUBLISH_TOKEN: ${MEDIA_E2E_PUBLISH_TOKEN:?MEDIA_E2E_PUBLISH_TOKEN required}

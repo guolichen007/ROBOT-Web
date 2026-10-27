@@ -16,7 +16,9 @@ function buildTarget() {
     // SRT 鉴权：streamid=publish:<path>:<user>:<pass>（MediaMTX authHTTP 校验 password==发布 token）。
     // 注意：streamid 的分号分隔结构必须保持原文；token/passphrase 作为“值”需编码
     // （base64 含 '+'，ffmpeg 会对查询值做 URL 解码，'+' 会被解码为空格导致鉴权/加密失败）。
-    const streamid = `publish:${streamId}:u-dao:${encodeURIComponent(token)}`
+    // per-vehicle SRT 发布语义：user 必须为流所属 canonical vehicle_id（默认 R001 合成流）
+    const srtUser = process.env.SRT_USER || 'R001'
+    const streamid = `publish:${streamId}:${srtUser}:${encodeURIComponent(token)}`
     let query = `streamid=${streamid}&pkt_size=1316`
     if (srtPassphrase) query += `&passphrase=${encodeURIComponent(srtPassphrase)}`
     return `${srtOrigin}?${query}`
