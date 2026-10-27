@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
+import math
+import os
 import socket
 import threading
 import time
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
 
 import paho.mqtt.client as mqtt
 from app.core.config import get_settings
@@ -27,7 +28,12 @@ redis = get_redis()
 
 
 def dispatcher_instance_id() -> str:
-    return f"command-dispatcher-{socket.gethostname()}-{uuid4().hex[:12]}"
+    # 稳定 client id（R2-6）：随机后缀使每次重启成为全新 MQTT 会话，
+    # 破坏会话连续性并遗留旧会话；生产为单副本部署约束，
+    # 未来多副本须用 FIREBOT_SERVICE_INSTANCE_ID 显式区分。
+    return os.environ.get(
+        "FIREBOT_SERVICE_INSTANCE_ID", f"command-dispatcher-{socket.gethostname()}"
+    )
 
 
 INSTANCE_ID = dispatcher_instance_id()
@@ -37,8 +43,12 @@ client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=INSTANCE_ID, pr
 def publish_command(payload: dict, qos: int) -> None:
     validate_message(payload)
     expires = datetime.fromisoformat(payload["expires_at"])
-    if expires <= datetime.now(UTC):
+    now = datetime.now(UTC)
+    if expires <= now:
         raise TimeoutError("command expired before publish")
+    # MQTT5 Message Expiry Interval（R2-8）：max(1, ceil(remaining))；
+    # broker 对持久会话离线队列中的过期消息到期即弃（第二层防护），车辆仍必须校验 payload.expires_at。
+    expiry_interval = max(1, math.ceil((expires - now).total_seconds()))
     destination = f"robot/{payload['vehicle_id']}/command"
     with SessionLocal() as db:
         robot = db.scalar(select(Robot).where(Robot.vehicle_id == payload["vehicle_id"]))
@@ -70,6 +80,7 @@ def publish_command(payload: dict, qos: int) -> None:
         json.dumps(payload, ensure_ascii=False),
         qos=qos,
         retain=False,
+        properties=mqtt.Properties(MessageExpiryInterval=expiry_interval),
     )
     info.wait_for_publish(timeout=3)
     if not info.is_published():
@@ -132,11 +143,12 @@ def safety_loop() -> None:
             except ResponseError as exc:
                 if "BUSYGROUP" not in str(exc):
                     raise
-            redis.setex(
-                "service:command-dispatcher:safety-heartbeat",
-                5,
-                datetime.now(UTC).isoformat(),
-            )
+            if client.is_connected():
+                redis.setex(
+                    "service:command-dispatcher:safety-heartbeat",
+                    5,
+                    datetime.now(UTC).isoformat(),
+                )
             claimed = redis.xautoclaim(
                 "firebot:safety_commands",
                 "dispatchers",
@@ -194,7 +206,10 @@ def process_safety_events(events: list) -> None:
 
 def dispatch_next() -> bool:
     """One transactional Outbox cycle, shared by the worker and mock integration tests."""
-    redis.setex("service:command-dispatcher:outbox-heartbeat", 5, datetime.now(UTC).isoformat())
+    # 心跳绑定 MQTT 连接（R2-7）：断连时 healthcheck 暴露 unhealthy；
+    # 恢复依赖 paho 有界重连，而非容器重启。
+    if client.is_connected():
+        redis.setex("service:command-dispatcher:outbox-heartbeat", 5, datetime.now(UTC).isoformat())
     with SessionLocal.begin() as db:
         row = db.scalar(
             select(OutboxEvent)
@@ -253,7 +268,14 @@ def connect() -> None:
     settings.configure_mqtt_client(client)
     while True:
         try:
-            client.connect(settings.mqtt_host, settings.mqtt_port, keepalive=30)
+            # dispatcher 是纯发布方：显式 clean session（无 broker 侧离线队列）
+            client.connect(
+                settings.mqtt_host,
+                settings.mqtt_port,
+                keepalive=30,
+                clean_start=settings.mqtt_clean_start,
+                properties=settings.mqtt_connect_properties(),
+            )
             client.loop_start()
             for _ in range(50):
                 if client.is_connected():

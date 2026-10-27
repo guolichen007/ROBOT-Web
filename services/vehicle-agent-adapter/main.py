@@ -5,6 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
+import os
+import socket
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -93,8 +96,11 @@ class Adapter:
         if self.redis.get(f"vehicle-agent:binding:{vehicle}") != binding:
             raise ValueError("binding/boot no longer active")
         now = datetime.now(UTC)
-        if datetime.fromisoformat(payload["expires_at"]) <= now:
+        expires_at = datetime.fromisoformat(payload["expires_at"])
+        if expires_at <= now:
             raise ValueError("expired canonical command")
+        # MQTT5 Message Expiry Interval（R2-8）：max(1, ceil(remaining))，broker 过期即弃
+        expiry_interval = max(1, math.ceil((expires_at - now).total_seconds()))
         correlation_key = key(vehicle, wire["msg_id"])
         fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
         entry = {
@@ -122,7 +128,13 @@ class Adapter:
         # Retried canonical messages retain EXACTLY the same UUID; the vehicle's
         # five-minute dedup cache prevents a second execution after ACK loss.
         qos, retain = TOPIC_CONTRACT["cmd"]
-        self.publish(topic(vehicle, "cmd"), json.dumps(wire, ensure_ascii=False), qos, retain)
+        self.publish(
+            topic(vehicle, "cmd"),
+            json.dumps(wire, ensure_ascii=False),
+            qos,
+            retain,
+            expiry_interval,
+        )
 
     @staticmethod
     def timeout_ack(entry: dict) -> dict:
@@ -220,12 +232,20 @@ def main() -> None:
     redis = get_redis()
     client = mqtt.Client(
         mqtt.CallbackAPIVersion.VERSION2,
-        client_id=f"vehicle-agent-adapter-{uuid4().hex[:12]}",
+        # 稳定 client id（R2-6）：随机后缀每次重启成为全新会话，丢失持久会话的 ACK 恢复能力
+        client_id=os.environ.get(
+            "FIREBOT_SERVICE_INSTANCE_ID", f"vehicle-agent-adapter-{socket.gethostname()}"
+        ),
         protocol=mqtt.MQTTv5,
     )
 
-    def publish(name: str, payload: str, qos: int, retain: bool) -> None:
-        info = client.publish(name, payload, qos=qos, retain=retain)
+    def publish(
+        name: str, payload: str, qos: int, retain: bool, message_expiry: int | None = None
+    ) -> None:
+        props = (
+            mqtt.Properties(MessageExpiryInterval=message_expiry) if message_expiry else None
+        )
+        info = client.publish(name, payload, qos=qos, retain=retain, properties=props)
         if info.rc != mqtt.MQTT_ERR_SUCCESS:
             raise RuntimeError("adapter MQTT publish rejected")
 
@@ -255,7 +275,15 @@ def main() -> None:
     if settings.mqtt_username:
         client.username_pw_set(settings.mqtt_username, settings.effective_mqtt_password)
     settings.configure_mqtt_client(client)
-    client.connect_async(settings.mqtt_host, settings.mqtt_port, keepalive=30)
+    # 持久会话（clean_start=False + Session Expiry 600s）：adapter 重启后
+    # 恢复订阅并接收 broker 代存的 v1 QoS1 ACK（late ACK 修复的第二层保障）
+    client.connect_async(
+        settings.mqtt_host,
+        settings.mqtt_port,
+        keepalive=30,
+        clean_start=False,
+        properties=settings.mqtt_connect_properties(durable=True),
+    )
     client.loop_start()
     while True:
         try:
