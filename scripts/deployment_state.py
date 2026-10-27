@@ -1,4 +1,8 @@
-"""Read old SHA-only SSOT and atomically persist explicit runtime descriptors."""
+"""Read old SHA-only SSOT and atomically persist explicit runtime descriptors.
+
+Descriptor kinds: exact_sha | legacy_snapshot | none（fresh install：无历史 runtime）。
+旧 SHA-only 文件（仅 current_sha/previous_sha 字符串）保持 exact_sha 兼容语义不变。
+"""
 
 import json
 import os
@@ -19,6 +23,10 @@ def load(path):
 
 def runtime(state, prefix):
     kind = state.get(f"{prefix}_runtime_kind", "exact_sha")
+    if kind == "none":
+        # fresh install 语义：previous=none（无历史 runtime，禁止伪造回滚链）。
+        # 仅 state 文件缺失/显式 none 时出现；旧 SHA-only 文件的默认 exact_sha 语义不变。
+        return {"kind": "none"}
     if kind == "exact_sha":
         sha = state.get(f"{prefix}_sha", "UNKNOWN")
         if sha != "UNKNOWN" and not re.fullmatch(r"[0-9a-f]{40}", sha):
@@ -39,7 +47,9 @@ def write(path, current, previous):
     state = {}
     for prefix, descriptor in (("current", current), ("previous", previous)):
         state[f"{prefix}_runtime_kind"] = descriptor["kind"]
-        if descriptor["kind"] == "exact_sha":
+        if descriptor["kind"] == "none":
+            pass
+        elif descriptor["kind"] == "exact_sha":
             state[f"{prefix}_sha"] = descriptor["sha"]
         elif descriptor["kind"] == "legacy_snapshot":
             state[f"{prefix}_runtime_manifest"] = descriptor["manifest"]
