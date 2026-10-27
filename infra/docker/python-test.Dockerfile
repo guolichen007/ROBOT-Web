@@ -6,7 +6,7 @@ ARG APK_REPOSITORY_BASE=dl-cdn.alpinelinux.org/alpine
 # 中国大陆网络下 dl-cdn 的 TLS 被断；docker-cli 在 community 仓库，需同时替换两源
 RUN printf 'https://%s/v3.24/main\nhttps://%s/v3.24/community\n' \
         "$APK_REPOSITORY_BASE" "$APK_REPOSITORY_BASE" > /etc/apk/repositories \
-    && apk add --no-cache git docker-cli
+    && apk add --no-cache git bash docker-cli
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

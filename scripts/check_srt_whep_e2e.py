@@ -42,9 +42,10 @@ def check(name: str, cond: bool, detail: str = "") -> None:
 def docker() -> list[str]:
     if subprocess.run(["docker", "info"], capture_output=True, timeout=60).returncode == 0:
         return ["docker"]
-    if subprocess.run(
-        ["sudo", "-n", "docker", "info"], capture_output=True, timeout=60
-    ).returncode == 0:
+    if (
+        subprocess.run(["sudo", "-n", "docker", "info"], capture_output=True, timeout=60).returncode
+        == 0
+    ):
         return ["sudo", "-n", "docker"]
     raise RuntimeError("docker 与 sudo -n docker 均不可用")
 
@@ -60,27 +61,73 @@ def srt_publish(token: str, passphrase: str, stream_id: str, expect_ok: bool) ->
     url = f"srt://127.0.0.1:18890?streamid={streamid}&pkt_size=1316"
     if passphrase:
         url += f"&passphrase={passphrase}"
-    cmd = d + ["run", "--rm", "--network", "host", "u-dao-media-e2e-source:v1",
-               "ffmpeg", "-hide_banner", "-loglevel", "error", "-re",
-               "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=10", "-t", "6",
-               "-an", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
-               "-f", "mpegts", url]
+    cmd = d + [
+        "run",
+        "--rm",
+        "--network",
+        "host",
+        "u-dao-media-e2e-source:v1",
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-re",
+        "-f",
+        "lavfi",
+        "-i",
+        "testsrc2=size=320x240:rate=10",
+        "-t",
+        "6",
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-pix_fmt",
+        "yuv420p",
+        "-f",
+        "mpegts",
+        url,
+    ]
     result = run(cmd, timeout=60)
-    check(f"SRT publish {stream_id} (expect {'OK' if expect_ok else 'FAIL'})",
-          (result.returncode == 0) == expect_ok,
-          f"rc={result.returncode} err={result.stderr[-300:]}")
+    check(
+        f"SRT publish {stream_id} (expect {'OK' if expect_ok else 'FAIL'})",
+        (result.returncode == 0) == expect_ok,
+        f"rc={result.returncode} err={result.stderr[-300:]}",
+    )
 
 
 def mediamtx_api(path: str) -> dict:
     """容器内访问 MediaMTX v3 API（action=api 免鉴权，仅容器内 9997）。"""
     d = docker()
-    cid = run(d + ["ps", "-q", "-f", "label=com.docker.compose.project=u-dao-firebot",
-                   "-f", "label=com.docker.compose.service=mediamtx"], timeout=60)
+    cid = run(
+        d
+        + [
+            "ps",
+            "-q",
+            "-f",
+            "label=com.docker.compose.project=u-dao-firebot",
+            "-f",
+            "label=com.docker.compose.service=mediamtx",
+        ],
+        timeout=60,
+    )
     assert cid.returncode == 0 and cid.stdout.strip(), "mediamtx 容器未运行"
     # Docker 29 已移除 exec 的 -T 速记；非 tty stdin 下不加 -T 亦不分配 tty
-    result = run(d + ["exec", cid.stdout.strip(),
-                      "/busybox", "wget", "-q", "-O", "-",
-                      f"http://127.0.0.1:9997{path}"], timeout=60)
+    result = run(
+        d
+        + [
+            "exec",
+            cid.stdout.strip(),
+            "/busybox",
+            "wget",
+            "-q",
+            "-O",
+            "-",
+            f"http://127.0.0.1:9997{path}",
+        ],
+        timeout=60,
+    )
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout)
 
@@ -138,9 +185,11 @@ def whep_flow(opener, base_url: str, stream_id: str, token: str) -> None:
         sdp = exc.read().decode()
         status = exc.code
     check(f"WHEP POST {stream_id} 返回 201", status == 201, f"status={status}")
-    check("WHEP answer 含 127.0.0.1:8189 ICE candidate（端口保持）",
-          "127.0.0.1 8189" in sdp or "127.0.0.1:8189" in sdp,
-          sdp[:400])
+    check(
+        "WHEP answer 含 127.0.0.1:8189 ICE candidate（端口保持）",
+        "127.0.0.1 8189" in sdp or "127.0.0.1:8189" in sdp,
+        sdp[:400],
+    )
 
 
 def main() -> int:
@@ -167,15 +216,21 @@ def main() -> int:
     streams = (("R001-roof_rgb", "roof_rgb"), ("R001-roof_thermal", "roof_thermal"))
     for stream_id, _camera in streams:
         entry = items.get(stream_id)
-        check(f"流注册 {stream_id} ready", bool(entry and entry.get("ready")),
-              json.dumps(entry)[:200] if entry else "missing")
+        check(
+            f"流注册 {stream_id} ready",
+            bool(entry and entry.get("ready")),
+            json.dumps(entry)[:200] if entry else "missing",
+        )
         if entry:
             # MediaMTX v3 API 不暴露 pixFmt：codec 合同断言 H264；
             # yuv420p 由发布端强制（media-test-source 输出 -pix_fmt yuv420p，ready 日志有证据）
             tracks = entry.get("tracks2") or entry.get("tracks") or []
             codecs = [t.get("codec") for t in tracks]
-            check(f"{stream_id} codec H264（V1 浏览器合同；yuv420p 由发布端强制）",
-                  "H264" in codecs, str(codecs))
+            check(
+                f"{stream_id} codec H264（V1 浏览器合同；yuv420p 由发布端强制）",
+                "H264" in codecs,
+                str(codecs),
+            )
 
     # 3) 票据 + WHEP + ICE（bootstrap HTTPS；HTTP 仅 health，完整 auth 必须走 18443）
     opener, token = login(args.base_url, admin_password)

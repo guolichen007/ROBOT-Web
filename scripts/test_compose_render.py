@@ -68,20 +68,29 @@ def test_legacy_render() -> None:
             encoding="utf-8",
         )
         cfg = compose_config(env, ["docker-compose.server.yml"])
-        check("legacy name=firebot-server", cfg.get("name") == "firebot-server",
-              str(cfg.get("name")))
+        check(
+            "legacy name=firebot-server", cfg.get("name") == "firebot-server", str(cfg.get("name"))
+        )
         check("legacy mosquitto 8883:8883", has_port(ports_of(cfg, "mosquitto"), 8883, "tcp"))
         check("legacy nginx 80", has_port(ports_of(cfg, "nginx"), 80, "tcp"))
         check("legacy nginx 443", has_port(ports_of(cfg, "nginx"), 443, "tcp"))
-        check("legacy mediamtx 8554 bound to Tailscale IP",
-              has_port(ports_of(cfg, "mediamtx"), 8554, "tcp", "100.64.0.2"))
-        check("legacy mediamtx 8189/udp bound to LAN IP",
-              has_port(ports_of(cfg, "mediamtx"), 8189, "udp", "192.168.110.101"))
-        check("legacy mediamtx 8189/tcp bound to LAN IP",
-              has_port(ports_of(cfg, "mediamtx"), 8189, "tcp", "192.168.110.101"))
-        check("legacy no 9997/8889 exposure",
-              not has_port(ports_of(cfg, "mediamtx"), 9997, "tcp")
-              and not has_port(ports_of(cfg, "mediamtx"), 8889, "tcp"))
+        check(
+            "legacy mediamtx 8554 bound to Tailscale IP",
+            has_port(ports_of(cfg, "mediamtx"), 8554, "tcp", "100.64.0.2"),
+        )
+        check(
+            "legacy mediamtx 8189/udp bound to LAN IP",
+            has_port(ports_of(cfg, "mediamtx"), 8189, "udp", "192.168.110.101"),
+        )
+        check(
+            "legacy mediamtx 8189/tcp bound to LAN IP",
+            has_port(ports_of(cfg, "mediamtx"), 8189, "tcp", "192.168.110.101"),
+        )
+        check(
+            "legacy no 9997/8889 exposure",
+            not has_port(ports_of(cfg, "mediamtx"), 9997, "tcp")
+            and not has_port(ports_of(cfg, "mediamtx"), 8889, "tcp"),
+        )
 
 
 RUNTIME = "/srv/u-dao/projects/firebot/runtime"
@@ -103,55 +112,95 @@ def test_u_dao_render() -> None:
         )
         cfg = compose_config(env, ["docker-compose.server.yml", "deploy/u-dao/compose.u-dao.yml"])
         check("u-dao name=u-dao-firebot", cfg.get("name") == "u-dao-firebot", str(cfg.get("name")))
-        check("u-dao mosquitto 127.0.0.1:18883:8883",
-              has_port(ports_of(cfg, "mosquitto"), 18883, "tcp", "127.0.0.1"))
-        check("u-dao mediamtx 127.0.0.1:18554:8554",
-              has_port(ports_of(cfg, "mediamtx"), 18554, "tcp", "127.0.0.1"))
-        check("u-dao mediamtx 127.0.0.1:18890:8890/udp (SRT)",
-              has_port(ports_of(cfg, "mediamtx"), 18890, "udp", "127.0.0.1"))
-        check("u-dao mediamtx 127.0.0.1:8189 udp+tcp（端口保持）",
-              has_port(ports_of(cfg, "mediamtx"), 8189, "udp", "127.0.0.1")
-              and has_port(ports_of(cfg, "mediamtx"), 8189, "tcp", "127.0.0.1"))
-        check("u-dao nginx 127.0.0.1:18080:80",
-              has_port(ports_of(cfg, "nginx"), 18080, "tcp", "127.0.0.1"))
+        check(
+            "u-dao mosquitto 127.0.0.1:18883:8883",
+            has_port(ports_of(cfg, "mosquitto"), 18883, "tcp", "127.0.0.1"),
+        )
+        check(
+            "u-dao mediamtx 127.0.0.1:18554:8554",
+            has_port(ports_of(cfg, "mediamtx"), 18554, "tcp", "127.0.0.1"),
+        )
+        check(
+            "u-dao mediamtx 127.0.0.1:18890:8890/udp (SRT)",
+            has_port(ports_of(cfg, "mediamtx"), 18890, "udp", "127.0.0.1"),
+        )
+        check(
+            "u-dao mediamtx 127.0.0.1:8189 udp+tcp（端口保持）",
+            has_port(ports_of(cfg, "mediamtx"), 8189, "udp", "127.0.0.1")
+            and has_port(ports_of(cfg, "mediamtx"), 8189, "tcp", "127.0.0.1"),
+        )
+        check(
+            "u-dao nginx 127.0.0.1:18080:80",
+            has_port(ports_of(cfg, "nginx"), 18080, "tcp", "127.0.0.1"),
+        )
         check("u-dao nginx 无 443", not has_port(ports_of(cfg, "nginx"), 443, "tcp"))
-        check("u-dao 无 0.0.0.0 绑定", all(p.get("host_ip", "0.0.0.0") != "0.0.0.0"
-                                        for svc in cfg["services"] for p in ports_of(cfg, svc)))
+        check(
+            "u-dao 无 0.0.0.0 绑定",
+            all(
+                p.get("host_ip", "0.0.0.0") != "0.0.0.0"
+                for svc in cfg["services"]
+                for p in ports_of(cfg, svc)
+            ),
+        )
         api_cmd = cfg["services"]["api"].get("command")
         check("u-dao api --proxy-headers", api_cmd and "--proxy-headers" in api_cmd, str(api_cmd))
         nginx_nets = cfg["services"]["nginx"].get("networks", {})
-        check("u-dao edge 别名 firebot-edge 入 u-dao-ingress 网络",
-              "u-dao-ingress" in nginx_nets
-              and "firebot-edge" in (nginx_nets["u-dao-ingress"] or {}).get("aliases", []))
+        check(
+            "u-dao edge 别名 firebot-edge 入 u-dao-ingress 网络",
+            "u-dao-ingress" in nginx_nets
+            and "firebot-edge" in (nginx_nets["u-dao-ingress"] or {}).get("aliases", []),
+        )
         top_nets = cfg.get("networks", {})
-        check("u-dao 顶层 external u-dao-ingress",
-              top_nets.get("u-dao-ingress", {}).get("external") is True
-              and top_nets["u-dao-ingress"].get("name") == "u-dao-ingress")
+        check(
+            "u-dao 顶层 external u-dao-ingress",
+            top_nets.get("u-dao-ingress", {}).get("external") is True
+            and top_nets["u-dao-ingress"].get("name") == "u-dao-ingress",
+        )
         # secrets 分发模式：file 型 compose secret 是绑定挂载（保留宿主 600 权限），
         # 容器内非 root 用户不可读 → 改为 app-secrets-init 拷入具名卷分发
         # （宿主文件 600/ubuntu 不变）。
-        check("u-dao app-secrets-init 存在",
-              "app-secrets-init" in cfg.get("services", {}), "missing app-secrets-init")
-        check("u-dao 顶层 app_secrets 具名卷",
-              "app_secrets" in cfg.get("volumes", {}), str(cfg.get("volumes")))
-        for svc in ("api", "migrate", "mqtt-ingress", "command-dispatcher", "task-worker",
-                    "postgres", "redis", "mosquitto"):
+        check(
+            "u-dao app-secrets-init 存在",
+            "app-secrets-init" in cfg.get("services", {}),
+            "missing app-secrets-init",
+        )
+        check(
+            "u-dao 顶层 app_secrets 具名卷",
+            "app_secrets" in cfg.get("volumes", {}),
+            str(cfg.get("volumes")),
+        )
+        for svc in (
+            "api",
+            "migrate",
+            "mqtt-ingress",
+            "command-dispatcher",
+            "task-worker",
+            "postgres",
+            "redis",
+            "mosquitto",
+        ):
             svc_vols = {v.get("target"): v for v in cfg["services"][svc].get("volumes", [])}
-            check(f"u-dao {svc} 挂载 app_secrets:/run/secrets",
-                  svc_vols.get("/run/secrets", {}).get("source") == "app_secrets",
-                  str(svc_vols.get("/run/secrets")))
-            check(f"u-dao {svc} 无 file 型 compose secret",
-                  not cfg["services"][svc].get("secrets"), str(cfg["services"][svc].get("secrets")))
+            check(
+                f"u-dao {svc} 挂载 app_secrets:/run/secrets",
+                svc_vols.get("/run/secrets", {}).get("source") == "app_secrets",
+                str(svc_vols.get("/run/secrets")),
+            )
+            check(
+                f"u-dao {svc} 无 file 型 compose secret",
+                not cfg["services"][svc].get("secrets"),
+                str(cfg["services"][svc].get("secrets")),
+            )
         # srt_publish_passphrase 不经过 compose secret：由 runtime 渲染的
         # mediamtx.server.u-dao.yml（per-path srtPublishPassphrase）注入，见 mediamtx 卷断言。
         # mediamtx 挂载运行时渲染配置
         mtx_vols = {
-            v.get("target"): v.get("source")
-            for v in cfg["services"]["mediamtx"].get("volumes", [])
+            v.get("target"): v.get("source") for v in cfg["services"]["mediamtx"].get("volumes", [])
         }
-        check("u-dao mediamtx 配置指向 runtime 渲染 yml",
-              mtx_vols.get("/mediamtx.yml") == f"{RUNTIME}/env/mediamtx.server.u-dao.yml",
-              str(mtx_vols.get("/mediamtx.yml")))
+        check(
+            "u-dao mediamtx 配置指向 runtime 渲染 yml",
+            mtx_vols.get("/mediamtx.yml") == f"{RUNTIME}/env/mediamtx.server.u-dao.yml",
+            str(mtx_vols.get("/mediamtx.yml")),
+        )
 
 
 def docker_directly_accessible() -> bool:
@@ -170,15 +219,26 @@ def run_preflight(
     )
     if docker_directly_accessible():
         env = {**os.environ, **base_env}
-        return subprocess.run(["bash", "scripts/server-preflight.sh"], cwd=ROOT,
-                              capture_output=True, text=True, timeout=180, env=env)
-    cmd = ["sudo", "-n", "env"] + [f"{k}={v}" for k, v in base_env.items()] + \
-        ["bash", "scripts/server-preflight.sh"]
+        return subprocess.run(
+            ["bash", "scripts/server-preflight.sh"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=180,
+            env=env,
+        )
+    cmd = (
+        ["sudo", "-n", "env"]
+        + [f"{k}={v}" for k, v in base_env.items()]
+        + ["bash", "scripts/server-preflight.sh"]
+    )
     proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=180)
     # 清理 root 产生的文件，保证 TemporaryDirectory 可回收
     subprocess.run(
         ["sudo", "-n", "chown", "-R", f"{os.getuid()}:{os.getgid()}", str(env_file.parent)],
-                   capture_output=True, timeout=60)
+        capture_output=True,
+        timeout=60,
+    )
     return proc
 
 
@@ -190,8 +250,10 @@ def test_legacy_preflight_fail_closed() -> None:
         env.write_text("APP_ENV=server\nENABLE_API_DOCS=false\n", encoding="utf-8")
         proc = run_preflight(env)
         check("legacy preflight 缺变量 → FAIL", proc.returncode != 0)
-        check("legacy preflight 报 SERVER_TAILSCALE_IP 语义",
-              "SERVER_TAILSCALE_IP" in (proc.stdout + proc.stderr))
+        check(
+            "legacy preflight 报 SERVER_TAILSCALE_IP 语义",
+            "SERVER_TAILSCALE_IP" in (proc.stdout + proc.stderr),
+        )
         env2 = Path(tmp) / ".env2.server"
         env2.write_text(
             "APP_ENV=server\nENABLE_API_DOCS=false\nSERVER_TAILSCALE_IP=192.0.2.11\nSERVER_LAN_IP=192.0.2.10\n",
@@ -205,8 +267,7 @@ def test_legacy_preflight_fail_closed() -> None:
             {
                 "U_DAO_MODE": "1",
                 "FIREBOT_RUNTIME_ROOT": str(tmp),
-                "FIREBOT_COMPOSE_FILES":
-                "docker-compose.server.yml deploy/u-dao/compose.u-dao.yml",
+                "FIREBOT_COMPOSE_FILES": "docker-compose.server.yml deploy/u-dao/compose.u-dao.yml",
             },
         )
         check("u-dao preflight 定义 SERVER_TAILSCALE_IP → FAIL", proc3.returncode != 0)

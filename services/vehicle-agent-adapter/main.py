@@ -242,9 +242,7 @@ def main() -> None:
     def publish(
         name: str, payload: str, qos: int, retain: bool, message_expiry: int | None = None
     ) -> None:
-        props = (
-            mqtt_message_expiry_properties(message_expiry) if message_expiry else None
-        )
+        props = mqtt_message_expiry_properties(message_expiry) if message_expiry else None
         info = client.publish(name, payload, qos=qos, retain=retain, properties=props)
         if info.rc != mqtt.MQTT_ERR_SUCCESS:
             raise RuntimeError("adapter MQTT publish rejected")

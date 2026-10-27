@@ -101,21 +101,34 @@ esac
 
 
 class CloudDeployTests(unittest.TestCase):
-    def run_case(self, case: str, *, target_sha=SHA1, extra_env=None, expect_rc=0,
-                 pre_state: dict | None = None) -> subprocess.CompletedProcess:
+    def run_case(
+        self,
+        case: str,
+        *,
+        target_sha=SHA1,
+        extra_env=None,
+        expect_rc=0,
+        pre_state: dict | None = None,
+    ) -> subprocess.CompletedProcess:
         artifacts = ROOT / "artifacts"
         artifacts.mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="cloud-deploy-", dir=artifacts) as directory:
             work = Path(directory).resolve()
             (work / "scripts").mkdir()
-            for name in ("server-deploy.sh", "docker_cmd.sh", "vehicle-agent-rollout.sh",
-                         "deployment_state.py", "legacy_runtime.py"):
+            for name in (
+                "server-deploy.sh",
+                "docker_cmd.sh",
+                "vehicle-agent-rollout.sh",
+                "deployment_state.py",
+                "legacy_runtime.py",
+            ):
                 shutil.copyfile(ROOT / "scripts" / name, work / "scripts" / name)
             (work / "head").write_text(target_sha)
             if pre_state is not None:
                 (work / "deployments").mkdir()
                 (work / "deployments" / "current.json").write_text(
-                    json.dumps(pre_state, ensure_ascii=False, indent=2), encoding="utf-8")
+                    json.dumps(pre_state, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
             (work / "harness.sh").write_text(HARNESS, encoding="utf-8", newline="\n")
             env = {
                 **os.environ,
@@ -125,11 +138,21 @@ class CloudDeployTests(unittest.TestCase):
                 "FIREBOT_COMPOSE_FILES": "docker-compose.server.yml deploy/u-dao/compose.u-dao.yml",
             }
             env.update(extra_env or {})
-            result = subprocess.run(["bash", "harness.sh"], cwd=work, capture_output=True,
-                                    text=True, encoding="utf-8", env=env, timeout=60)
-            self.assertEqual(result.returncode, expect_rc,
-                             f"case={case} rc={result.returncode}\n"
-                             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}")
+            result = subprocess.run(
+                ["bash", "harness.sh"],
+                cwd=work,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                env=env,
+                timeout=60,
+            )
+            self.assertEqual(
+                result.returncode,
+                expect_rc,
+                f"case={case} rc={result.returncode}\n"
+                f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}",
+            )
             return result
 
     def state(self, result) -> dict:
@@ -154,60 +177,96 @@ class CloudDeployTests(unittest.TestCase):
         self.assertIn("非 fresh DB", result.stdout + result.stderr)
 
     def test_first_release_keeps_previous_none(self):
-        self.run_case("first-release", pre_state={
-            "current_runtime_kind": "exact_sha", "current_sha": SHA1,
-            "previous_runtime_kind": "none",
-        })
+        self.run_case(
+            "first-release",
+            pre_state={
+                "current_runtime_kind": "exact_sha",
+                "current_sha": SHA1,
+                "previous_runtime_kind": "none",
+            },
+        )
         # SSOT 由 write_ssot 真实写入 harness 工作目录；断言通过第二段验证：
         # 第二次发布测试覆盖轮转语义。
 
     def test_second_release_rotates_previous(self):
-        self.run_case("second-release", target_sha=SHA2, pre_state={
-            "current_runtime_kind": "exact_sha", "current_sha": SHA1,
-            "previous_runtime_kind": "none",
-        })
+        self.run_case(
+            "second-release",
+            target_sha=SHA2,
+            pre_state={
+                "current_runtime_kind": "exact_sha",
+                "current_sha": SHA1,
+                "previous_runtime_kind": "none",
+            },
+        )
         # 断言 SSOT 轮转由 harness 内 trace 完成（见 harness 内 write_ssot 真实执行）；
         # 具体文件断言在 test_ssot_file_assertions 中单独验证。
 
     def test_fresh_failure_no_auto_rollback(self):
-        result = self.run_case("fresh-failure", target_sha=SHA1, expect_rc=1,
-                               extra_env={"FAIL_RECREATE": "1"},
-                               pre_state={
-                                   "current_runtime_kind": "exact_sha", "current_sha": SHA1,
-                                   "previous_runtime_kind": "none",
-                               })
+        result = self.run_case(
+            "fresh-failure",
+            target_sha=SHA1,
+            expect_rc=1,
+            extra_env={"FAIL_RECREATE": "1"},
+            pre_state={
+                "current_runtime_kind": "exact_sha",
+                "current_sha": SHA1,
+                "previous_runtime_kind": "none",
+            },
+        )
         self.assertIn("AUTO_ROLLBACK=FAIL（fresh", result.stdout + result.stderr)
         self.assertNotIn("ROLLBACK_TO_CALLED", result.stdout)
 
     def test_second_failure_auto_rollbacks(self):
-        result = self.run_case("second-failure", target_sha=SHA2, expect_rc=1,
-                               extra_env={"FAIL_RECREATE": "1"},
-                               pre_state={
-                                   "current_runtime_kind": "exact_sha", "current_sha": SHA1,
-                                   "previous_runtime_kind": "none",
-                               })
+        result = self.run_case(
+            "second-failure",
+            target_sha=SHA2,
+            expect_rc=1,
+            extra_env={"FAIL_RECREATE": "1"},
+            pre_state={
+                "current_runtime_kind": "exact_sha",
+                "current_sha": SHA1,
+                "previous_runtime_kind": "none",
+            },
+        )
         self.assertIn("AUTO_ROLLBACK=PASS", result.stdout + result.stderr)
 
     def test_rollback_none_rejected(self):
-        result = self.run_case("rollback-none", expect_rc=1, pre_state={
-            "current_runtime_kind": "exact_sha", "current_sha": SHA2,
-            "previous_runtime_kind": "none",
-        })
+        result = self.run_case(
+            "rollback-none",
+            expect_rc=1,
+            pre_state={
+                "current_runtime_kind": "exact_sha",
+                "current_sha": SHA2,
+                "previous_runtime_kind": "none",
+            },
+        )
         self.assertIn("previous=none", result.stdout + result.stderr)
 
     def test_rollback_unknown_rejected(self):
-        result = self.run_case("rollback-unknown", expect_rc=1, pre_state={
-            "current_runtime_kind": "exact_sha", "current_sha": SHA2,
-            "previous_runtime_kind": "exact_sha", "previous_sha": "UNKNOWN",
-        })
+        result = self.run_case(
+            "rollback-unknown",
+            expect_rc=1,
+            pre_state={
+                "current_runtime_kind": "exact_sha",
+                "current_sha": SHA2,
+                "previous_runtime_kind": "exact_sha",
+                "previous_sha": "UNKNOWN",
+            },
+        )
         self.assertIn("没有可回滚的 previous SHA", result.stdout + result.stderr)
 
     def test_u_dao_guard_rejects_missing_override(self):
-        result = self.run_case("u-dao-guard", expect_rc=1, extra_env={"GIT_HAS_UDAO_FILE": "0"},
-                               pre_state={
-                                   "current_runtime_kind": "exact_sha", "current_sha": SHA2,
-                                   "previous_runtime_kind": "exact_sha", "previous_sha": SHA0,
-                               })
+        result = self.run_case(
+            "u-dao-guard",
+            expect_rc=1,
+            extra_env={"GIT_HAS_UDAO_FILE": "0"},
+            pre_state={
+                "current_runtime_kind": "exact_sha",
+                "current_sha": SHA2,
+                "previous_runtime_kind": "exact_sha",
+                "previous_sha": SHA0,
+            },
+        )
         self.assertIn("U_DAO_GUARD=FAIL", result.stdout + result.stderr)
 
 
@@ -225,38 +284,68 @@ class SsotFileTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="ssot-", dir=artifacts) as directory:
             work = Path(directory).resolve()
             (work / "scripts").mkdir()
-            for name in ("server-deploy.sh", "docker_cmd.sh", "vehicle-agent-rollout.sh",
-                         "deployment_state.py", "legacy_runtime.py"):
+            for name in (
+                "server-deploy.sh",
+                "docker_cmd.sh",
+                "vehicle-agent-rollout.sh",
+                "deployment_state.py",
+                "legacy_runtime.py",
+            ):
                 shutil.copyfile(ROOT / "scripts" / name, work / "scripts" / name)
             (work / "head").write_text(SHA1)
-            _write_state(work / "deployments" / "current.json", {
-                "current_runtime_kind": "exact_sha", "current_sha": SHA1,
-                "previous_runtime_kind": "none",
-            })
+            _write_state(
+                work / "deployments" / "current.json",
+                {
+                    "current_runtime_kind": "exact_sha",
+                    "current_sha": SHA1,
+                    "previous_runtime_kind": "none",
+                },
+            )
             # 独立 case 名避免与 HARNESS 内置 case 块重复执行 deploy_scope
             harness = HARNESS + (
-                "\ncase \"$CASE\" in\n  ssot-case) deploy_scope all-app "
+                '\ncase "$CASE" in\n  ssot-case) deploy_scope all-app '
                 "api mqtt-ingress command-dispatcher task-worker web ;;\nesac\n"
             )
             (work / "harness.sh").write_text(harness, encoding="utf-8", newline="\n")
-            env = {**os.environ, "CASE": "ssot-case", "TARGET_SHA": SHA1,
-                   "TEST_PYTHON": sys.executable,
-                   "FIREBOT_COMPOSE_FILES":
-                   "docker-compose.server.yml deploy/u-dao/compose.u-dao.yml"}
-            result = subprocess.run(["bash", "harness.sh"], cwd=work, capture_output=True,
-                                    text=True, encoding="utf-8", env=env, timeout=60)
+            env = {
+                **os.environ,
+                "CASE": "ssot-case",
+                "TARGET_SHA": SHA1,
+                "TEST_PYTHON": sys.executable,
+                "FIREBOT_COMPOSE_FILES": "docker-compose.server.yml deploy/u-dao/compose.u-dao.yml",
+            }
+            result = subprocess.run(
+                ["bash", "harness.sh"],
+                cwd=work,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                env=env,
+                timeout=60,
+            )
             self.assertEqual(result.returncode, 0, result.stderr)
             state = json.loads((work / "deployments" / "current.json").read_text(encoding="utf-8"))
             self.assertEqual(state["current_sha"], SHA1)
             self.assertEqual(state["previous_runtime_kind"], "none")
             # 第二次发布：轮转 previous=旧 current
-            _write_state(work / "deployments" / "current.json", {
-                "current_runtime_kind": "exact_sha", "current_sha": SHA1,
-                "previous_runtime_kind": "none",
-            })
+            _write_state(
+                work / "deployments" / "current.json",
+                {
+                    "current_runtime_kind": "exact_sha",
+                    "current_sha": SHA1,
+                    "previous_runtime_kind": "none",
+                },
+            )
             env2 = {**env, "TARGET_SHA": SHA2}
-            result2 = subprocess.run(["bash", "harness.sh"], cwd=work, capture_output=True,
-                                     text=True, encoding="utf-8", env=env2, timeout=60)
+            result2 = subprocess.run(
+                ["bash", "harness.sh"],
+                cwd=work,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                env=env2,
+                timeout=60,
+            )
             self.assertEqual(result2.returncode, 0, result2.stderr)
             state2 = json.loads((work / "deployments" / "current.json").read_text(encoding="utf-8"))
             self.assertEqual(state2["current_sha"], SHA2)
@@ -280,13 +369,16 @@ class ReleaseGuardTests(unittest.TestCase):
         (base / "f.txt").write_text("x")
         subprocess.run(["git", "-C", str(base), "add", "f.txt"], check=True)
         subprocess.run(["git", "-C", str(base), "commit", "-qm", "init"], check=True)
-        head = subprocess.check_output(["git", "-C", str(base), "rev-parse", "HEAD"],
-                                       text=True).strip()
+        head = subprocess.check_output(
+            ["git", "-C", str(base), "rev-parse", "HEAD"], text=True
+        ).strip()
         (base / "head").write_text(head)
         # release 目录名必须是真实 git SHA（immutable 目录语义）
         release = base / head
-        subprocess.run(["git", "-C", str(base), "worktree", "add", "-q", "--detach",
-                        str(release), head], check=True)
+        subprocess.run(
+            ["git", "-C", str(base), "worktree", "add", "-q", "--detach", str(release), head],
+            check=True,
+        )
         if dirty:
             (release / "dirty.txt").write_text("d")
         if on_branch:
@@ -296,25 +388,39 @@ class ReleaseGuardTests(unittest.TestCase):
     def run_guard(self, release: Path, sha: str) -> subprocess.CompletedProcess:
         work = release.parent
         (work / "scripts").mkdir(exist_ok=True)
-        for name in ("server-deploy.sh", "docker_cmd.sh", "vehicle-agent-rollout.sh",
-                     "deployment_state.py", "legacy_runtime.py"):
+        for name in (
+            "server-deploy.sh",
+            "docker_cmd.sh",
+            "vehicle-agent-rollout.sh",
+            "deployment_state.py",
+            "legacy_runtime.py",
+        ):
             shutil.copyfile(ROOT / "scripts" / name, work / "scripts" / name)
         harness = (
-            'set -euo pipefail\n'
-            'export DOCKER_CMD_SKIP_DETECT=1\n'
-            'if command -v cygpath >/dev/null; then TEST_PYTHON="$(cygpath -u "$TEST_PYTHON")";' \
-                'fi\n'
+            "set -euo pipefail\n"
+            "export DOCKER_CMD_SKIP_DETECT=1\n"
+            'if command -v cygpath >/dev/null; then TEST_PYTHON="$(cygpath -u "$TEST_PYTHON")";'
+            "fi\n"
             'python3() { command "$TEST_PYTHON" "$@"; }\n'
             'git() { case "$1" in -C) command git "$@" ;; *) return 1 ;; esac; }\n'
-            'source scripts/server-deploy.sh\n'
-            'release_guard\n'
+            "source scripts/server-deploy.sh\n"
+            "release_guard\n"
         )
         (work / "harness.sh").write_text(harness, encoding="utf-8", newline="\n")
-        return subprocess.run(["bash", "harness.sh"], cwd=work, capture_output=True,
-                              text=True, encoding="utf-8", timeout=60,
-                              env={**os.environ, "TARGET_SHA": sha,
-                                   "FIREBOT_RELEASE_ROOT": str(release),
-                                   "TEST_PYTHON": sys.executable})
+        return subprocess.run(
+            ["bash", "harness.sh"],
+            cwd=work,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=60,
+            env={
+                **os.environ,
+                "TARGET_SHA": sha,
+                "FIREBOT_RELEASE_ROOT": str(release),
+                "TEST_PYTHON": sys.executable,
+            },
+        )
 
     def test_release_guard_pass(self):
         release, head = self._make_release()

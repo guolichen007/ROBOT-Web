@@ -201,6 +201,7 @@ except (OSError, ValueError, KeyError, TypeError):
 
 HARNESS = r"""
 set -euo pipefail
+export DOCKER_CMD_SKIP_DETECT=1
 if command -v cygpath >/dev/null; then TEST_PYTHON="$(cygpath -u "$TEST_PYTHON")"; fi
 python3() {
   if [ "${1:-}" = scripts/legacy_runtime.py ]; then
@@ -270,6 +271,7 @@ class CutoverTests(unittest.TestCase):
         (self.work / "scripts").mkdir()
         for name in (
             "server-deploy.sh",
+            "docker_cmd.sh",
             "vehicle-agent-rollout.sh",
             "deployment_state.py",
             "legacy_runtime.py",
