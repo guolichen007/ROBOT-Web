@@ -73,6 +73,9 @@ scripts/              启停、测试、备份、preflight、handoff 构建
 
 ## 新设备接入流程
 
+> 注：旧现场方案的第一步「Tailscale 登录」为**历史现场方案**；U-Dao 云部署不使用 Tailscale，
+> 车端云接入顺序见 [车端云通信与视频链路](docs/部署运维/车端云通信与视频链路.md)。
+
 新设备接入只使用 `firebotctl`（`integration/ros1/firebotctl`），标准顺序：
 
 ```text
