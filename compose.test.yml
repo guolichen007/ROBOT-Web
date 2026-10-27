@@ -15,6 +15,8 @@ x-test-environment: &test-environment
   MEDIA_PUBLISH_TOKEN: test-media-publisher-token-2026
   MEDIA_TICKET_SECONDS: "2"
   VEHICLE_AGENT_V1_DOWNLINK_ENABLED: ${TEST_VEHICLE_AGENT_DOWNLINK:-false}
+  # 测试栈专用二级门白名单（生产默认空；与 allowlist 双条件语义一致）
+  VEHICLE_AGENT_V1_DOWNLINK_ALLOWLIST: ${TEST_VEHICLE_AGENT_DOWNLINK_ALLOWLIST:-R001,R002,TEST_V1}
   ALLOWED_ORIGINS: http://localhost:${TEST_HTTP_PORT:-18080},http://127.0.0.1:${TEST_HTTP_PORT:-18080},http://host.docker.internal:${TEST_HTTP_PORT:-18080}
   ASSET_ROOT: /tmp/firebot-test-assets
 
