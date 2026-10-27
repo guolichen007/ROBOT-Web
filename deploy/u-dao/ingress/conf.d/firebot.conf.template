@@ -2,12 +2,9 @@
 # 本文件由 Firebot 仓库提供，platform 实例化时复制到 /srv/u-dao/platform/ingress/conf.d/firebot.conf。
 # 所有权：shared ingress 属于 platform（project u-dao-ingress），不属于 Firebot 生命周期；
 # Firebot 的部署/回滚脚本禁止操作 u-dao-ingress project。
-# upstream 使用 resolve：firebot edge 容器重建后由 Docker DNS 重新解析，无需人工 reload
-# （reload 兜底流程见 deploy/u-dao/ingress/README.md）。
-upstream firebot_edge {
-  zone firebot_edge 64k;
-  server firebot-edge:80 resolve;
-}
+# 解析策略：变量式 proxy_pass + Docker DNS 运行时解析（R2-10）——
+#   firebot edge 未就绪时返回 502 而非 nginx 启动失败；edge 重建后按 DNS TTL 自动恢复，无需人工 reload。
+resolver 127.0.0.11 valid=10s ipv6=off;
 
 map $http_upgrade $firebot_connection_upgrade { default upgrade; '' close; }
 
@@ -16,12 +13,13 @@ map $http_upgrade $firebot_connection_upgrade { default upgrade; '' close; }
 server {
   listen 127.0.0.1:18000;
   server_name firebot.local;
+  set $firebot_edge_upstream firebot-edge:80;
 
   location = /health/live {
-    proxy_pass http://firebot_edge;
+    proxy_pass http://$firebot_edge_upstream;
   }
   location / {
-    proxy_pass http://firebot_edge;
+    proxy_pass http://$firebot_edge_upstream;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection $firebot_connection_upgrade;
@@ -49,11 +47,12 @@ server {
   add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https: wss:; media-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
   add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()" always;
 
+  set $firebot_edge_upstream firebot-edge:80;
   location = /health/live {
-    proxy_pass http://firebot_edge;
+    proxy_pass http://$firebot_edge_upstream;
   }
   location / {
-    proxy_pass http://firebot_edge;
+    proxy_pass http://$firebot_edge_upstream;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection $firebot_connection_upgrade;
