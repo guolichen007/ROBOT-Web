@@ -7,7 +7,7 @@
 # 车端：
 #   firebotctl vehicle enroll <DEVICE_ID>            # 生成 device.env + GENERATED bridge.env
 #   firebotctl vehicle install --sha <SHA>           # 安装 Bridge + Control（不启动控制）
-#   firebotctl vehicle verify                         # 机器可读验收
+#   firebotctl vehicle verify                         # 机器可读验收（含 Control active 只读安全门）
 #   firebotctl vehicle status                         # 只读状态
 #   firebotctl vehicle start base|navigation|control  # 模块化启动
 #   firebotctl vehicle stop control                   # 只停 control
@@ -18,11 +18,15 @@
 #   firebotctl vehicle support-bundle                 # 脱敏诊断包
 #   firebotctl vehicle rollback                       # 回滚 previous
 #   firebotctl vehicle upgrade --sha <SHA>            # 升级
+#   firebotctl vehicle readonly-preflight             # 真实车辆只读接入前置检查（bootstrap/enrolled）
+#   firebotctl vehicle readonly-start                 # 只读启动 Bridge（唯一正式入口）
 # 服务器：
 #   firebotctl server deploy --sha <SHA>              # 一条命令部署
 #   firebotctl server verify / rollback / support-bundle
 # 舰队：
 #   firebotctl fleet register <DEVICE_ID>             # 生成 per-device credential + enrollment token
+#   firebotctl fleet sites                             # 只读列出 Site
+#   firebotctl fleet preregister <DEVICE_ID>          # 建立 Fleet stable identity（只读基线）
 #   firebotctl fleet status
 set -euo pipefail
 
@@ -305,10 +309,23 @@ print(pid)
         echo "VEHICLE_VERIFY=FAIL（APPROVED_RUNTIME 与期望 SHA 不一致）" >&2
         exit 1
       fi
+      # P0-C 只读安全门：enabled 之外还必须 active 门（enabled/active/activating/reloading 均 FAIL）。
+      local ctl_enabled ctl_active gate_fail=0
+      ctl_enabled="$(systemctl is-enabled firebot-control 2>/dev/null || echo disabled)"
+      ctl_active="$(systemctl is-active firebot-control 2>/dev/null || echo inactive)"
+      case "$ctl_enabled" in enabled) gate_fail=1 ;; esac
+      case "$ctl_active" in active|activating|reloading) gate_fail=1 ;; esac
       echo "DEVICE_ID=$(read_device_id)"
       echo "PROFILE_ID=$(grep -E '^PROFILE_ID=' "$DEVICE_ENV" 2>/dev/null | cut -d= -f2- || echo UNKNOWN)"
       echo "SOURCE_SHA=$expect"
-      echo "CONTROL_ENABLED=$(systemctl is-enabled firebot-control 2>/dev/null || echo disabled)"
+      echo "CONTROL_ENABLED=$ctl_enabled"
+      echo "CONTROL_ACTIVE=$ctl_active"
+      if [ "$gate_fail" -ne 0 ]; then
+        echo "READONLY_SAFETY_GATE=FAIL"
+        echo "VEHICLE_VERIFY=FAIL（firebot-control enabled/active/activating/reloading 只读铁律违反）" >&2
+        exit 1
+      fi
+      echo "READONLY_SAFETY_GATE=PASS"
       echo "VEHICLE_VERIFY=PASS"
       ;;
     status)
@@ -336,6 +353,15 @@ print(pid)
     media-secret)
       [ "${1:-}" = "check" ] || { echo "用法: firebotctl vehicle media-secret check" >&2; exit 1; }
       check_media_secret ;;
+    readonly-preflight)
+      # 真实车辆只读接入前置检查（P0-D）：bootstrap（未 enroll）/ enrolled（已 enroll）。
+      # 不得 MQTT publish、不得使用生产 credential 登录（MQTT 仅 TLS 握手）。
+      bash "$ROS1_DIR/readonly-preflight.sh" "$@" ;;
+    readonly-start)
+      # 现场唯一允许启动 Bridge 的正式入口（P0-E）：只 enable/start firebot-bridge，
+      # 绝不触碰 firebot-control/roscore/base/navigation/move_base/cmd_vel。
+      require_root
+      bash "$ROS1_DIR/readonly-start.sh" "$@" ;;
     profile-sync)
       local did; did="$(read_device_id)"
       local pid; pid="$(grep -E '^PROFILE_ID=' "$DEVICE_ENV" 2>/dev/null | cut -d= -f2- || echo "$DEFAULT_PROFILE")"
@@ -352,7 +378,7 @@ print(pid)
       FIREBOT_REQUIRE_SHA="$sha" bash "$ROS1_DIR/vehicle-install.sh" all
       FIREBOT_REQUIRE_SHA="$sha" bash "$ROS1_DIR/vehicle-install.sh" verify ;;
     *)
-      echo "firebotctl vehicle <enroll|install|verify|status|start|stop|capability|location|profile-sync|support-bundle|rollback|upgrade>" >&2; exit 1 ;;
+      echo "firebotctl vehicle <enroll|install|verify|status|start|stop|capability|location|profile-sync|support-bundle|rollback|upgrade|readonly-preflight|readonly-start>" >&2; exit 1 ;;
   esac
 }
 
@@ -574,9 +600,16 @@ cmd_fleet() {
         local did="${1:-}"
         [ -n "$did" ] || { echo "用法: firebotctl fleet register <DEVICE_ID>" >&2; exit 1; }
         "$SCRIPT_DIR/fleet-register.sh" "$did" ;;
+      sites)
+        # 只读列出 Site（SITE_CODE/SITE_NAME/ACTIVE/ROBOT_COUNT），无数据库敏感信息。
+        "$SCRIPT_DIR/fleet-sites.sh" ;;
+      preregister)
+        # 建立 Fleet stable identity（enabled=false 只读基线）；绝不生成 credential/token。
+        [ -n "${1:-}" ] || { echo "用法: firebotctl fleet preregister <DEVICE_ID> --name <N> --site-code <S>" >&2; exit 1; }
+        "$SCRIPT_DIR/fleet-preregister.sh" "$@" ;;
       status)
         echo "FLEET_STATUS=见服务器 Robot/IntegrationProfile（firebotctl server verify）" ;;
-      *) echo "firebotctl fleet <register|status>" >&2; exit 1 ;;
+      *) echo "firebotctl fleet <register|sites|preregister|status>" >&2; exit 1 ;;
     esac
   )
 }
@@ -588,14 +621,18 @@ print_help() {
   echo "用法："
   echo "  firebotctl vehicle enroll <设备编号> --token <令牌>     车辆注册"
   echo "  firebotctl vehicle install --sha <SHA>                车辆安装"
-  echo "  firebotctl vehicle verify                              车辆验收"
+  echo "  firebotctl vehicle verify                              车辆验收（含只读安全门）"
+  echo "  firebotctl vehicle readonly-preflight --phase bootstrap|enrolled  只读前置检查"
+  echo "  firebotctl vehicle readonly-start                      只读启动 Bridge（唯一正式入口）"
   echo "  firebotctl vehicle start base|navigation|control       模块化启动"
   echo "  firebotctl vehicle capability stop-only|patrol         能力提升"
   echo "  firebotctl vehicle location enable                     定位开启"
   echo "  firebotctl vehicle media-secret check                  媒体 secret 落盘规范检查"
   echo "  firebotctl vehicle rollback / support-bundle           回滚 / 诊断包"
   echo "  firebotctl server deploy --sha <SHA> / verify / rollback  服务器部署/验收/回滚"
-  echo "  firebotctl fleet register <设备编号>                    设备签发"
+  echo "  firebotctl fleet sites                                 只读列出 Site"
+  echo "  firebotctl fleet preregister <设备编号> --name <名> --site-code <站点>  预登记"
+  echo "  firebotctl fleet register <设备编号>                    设备签发（需已预登记）"
   echo ""
   echo "详细见 docs/部署运维/车端部署与实车接口.md"
 }

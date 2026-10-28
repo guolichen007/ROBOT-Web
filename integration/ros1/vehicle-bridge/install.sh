@@ -138,10 +138,11 @@ if [ "$WAS_ACTIVE" = "yes" ]; then
   sudo systemctl start firebot-bridge || true
 fi
 
-# 6) 配置与 secret 提示（不自动写密码）
+# 6) 配置与 secret 提示（不自动写密码；正式流程由 firebotctl enroll 自动写入）
 echo ""
 if [ ! -f "$SECRET_ENV" ]; then
-  echo "  未找到 $SECRET_ENV —— 请手动创建（root:root 600）："
+  echo "  DEVELOPER/DEBUG ONLY（现场正式流程：firebotctl vehicle enroll 自动写 0600）："
+  echo "  未找到 $SECRET_ENV —— 手动创建（root:root 600）："
   echo "    sudo install -m 600 /dev/null $SECRET_ENV"
   echo "    echo 'FIREBOT_MQTT_PASSWORD=<车辆MQTT密码>' | sudo tee $SECRET_ENV >/dev/null"
   echo "    sudo chmod 600 $SECRET_ENV"
@@ -150,7 +151,8 @@ else
 fi
 
 echo ""
-echo "  完成。下一步："
+echo "  DEVELOPER/DEBUG ONLY（现场正式流程一律走 firebotctl："
+echo "    enroll → install → verify → readonly-preflight → readonly-start）："
 echo "    1. 编辑 $BRIDGE_ENV 确认 SITE/MAP/频率/STUB"
 echo "    2. 确认 secret 后：sudo systemctl enable --now firebot-bridge"
 echo "    3. 运行 verify.sh 验收"

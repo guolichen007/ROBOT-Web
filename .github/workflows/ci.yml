@@ -117,10 +117,13 @@ jobs:
           python3 tests/test_u2_freshness.py
           python3 tests/test_mecanum_odom.py
           python3 tests/test_location_freshness.py
+          python3 tests/test_readonly_gate.py
       - name: Control STOP 安全测试
         run: python3 integration/ros1/vehicle-control/tests/test_stop_motion_safety.py
       - name: 生产链路合同（fleet register / 车端 TLS 信任链 / 只读铁律）
         run: python3 scripts/test_fleet_register_contract.py
+      - name: 预登记与只读门合同（fleet preregister / readonly-preflight / readonly-start）
+        run: python3 scripts/test_fleet_preregister_contract.py
       - name: py_compile 车端 Python
         run: |
           python3 -m compileall -q \

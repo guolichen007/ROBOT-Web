@@ -35,7 +35,25 @@ install_bridge() {
   FIREBOT_REQUIRE_SHA="$REQUIRE_SHA" bash "$BRIDGE_INSTALL"
 }
 
+# P0-F：firebot-control 处于 active/activating/reloading 时，安装不得静默覆盖后继续。
+# 不自动 stop（由人工确认），fail-closed 拒绝。
+assert_control_inactive() {
+  local ctl_active
+  ctl_active="$(systemctl is-active firebot-control 2>/dev/null || echo inactive)"
+  case "$ctl_active" in
+    active|activating|reloading)
+      echo "CONTROL_INSTALL=REJECTED"
+      echo "EXISTING_CONTROL_ACTIVE"
+      echo "原因：firebot-control 当前 is-active=$ctl_active；安装不得静默覆盖运行中的控制面。" >&2
+      echo "由人工确认后先 firebotctl vehicle stop control，再重新 install。" >&2
+      exit 1
+      ;;
+    *) : ;;  # inactive/unknown/failed（unit 未安装）→ 放行
+  esac
+}
+
 install_control() {
+  assert_control_inactive
   FIREBOT_REQUIRE_SHA="$REQUIRE_SHA" bash "$CONTROL_INSTALL"
   # catkin 编译（firebot_control 是 catkin 包，安装后必须编译才能 rosrun）。
   # build 失败自动回滚 previous，绝不留下 new SHA 半安装。
@@ -96,6 +114,8 @@ EOF
 }
 
 install_all() {
+  # P0-F：all 事务开始前先做 control-active 门，避免 Bridge 已装而 Control 拒绝的半事务。
+  assert_control_inactive
   # Bridge + Control 视为同一 Release 事务：任一失败整体回滚。
   local bridge_old control_old
   bridge_old="$(cat "$BRIDGE_DIR/APPROVED_RUNTIME.txt" 2>/dev/null || echo NONE)"
