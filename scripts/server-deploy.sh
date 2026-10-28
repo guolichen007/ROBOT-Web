@@ -152,11 +152,12 @@ write_runtime_image_tags() {
   [ -f "$ENV_FILE" ] || return 0
   local tmp
   tmp="$(mktemp)"
-  grep -vE '^FIREBOT_(PYTHON|WEB)_IMAGE=' "$ENV_FILE" > "$tmp" 2>/dev/null || true
-  printf 'FIREBOT_PYTHON_IMAGE=%s\nFIREBOT_WEB_IMAGE=%s\n' "$PY_IMAGE" "$WEB_IMAGE" >> "$tmp"
+  grep -vE '^FIREBOT_(PYTHON|WEB)_IMAGE=|^SOURCE_REVISION=' "$ENV_FILE" > "$tmp" 2>/dev/null || true
+  printf 'FIREBOT_PYTHON_IMAGE=%s\nFIREBOT_WEB_IMAGE=%s\nSOURCE_REVISION=%s\n' \
+    "$PY_IMAGE" "$WEB_IMAGE" "$TARGET_SHA" >> "$tmp"
   chmod --reference="$ENV_FILE" "$tmp"
   mv "$tmp" "$ENV_FILE"
-  echo "  runtime env 镜像 tag 已更新：$PY_IMAGE / $WEB_IMAGE"
+  echo "  runtime env 镜像 tag 已更新：$PY_IMAGE / $WEB_IMAGE（SOURCE_REVISION=$TARGET_SHA）"
 }
 
 require_sha() {

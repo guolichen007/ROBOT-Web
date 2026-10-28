@@ -447,5 +447,20 @@ class ReleaseGuardTests(unittest.TestCase):
         self.assertIn("detached", result.stdout + result.stderr)
 
 
+class ImageTagWriteTests(unittest.TestCase):
+    """write_runtime_image_tags 必须同步更新 SOURCE_REVISION。
+
+    回归背景：U-Dao compose 经 environment 把 ${SOURCE_REVISION} 注入容器；
+    若部署只更新镜像 tag 而不更新该 env，容器内 SOURCE_REVISION 会残留旧 SHA。
+    """
+
+    def test_write_runtime_image_tags_updates_source_revision(self):
+        text = (ROOT / "scripts" / "server-deploy.sh").read_text(encoding="utf-8")
+        fn = text.split("write_runtime_image_tags() {", 1)[1].split("\n}", 1)[0]
+        self.assertIn("^SOURCE_REVISION=", fn, "必须清理旧 SOURCE_REVISION 行")
+        self.assertIn("SOURCE_REVISION=%s", fn)
+        self.assertIn('"$TARGET_SHA"', fn, "SOURCE_REVISION 必须写入当前 TARGET_SHA")
+
+
 if __name__ == "__main__":
     unittest.main()
