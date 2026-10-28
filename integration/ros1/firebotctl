@@ -244,80 +244,17 @@ cmd_vehicle() {
   local sub="${1:-}"; shift || true
   case "$sub" in
     enroll)
+      # Vehicle Edge canonical：Enrollment 输出到 Edge Home（config/identity、secrets/mqtt.env 等）。
+      # 合同不变；实现唯一 source of truth = vehicle-edge/lifecycle/enroll.sh。
+      # cutover 门（P0-2）在 enroll.sh 内：Bridge/Edge active → REJECTED，token 零消费。
       local did="${1:-}"
       [ -n "$did" ] || { echo "用法: firebotctl vehicle enroll <DEVICE_ID> --token <TOKEN>" >&2; exit 1; }
-      echo "$did" | grep -qE '^[A-Za-z0-9_-]{1,64}$' || { echo "ERROR: DEVICE_ID 非法" >&2; exit 1; }
       require_root
-      local token="" server="${FIREBOT_ENROLL_URL:-${ENROLL_URL_DEFAULT:-}}"
-      shift || true
-      while [ $# -gt 0 ]; do
-        case "$1" in
-          --token) token="${2:-}"; shift 2 ;;
-          --server) server="${2:-}"; shift 2 ;;
-          *) shift ;;
-        esac
-      done
-      [ -n "$server" ] || { echo "ERROR: 未配置 enrollment 服务器地址（/etc/firebot/bootstrap.env 的 FIREBOT_SERVER_URL）" >&2; exit 1; }
-      [ -n "$token" ] || { echo "ERROR: 缺少 --token（由服务器 firebotctl fleet register 签发）" >&2; exit 1; }
-      # 正式 bootstrap（P0-4）：必须 https:// + 公网域名；禁止 http、IP、Tailscale hostname。
-      case "$server" in
-        https://*) : ;;
-        *) echo "ERROR: enrollment 服务器必须为 https:// 正式域名（禁止 http/IP/Tailscale）" >&2; exit 1 ;;
-      esac
-      local server_host
-      server_host="$(printf '%s' "$server" | sed -E 's#^https://([^/:]+).*#\1#')"
-      if printf '%s' "$server_host" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$|^100\.(64|68|110)\.|tailscale'; then
-        echo "ERROR: 禁止 IP/Tailscale enrollment 地址（必须为正式公网域名）" >&2
-        exit 1
-      fi
-      # P0-2 cutover 事务门：Bridge 必须已停止（migration-stop-legacy 之后）才允许消费 token。
-      # fail-closed：active/activating/reloading 时绝不写任何文件、绝不 POST（token 零消费）。
-      if bridge_running; then
-        echo "ENROLL=REJECTED"
-        echo "LEGACY_BRIDGE_STILL_ACTIVE"
-        echo "原因：firebot-bridge 仍在运行；先 firebotctl vehicle migration-stop-legacy 进入 cutover。" >&2
-        exit 1
-      fi
-      # 真实验证 token + 取得 per-device credential（服务器一次性消费，重放会 401）。
-      # HTTPS 信任 = Ubuntu 系统 CA store（TrustAsia 公网证书）；禁止 --cacert / -k。
-      local resp
-      resp="$("$CURL" -sf -X POST "$server" \
-        -H 'Content-Type: application/json' \
-        -d "{\"device_id\":\"$did\",\"token\":\"$token\"}" 2>/dev/null || true)"
-      if [ -z "$resp" ]; then
-        echo "ENROLL=FAIL（enrollment API 不可达 / token 无效或已使用）" >&2
-        exit 1
-      fi
-      mkdir -p "$FIREBOT_ETC"
-      echo "$resp" | python3 -c '
-import json, os, sys
-d = json.load(sys.stdin)
-did = d["device_id"]
-pid = d.get("profile_id", "firebot_ros1_standard_v1")
-etc = os.environ.get("FIREBOT_ETC", "/etc/firebot")
-open(f"{etc}/device.env", "w").write(f"DEVICE_ID={did}\nPROFILE_ID={pid}\n")
-os.chmod(f"{etc}/device.env", 0o644)
-open(f"{etc}/assignment.env", "w").write(
-    "MQTT_HOST=%s\nMQTT_PORT=%s\nSITE_CODE=%s\nMAP_CODE=%s\nMAP_VERSION=%s\nMAP_CHECKSUM=%s\n"
-    % (d.get("mqtt_host", ""), d.get("mqtt_port", 8883), d.get("site_code", ""),
-       d.get("map_code", ""), d.get("map_version", ""), d.get("map_checksum", ""))
-)
-os.chmod(f"{etc}/assignment.env", 0o644)
-open(f"{etc}/bridge-secret.env", "w").write("FIREBOT_MQTT_PASSWORD=%s\n" % d["mqtt_password"])
-os.chmod(f"{etc}/bridge-secret.env", 0o600)
-open(f"{etc}/device-token", "w").write(d.get("device_token", ""))
-os.chmod(f"{etc}/device-token", 0o600)
-print(did)
-print(pid)
-'
-      local profile_id
-      profile_id="$(grep -E '^PROFILE_ID=' "$DEVICE_ENV" | cut -d= -f2-)"
-      generate_bridge_env "$did" "$profile_id" > "$BRIDGE_ENV"
-      chmod 644 "$BRIDGE_ENV"
-      generate_runtime_env "$profile_id"
-      echo "ENROLL=PASS device_id=$did profile=$profile_id（per-device credential 已安全写入 0600）"
-      ;;
+      bash "$ROS1_DIR/vehicle-edge/lifecycle/enroll.sh" "$@" ;;
+
     install)
+      # LEGACY / FULL VEHICLE INSTALL — NOT FOR READONLY CONNECTIVITY MIGRATION。
+      # 真实 R002 通信迁移必须改用 firebotctl vehicle edge-install（只装通信层，不碰 ROS workspace）。
       local sha=""; while [ $# -gt 0 ]; do case "$1" in --sha) sha="$2"; shift 2;; *) shift;; esac; done
       require_sha "$sha"
       # P0-3 cutover 事务门：install ≠ start；Bridge 必须 inactive 才能进入 release_sync/安装。
@@ -396,17 +333,43 @@ print(pid)
     readonly-preflight)
       # 真实车辆只读接入前置检查（P0-D）：bootstrap（未 enroll）/ enrolled（已 enroll）。
       # 不得 MQTT publish、不得使用生产 credential 登录（MQTT 仅 TLS 握手）。
-      bash "$ROS1_DIR/readonly-preflight.sh" "$@" ;;
+      # 实现唯一 source of truth = vehicle-edge/lifecycle/readonly-preflight.sh。
+      bash "$ROS1_DIR/vehicle-edge/lifecycle/readonly-preflight.sh" "$@" ;;
     readonly-start)
-      # 现场唯一允许启动 Bridge 的正式入口（P0-E）：只 enable/start firebot-bridge，
-      # 绝不触碰 firebot-control/roscore/base/navigation/move_base/cmd_vel。
+      # 现场唯一允许启动 Vehicle Edge 的正式入口（P0-E）：只 enable/start
+      # firebot-vehicle-edge，绝不触碰 firebot-control/roscore/base/navigation/move_base/cmd_vel。
       require_root
-      bash "$ROS1_DIR/readonly-start.sh" "$@" ;;
+      bash "$ROS1_DIR/vehicle-edge/lifecycle/readonly-start.sh" "$@" ;;
     migration-stop-legacy)
       # 跨 Broker 迁移正式 cutover 切换点（P0-1）：只 disable --now firebot-bridge。
       # Control active/enabled → REJECTED/CONTROL_NOT_SAFE（不自动处理）。
+      # 实现唯一 source of truth = vehicle-edge/lifecycle/migration-stop-legacy.sh。
       require_root
-      bash "$ROS1_DIR/migration-stop-legacy.sh" "$@" ;;
+      bash "$ROS1_DIR/vehicle-edge/lifecycle/migration-stop-legacy.sh" "$@" ;;
+    edge-init)
+      # Vehicle Edge 目录与权限初始化（显式 --runtime-user；禁止 id -un 自动猜）。
+      require_root
+      bash "$ROS1_DIR/vehicle-edge/lifecycle/edge-init.sh" "$@" ;;
+    edge-install)
+      # 通信专用安装（只装 Vehicle Edge release + systemd unit + wrappers；
+      # 绝不触碰 ROS workspace/Control/catkin_make）。
+      local esha=""; while [ $# -gt 0 ]; do case "$1" in --sha) esha="$2"; shift 2;; *) shift;; esac; done
+      require_sha "$esha"
+      # exact SHA：edge-install 要求 HEAD == SHA（release 组装来源可证明）
+      local ehead; ehead="$(git -C "$REPO_DIR" rev-parse HEAD)"
+      if [ "$ehead" != "$esha" ]; then
+        echo "EDGE_INSTALL=REJECTED"
+        echo "HEAD_SHA_MISMATCH"
+        echo "原因：git HEAD($ehead) != --sha($esha)；先 checkout exact SHA。" >&2
+        exit 1
+      fi
+      require_root
+      FIREBOT_REQUIRE_SHA="$esha" bash "$ROS1_DIR/vehicle-edge/lifecycle/edge-install.sh" "$REPO_DIR" ;;
+    edge-verify)
+      # 验证当前 release/manifest/权限/service inactive（安装≠启动）。
+      local vsha=""; while [ $# -gt 0 ]; do case "$1" in --sha) vsha="$2"; shift 2;; *) shift;; esac; done
+      require_sha "$vsha"
+      FIREBOT_REQUIRE_SHA="$vsha" bash "$ROS1_DIR/vehicle-edge/lifecycle/edge-verify.sh" "$@" ;;
     profile-sync)
       local did; did="$(read_device_id)"
       local pid; pid="$(grep -E '^PROFILE_ID=' "$DEVICE_ENV" 2>/dev/null | cut -d= -f2- || echo "$DEFAULT_PROFILE")"

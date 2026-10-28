@@ -80,25 +80,32 @@ backup 清单：
 - Control active/enabled 时该命令 `MIGRATION_STOP_LEGACY=REJECTED / CONTROL_NOT_SAFE`（不自动处理 Control）。
 - **从此开始任何失败一律进入 ROLLBACK_REQUIRED=YES（第 5 节），不得“继续试试看”。**
 
-### C. 新链路安装（Bridge 全程 inactive，只有 readonly-start 允许 active）
+### C. 新链路安装（Bridge/Edge 全程 inactive，只有 readonly-start 允许 active）
 
 ```text
   firebotctl vehicle enroll firebot-vehicle-02 --token <TOKEN>
-     # fail-closed：Bridge active/activating/reloading → ENROLL=REJECTED / LEGACY_BRIDGE_STILL_ACTIVE
+     # fail-closed：Bridge/Edge active/activating/reloading → ENROLL=REJECTED / LEGACY_BRIDGE_STILL_ACTIVE
      # （不写任何文件、不消费 token——token 必须 Bridge 已停止后才允许消费）
-  firebotctl vehicle install --sha <FINAL_SHA>
-     # fail-closed：Bridge active → VEHICLE_INSTALL=REJECTED / BRIDGE_ACTIVE_BEFORE_INSTALL
-     # （不进入 release_sync / catkin_make；install ≠ start 真正成立）
-  firebotctl vehicle verify                        # CONTROL_ENABLED=disabled + CONTROL_ACTIVE=inactive
+     # Enrollment 输出到 Edge Home（config/identity、assignment、bridge；secrets/mqtt.env、device-token）
+  firebotctl vehicle edge-install --sha <FINAL_SHA>
+     # 通信专用安装（Vehicle Edge release + firebot-vehicle-edge.service + CLI wrappers）
+     # fail-closed：legacy/new service active → EDGE_INSTALL=REJECTED（互斥 + 安装≠启动）
+     # 绝不触碰 ROS workspace / firebot_control / catkin_make / control（EDGE_INSTALL_NO_CONTROL_TOUCH）
+  firebotctl vehicle edge-verify --sha <FINAL_SHA>
+     # manifest source_sha / layout / 权限模型 / runtime user / service inactive+disabled
   firebotctl vehicle readonly-preflight --phase enrolled --expected-sha <FINAL_SHA>
      # EXACT_SHA_MATCH=YES 强制（HEAD == FINAL_SHA）；SUPPORTED_COMMANDS 必须为空
-  firebotctl vehicle readonly-start                # 唯一允许新 Bridge active 的入口
-     # 启动后验收失败（BRIDGE_ACTIVE/MQTT_CONNECTED/boot_id）→ 自动 disable --now firebot-bridge
-     # → FAIL_CLOSED_BRIDGE_STOP=PASS + READONLY_BRIDGE_START=FAIL（不留下半在线 Bridge）
+  firebotctl vehicle readonly-start                # 唯一允许 firebot-vehicle-edge active 的入口
+     # 启动后验收失败（ACTIVE/MQTT_CONNECTED/boot_id）→ 自动 disable --now firebot-vehicle-edge
+     # → FAIL_CLOSED_BRIDGE_STOP=PASS + READONLY_BRIDGE_START=FAIL（不留下半在线 Edge）
+  vehicle-connection-status                        # 期望 Overall HEALTHY
 
 只读观测（服务器）：
   check_real_vehicle_readonly.py → REAL_ROBOT_READONLY_READY=YES 前禁止任何控制步骤
 ```
+
+> `firebotctl vehicle install` 为 LEGACY / FULL VEHICLE INSTALL，
+> **NOT FOR READONLY CONNECTIVITY MIGRATION**（会安装 Control 并触发 catkin_make）。
 
 ## 5. 回滚（cutover 之后任一步失败 → ROLLBACK_REQUIRED=YES）
 

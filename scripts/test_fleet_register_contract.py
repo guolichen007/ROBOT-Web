@@ -108,7 +108,12 @@ def test_fleet_register_secret_output_scan() -> None:
 
 
 def test_https_system_ca() -> None:
-    firebotctl = read("integration/ros1/firebotctl")
+    # enroll 实现唯一 source of truth = vehicle-edge/lifecycle/enroll.sh（firebotctl 转发）
+    firebotctl = (
+        read("integration/ros1/firebotctl")
+        + "\n"
+        + read("integration/ros1/vehicle-edge/lifecycle/enroll.sh")
+    )
     # 实际 curl 命令行不得携带 --cacert / -k（注释中的“禁止”声明是合法负向语义）
     curl_lines = [ln for ln in firebotctl.splitlines() if re.match(r"\s*curl ", ln)]
     check(

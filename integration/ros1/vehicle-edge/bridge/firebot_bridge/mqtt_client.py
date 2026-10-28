@@ -22,6 +22,12 @@ LOG = logging.getLogger("firebot-bridge")
 OnCommand = "callable[[dict], None]"
 
 
+def utcnow_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
 class MqttClient:
     def __init__(self, config: Config, identity: Identity, proto: Protocol, on_command, status=None, trace=None) -> None:
         self.config = config
@@ -30,6 +36,7 @@ class MqttClient:
         self.on_command = on_command
         self.status = status
         self.trace = trace
+        self._reconnects = 0
 
         self.client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
@@ -92,25 +99,41 @@ class MqttClient:
             retain=True,
         )
         if self.status:
-            self.status.set(mqtt_connected=True)
+            now = utcnow_iso()
+            self.status.set(
+                mqtt_connected=True,
+                mqtt_connected_since=now,
+                mqtt_last_connect_at=now,
+                mqtt_reconnect_count=self._reconnects,
+                heartbeat_age_seconds=0.0,
+            )
         LOG.info("已订阅命令 topic: %s", self.proto.topic("command"))
 
     def _on_connect_fail(self, client, userdata) -> None:
         LOG.warning("MQTT connect fail（Paho 将按退避重试）")
+        self._reconnects += 1
         if self.trace:
             self.trace.emit("mqtt.connect_failed", level="warn",
                             broker=f"{self.config.mqtt_host}:{self.config.mqtt_port}")
         if self.status:
-            self.status.set(mqtt_connected=False)
+            self.status.set(
+                mqtt_connected=False, mqtt_reconnect_count=self._reconnects
+            )
 
     def _on_disconnect(self, client, userdata, flags, reason_code, properties=None) -> None:
         LOG.warning("MQTT disconnected rc=%s（Paho 自动重连）", reason_code)
         if self.trace:
             self.trace.emit("mqtt.disconnected", level="warn", rc=reason_code)
         if self.status:
-            self.status.set(mqtt_connected=False)
+            self.status.set(
+                mqtt_connected=False,
+                mqtt_last_disconnect_at=utcnow_iso(),
+                mqtt_reconnect_count=self._reconnects,
+            )
 
     def _on_message(self, client, userdata, message) -> None:
+        if self.status:
+            self.status.set(last_receive_at=utcnow_iso())
         try:
             payload = json.loads(message.payload.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
@@ -134,6 +157,8 @@ class MqttClient:
 
     # ---- 发布 ----
     def publish(self, topic: str, payload: dict, qos: int = 0, retain: bool = False):
+        if self.status:
+            self.status.set(last_publish_at=utcnow_iso())
         result = self.client.publish(topic, json.dumps(payload, ensure_ascii=False), qos=qos, retain=retain)
         self._trace_publish(payload)
         return result

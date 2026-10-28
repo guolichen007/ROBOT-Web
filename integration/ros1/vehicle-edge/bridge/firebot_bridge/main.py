@@ -118,6 +118,25 @@ def main() -> int:
              config.vehicle_id, identity.boot_id[:8], config.bridge_stub_mode)
 
     status = RuntimeStatus()
+    # release_sha：Vehicle Edge release 标识（环境注入；只写本地 status，不进 MQTT schema）
+    release_sha = os.environ.get("FIREBOT_EDGE_RELEASE_SHA", "")
+    if not release_sha:
+        import json as _json
+
+        try:
+            manifest = _json.load(
+                open(
+                    os.path.join(
+                        os.environ.get("FIREBOT_EDGE_HOME", "/home/tl/firebot-edge"),
+                        "current",
+                        "manifest.json",
+                    ),
+                    encoding="utf-8",
+                )
+            )
+            release_sha = manifest.get("source_sha", "")
+        except (OSError, ValueError):
+            release_sha = ""
     status.set(
         boot_id=identity.boot_id,
         vehicle_id=config.vehicle_id,
@@ -129,6 +148,7 @@ def main() -> int:
         location_enabled=config.location_enabled,
         field_trace_enabled=config.field_trace_enabled,
         battery_source=config.battery_source,
+        release_sha=release_sha,
     )
 
     # 异步事件 recorder（fail-open：任何失败都不影响 Bridge 启动/运行）

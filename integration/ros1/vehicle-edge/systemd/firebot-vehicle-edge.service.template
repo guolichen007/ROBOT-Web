@@ -1,0 +1,24 @@
+[Unit]
+Description=Firebot vehicle edge (communication runtime; readonly connectivity)
+After=network-online.target
+Wants=network-online.target
+# 与 legacy firebot-bridge 互斥（LEGACY_AND_EDGE_MUTUAL_EXCLUSION）：
+# 本 unit 与 firebot-bridge.service 不得同时成为 communication owner。
+Conflicts=firebot-bridge.service
+
+[Service]
+Type=simple
+User=@RUNTIME_USER@
+WorkingDirectory=@EDGE_HOME@/current
+ExecStart=@EDGE_HOME@/bin/firebot-edge run
+Restart=always
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+Environment=FIREBOT_EDGE_HOME=@EDGE_HOME@
+# canonical 本地 status.json（复用现有 FIREBOT_BRIDGE_STATUS_FILE 支持，不重造第二套 writer）
+Environment=FIREBOT_BRIDGE_STATUS_FILE=@EDGE_HOME@/runtime/status.json
+# MQTT 密码经 EnvironmentFile 注入（secrets/mqtt.env root:root 600），不写进本文件、不进 Git
+EnvironmentFile=-@EDGE_HOME@/secrets/mqtt.env
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+# edge-install.sh — firebotctl vehicle edge-install 的受控实现（规格十七/十八）。
+#
+# 通信专用安装：只安装 Vehicle Edge release + systemd unit + CLI wrappers。
+# 绝对不得：touch firerobot_ws/src/firebot_control、catkin_make、安装/启动 firebot-control、
+#           启动 ROS/control、发布 cmd_vel（EDGE_INSTALL_NO_CONTROL_TOUCH / NO_CATKIN）。
+#
+# 前置门（fail-closed）：
+#   legacy firebot-bridge inactive（LEGACY_AND_EDGE_MUTUAL_EXCLUSION）
+#   new firebot-vehicle-edge inactive（安装 ≠ 启动）
+#   repo clean + exact SHA + runtime user 已配置（EDGE_RUNTIME_USER_NOT_CONFIGURED）
+#
+# 安装完成：firebot-vehicle-edge inactive + disabled。只有 readonly-start 才能启动。
+#
+# 用法（root）：
+#   FIREBOT_REQUIRE_SHA=<SHA> edge-install.sh [REPO_ROOT]
+set -euo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VEHICLE_EDGE_SRC="$(cd "$SELF_DIR/.." && pwd)"
+REPO_ROOT="${1:-$(cd "$VEHICLE_EDGE_SRC/.." && pwd)}"
+REQUIRE_SHA="${FIREBOT_REQUIRE_SHA:-}"
+EDGE_HOME="${FIREBOT_EDGE_HOME:-/home/tl/firebot-edge}"
+SYSTEMCTL="${FIREBOT_TEST_SYSTEMCTL:-systemctl}"
+
+# 测试逃逸：仅 CI fixture；生产必须 root（/etc/systemd/system 与权限模型需要）。
+if [ "${FIREBOT_TEST_SKIP_ROOT:-0}" != "1" ]; then
+  [ "$(id -u)" -eq 0 ] || { echo "ERROR: 需要 root（用 sudo）" >&2; exit 1; }
+fi
+echo "$REQUIRE_SHA" | grep -qE '^[0-9a-f]{40}$' || { echo "ERROR: FIREBOT_REQUIRE_SHA 必须 40 位 hex" >&2; exit 1; }
+
+# ---- 前置门 1：repo clean + exact SHA ----
+if [ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)" ]; then
+  echo "EDGE_INSTALL=REJECTED"
+  echo "REPO_NOT_CLEAN"
+  exit 1
+fi
+git -C "$REPO_ROOT" cat-file -e "$REQUIRE_SHA^{commit}" 2>/dev/null || {
+  echo "EDGE_INSTALL=REJECTED"
+  echo "SHA_NOT_PRESENT"
+  exit 1
+}
+head_sha="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+[ "$head_sha" = "$REQUIRE_SHA" ] || {
+  echo "EDGE_INSTALL=REJECTED"
+  echo "HEAD_SHA_MISMATCH"
+  exit 1
+}
+
+# ---- 前置门 2：runtime user 已配置（禁止自动猜）----
+INSTALL_ENV="$EDGE_HOME/config/install.env"
+if [ ! -f "$INSTALL_ENV" ] || ! grep -qE '^FIREBOT_EDGE_USER=[a-z_][a-z0-9_-]*$' "$INSTALL_ENV"; then
+  echo "EDGE_INSTALL=REJECTED"
+  echo "EDGE_RUNTIME_USER_NOT_CONFIGURED"
+  echo "原因：先 firebotctl vehicle edge-init --runtime-user <用户>" >&2
+  exit 1
+fi
+RUNTIME_USER="$(grep -E '^FIREBOT_EDGE_USER=' "$INSTALL_ENV" | cut -d= -f2-)"
+
+# ---- 前置门 3：legacy/new 互斥 + 安装≠启动 ----
+legacy_state="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive)"
+edge_state="$("$SYSTEMCTL" is-active firebot-vehicle-edge 2>/dev/null || echo inactive)"
+if [ "$legacy_state" != "inactive" ]; then
+  echo "EDGE_INSTALL=REJECTED"
+  echo "LEGACY_BRIDGE_ACTIVE"
+  echo "原因：firebot-bridge 仍在运行（LEGACY_AND_EDGE_MUTUAL_EXCLUSION）；先 migration-stop-legacy。" >&2
+  exit 1
+fi
+if [ "$edge_state" != "inactive" ]; then
+  echo "EDGE_INSTALL=REJECTED"
+  echo "EDGE_SERVICE_ACTIVE"
+  echo "原因：firebot-vehicle-edge 正在运行；安装 ≠ 启动。" >&2
+  exit 1
+fi
+
+# ---- 组装 release（交付源 = repo 的 vehicle-edge 源码；车辆只是数据）----
+if [ "${FIREBOT_TEST_SKIP_CHOWN:-0}" != "1" ]; then
+  chmod 0755 "$EDGE_HOME/releases" 2>/dev/null || true
+fi
+bash "$VEHICLE_EDGE_SRC/install/release-manager.sh" build "$VEHICLE_EDGE_SRC" "$REQUIRE_SHA" "$EDGE_HOME"
+
+# ---- 安装 systemd unit（新 unit，绝不改造 legacy unit）----
+SYSTEMD_DIR="${FIREBOT_TEST_SYSTEMD_DIR:-/etc/systemd/system}"
+UNIT_DST="$SYSTEMD_DIR/firebot-vehicle-edge.service"
+TMP_UNIT="$(mktemp)"
+sed \
+  -e "s|@EDGE_HOME@|$EDGE_HOME|g" \
+  -e "s|@RUNTIME_USER@|$RUNTIME_USER|g" \
+  "$VEHICLE_EDGE_SRC/systemd/firebot-vehicle-edge.service.template" > "$TMP_UNIT"
+chmod 0644 "$TMP_UNIT"
+mv "$TMP_UNIT" "$UNIT_DST"
+if [ "${FIREBOT_TEST_SKIP_ROOT:-0}" != "1" ]; then
+  "$SYSTEMCTL" daemon-reload
+fi
+
+# ---- CLI wrappers（薄转发；禁止重复业务逻辑）----
+WRAP_DIR="${FIREBOT_TEST_WRAP_DIR:-/usr/local/bin}"
+for cmd in vehicle-connection-status:status vehicle-connection-watch:watch \
+           vehicle-connectivity-selftest:selftest vehicle-edge-doctor:doctor; do
+  name="${cmd%%:*}"
+  sub="${cmd##*:}"
+  cat > "$WRAP_DIR/$name" <<EOF
+#!/usr/bin/env bash
+# 薄 wrapper（等价 firebot-edge $sub）；禁止重复业务逻辑。
+exec "$EDGE_HOME/bin/firebot-edge" "$sub" "\$@"
+EOF
+  chmod 0755 "$WRAP_DIR/$name"
+done
+
+# ---- 原子 current/previous 切换（失败 current 不变）----
+bash "$VEHICLE_EDGE_SRC/install/release-manager.sh" switch "$REQUIRE_SHA" "$EDGE_HOME"
+
+# ---- 安装后确认：inactive + disabled ----
+edge_now="$("$SYSTEMCTL" is-active firebot-vehicle-edge 2>/dev/null || echo inactive)"
+edge_enabled="$("$SYSTEMCTL" is-enabled firebot-vehicle-edge 2>/dev/null || echo disabled)"
+if [ "$edge_now" != "inactive" ] || [ "$edge_enabled" = "enabled" ]; then
+  echo "EDGE_INSTALL=FAIL（安装后 service 必须 inactive+disabled；实际 active=$edge_now enabled=$edge_enabled）" >&2
+  exit 1
+fi
+
+echo "EDGE_INSTALL=PASS sha=$REQUIRE_SHA"
+echo "EDGE_INSTALL_NO_CONTROL_TOUCH=PASS"
+echo "EDGE_INSTALL_NO_CATKIN=PASS"
+echo "EDGE_SERVICE_STATE=inactive+disabled"

@@ -1,0 +1,165 @@
+#!/usr/bin/env python3
+"""firebot-edge — 车端通信 Runtime 统一主 CLI（规格二十三/二十四）。
+
+工程边界：本工具只属于车辆↔云通信层；绝不触碰 ROS workspace / Control / cmd_vel。
+
+命令：
+  run       启动 Bridge 进程（systemd ExecStart 专用；等价 current/bridge/run_bridge.sh）
+  status    连接状态（人类输出；--json）
+  watch     持续观测本地 canonical status.json（--interval N / --json / --once）
+  selftest  主动只读自检（不建第二 MQTT session、不发 probe）
+  doctor    完整安装体检（不输出 secret value）
+  version   当前 release 版本
+  logs      本地 logs + journalctl -u firebot-vehicle-edge
+
+快捷命令（薄 wrapper，/usr/local/bin/）：
+  vehicle-connection-status        = firebot-edge status
+  vehicle-connection-watch         = firebot-edge watch
+  vehicle-connectivity-selftest    = firebot-edge selftest
+  vehicle-edge-doctor              = firebot-edge doctor
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+
+SCRIPT = os.path.realpath(__file__)
+ROOT = os.path.dirname(os.path.dirname(SCRIPT))  # release 根或 vehicle-edge/ 目录
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+USAGE = """用法: firebot-edge <run|status|watch|selftest|doctor|version|logs> [选项]"""
+
+
+def _edge_home() -> str:
+    env = os.environ.get("FIREBOT_EDGE_HOME")
+    if env:
+        return env
+    install = os.path.join("/home/tl/firebot-edge", "config", "install.env")
+    try:
+        for line in open(install, encoding="utf-8"):
+            line = line.strip()
+            if line.startswith("FIREBOT_EDGE_HOME="):
+                return line.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    return "/home/tl/firebot-edge"
+
+
+def cmd_run(argv: list[str]) -> int:
+    """systemd ExecStart 专用：exec current/bridge/run_bridge.sh（进程替换，日志进 journald）。"""
+    home = _edge_home()
+    run_script = os.path.join(home, "current", "bridge", "run_bridge.sh")
+    if not os.path.isfile(run_script):
+        print(f"CONFIG_ERROR: 缺少 {run_script}（先 edge-install）", file=sys.stderr)
+        return 40
+    os.execv("/bin/bash", ["/bin/bash", run_script] + argv)
+
+
+def cmd_status(argv: list[str]) -> int:
+    from monitor.status import main as status_main
+
+    return status_main(argv)
+
+
+def cmd_watch(argv: list[str]) -> int:
+    from monitor.watch import main as watch_main
+
+    return watch_main(argv)
+
+
+def cmd_selftest(argv: list[str]) -> int:
+    from monitor.selftest import main as selftest_main
+
+    return selftest_main(argv)
+
+
+def cmd_doctor(argv: list[str]) -> int:
+    from monitor.doctor import main as doctor_main
+
+    return doctor_main(argv)
+
+
+def cmd_version(argv: list[str]) -> int:
+    from lib.edge_paths import edge_paths
+
+    paths = edge_paths()
+    version = "<unknown>"
+    try:
+        version = open(paths["version"], encoding="utf-8").read().strip()
+    except OSError:
+        pass
+    release = "<none>"
+    if os.path.islink(paths["current"]):
+        release = os.path.basename(os.path.realpath(paths["current"]))
+    print(f"firebot-edge {version} release={release}")
+    return 0
+
+
+def cmd_logs(argv: list[str]) -> int:
+    from lib.edge_paths import edge_paths
+    from monitor.redact import redact_lines
+
+    paths = edge_paths()
+    lines = 50
+    follow = False
+    i = 0
+    while i < len(argv):
+        if argv[i] == "--lines" and i + 1 < len(argv):
+            try:
+                lines = int(argv[i + 1])
+            except ValueError:
+                pass
+            i += 2
+        elif argv[i] == "-f":
+            follow = True
+            i += 1
+        else:
+            i += 1
+    for name in ("connection.log", "audit.log"):
+        path = os.path.join(paths["logs"], name)
+        if os.path.isfile(path):
+            print(f"== {path} ==")
+            try:
+                tail = open(path, encoding="utf-8", errors="replace").read().splitlines()[-lines:]
+                print(redact_lines("\n".join(tail)))
+            except OSError:
+                pass
+    journal_args = ["journalctl", "-u", "firebot-vehicle-edge", "-n", str(lines), "--no-pager"]
+    if follow:
+        journal_args.append("-f")
+    try:
+        subprocess.run(journal_args, check=False)
+    except OSError:
+        print("journalctl 不可用")
+    return 0
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help", "help"):
+        print(__doc__)
+        print(USAGE)
+        return 0
+    cmd, rest = argv[0], argv[1:]
+    handlers = {
+        "run": cmd_run,
+        "status": cmd_status,
+        "watch": cmd_watch,
+        "selftest": cmd_selftest,
+        "doctor": cmd_doctor,
+        "version": cmd_version,
+        "logs": cmd_logs,
+    }
+    handler = handlers.get(cmd)
+    if handler is None:
+        print(f"未知子命令: {cmd}", file=sys.stderr)
+        print(USAGE, file=sys.stderr)
+        return 2
+    return handler(rest)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

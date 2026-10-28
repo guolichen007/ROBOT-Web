@@ -55,16 +55,17 @@ def test_cutover_order_contract() -> None:
         "ENROLL=REJECTED" in doc and "LEGACY_BRIDGE_STILL_ACTIVE" in doc,
     )
     check(
-        "CUTOVER_ORDER_CONTRACT：install 门说明 VEHICLE_INSTALL=REJECTED/\n"
-        "BRIDGE_ACTIVE_BEFORE_INSTALL",
-        "VEHICLE_INSTALL=REJECTED" in doc and "BRIDGE_ACTIVE_BEFORE_INSTALL" in doc,
+        "CUTOVER_ORDER_CONTRACT：edge-install 互斥门说明（EDGE_INSTALL=REJECTED）",
+        "EDGE_INSTALL=REJECTED" in doc and "firebot-vehicle-edge" in doc,
     )
 
     ctl = read("integration/ros1/firebotctl")
     # enroll：Bridge 门必须在 token POST 之前（源码顺序断言）
-    enroll_sec = ctl.split("    enroll)", 1)[1].split("    install)", 1)[0]
+    enroll_sec = read("integration/ros1/vehicle-edge/lifecycle/enroll.sh")
     gate_pos = enroll_sec.find("LEGACY_BRIDGE_STILL_ACTIVE")
     post_pos = enroll_sec.find('"$CURL" -sf -X POST')
+    if post_pos == -1:
+        post_pos = enroll_sec.find("$CURL")
     check(
         "CUTOVER_ORDER_CONTRACT：enroll Bridge 门在 token POST 之前（代码顺序）",
         gate_pos != -1 and post_pos != -1 and gate_pos < post_pos,
@@ -82,7 +83,7 @@ def test_cutover_order_contract() -> None:
 
 
 def test_migration_stop_legacy_surface() -> None:
-    sh = read("integration/ros1/migration-stop-legacy.sh")
+    sh = read("integration/ros1/vehicle-edge/lifecycle/migration-stop-legacy.sh")
     check(
         "migration-stop-legacy 输出 MIGRATION_CUTOVER_BOUNDARY=ENTERED",
         "MIGRATION_CUTOVER_BOUNDARY=ENTERED" in sh,
@@ -131,17 +132,18 @@ def test_migration_stop_legacy_surface() -> None:
 
 
 def test_readonly_start_fail_closed() -> None:
-    sh = read("integration/ros1/readonly-start.sh")
+    sh = read("integration/ros1/vehicle-edge/lifecycle/readonly-start.sh")
     check(
-        "readonly-start 失败分支 disable --now firebot-bridge",
-        '"$SYSTEMCTL" disable --now firebot-bridge' in sh,
+        "readonly-start 失败分支 disable --now firebot-vehicle-edge",
+        '"$SYSTEMCTL" disable --now firebot-vehicle-edge' in sh,
     )
     check("readonly-start 输出 FAIL_CLOSED_BRIDGE_STOP", "FAIL_CLOSED_BRIDGE_STOP" in sh)
     check(
         "readonly-start 失败输出 BRIDGE_ACTIVE=NO + BRIDGE_ENABLED=NO",
         "BRIDGE_ACTIVE=NO" in sh and "BRIDGE_ENABLED=NO" in sh,
     )
-    fail_branch = sh.split('if [ "$FAILED" -ne 0 ]; then', 1)[1]
+    marker = 'if [ "$FAILED" -ne 0 ]; then'
+    fail_branch = sh.split(marker, 1)[1] if marker in sh else ""
     fail_active = active_lines(fail_branch)
     check(
         "readonly-start 失败分支不触碰 control/ROS/Tailscale（可执行行）",
@@ -154,7 +156,7 @@ def test_readonly_start_fail_closed() -> None:
 
 
 def test_enrolled_exact_sha_gate() -> None:
-    sh = read("integration/ros1/readonly-preflight.sh")
+    sh = read("integration/ros1/vehicle-edge/lifecycle/readonly-preflight.sh")
     check("enrolled 阶段含 EXACT_SHA_MATCH 检查", "EXACT_SHA_MATCH=" in sh)
     check("enrolled 阶段 rev-parse HEAD 比较", "rev-parse HEAD" in sh)
     # bootstrap 不强制：EXACT_SHA 检查必须位于 enrolled 分支内

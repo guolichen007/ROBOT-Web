@@ -11,7 +11,7 @@
     EXISTING_CONTROL_ACTIVE（不自动 stop）
   - readonly-preflight：bootstrap/enrolled 两阶段、
     SUPPORTED_COMMANDS_NOT_EMPTY、无 MQTT publish
-  - readonly-start：唯一启动点 enable --now firebot-bridge；
+  - readonly-start：唯一启动点 enable --now firebot-vehicle-edge；
     可执行行不触碰 control/roscore/move_base/cmd_vel
   - P0-G：正式入口统一 firebotctl（底层 systemctl 提示标 DEVELOPER/DEBUG ONLY）
   - 服务层 pytest 覆盖存在性（CREATE/IDEMPOTENT/CONFLICT/NO_SECRET/OTHER_UNTOUCHED）
@@ -139,7 +139,8 @@ def test_install_control_active_gate() -> None:
 
 
 def test_readonly_scripts_surface() -> None:
-    pre = read("integration/ros1/readonly-preflight.sh")
+    # 生产逻辑唯一 source of truth = vehicle-edge/lifecycle/（旧路径是 thin shim）
+    pre = read("integration/ros1/vehicle-edge/lifecycle/readonly-preflight.sh")
     check("READONLY_BOOTSTRAP_PREFLIGHT 输出存在", "READONLY_BOOTSTRAP_PREFLIGHT=" in pre)
     check("READONLY_ENROLLED_PREFLIGHT 输出存在", "READONLY_ENROLLED_PREFLIGHT=" in pre)
     check("bootstrap 检查 HTTPS 系统 CA（无 -k/--cacert）", "HTTPS_SYSTEM_CA" in pre)
@@ -155,11 +156,11 @@ def test_readonly_scripts_surface() -> None:
     )
     check("NTP 检查", "NTPSynchronized" in pre)
 
-    start = read("integration/ros1/readonly-start.sh")
+    start = read("integration/ros1/vehicle-edge/lifecycle/readonly-start.sh")
     check("READONLY_BRIDGE_START 输出存在", "READONLY_BRIDGE_START=" in start)
     check(
-        "readonly-start 唯一启动点 enable --now firebot-bridge",
-        "enable --now firebot-bridge" in start,
+        "readonly-start 唯一启动点 enable --now firebot-vehicle-edge",
+        "enable --now firebot-vehicle-edge" in start,
     )
     start_active = active_lines(start)
     check(

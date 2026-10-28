@@ -38,6 +38,19 @@ _DEFAULT_FIELDS = {
     "write_errors": 0,
     "disk_log_available": True,
     "battery_source": "UNKNOWN",
+    # ---- Vehicle Edge 本地 observability（规格三十二；只写本地 status，不新增 MQTT schema 字段）----
+    "release_sha": "",
+    "mqtt_connected_since": None,
+    "mqtt_last_connect_at": None,
+    "mqtt_last_disconnect_at": None,
+    "mqtt_reconnect_count": 0,
+    "last_publish_at": None,
+    "last_receive_at": None,
+    "last_heartbeat_at": None,
+    "last_status_at": None,
+    "heartbeat_age_seconds": None,
+    "last_error": "",
+    "last_error_at": None,
 }
 
 

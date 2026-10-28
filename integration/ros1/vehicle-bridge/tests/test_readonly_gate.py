@@ -55,8 +55,14 @@ class Fixture:
         self.tmp = Path(tempfile.mkdtemp(prefix="readonly-gate-"))
         # fake git repo（readonly-preflight 要求 REPO_DIR 干净且 SHA 可 cat-file）
         self.repo = self.tmp / "fake-repo"
-        (self.repo / "integration" / "ros1").mkdir(parents=True)
-        shutil.copy(SCRIPT, self.repo / "integration" / "ros1" / "readonly-preflight.sh")
+        ros1_fake = self.repo / "integration" / "ros1"
+        ros1_fake.mkdir(parents=True)
+        shutil.copy(SCRIPT, ros1_fake / "readonly-preflight.sh")
+        # shim 转发目标：vehicle-edge/lifecycle（生产逻辑唯一 source of truth）
+        lifecycle_dst = ros1_fake / "vehicle-edge" / "lifecycle"
+        lifecycle_dst.mkdir(parents=True)
+        for name in ("readonly-preflight.sh", "readonly-start.sh", "migration-stop-legacy.sh"):
+            shutil.copy(SRC_DIR / "vehicle-edge" / "lifecycle" / name, lifecycle_dst / name)
         git(self.repo, "init", "-q")
         git(self.repo, "add", ".")
         git(self.repo, "commit", "-qm", "fixture")
@@ -77,6 +83,8 @@ class Fixture:
         self.ctl_enabled = self.state / "ctl_enabled"  # 默认 disabled
         self.ctl_active = self.state / "ctl_active"  # 默认 inactive
         self.bridge_active = self.state / "bridge_active"
+        (self.state / "edge_active").write_text("inactive")
+        (self.state / "edge_enabled").write_text("disabled")
         self.status_json = self.tmp / "status.json"
         self.fake_log = self.tmp / "systemctl.log"
         (self.state / "ctl_enabled").write_text("disabled")
@@ -114,10 +122,32 @@ class Fixture:
                   "is-enabled firebot-control") cat "${FAKE_STATE:?}/ctl_enabled" 2>/dev/null || echo disabled ;;
                   "is-active firebot-control") cat "$FAKE_STATE/ctl_active" 2>/dev/null || echo inactive ;;
                   "is-active firebot-bridge") cat "$FAKE_STATE/bridge_active" 2>/dev/null || echo inactive ;;
+                  "is-active firebot-vehicle-edge") cat "$FAKE_STATE/edge_active" 2>/dev/null || echo inactive ;;
+                  "is-enabled firebot-vehicle-edge") cat "$FAKE_STATE/edge_enabled" 2>/dev/null || echo disabled ;;
                   "is-active systemd-timesyncd") echo inactive ;;
                   "enable --now firebot-bridge")
                     echo active > "$FAKE_STATE/bridge_active"
                     printf '{"mqtt_connected": true, "boot_id": "boot-fixture-0001"}' > "${FAKE_STATUS_JSON:?}"
+                    ;;
+                  "enable --now firebot-vehicle-edge")
+                    echo active > "$FAKE_STATE/edge_active"
+                    echo enabled > "$FAKE_STATE/edge_enabled"
+                    printf '{"mqtt_connected": %s, "boot_id": "boot-fixture-0001"}' \
+                      "${FAKE_EDGE_STATUS_CONNECTED:-true}" > "${FAKE_STATUS_JSON:?}"
+                    ;;
+                  "disable --now firebot-vehicle-edge")
+                    echo inactive > "$FAKE_STATE/edge_active"
+                    echo disabled > "$FAKE_STATE/edge_enabled"
+                    ;;
+                  "enable --now firebot-vehicle-edge")
+                    echo active > "$FAKE_STATE/edge_active"
+                    echo enabled > "$FAKE_STATE/edge_enabled"
+                    printf '{"mqtt_connected": %s, "boot_id": "boot-fixture-0001"}' \
+                      "${FAKE_EDGE_STATUS_CONNECTED:-true}" > "${FAKE_STATUS_JSON:?}"
+                    ;;
+                  "disable --now firebot-vehicle-edge")
+                    echo inactive > "$FAKE_STATE/edge_active"
+                    echo disabled > "$FAKE_STATE/edge_enabled"
                     ;;
                   *) echo "unexpected systemctl call: $args" >&2; exit 1 ;;
                 esac
@@ -147,6 +177,7 @@ class Fixture:
             "FIREBOT_TEST_TIMEDATECTL": str(self.fakebin / "timedatectl"),
             "FIREBOT_TEST_PGREP": str(self.fakebin / "pgrep"),
             "FIREBOT_TEST_ETC_ROOT": str(self.etc),
+            "FIREBOT_EDGE_HOME": str(self.etc),
             "FIREBOT_TEST_OS_RELEASE": str(self.write_os_release()),
             "FIREBOT_TEST_ROS_NOETIC_SETUP": str(self.write_ros_noetic()),
             "FIREBOT_TEST_STATUS_JSON": str(self.status_json),
@@ -159,17 +190,21 @@ class Fixture:
         return e
 
     def write_bootstrap_files(self) -> None:
-        (self.etc / "bootstrap.env").write_text(
+        # Vehicle Edge 布局：EDGE_HOME=etc（config/ certs/ secrets/）
+        (self.etc / "config").mkdir(exist_ok=True)
+        (self.etc / "certs").mkdir(exist_ok=True)
+        (self.etc / "secrets").mkdir(exist_ok=True)
+        (self.etc / "config" / "bootstrap.env").write_text(
             "FIREBOT_SERVER_URL=https://firebot.youdaozd.com\n"
         )
-        (self.etc / "mqtt-ca.crt").write_text("fixture-ca\n")
+        (self.etc / "certs" / "mqtt-ca.crt").write_text("fixture-ca\n")
 
     def write_enrolled_files(self, supported_commands: str = "") -> None:
-        (self.etc / "device.env").write_text(
+        self.write_bootstrap_files()
+        ca_path = self.etc / "certs" / "mqtt-ca.crt"
+        (self.etc / "config" / "identity.env").write_text(
             "DEVICE_ID=firebot-vehicle-02\nPROFILE_ID=firebot_ros1_standard_v1\n"
         )
-        ca_path = self.etc / "mqtt-ca.crt"  # 与 FIREBOT_TEST_ETC_ROOT 一致的 fixture CA
-        ca_path.write_text("fixture-ca\n")
         lines = [
             "FIREBOT_VEHICLE_ID=firebot-vehicle-02",
             "FIREBOT_MQTT_USERNAME=firebot-vehicle-02",
@@ -178,10 +213,10 @@ class Fixture:
             f"FIREBOT_CA_CERT={ca_path}",
             f"FIREBOT_SUPPORTED_COMMANDS={supported_commands}",
         ]
-        (self.etc / "bridge.env").write_text("\n".join(lines) + "\n")
-        (self.etc / "bridge-secret.env").write_text("FIREBOT_MQTT_PASSWORD=x\n")
-        (self.etc / "bridge-secret.env").chmod(0o600)
-        (self.etc / "assignment.env").write_text("SUPPORTED_COMMANDS=\n")
+        (self.etc / "config" / "bridge.env").write_text("\n".join(lines) + "\n")
+        (self.etc / "secrets" / "mqtt.env").write_text("FIREBOT_MQTT_PASSWORD=x\n")
+        (self.etc / "secrets" / "mqtt.env").chmod(0o600)
+        (self.etc / "config" / "assignment.env").write_text("SUPPORTED_COMMANDS=\n")
 
     def run_preflight(self, phase: str, device_id: str = "firebot-vehicle-02") -> subprocess.CompletedProcess:
         return subprocess.run(
@@ -255,7 +290,7 @@ def test_readonly_enrolled_preflight_pass() -> None:
         fx.write_enrolled_files()
         r = fx.run_preflight("enrolled")
         check("READONLY_ENROLLED_PREFLIGHT=PASS", r.returncode == 0 and "READONLY_ENROLLED_PREFLIGHT=PASS" in r.stdout, r.stdout[-300:])
-        check("enrolled BRIDGE_SECRET_ENV mode=600", "BRIDGE_SECRET_ENV=yes mode=600" in r.stdout)
+        check("enrolled MQTT_ENV mode=600", "MQTT_ENV=yes mode=600" in r.stdout)
         check("enrolled MQTT_HOST=firebot.youdaozd.com", "MQTT_HOST=firebot.youdaozd.com" in r.stdout)
         check("enrolled SUPPORTED_COMMANDS_EMPTY=yes", "SUPPORTED_COMMANDS_EMPTY=yes" in r.stdout)
     finally:
@@ -287,7 +322,7 @@ def test_readonly_start_bridge_only() -> None:
         check("MQTT_CONNECTED=YES 输出", "MQTT_CONNECTED=YES" in r.stdout)
         check("CONTROL_ACTIVE=NO 输出", "CONTROL_ACTIVE=NO" in r.stdout)
         log = fx.fake_log.read_text()
-        check("只调用过 firebot-bridge enable", "enable --now firebot-bridge" in log)
+        check("只调用过 firebot-vehicle-edge enable", "enable --now firebot-vehicle-edge" in log)
         check(
             "READONLY_START_CONTROL_UNTOUCHED（无 control enable/start/stop）",
             not any(c in log for c in ("enable firebot-control", "start firebot-control", "stop firebot-control")),
@@ -333,12 +368,13 @@ def test_readonly_start_rejected_wrong_mqtt_host() -> None:
     fx = Fixture()
     try:
         fx.write_enrolled_files()
-        (fx.etc / "bridge.env").write_text(
+        (fx.etc / "config").mkdir(exist_ok=True)
+        (fx.etc / "config" / "bridge.env").write_text(
             "FIREBOT_VEHICLE_ID=firebot-vehicle-02\n"
             "FIREBOT_MQTT_HOST=100.110.31.112\n"
             "FIREBOT_MQTT_PORT=8883\n"
-            "FIREBOT_CA_CERT=/etc/firebot/mqtt-ca.crt\n"
-            "FIREBOT_SUPPORTED_COMMANDS=\n"
+            "FIREBOT_CA_CERT=%s/certs/mqtt-ca.crt\n"
+            "FIREBOT_SUPPORTED_COMMANDS=\n" % fx.etc
         )
         r = fx.run_start()
         check("READONLY_START 旧 IP host → REJECTED", r.returncode != 0 and "MQTT_HOST 必须 firebot.youdaozd.com" in r.stdout, r.stdout[-200:])
