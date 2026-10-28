@@ -124,7 +124,7 @@ jobs:
           cd integration/ros1/vehicle-edge
           python3 tests/test_edge_home.py
           python3 tests/test_monitor.py
-          cd ../..
+          cd ../../..
           python3 scripts/test_edge_contract.py
       - name: Control STOP 安全测试
         run: python3 integration/ros1/vehicle-control/tests/test_stop_motion_safety.py
