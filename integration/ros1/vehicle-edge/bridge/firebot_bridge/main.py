@@ -49,12 +49,22 @@ def make_stop_handler(stop: threading.Event):
 
 
 # ---------------- 周期上报 ----------------
-def heartbeat_loop(proto, mqtt, stop: threading.Event) -> None:
+def utcnow_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
+def heartbeat_loop(proto, mqtt, status, stop: threading.Event) -> None:
     uptime = 0.0
     period = 1.0 / get_config().heartbeat_hz
     while not stop.is_set():
         uptime += period
         mqtt.publish(proto.topic("heartbeat"), hb_uplink.make_heartbeat(proto, uptime), qos=0)
+        # P0-3：heartbeat freshness 必须是真实时间——每次实际执行更新 last_heartbeat_at，
+        # 健康模型动态计算 age（不再依赖持久静态 age 数字）。
+        if status:
+            status.set(last_heartbeat_at=utcnow_iso())
         stop.wait(period)
 
 
@@ -80,6 +90,9 @@ def telemetry_loop(proto, mqtt, state, status, trace, stop: threading.Event) -> 
         if status_msg is not None:
             # status 为业务遥测，契约 QoS1；heartbeat/sensor/location 为 QoS0。
             mqtt.publish(proto.topic("status"), status_msg, qos=1)
+            # P0-4：真实 status message 发布时更新 last_status_at（本地 observability）
+            if status:
+                status.set(last_status_at=utcnow_iso())
         sensor_msg = sensor_uplink.make_sensor(proto, state)
         if sensor_msg is not None:
             mqtt.publish(proto.topic("sensor"), sensor_msg, qos=0)
@@ -138,6 +151,9 @@ def main() -> int:
         except (OSError, ValueError):
             release_sha = ""
     status.set(
+        # P0-1：本次进程绑定字段（readonly-start 的 stale 检测依据）
+        process_started_at=utcnow_iso(),
+        mqtt_connected=False,
         boot_id=identity.boot_id,
         vehicle_id=config.vehicle_id,
         protocol_version=config.protocol_version,
@@ -199,7 +215,7 @@ def main() -> int:
 
     # 4) 周期上报线程
     threads = [
-        threading.Thread(target=heartbeat_loop, args=(proto, mqtt, stop), daemon=True),
+        threading.Thread(target=heartbeat_loop, args=(proto, mqtt, status, stop), daemon=True),
         threading.Thread(target=telemetry_loop, args=(proto, mqtt, state, status, trace, stop), daemon=True),
         threading.Thread(target=location_loop, args=(proto, mqtt, state, stop), daemon=True),
     ]

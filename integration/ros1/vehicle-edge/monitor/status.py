@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime, timezone
 
 from lib.edge_paths import edge_paths, read_kv
 from monitor.health import evaluate, load_status, service_active
@@ -22,6 +23,7 @@ def collect(home: str | None = None) -> dict:
     )
     mqtt_host = status.get("mqtt_host") or read_kv(paths["bridge_env"], "FIREBOT_MQTT_HOST")
     mqtt_port = read_kv(paths["bridge_env"], "FIREBOT_MQTT_PORT") or "8883"
+    # P0-6：真实 Session 字段（进程绑定 / 新鲜度 / 连接时间线；全部非敏感）
     return {
         "vehicle_id": identity,
         "release_sha": release_sha,
@@ -35,7 +37,25 @@ def collect(home: str | None = None) -> dict:
         "boot_id": status.get("boot_id", ""),
         "supported_commands": status.get("supported_commands") or [],
         "control_active": service_active("firebot-control"),
-        "heartbeat_age_seconds": status.get("heartbeat_age_seconds"),
+        "process_pid": status.get("pid"),
+        "main_pid": result["checks"].get("main_pid"),
+        "process_started_at": status.get("process_started_at", ""),
+        "status_updated_at": status.get("status_updated_at", ""),
+        "status_freshness_seconds": (
+            None
+            if not status.get("status_updated_at")
+            else max(
+                0.0,
+                (
+                    datetime.now(timezone.utc)
+                    - datetime.fromisoformat(str(status["status_updated_at"]))
+                ).total_seconds(),
+            )
+        ),
+        "heartbeat_age_seconds": result["checks"].get("heartbeat_age_seconds"),
+        "last_heartbeat_at": status.get("last_heartbeat_at", ""),
+        "mqtt_last_connect_at": status.get("mqtt_last_connect_at", ""),
+        "mqtt_last_disconnect_at": status.get("mqtt_last_disconnect_at", ""),
         "reconnect_count": status.get("mqtt_reconnect_count", 0),
         "last_error": status.get("last_error", ""),
     }
@@ -53,9 +73,17 @@ def human(data: dict) -> str:
         f"Broker            {data['mqtt_host'] or '<unknown>'}:{data['mqtt_port']}",
         "",
         f"Boot ID           {data['boot_id'] or '<none>'}",
+        f"Process PID       {data['process_pid'] or '<none>'} (MainPID {data['main_pid'] or '-'})",
+        f"Session Started   {data['process_started_at'] or '<none>'}",
+        f"Status Updated    {data['status_updated_at'] or '<none>'}",
+        f"Status Freshness  {data['status_freshness_seconds']}s"
+        if data["status_freshness_seconds"] is not None
+        else "Status Freshness  <none>",
         f"Heartbeat Age     {data['heartbeat_age_seconds']}s"
         if data["heartbeat_age_seconds"] is not None
         else "Heartbeat Age     <none>",
+        f"Last MQTT Connect {data['mqtt_last_connect_at'] or '<none>'}",
+        f"Last MQTT Disconn {data['mqtt_last_disconnect_at'] or '<none>'}",
         f"Reconnect Count   {data['reconnect_count']}",
         "",
         f"Commands          {'NONE' if not data['supported_commands'] else ','.join(data['supported_commands'])}",

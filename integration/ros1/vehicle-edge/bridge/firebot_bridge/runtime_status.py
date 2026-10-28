@@ -38,6 +38,9 @@ _DEFAULT_FIELDS = {
     "write_errors": 0,
     "disk_log_available": True,
     "battery_source": "UNKNOWN",
+    # P0-1：本次进程绑定（readonly-start stale 检测依据）
+    "process_started_at": None,
+    "status_updated_at": None,
     # ---- Vehicle Edge 本地 observability（规格三十二；只写本地 status，不新增 MQTT schema 字段）----
     "release_sha": "",
     "mqtt_connected_since": None,
@@ -82,6 +85,13 @@ class RuntimeStatus:
             return dict(self._data)
 
     def _flush(self) -> None:
+        # P0-1：每次写入都刷新 status_updated_at（stale 检测的真实时间戳）
+        try:
+            from datetime import datetime, timezone
+
+            self._data["status_updated_at"] = datetime.now(timezone.utc).isoformat()
+        except Exception:  # noqa: BLE001
+            pass
         try:
             path = status_path()
             directory = os.path.dirname(path) or "."

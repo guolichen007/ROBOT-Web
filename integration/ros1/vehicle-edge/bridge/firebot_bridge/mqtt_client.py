@@ -105,7 +105,6 @@ class MqttClient:
                 mqtt_connected_since=now,
                 mqtt_last_connect_at=now,
                 mqtt_reconnect_count=self._reconnects,
-                heartbeat_age_seconds=0.0,
             )
         LOG.info("已订阅命令 topic: %s", self.proto.topic("command"))
 

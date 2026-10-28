@@ -115,7 +115,7 @@ PROFILE_ID="$(grep -E '^PROFILE_ID=' "$EDGE_HOME/config/identity.env" | cut -d= 
 # ---- 生成 bridge.env（来源 identity + profile + assignment；缺失 MQTT_HOST 即失败，无 fallback）----
 [ -f "$PROFILE_DIR/$PROFILE_ID.yaml" ] || { echo "ERROR: profile 不存在: $PROFILE_ID（$PROFILE_DIR）" >&2; exit 1; }
 python3 - "$DEVICE_ID" "$PROFILE_ID" "$PROFILE_DIR/$PROFILE_ID.yaml" "$EDGE_HOME/config/assignment.env" "$EDGE_HOME/config/bridge.env" <<'PY'
-import sys
+import os, sys
 device_id, profile_id, profile_path, assignment_path, out_path = sys.argv[1:6]
 def load_kv(path):
     d = {}
@@ -153,7 +153,7 @@ lines = [
     "FIREBOT_MQTT_USERNAME=%s" % device_id,
     "FIREBOT_MQTT_HOST=%s" % assignment.get("MQTT_HOST", ""),
     "FIREBOT_MQTT_PORT=%s" % assignment.get("MQTT_PORT", "8883"),
-    "FIREBOT_CA_CERT=%s" % assignment.get("MQTT_CA", "/home/tl/firebot-edge/certs/mqtt-ca.crt"),
+    "FIREBOT_CA_CERT=%s" % assignment.get("MQTT_CA", os.environ.get("FIREBOT_EDGE_HOME", "/home/tl/firebot-edge") + "/certs/mqtt-ca.crt"),
     "",
     "FIREBOT_SITE_CODE=%s" % assignment.get("SITE_CODE", ""),
     "FIREBOT_MAP_CODE=%s" % assignment.get("MAP_CODE", ""),

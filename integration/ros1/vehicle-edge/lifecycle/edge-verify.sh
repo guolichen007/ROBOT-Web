@@ -65,6 +65,20 @@ edge_enabled="$("$SYSTEMCTL" is-enabled firebot-vehicle-edge 2>/dev/null || echo
 [ "$edge_state" = "inactive" ] && pass "EDGE_SERVICE_INACTIVE=yes" || fail "EDGE_SERVICE_INACTIVE=no（$edge_state）"
 [ "$edge_enabled" != "enabled" ] && pass "EDGE_SERVICE_DISABLED=yes" || fail "EDGE_SERVICE_DISABLED=no"
 
+# P1-4：ROS adapter 环境验证（若配置则文件必须存在；ROS Master 运行不是成功条件）
+ros_setup="$(grep -E '^FIREBOT_ROS_SETUP=' "$EDGE_HOME/config/install.env" 2>/dev/null | cut -d= -f2- || true)"
+ros_ws="$(grep -E '^FIREBOT_ROS_WORKSPACE_SETUP=' "$EDGE_HOME/config/install.env" 2>/dev/null | cut -d= -f2- || true)"
+if [ -n "$ros_setup" ]; then
+  [ -f "$ros_setup" ] && pass "ROS_SETUP_READY=YES" || fail "ROS_SETUP_READY=NO（$ros_setup 不存在）"
+else
+  pass "ROS_SETUP_READY=NOT_CONFIGURED"
+fi
+if [ -n "$ros_ws" ]; then
+  [ -f "$ros_ws" ] && pass "ROS_WORKSPACE_SETUP_READY=YES" || fail "ROS_WORKSPACE_SETUP_READY=NO（$ros_ws 不存在）"
+else
+  pass "ROS_WORKSPACE_SETUP_READY=NOT_CONFIGURED"
+fi
+
 # config/secrets/certs 就绪
 [ -f "$EDGE_HOME/config/identity.env" ] && pass "EDGE_IDENTITY=yes" || fail "EDGE_IDENTITY=no"
 [ -f "$EDGE_HOME/config/bridge.env" ] && pass "EDGE_BRIDGE_ENV=yes" || fail "EDGE_BRIDGE_ENV=no"

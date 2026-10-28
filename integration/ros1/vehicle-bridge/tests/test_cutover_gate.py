@@ -57,6 +57,21 @@ def git(cwd: Path, *args: str) -> str:
     ).stdout.strip()
 
 
+import json as _json
+
+
+def _setup_current_release(fx, sha="9" * 40):
+    """readonly-start 的 STATUS_RELEASE_MATCH 需要 current symlink + manifest。"""
+    rel = fx.etc / "releases" / sha
+    rel.mkdir(parents=True, exist_ok=True)
+    (rel / "manifest.json").write_text(_json.dumps({"source_sha": sha}))
+    cur = fx.etc / "current"
+    if cur.is_symlink() or cur.exists():
+        cur.unlink()
+    cur.symlink_to(f"releases/{sha}")
+    os.environ["FAKE_RELEASE_SHA"] = sha
+
+
 class Fixture:
     def __init__(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="cutover-gate-"))
@@ -147,11 +162,13 @@ class Fixture:
                   "is-active firebot-bridge") cat "$FAKE_STATE/bridge_active" 2>/dev/null || echo inactive ;;
                   "is-enabled firebot-vehicle-edge") cat "$FAKE_STATE/edge_enabled" 2>/dev/null || echo disabled ;;
                   "is-active firebot-vehicle-edge") cat "$FAKE_STATE/edge_active" 2>/dev/null || echo inactive ;;
+                  "show firebot-vehicle-edge -p MainPID --value") cat "$FAKE_STATE/main_pid" 2>/dev/null || echo 0 ;;
                   "enable --now firebot-vehicle-edge")
                     echo enabled > "$FAKE_STATE/edge_enabled"
                     echo active > "$FAKE_STATE/edge_active"
-                    printf '{"mqtt_connected": %s, "boot_id": "boot-cutover-fixture"}' \
-                      "${FAKE_STATUS_CONNECTED:-true}" > "${FAKE_STATUS_JSON:?}"
+                    echo 4242 > "$FAKE_STATE/main_pid"
+                    printf '{"mqtt_connected": %s, "boot_id": "boot-cutover-fixture", "pid": 4242, "release_sha": "%s", "process_started_at": "2026-10-28T00:00:01Z", "status_updated_at": "2026-10-28T00:00:01Z"}' \
+                      "${FAKE_STATUS_CONNECTED:-true}" "${FAKE_RELEASE_SHA:-}" > "${FAKE_STATUS_JSON:?}"
                     ;;
                   "disable --now firebot-vehicle-edge")
                     echo disabled > "$FAKE_STATE/edge_enabled"
@@ -188,6 +205,7 @@ class Fixture:
             "FAKE_STATE": str(self.state),
             "FAKE_STATUS_JSON": str(self.status_json),
             "FAKE_LOG": str(self.syslog),
+            "FAKE_RELEASE_SHA": os.environ.get("FAKE_RELEASE_SHA", ""),
             "FAKE_CURL_LOG": str(self.curllog),
             "FAKE_STATUS_CONNECTED": os.environ.get("FAKE_STATUS_CONNECTED", "true"),
             "FIREBOT_TEST_OS_RELEASE": str(self.os_release),
@@ -333,6 +351,7 @@ def test_readonly_start_failure_auto_stop_and_disable() -> None:
             f"FIREBOT_CA_CERT={fx.ca}\n"
             "FIREBOT_SUPPORTED_COMMANDS=\n"
         )
+        _setup_current_release(fx)
         r = fx.run_script(START)
         check("READONLY_START_FAILURE_AUTO_STOP（FAIL + 自动退回）", r.returncode != 0 and "READONLY_BRIDGE_START=FAIL" in r.stdout, r.stdout[-300:])
         check("FAIL_CLOSED_BRIDGE_STOP=PASS", "FAIL_CLOSED_BRIDGE_STOP=PASS" in r.stdout)
@@ -367,6 +386,7 @@ def test_readonly_start_success_no_auto_stop() -> None:
             f"FIREBOT_CA_CERT={fx.ca}\n"
             "FIREBOT_SUPPORTED_COMMANDS=\n"
         )
+        _setup_current_release(fx)
         r = fx.run_script(START)
         check("READONLY_START 成功路径（mqtt_connected=true）", r.returncode == 0 and "READONLY_BRIDGE_START=PASS" in r.stdout, r.stdout[-300:])
         log = fx.syslog.read_text()

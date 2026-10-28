@@ -66,8 +66,25 @@ cmd_build() {
     }
   done
 
-  # 3) 落位 releases/<SHA>（原子 rename；同名 SHA 已存在则拒绝覆盖——immutable）
-  [ -e "$release" ] && { echo "ERROR: releases/$SHA 已存在（immutable，禁止覆盖）" >&2; rm -rf "$staging"; exit 1; }
+  # 3) 落位 releases/<SHA>（原子 rename；同名 SHA 已存在 → 验证后 EXISTS_VERIFIED，绝不覆盖）
+  if [ -e "$release" ]; then
+    # P1-1 同 SHA 安全重试：先验证已有 release 完整性；通过则继续后续 install/switch。
+    if grep -q "\"source_sha\": \"$SHA\"" "$release/manifest.json" 2>/dev/null \
+      && [ -f "$release/VERSION" ] && [ -x "$release/bin/firebot-edge" ] \
+      && [ -f "$release/bridge/run_bridge.sh" ] \
+      && [ -f "$release/bridge/firebot_bridge/__init__.py" ] \
+      && [ -d "$release/lib" ] && [ -d "$release/monitor" ] \
+      && ! find "$release" -type f -perm /022 | grep -q . ; then
+      echo "RELEASE_BUILD=EXISTS_VERIFIED release=$release（同 SHA 安全重试；不覆盖）"
+      rm -rf "$staging"
+      return 0
+    fi
+    echo "RELEASE_BUILD=REJECTED"
+    echo "RELEASE_CORRUPT_OR_MISMATCH"
+    echo "原因：releases/$SHA 已存在但完整性校验不通过；禁止自动删除，由人工处置。" >&2
+    rm -rf "$staging"
+    exit 1
+  fi
   chmod -R u=rwX,go=rX "$staging"
   mv "$staging" "$release"
   echo "RELEASE_BUILD=PASS release=$release"

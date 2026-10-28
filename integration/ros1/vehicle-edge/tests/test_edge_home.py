@@ -107,10 +107,17 @@ class Fixture:
                   "is-enabled firebot-control") cat "$FAKE_STATE/ctl_enabled" 2>/dev/null || echo disabled ;;
                   "is-active firebot-control") cat "$FAKE_STATE/ctl_active" 2>/dev/null || echo inactive ;;
                   "is-active firebot-bridge.service"*) echo inactive ;;
+                  "show firebot-vehicle-edge -p MainPID --value") cat "$FAKE_STATE/main_pid" 2>/dev/null || echo 0 ;;
                   "enable --now firebot-vehicle-edge")
-                    echo enabled > "$FAKE_STATE/edge_enabled"; echo active > "$FAKE_STATE/edge_active" ;;
+                    echo enabled > "$FAKE_STATE/edge_enabled"; echo active > "$FAKE_STATE/edge_active"
+                    echo "${FAKE_MAIN_PID:-4242}" > "$FAKE_STATE/main_pid"
+                    printf '{"mqtt_connected": %s, "boot_id": "%s", "pid": %s, "release_sha": "%s", "process_started_at": "2026-10-28T00:00:01Z", "status_updated_at": "2026-10-28T00:00:01Z"}' \
+                      "${FAKE_STATUS_CONNECTED:-true}" "${FAKE_BOOT_ID:-boot-fixture}" "${FAKE_MAIN_PID:-4242}" "${FAKE_RELEASE_SHA:-}" > "${FAKE_STATUS_JSON:?}"
+                    ;;
                   "disable --now firebot-vehicle-edge")
-                    echo disabled > "$FAKE_STATE/edge_enabled"; echo inactive > "$FAKE_STATE/edge_active" ;;
+                    echo disabled > "$FAKE_STATE/edge_enabled"; echo inactive > "$FAKE_STATE/edge_active"
+                    echo 0 > "$FAKE_STATE/main_pid"
+                    ;;
                   "daemon-reload") ;;
                   *) echo "unexpected: $args" >&2; exit 1 ;;
                 esac
@@ -128,8 +135,14 @@ class Fixture:
             "FIREBOT_TEST_SKIP_CHOWN": "1",
             "FIREBOT_TEST_SYSTEMD_DIR": str(self.systemd_dir),
             "FIREBOT_TEST_WRAP_DIR": str(self.wrap_dir),
+            "FIREBOT_TEST_STATUS_JSON": str(self.edge_home / "runtime" / "status.json"),
             "FAKE_STATE": str(self.state),
             "FAKE_LOG": str(self.syslog),
+            "FAKE_STATUS_JSON": str(self.edge_home / "runtime" / "status.json"),
+            "FAKE_MAIN_PID": os.environ.get("FAKE_MAIN_PID", "4242"),
+            "FAKE_BOOT_ID": os.environ.get("FAKE_BOOT_ID", "boot-fixture"),
+            "FAKE_RELEASE_SHA": os.environ.get("FAKE_RELEASE_SHA", ""),
+            "FAKE_STATUS_CONNECTED": os.environ.get("FAKE_STATUS_CONNECTED", "true"),
         }
 
     def run(self, script: Path, *args: str, **extra_env: str) -> subprocess.CompletedProcess:
@@ -162,7 +175,8 @@ def test_edge_init_layout_and_idempotent() -> None:
         check("install.env 显式 runtime user", "FIREBOT_EDGE_USER=tl" in text and "FIREBOT_EDGE_HOME=" in text)
         # 幂等
         r2 = fx.run(fx.lifecycle("edge-init.sh"), "--runtime-user", "tl")
-        check("EDGE_INIT_IDEMPOTENT", r2.returncode == 0 and "EDGE_INIT=PASS" in r2.stdout)
+        check("EDGE_INIT_IDEMPOTENT（EXISTS 不重写）", r2.returncode == 0
+              and "EDGE_INIT=EXISTS" in r2.stdout and "EDGE_INIT_IDEMPOTENT=PASS" in r2.stdout)
         # 绝不生成 credential（无 mqtt.env/device-token）
         check("EDGE_INIT_NO_SECRET", not (fx.edge_home / "secrets" / "mqtt.env").exists()
               and not (fx.edge_home / "secrets" / "device-token").exists())

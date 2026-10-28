@@ -119,11 +119,12 @@ jobs:
           python3 tests/test_location_freshness.py
           python3 tests/test_readonly_gate.py
           python3 tests/test_cutover_gate.py
-      - name: Vehicle Edge 工程化测试（edge home / monitor / 合同）
+      - name: Vehicle Edge 工程化测试（edge home / monitor / freshness / 合同）
         run: |
           cd integration/ros1/vehicle-edge
           python3 tests/test_edge_home.py
           python3 tests/test_monitor.py
+          python3 tests/test_freshness.py
           cd ../../..
           python3 scripts/test_edge_contract.py
       - name: Control STOP 安全测试

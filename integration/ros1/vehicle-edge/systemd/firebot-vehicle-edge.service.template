@@ -17,6 +17,8 @@ Environment=PYTHONUNBUFFERED=1
 Environment=FIREBOT_EDGE_HOME=@EDGE_HOME@
 # canonical 本地 status.json（复用现有 FIREBOT_BRIDGE_STATUS_FILE 支持，不重造第二套 writer）
 Environment=FIREBOT_BRIDGE_STATUS_FILE=@EDGE_HOME@/runtime/status.json
+# P1-3：显式 ROS adapter 环境（Edge 只 source；绝不启动 ROS/roscore/roslaunch）
+@ROS_ENV_LINES@
 # MQTT 密码经 EnvironmentFile 注入（secrets/mqtt.env root:root 600），不写进本文件、不进 Git
 EnvironmentFile=-@EDGE_HOME@/secrets/mqtt.env
 

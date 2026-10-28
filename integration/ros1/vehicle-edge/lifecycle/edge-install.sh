@@ -57,6 +57,15 @@ if [ ! -f "$INSTALL_ENV" ] || ! grep -qE '^FIREBOT_EDGE_USER=[a-z_][a-z0-9_-]*$'
 fi
 RUNTIME_USER="$(grep -E '^FIREBOT_EDGE_USER=' "$INSTALL_ENV" | cut -d= -f2-)"
 
+# P1-3：显式 ROS adapter 环境注入 systemd（只 source，绝不启动 ROS）
+ROS_ENV_LINES=""
+ros_setup="$(grep -E '^FIREBOT_ROS_SETUP=' "$INSTALL_ENV" 2>/dev/null | cut -d= -f2- || true)"
+ros_ws="$(grep -E '^FIREBOT_ROS_WORKSPACE_SETUP=' "$INSTALL_ENV" 2>/dev/null | cut -d= -f2- || true)"
+[ -n "$ros_setup" ] && ROS_ENV_LINES="$ROS_ENV_LINES
+Environment=FIREBOT_ROS_SETUP=$ros_setup"
+[ -n "$ros_ws" ] && ROS_ENV_LINES="$ROS_ENV_LINES
+Environment=FIREBOT_ROS_WORKSPACE_SETUP=$ros_ws"
+
 # ---- 前置门 3：legacy/new 互斥 + 安装≠启动 ----
 legacy_state="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive)"
 edge_state="$("$SYSTEMCTL" is-active firebot-vehicle-edge 2>/dev/null || echo inactive)"
@@ -80,13 +89,20 @@ fi
 bash "$VEHICLE_EDGE_SRC/install/release-manager.sh" build "$VEHICLE_EDGE_SRC" "$REQUIRE_SHA" "$EDGE_HOME"
 
 # ---- 安装 systemd unit（新 unit，绝不改造 legacy unit）----
+# 占位符替换用 python（@ROS_ENV_LINES@ 为多行 Environment 行，sed 无法安全处理）
 SYSTEMD_DIR="${FIREBOT_TEST_SYSTEMD_DIR:-/etc/systemd/system}"
 UNIT_DST="$SYSTEMD_DIR/firebot-vehicle-edge.service"
 TMP_UNIT="$(mktemp)"
-sed \
-  -e "s|@EDGE_HOME@|$EDGE_HOME|g" \
-  -e "s|@RUNTIME_USER@|$RUNTIME_USER|g" \
-  "$VEHICLE_EDGE_SRC/systemd/firebot-vehicle-edge.service.template" > "$TMP_UNIT"
+EDGE_HOME="$EDGE_HOME" RUNTIME_USER="$RUNTIME_USER" ROS_ENV_LINES="$ROS_ENV_LINES" \
+python3 - "$VEHICLE_EDGE_SRC/systemd/firebot-vehicle-edge.service.template" "$TMP_UNIT" <<'PY'
+import os, sys
+src_path, dst_path = sys.argv[1:3]
+text = open(src_path, encoding="utf-8").read()
+text = text.replace("@EDGE_HOME@", os.environ["EDGE_HOME"])
+text = text.replace("@RUNTIME_USER@", os.environ["RUNTIME_USER"])
+text = text.replace("@ROS_ENV_LINES@", os.environ.get("ROS_ENV_LINES", ""))
+open(dst_path, "w", encoding="utf-8").write(text)
+PY
 chmod 0644 "$TMP_UNIT"
 mv "$TMP_UNIT" "$UNIT_DST"
 if [ "${FIREBOT_TEST_SKIP_ROOT:-0}" != "1" ]; then

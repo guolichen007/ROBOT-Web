@@ -18,10 +18,15 @@ set -euo pipefail
 
 RUNTIME_USER=""
 EDGE_HOME="${FIREBOT_EDGE_HOME:-/home/tl/firebot-edge}"
+ROS_SETUP=""
+ROS_WORKSPACE_SETUP=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --runtime-user) RUNTIME_USER="${2:-}"; shift 2 ;;
     --edge-home) EDGE_HOME="${2:-}"; shift 2 ;;
+    # P1-3：显式 ROS adapter 环境（Edge 只 source，绝不启动 ROS）
+    --ros-setup) ROS_SETUP="${2:-}"; shift 2 ;;
+    --ros-workspace-setup) ROS_WORKSPACE_SETUP="${2:-}"; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -55,13 +60,37 @@ for d in $RW_DIRS; do
   chmod 0750 "$EDGE_HOME/$d"
 done
 
-# install.env：显式 runtime user + Edge Home（之后所有 lifecycle 读取这里；缺失 fail-closed）
+# install.env：显式 runtime user + Edge Home + 可选 ROS adapter 环境
+# （之后所有 lifecycle 读取这里；缺失 fail-closed）
+# P1-2：已存在时校验一致性——完全一致 → EXISTS（不重写）；任何差异 → CONFLICT 停止。
+# 禁止静默 tl->root、tl->other、home->other root。
 INSTALL_ENV="$EDGE_HOME/config/install.env"
+if [ -f "$INSTALL_ENV" ]; then
+  cur_user="$(grep -E '^FIREBOT_EDGE_USER=' "$INSTALL_ENV" | tail -1 | cut -d= -f2- | tr -d '"'"'"'[:space:]')"
+  cur_home="$(grep -E '^FIREBOT_EDGE_HOME=' "$INSTALL_ENV" | tail -1 | cut -d= -f2- | tr -d '"'"'"'[:space:]')"
+  cur_ros="$(grep -E '^FIREBOT_ROS_SETUP=' "$INSTALL_ENV" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"'[:space:]' || true)"
+  cur_ros_ws="$(grep -E '^FIREBOT_ROS_WORKSPACE_SETUP=' "$INSTALL_ENV" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"'[:space:]' || true)"
+  if [ "$cur_user" = "$RUNTIME_USER" ] && [ "$cur_home" = "$EDGE_HOME" ] \
+     && [ "$cur_ros" = "$ROS_SETUP" ] && [ "$cur_ros_ws" = "$ROS_WORKSPACE_SETUP" ]; then
+    echo "EDGE_INIT=EXISTS"
+    echo "EDGE_INIT_IDEMPOTENT=PASS"
+    exit 0
+  fi
+  echo "EDGE_INIT=CONFLICT"
+  echo "原因：install.env 已存在且与本次参数不一致（user=$cur_user→$RUNTIME_USER home=$cur_home→$EDGE_HOME）；禁止静默改写。" >&2
+  exit 1
+fi
 TMP_ENV="$(mktemp)"
 {
   echo "# firebot-edge install 配置（由 edge-init 生成；禁止手改 runtime user）"
   echo "FIREBOT_EDGE_USER=$RUNTIME_USER"
   echo "FIREBOT_EDGE_HOME=$EDGE_HOME"
+  if [ -n "$ROS_SETUP" ]; then
+    echo "FIREBOT_ROS_SETUP=$ROS_SETUP"
+  fi
+  if [ -n "$ROS_WORKSPACE_SETUP" ]; then
+    echo "FIREBOT_ROS_WORKSPACE_SETUP=$ROS_WORKSPACE_SETUP"
+  fi
 } > "$TMP_ENV"
 chmod 0644 "$TMP_ENV"
 mv "$TMP_ENV" "$INSTALL_ENV"

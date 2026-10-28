@@ -48,6 +48,21 @@ def git(cwd: Path, *args: str) -> None:
     )
 
 
+import json as _json
+
+
+def _setup_current_release(fx, sha="9" * 40):
+    """readonly-start 的 STATUS_RELEASE_MATCH 需要 current symlink + manifest。"""
+    rel = fx.etc / "releases" / sha
+    rel.mkdir(parents=True, exist_ok=True)
+    (rel / "manifest.json").write_text(_json.dumps({"source_sha": sha}))
+    cur = fx.etc / "current"
+    if cur.is_symlink() or cur.exists():
+        cur.unlink()
+    cur.symlink_to(f"releases/{sha}")
+    os.environ["FAKE_RELEASE_SHA"] = sha
+
+
 class Fixture:
     """fake repo + fakebin + fake /etc/firebot + fake systemctl 状态。"""
 
@@ -129,11 +144,13 @@ class Fixture:
                     echo active > "$FAKE_STATE/bridge_active"
                     printf '{"mqtt_connected": true, "boot_id": "boot-fixture-0001"}' > "${FAKE_STATUS_JSON:?}"
                     ;;
+                  "show firebot-vehicle-edge -p MainPID --value") cat "$FAKE_STATE/main_pid" 2>/dev/null || echo 0 ;;
                   "enable --now firebot-vehicle-edge")
                     echo active > "$FAKE_STATE/edge_active"
                     echo enabled > "$FAKE_STATE/edge_enabled"
-                    printf '{"mqtt_connected": %s, "boot_id": "boot-fixture-0001"}' \
-                      "${FAKE_EDGE_STATUS_CONNECTED:-true}" > "${FAKE_STATUS_JSON:?}"
+                    echo 4242 > "$FAKE_STATE/main_pid"
+                    printf '{"mqtt_connected": %s, "boot_id": "boot-fixture-0001", "pid": 4242, "release_sha": "%s", "process_started_at": "2026-10-28T00:00:01Z", "status_updated_at": "2026-10-28T00:00:01Z"}' \
+                      "${FAKE_EDGE_STATUS_CONNECTED:-true}" "${FAKE_RELEASE_SHA:-}" > "${FAKE_STATUS_JSON:?}"
                     ;;
                   "disable --now firebot-vehicle-edge")
                     echo inactive > "$FAKE_STATE/edge_active"
@@ -142,8 +159,9 @@ class Fixture:
                   "enable --now firebot-vehicle-edge")
                     echo active > "$FAKE_STATE/edge_active"
                     echo enabled > "$FAKE_STATE/edge_enabled"
-                    printf '{"mqtt_connected": %s, "boot_id": "boot-fixture-0001"}' \
-                      "${FAKE_EDGE_STATUS_CONNECTED:-true}" > "${FAKE_STATUS_JSON:?}"
+                    echo 4242 > "$FAKE_STATE/main_pid"
+                    printf '{"mqtt_connected": %s, "boot_id": "boot-fixture-0001", "pid": 4242, "release_sha": "%s", "process_started_at": "2026-10-28T00:00:01Z", "status_updated_at": "2026-10-28T00:00:01Z"}' \
+                      "${FAKE_EDGE_STATUS_CONNECTED:-true}" "${FAKE_RELEASE_SHA:-}" > "${FAKE_STATUS_JSON:?}"
                     ;;
                   "disable --now firebot-vehicle-edge")
                     echo inactive > "$FAKE_STATE/edge_active"
@@ -185,6 +203,7 @@ class Fixture:
             "FAKE_STATE": str(self.state),
             "FAKE_STATUS_JSON": str(self.status_json),
             "FAKE_LOG": str(self.fake_log),
+            "FAKE_RELEASE_SHA": os.environ.get("FAKE_RELEASE_SHA", ""),
         }
         e.update(over)
         return e
@@ -316,6 +335,7 @@ def test_readonly_start_bridge_only() -> None:
     fx = Fixture()
     try:
         fx.write_enrolled_files()
+        _setup_current_release(fx)
         r = fx.run_start()
         check("READONLY_START_BRIDGE_ONLY=PASS", r.returncode == 0 and "READONLY_BRIDGE_START=PASS" in r.stdout, r.stdout[-300:])
         check("BRIDGE_ACTIVE=YES 输出", "BRIDGE_ACTIVE=YES" in r.stdout)
