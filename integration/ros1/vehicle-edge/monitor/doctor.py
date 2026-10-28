@@ -89,8 +89,30 @@ def main(argv: list[str] | None = None) -> int:
     check("layout-backups", os.path.isdir(paths["backups"]))
     check("layout-certs", os.path.isdir(paths["certs"]))
 
-    # Permissions（关键目录）
+    # Permissions（关键目录）+ P1-2 ownership 强校验（runtime user 来自 install.env）
     check("perm-secrets", mode_str(paths["secrets"]) == "700", mode_str(paths["secrets"]))
+    if os.environ.get("FIREBOT_TEST_SKIP_OWNERSHIP") == "1":
+        check("ownership-model", True, "SKIPPED（测试逃逸）")
+    else:
+        edge_user = read_kv(paths["install_env"], "FIREBOT_EDGE_USER")
+        for label, path, expect in (
+            ("EDGE_HOME_OWNER", paths["home"], "root:root"),
+            ("CONFIG_OWNER", paths["config"], "root:root"),
+            ("CERTS_OWNER", paths["certs"], "root:root"),
+            ("RELEASES_OWNER", paths["releases"], "root:root"),
+            ("SECRETS_OWNER", paths["secrets"], "root:root"),
+            ("BACKUPS_OWNER", paths["backups"], "root:root"),
+        ):
+            check(label, user_str(path) == expect, user_str(path))
+        if edge_user:
+            for label, path in (
+                ("RUNTIME_OWNER", paths["runtime"]),
+                ("DATA_OWNER", paths["data"]),
+                ("LOGS_OWNER", paths["logs"]),
+            ):
+                check(label, user_str(path).startswith(edge_user + ":"), user_str(path))
+        else:
+            check("ownership-runtime", False, "runtime user 未配置")
     check("perm-backups", mode_str(paths["backups"]) == "700", mode_str(paths["backups"]))
     check("perm-mqtt-env", mode_str(paths["mqtt_env"]) in ("600", "-"),
           mode_str(paths["mqtt_env"]))

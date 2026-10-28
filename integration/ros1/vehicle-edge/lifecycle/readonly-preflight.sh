@@ -144,7 +144,7 @@ ntp_ok=no
 [ "$("$SYSTEMCTL" is-active systemd-timesyncd 2>/dev/null)" = "active" ] && ntp_ok=yes
 [ "$ntp_ok" = "yes" ] && pass "NTP_SANE=yes" || fail "NTP_SANE=no"
 
-# ---- 控制面全关 + legacy/new 互斥（只读铁律）----
+# ---- 控制面全关 + communication-owner 语义（VEHICLE_EDGE_PRE_CUTOVER_SEMANTICS_FIX）----
 ctl_enabled="$("$SYSTEMCTL" is-enabled firebot-control 2>/dev/null || echo disabled)"
 ctl_active="$("$SYSTEMCTL" is-active firebot-control 2>/dev/null || echo inactive)"
 [ "$ctl_enabled" = "enabled" ] && fail "CONTROL_ENABLED=yes" || pass "CONTROL_ENABLED=no"
@@ -154,10 +154,37 @@ case "$ctl_active" in
 esac
 legacy_state="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive)"
 edge_state="$("$SYSTEMCTL" is-active firebot-vehicle-edge 2>/dev/null || echo inactive)"
-if [ "$legacy_state" = "inactive" ] && [ "$edge_state" = "inactive" ]; then
-  pass "COMMUNICATION_OWNER=NONE（legacy+edge 双 inactive）"
-else
-  fail "COMMUNICATION_OWNER=CONFLICT（legacy=$legacy_state edge=$edge_state；LEGACY_AND_EDGE_MUTUAL_EXCLUSION）"
+# P0-1 phase-aware：bootstrap = pre-cutover（旧链路仍在线允许 legacy active）；
+# 新 Edge 在 cutover 前绝不允许 active（EDGE_STARTED_BEFORE_CUTOVER）。
+case "$edge_state" in
+  active|activating|reloading)
+    echo "EDGE_STARTED_BEFORE_CUTOVER"
+    fail "EDGE_ACTIVE=yes（$edge_state；cutover 前禁止新 Edge 运行）"
+    ;;
+  *)
+    pass "EDGE_ACTIVE=no"
+    ;;
+esac
+if [ "$PHASE" = "bootstrap" ]; then
+  # pre-cutover：legacy active / inactive 均允许；preflight 纯只读，绝不操作服务。
+  if [ "$legacy_state" = "active" ]; then
+    pass "LEGACY_BRIDGE_STATE=ACTIVE"
+    pass "PRE_CUTOVER_LEGACY_LINK_PRESERVED=YES"
+    pass "COMMUNICATION_OWNER=LEGACY"
+  elif [ "$legacy_state" = "inactive" ]; then
+    pass "LEGACY_BRIDGE_STATE=INACTIVE"
+    pass "PRE_CUTOVER_LEGACY_LINK_PRESERVED=NOT_APPLICABLE"
+    pass "COMMUNICATION_OWNER=NONE"
+  else
+    fail "LEGACY_BRIDGE_STATE=UNKNOWN（$legacy_state）"
+  fi
+elif [ "$PHASE" = "enrolled" ]; then
+  # P0-2 post-cutover / pre-start：必须双 inactive（COMMUNICATION_OWNER=NONE）。
+  if [ "$legacy_state" = "inactive" ] && [ "$edge_state" = "inactive" ]; then
+    pass "COMMUNICATION_OWNER=NONE（legacy+edge 双 inactive）"
+  else
+    fail "COMMUNICATION_OWNER=CONFLICT（legacy=$legacy_state edge=$edge_state；enrolled 必须双 inactive）"
+  fi
 fi
 if "$PGREP" -f "rosmaster|roscore" >/dev/null 2>&1; then
   fail "ROS_MASTER_INACTIVE=no"

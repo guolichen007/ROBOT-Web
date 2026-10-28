@@ -21,6 +21,7 @@
 #   firebotctl vehicle readonly-preflight             # 真实车辆只读接入前置检查（bootstrap/enrolled）
 #   firebotctl vehicle readonly-start                 # 只读启动 Bridge（唯一正式入口）
 #   firebotctl vehicle migration-stop-legacy           # 跨 Broker 迁移 cutover 切换点（停 legacy Bridge）
+#   firebotctl vehicle edge-backup-legacy                # Stage A legacy 备份（Edge Home backups/legacy/；零运行影响）
 # 服务器：
 #   firebotctl server deploy --sha <SHA>              # 一条命令部署
 #   firebotctl server verify / rollback / support-bundle
@@ -366,10 +367,15 @@ cmd_vehicle() {
       require_root
       FIREBOT_REQUIRE_SHA="$esha" bash "$ROS1_DIR/vehicle-edge/lifecycle/edge-install.sh" "$REPO_DIR" ;;
     edge-verify)
-      # 验证当前 release/manifest/权限/service inactive（安装≠启动）。
+      # 验证当前 release/manifest/权限模型（ownership+mode）/service inactive（安装≠启动）。
       local vsha=""; while [ $# -gt 0 ]; do case "$1" in --sha) vsha="$2"; shift 2;; *) shift;; esac; done
       require_sha "$vsha"
       FIREBOT_REQUIRE_SHA="$vsha" bash "$ROS1_DIR/vehicle-edge/lifecycle/edge-verify.sh" "$@" ;;
+    edge-backup-legacy)
+      # Stage A legacy 备份统一进入 Edge Home backups/legacy/<UTC>/（root:root 0700）。
+      # 零运行影响：不 stop/restart/reload/disable 任何服务、不改 Tailscale、不输出 secret。
+      require_root
+      bash "$ROS1_DIR/vehicle-edge/lifecycle/edge-backup-legacy.sh" "$@" ;;
     profile-sync)
       local did; did="$(read_device_id)"
       local pid; pid="$(grep -E '^PROFILE_ID=' "$DEVICE_ENV" 2>/dev/null | cut -d= -f2- || echo "$DEFAULT_PROFILE")"
@@ -386,7 +392,7 @@ cmd_vehicle() {
       FIREBOT_REQUIRE_SHA="$sha" bash "$ROS1_DIR/vehicle-install.sh" all
       FIREBOT_REQUIRE_SHA="$sha" bash "$ROS1_DIR/vehicle-install.sh" verify ;;
     *)
-      echo "firebotctl vehicle <enroll|install|verify|status|start|stop|capability|location|profile-sync|support-bundle|rollback|upgrade|readonly-preflight|readonly-start|migration-stop-legacy>" >&2; exit 1 ;;
+      echo "firebotctl vehicle <enroll|install|verify|status|start|stop|capability|location|profile-sync|support-bundle|rollback|upgrade|readonly-preflight|readonly-start|migration-stop-legacy|edge-init|edge-install|edge-verify|edge-backup-legacy>" >&2; exit 1 ;;
   esac
 }
 

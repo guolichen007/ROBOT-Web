@@ -89,6 +89,17 @@ class Fixture:
         self.fakebin = self.tmp / "fakebin"
         self.fakebin.mkdir()
         self._write_fake_systemctl()
+        # preflight 所需只读命令（fixture；preflight 纯只读语义）
+        (self.fakebin / "curl").write_text("#!/usr/bin/env bash\nexit 0\n")
+        (self.fakebin / "getent").write_text("#!/usr/bin/env bash\necho 124.223.220.182 firebot.youdaozd.com\n")
+        (self.fakebin / "timedatectl").write_text("#!/usr/bin/env bash\necho NTPSynchronized=yes\n")
+        (self.fakebin / "pgrep").write_text("#!/usr/bin/env bash\nexit 1\n")
+        (self.fakebin / "openssl").write_text(
+            "#!/usr/bin/env bash\ncat >/dev/null\necho 'Verify return code: 0 (ok)'\n")
+        self.os_release = self.tmp / "os-release"
+        self.os_release.write_text('ID=ubuntu\nVERSION_ID="20.04"\n')
+        self.ros_setup_file = self.tmp / "ros-noetic-setup.bash"
+        self.ros_setup_file.write_text("# fixture\n")
         for f in self.fakebin.iterdir():
             f.chmod(f.stat().st_mode | stat.S_IXUSR)
 
@@ -139,6 +150,13 @@ class Fixture:
             "FAKE_STATE": str(self.state),
             "FAKE_LOG": str(self.syslog),
             "FAKE_STATUS_JSON": str(self.edge_home / "runtime" / "status.json"),
+            "FIREBOT_TEST_CURL": str(self.fakebin / "curl"),
+            "FIREBOT_TEST_GETENT": str(self.fakebin / "getent"),
+            "FIREBOT_TEST_TIMEDATECTL": str(self.fakebin / "timedatectl"),
+            "FIREBOT_TEST_PGREP": str(self.fakebin / "pgrep"),
+            "FIREBOT_TEST_OPENSSL": str(self.fakebin / "openssl"),
+            "FIREBOT_TEST_OS_RELEASE": str(self.os_release),
+            "FIREBOT_TEST_ROS_NOETIC_SETUP": str(self.ros_setup_file),
             "FAKE_MAIN_PID": os.environ.get("FAKE_MAIN_PID", "4242"),
             "FAKE_BOOT_ID": os.environ.get("FAKE_BOOT_ID", "boot-fixture"),
             "FAKE_RELEASE_SHA": os.environ.get("FAKE_RELEASE_SHA", ""),

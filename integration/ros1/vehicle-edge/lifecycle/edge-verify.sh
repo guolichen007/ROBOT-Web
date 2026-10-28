@@ -43,7 +43,13 @@ for f in VERSION bin/firebot-edge bridge/run_bridge.sh bridge/firebot_bridge/__i
   [ -e "$EDGE_HOME/current/$f" ] && pass "EDGE_FILE_$f=yes" || fail "EDGE_FILE_$f=no"
 done
 
-# 权限模型（fail-closed）
+# 权限模型（fail-closed；P1-2 ownership 强校验——runtime user 来自 install.env，禁止硬编码）
+owner_is() {
+  local path="$1" expect_user="$2" expect_group="${3:-$2}"
+  local actual
+  actual="$(stat -c '%U:%G' "$path" 2>/dev/null || echo MISSING)"
+  [ "$actual" = "$expect_user:$expect_group" ]
+}
 perm() {
   local path="$1" expect="$2"
   local actual
@@ -54,6 +60,26 @@ perm "$EDGE_HOME/secrets" 700 && pass "EDGE_PERM_secrets=700" || fail "EDGE_PERM
 perm "$EDGE_HOME/backups" 700 && pass "EDGE_PERM_backups=700" || fail "EDGE_PERM_backups=700"
 perm "$EDGE_HOME/runtime" 750 && pass "EDGE_PERM_runtime=750" || fail "EDGE_PERM_runtime=750"
 perm "$EDGE_HOME/config/install.env" 644 && pass "EDGE_PERM_install.env=644" || fail "EDGE_PERM_install.env=644"
+
+# P1-2：ownership 强校验（root-owned 目录 root:root；runtime/data/logs = <runtime user>）
+EDGE_USER="$(grep -E '^FIREBOT_EDGE_USER=' "$EDGE_HOME/config/install.env" 2>/dev/null | cut -d= -f2- | tr -d '"'"'"'[:space:]')"
+if [ "${FIREBOT_TEST_SKIP_OWNERSHIP:-0}" = "1" ]; then
+  pass "EDGE_OWNERSHIP=SKIPPED（测试逃逸）"
+else
+  owner_is "$EDGE_HOME" root root && pass "EDGE_HOME_OWNER=root:root" || fail "EDGE_HOME_OWNER=root:root"
+  owner_is "$EDGE_HOME/config" root root && pass "CONFIG_OWNER=root:root" || fail "CONFIG_OWNER=root:root"
+  owner_is "$EDGE_HOME/certs" root root && pass "CERTS_OWNER=root:root" || fail "CERTS_OWNER=root:root"
+  owner_is "$EDGE_HOME/releases" root root && pass "RELEASES_OWNER=root:root" || fail "RELEASES_OWNER=root:root"
+  owner_is "$EDGE_HOME/secrets" root root && pass "SECRETS_OWNER=root:root" || fail "SECRETS_OWNER=root:root"
+  owner_is "$EDGE_HOME/backups" root root && pass "BACKUPS_OWNER=root:root" || fail "BACKUPS_OWNER=root:root"
+  if [ -n "$EDGE_USER" ]; then
+    owner_is "$EDGE_HOME/runtime" "$EDGE_USER" "$EDGE_USER" && pass "RUNTIME_OWNER=$EDGE_USER:$EDGE_USER"       || fail "RUNTIME_OWNER=$EDGE_USER:$EDGE_USER"
+    owner_is "$EDGE_HOME/data" "$EDGE_USER" "$EDGE_USER" && pass "DATA_OWNER=$EDGE_USER:$EDGE_USER"       || fail "DATA_OWNER=$EDGE_USER:$EDGE_USER"
+    owner_is "$EDGE_HOME/logs" "$EDGE_USER" "$EDGE_USER" && pass "LOGS_OWNER=$EDGE_USER:$EDGE_USER"       || fail "LOGS_OWNER=$EDGE_USER:$EDGE_USER"
+  else
+    fail "EDGE_RUNTIME_USER_NOT_CONFIGURED（无法校验 runtime ownership）"
+  fi
+fi
 
 # runtime user 配置（禁止自动猜）
 grep -qE '^FIREBOT_EDGE_USER=[a-z_][a-z0-9_-]*$' "$EDGE_HOME/config/install.env" 2>/dev/null \
@@ -86,7 +112,9 @@ fi
 [ -f "$EDGE_HOME/certs/mqtt-ca.crt" ] && pass "EDGE_MQTT_CA=yes" || fail "EDGE_MQTT_CA=no"
 
 if [ "$FAILED" -ne 0 ]; then
+  echo "EDGE_PERMISSION_MODEL=FAIL"
   echo "EDGE_VERIFY=FAIL"
   exit 1
 fi
+echo "EDGE_PERMISSION_MODEL=PASS"
 echo "EDGE_VERIFY=PASS sha=$REQUIRE_SHA"

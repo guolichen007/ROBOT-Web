@@ -4,14 +4,21 @@
 > 本文件是 Vehicle Edge 工程化后的命令映射。
 
 ```text
-A. 旧链路仍在线（cutover 前）
-   1. root-only legacy backup（/root/firebot-legacy-backup-<日期>/，chmod 700）
-   2. firebotctl vehicle edge-init --runtime-user tl
-   3. 放 bootstrap 两个文件：
+A. PRE-CUTOVER / OLD LINK ONLINE（旧链路仍在线，零停机）
+   1. firebotctl vehicle edge-init --runtime-user tl \
+        [--ros-setup /opt/ros/noetic/setup.bash]
+        [--ros-workspace-setup /home/tl/firerobot_ws/devel/setup.bash]
+   2. firebotctl vehicle edge-backup-legacy
+      → LEGACY_BACKUP=PASS BACKUP_ROOT=/home/tl/firebot-edge/backups/legacy/<UTC>/
+      （canonical 单根备份；root:root 0700；零运行影响）
+   3. stage 两个文件（服务器下发）：
       /home/tl/firebot-edge/config/bootstrap.env  → FIREBOT_SERVER_URL=https://firebot.youdaozd.com
-      /home/tl/firebot-edge/certs/mqtt-ca.crt     → 服务器下发 U-Dao private CA
+      /home/tl/firebot-edge/certs/mqtt-ca.crt     → U-Dao private CA（公开信任材料）
    4. firebotctl vehicle readonly-preflight --phase bootstrap \
         --device-id firebot-vehicle-02 --expected-sha <FINAL_SHA>
+      → legacy bridge ACTIVE 允许（COMMUNICATION_OWNER=LEGACY /
+        PRE_CUTOVER_LEGACY_LINK_PRESERVED=YES）；新 Edge inactive 必须；
+        Edge active → EDGE_STARTED_BEFORE_CUTOVER FAIL
    5. 服务器：firebotctl fleet register firebot-vehicle-02（现场即时签发 token）
 
 B. 正式进入 cutover（唯一切换点）

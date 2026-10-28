@@ -202,6 +202,120 @@ def test_enroll_contract_unchanged() -> None:
     check("enroll cutover 门（LEGACY_BRIDGE_STILL_ACTIVE）", "LEGACY_BRIDGE_STILL_ACTIVE" in sh)
 
 
+def test_stage_a_zero_downtime_contract() -> None:
+    """STAGE_A_ZERO_DOWNTIME_CONTRACT：Stage A 全部动作（edge-init / edge-backup-legacy /
+    bootstrap staging / CA staging / bootstrap preflight）绝不 stop/restart legacy bridge、
+    不修改 legacy MQTT config/credential、不触碰 Tailscale。"""
+    pre = read(EDGE / "lifecycle" / "readonly-preflight.sh")
+    backup = read(EDGE / "lifecycle" / "edge-backup-legacy.sh")
+    init = read(EDGE / "lifecycle" / "edge-init.sh")
+    for name, text in (
+        ("readonly-preflight", pre),
+        ("edge-backup-legacy", backup),
+        ("edge-init", init),
+    ):
+        active = active_lines(text)
+        offenders = [
+            ln
+            for ln in active
+            if any(
+                t in ln
+                for t in (
+                    "stop firebot-bridge",
+                    "restart firebot-bridge",
+                    "systemctl stop",
+                    "systemctl restart",
+                    "systemctl reload",
+                    "disable --now firebot-bridge",
+                    "tailscale down",
+                    "tailscale logout",
+                    "systemctl disable tailscaled",
+                )
+            )
+        ]
+        check(
+            f"STAGE_A_ZERO_DOWNTIME_CONTRACT（{name} 无 stop/restart/disable/tailscale 操作）",
+            not offenders,
+            "; ".join(offenders[:2]),
+        )
+    check(
+        "bootstrap 允许 legacy active（COMMUNICATION_OWNER=LEGACY）",
+        "COMMUNICATION_OWNER=LEGACY" in pre,
+    )
+    check(
+        "bootstrap 拒绝 edge active（EDGE_STARTED_BEFORE_CUTOVER）",
+        "EDGE_STARTED_BEFORE_CUTOVER" in pre,
+    )
+    check(
+        "enrolled 强制双 inactive（COMMUNICATION_OWNER=NONE）",
+        "COMMUNICATION_OWNER=NONE" in pre and "enrolled 必须双 inactive" in pre,
+    )
+    check(
+        "无绕过参数（--allow-legacy/--skip-service-check/--force 不在 preflight）",
+        not any(t in pre for t in ("--allow-legacy", "--skip-service-check", "--force")),
+    )
+    check(
+        "backup 输出 LEGACY_BACKUP=PASS + BACKUP_ROOT",
+        "LEGACY_BACKUP=PASS" in backup and "BACKUP_ROOT=" in backup,
+    )
+    check(
+        "backup 零运行影响断言（LEGACY_SERVICE_STATE_UNCHANGED）",
+        "LEGACY_SERVICE_STATE_UNCHANGED" in backup,
+    )
+    check(
+        "backup 不输出 secret（无 password/token/secret 回显断言语义）",
+        "不输出 password/token/secret" in backup,
+    )
+
+
+def test_edge_ownership_model() -> None:
+    init = read(EDGE / "lifecycle" / "edge-init.sh")
+    verify = read(EDGE / "lifecycle" / "edge-verify.sh")
+    check("edge-init 显式 root:root ownership（chown root:root）", "chown root:root" in init)
+    check(
+        "edge-init runtime dirs 显式 user chown",
+        'chown "$RUNTIME_USER:$RUNTIME_USER"' in init or 'chown "$user:$user"' in init,
+    )
+    check(
+        "edge-verify ownership 强校验（EDGE_HOME_OWNER=root:root）",
+        "EDGE_HOME_OWNER=root:root" in verify
+        and "CONFIG_OWNER=root:root" in verify
+        and "CERTS_OWNER=root:root" in verify
+        and "RELEASES_OWNER=root:root" in verify
+        and "SECRETS_OWNER=root:root" in verify
+        and "BACKUPS_OWNER=root:root" in verify,
+    )
+    check(
+        "edge-verify runtime owner 来自 install.env（不硬编码 tl）",
+        "EDGE_USER=\"$(grep -E '^FIREBOT_EDGE_USER=" in verify
+        and "RUNTIME_OWNER=$EDGE_USER" in verify,
+    )
+    check("edge-verify 失败输出 EDGE_PERMISSION_MODEL=FAIL", "EDGE_PERMISSION_MODEL=FAIL" in verify)
+    check(
+        "edge-init EXISTS 路径也收口 ownership（不因 config 一致跳过安全）",
+        "EDGE_INIT=EXISTS" in init and "ensure_ownership_model" in init,
+    )
+
+
+def test_legacy_backup_canonical_root() -> None:
+    backup = read(EDGE / "lifecycle" / "edge-backup-legacy.sh")
+    check(
+        "LEGACY_BACKUP_CANONICAL_ROOT=backups/legacy/<UTC>/",
+        "backups/legacy/$TS" in backup or "backups/legacy" in backup,
+    )
+    check("backup 探测实证（路径存在才备份）", "探测实证" in backup or "[ -d" in backup)
+    check(
+        "backup 含 tailscale 状态记录（只记录不改动）",
+        "tailscale status --json" in backup and "tailscale ip -4" in backup,
+    )
+    check("backup 含 repo HEAD/branch/status", "REPO_HEAD" in backup and "REPO_BRANCH" in backup)
+    check(
+        "firebotctl edge-backup-legacy 接线",
+        "edge-backup-legacy)" in read(ROS1 / "firebotctl")
+        and "edge-backup-legacy.sh" in read(ROS1 / "firebotctl"),
+    )
+
+
 def main() -> int:
     test_firebotctl_dispatcher()
     test_fleet_scripts_stay_at_ros1_root()
@@ -213,6 +327,9 @@ def main() -> int:
     test_runtime_user_explicit()
     test_health_exit_codes()
     test_enroll_contract_unchanged()
+    test_stage_a_zero_downtime_contract()
+    test_edge_ownership_model()
+    test_legacy_backup_canonical_root()
     if FAILURES:
         print(f"\nEDGE_CONTRACT_TEST=FAIL count={len(FAILURES)}")
         return 1

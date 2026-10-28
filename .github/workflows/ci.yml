@@ -125,6 +125,7 @@ jobs:
           python3 tests/test_edge_home.py
           python3 tests/test_monitor.py
           python3 tests/test_freshness.py
+          python3 tests/test_precutover.py
           cd ../../..
           python3 scripts/test_edge_contract.py
       - name: Control STOP 安全测试
