@@ -89,7 +89,21 @@ done
 [ -n "$boot_id" ] && pass "BOOT_ID_PRESENT=yes" || fail "BOOT_ID_PRESENT=no"
 
 if [ "$FAILED" -ne 0 ]; then
+  # P0-4 cutover 事务 fail-closed：启动后验收失败时自动退回 inactive，
+  # 绝不留下半在线 Bridge（enable 也撤销）。只操作 firebot-bridge；
+  # 绝不触碰 firebot-control/ROS/base/navigation/cmd_vel/Tailscale。
+  "$SYSTEMCTL" disable --now firebot-bridge >/dev/null 2>&1 || true
+  bridge_after="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive)"
+  bridge_enabled_after="$("$SYSTEMCTL" is-enabled firebot-bridge 2>/dev/null || echo disabled)"
+  if [ "$bridge_after" = "inactive" ] && [ "$bridge_enabled_after" != "enabled" ]; then
+    echo "FAIL_CLOSED_BRIDGE_STOP=PASS"
+  else
+    echo "FAIL_CLOSED_BRIDGE_STOP=FAIL（active=$bridge_after enabled=$bridge_enabled_after）"
+  fi
+  echo "BRIDGE_ACTIVE=NO"
+  echo "BRIDGE_ENABLED=NO"
   echo "READONLY_BRIDGE_START=FAIL"
+  echo "CONTROL_ACTIVE=NO"
   exit 1
 fi
 echo "READONLY_BRIDGE_START=PASS"

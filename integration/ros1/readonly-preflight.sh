@@ -171,6 +171,16 @@ fi
 
 # ---- enrolled phase 特有 ----
 if [ "$PHASE" = "enrolled" ]; then
+  # P0-5 cutover 事务门：enrolled 阶段要求工作区 HEAD == EXPECTED_SHA（exact SHA）。
+  # bootstrap 阶段不强制（迁移前允许仍处于旧 release）。
+  if [ -n "$EXPECTED_SHA" ] && echo "$EXPECTED_SHA" | grep -qE '^[0-9a-f]{40}$'; then
+    head_sha="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || echo UNKNOWN)"
+    if [ "$head_sha" = "$EXPECTED_SHA" ]; then
+      pass "EXACT_SHA_MATCH=YES"
+    else
+      fail "EXACT_SHA_MATCH=NO（HEAD=$head_sha 期望=$EXPECTED_SHA）"
+    fi
+  fi
   if [ -f "$BRIDGE_SECRET" ] && [ "$(stat -c %a "$BRIDGE_SECRET" 2>/dev/null)" = "600" ]; then
     pass "BRIDGE_SECRET_ENV=yes mode=600"
   else

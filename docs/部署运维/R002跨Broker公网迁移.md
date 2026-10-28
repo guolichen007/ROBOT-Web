@@ -51,43 +51,75 @@ backup 清单：
 执行迁移前用 `firebotctl vehicle readonly-preflight --phase bootstrap --device-id firebot-vehicle-02`
 逐项确认，任何 FAIL 不得开始切换。
 
-## 4. 迁移步骤（正式流程，每步一个命令）
+## 4. 迁移步骤（cutover boundary 三段式，每步一个命令）
+
+### A. 旧链路仍在线（cutover 之前）
 
 ```text
-服务器（授权后）：
-  firebotctl fleet preregister firebot-vehicle-02 --name R002 --site-code <站点>
-  → PREREGISTER=CREATED；PLATFORM_ENABLED=false；SUPPORTED_COMMANDS=[]
-  firebotctl fleet register firebot-vehicle-02
-  → 现场即时签发 ENROLL_TOKEN（一次性；本命令仅在车端 bootstrap 全部就绪后执行）
+1. root-only legacy backup（见第 3 节；chmod 700）
+2. 车端：
+   firebotctl vehicle readonly-preflight --phase bootstrap \
+     --device-id firebot-vehicle-02 --expected-sha <FINAL_SHA>
+   → READONLY_BOOTSTRAP_PREFLIGHT=PASS（bootstrap 不强制 HEAD==SHA：允许仍处于旧 release）
+3. 服务器（授权后）：
+   firebotctl fleet register firebot-vehicle-02
+   → 现场即时签发一次性 ENROLL_TOKEN
+```
 
-车端（现场，按顺序）：
-  firebotctl vehicle readonly-preflight --phase bootstrap --device-id firebot-vehicle-02
+**到这里旧 Bridge 仍允许在线。** 收到 token 之前任何失败不进入 rollback。
+
+### B. 正式进入 cutover（唯一切换点）
+
+```text
+车端（收到 token 后）：
+  firebotctl vehicle migration-stop-legacy
+  → LEGACY_BRIDGE_STOPPED=YES + CONTROL_ACTIVE=NO + MIGRATION_CUTOVER_BOUNDARY=ENTERED
+  → OLD_BROKER_CONNECTION_EXPECTED=OFFLINE；TAILSCALE=KEEP
+```
+
+- Control active/enabled 时该命令 `MIGRATION_STOP_LEGACY=REJECTED / CONTROL_NOT_SAFE`（不自动处理 Control）。
+- **从此开始任何失败一律进入 ROLLBACK_REQUIRED=YES（第 5 节），不得“继续试试看”。**
+
+### C. 新链路安装（Bridge 全程 inactive，只有 readonly-start 允许 active）
+
+```text
   firebotctl vehicle enroll firebot-vehicle-02 --token <TOKEN>
+     # fail-closed：Bridge active/activating/reloading → ENROLL=REJECTED / LEGACY_BRIDGE_STILL_ACTIVE
+     # （不写任何文件、不消费 token——token 必须 Bridge 已停止后才允许消费）
   firebotctl vehicle install --sha <FINAL_SHA>
-  firebotctl vehicle verify                      # CONTROL_ENABLED=disabled + CONTROL_ACTIVE=inactive
-  firebotctl vehicle readonly-preflight --phase enrolled
-  firebotctl vehicle readonly-start              # 唯一允许启动 Bridge 的入口
-  → READONLY_BRIDGE_START=PASS + CONTROL_ACTIVE=NO
+     # fail-closed：Bridge active → VEHICLE_INSTALL=REJECTED / BRIDGE_ACTIVE_BEFORE_INSTALL
+     # （不进入 release_sync / catkin_make；install ≠ start 真正成立）
+  firebotctl vehicle verify                        # CONTROL_ENABLED=disabled + CONTROL_ACTIVE=inactive
+  firebotctl vehicle readonly-preflight --phase enrolled --expected-sha <FINAL_SHA>
+     # EXACT_SHA_MATCH=YES 强制（HEAD == FINAL_SHA）；SUPPORTED_COMMANDS 必须为空
+  firebotctl vehicle readonly-start                # 唯一允许新 Bridge active 的入口
+     # 启动后验收失败（BRIDGE_ACTIVE/MQTT_CONNECTED/boot_id）→ 自动 disable --now firebot-bridge
+     # → FAIL_CLOSED_BRIDGE_STOP=PASS + READONLY_BRIDGE_START=FAIL（不留下半在线 Bridge）
 
 只读观测（服务器）：
   check_real_vehicle_readonly.py → REAL_ROBOT_READONLY_READY=YES 前禁止任何控制步骤
 ```
 
-## 5. 回滚（公网迁移失败）
+## 5. 回滚（cutover 之后任一步失败 → ROLLBACK_REQUIRED=YES）
+
+一旦 `MIGRATION_CUTOVER_BOUNDARY=ENTERED`，之后 enroll / install / verify / enrolled preflight /
+readonly-start 任一步失败，**不得继续试错**，立即执行：
 
 ```text
-1. stop 新 Bridge（systemctl stop firebot-bridge，DEVELOPER/DEBUG；或保留只读停止）
-2. 从 /root/firebot-legacy-backup-*/ 恢复：
-   - /etc/firebot/*（含旧 production-ca.crt / 旧 bridge-secret）
+1. 确保新 Bridge 已停（readonly-start 失败已自动 fail-closed stop；其余情况手动确认 inactive）
+2. 从 /root/firebot-legacy-backup-*/ 恢复（车端 root-only）：
+   - /etc/firebot/（含旧 production-ca.crt / 旧 bridge-secret / 旧 bootstrap）
    - /opt/firebot/vehicle-bridge（旧 APPROVED_RUNTIME）
-   - systemd unit + daemon-reload
-3. 启动旧 Bridge，验证 mqtt_connected 回连旧 Broker 100.110.31.112:8883
-4. Tailscale 原状保留（回滚通道语义）
+   - /etc/systemd/system/firebot-bridge.service + systemctl daemon-reload
+3. systemctl enable/start 旧 firebot-bridge
+4. 验证：MQTT_HOST=100.110.31.112 + MQTT_CONNECTED=YES
+   → LEGACY_ROLLBACK=PASS（否则不得宣称回滚成功）
+5. Tailscale 原状保留（回滚通道语义；迁移期间不得 tailscale down/logout/卸载/禁用）
 ```
 
-- U-Dao 上新建的 `firebot-vehicle-02` identity **不需要删除**：保持 OFFLINE 即可，
-  迁移重试时直接复用（fleet register 的 credential ensure 语义保证不旋转）。
-- 任何回滚动作不改变云端 DOWNLINK=false / ALLOWLIST=empty。
+- 云端 `firebot-vehicle-02` Robot row / credential / 已消费的 enrollment token **不删除**：
+  保持 OFFLINE、enabled=false、supported_commands=[]、DOWNLINK=false。
+- 重试：重新 `firebotctl fleet register firebot-vehicle-02`（credential ensure 语义不旋转，重新签发 token）。
 
 ## 6. 只读铁律（迁移全程）
 

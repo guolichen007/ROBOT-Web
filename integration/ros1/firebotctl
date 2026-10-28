@@ -20,6 +20,7 @@
 #   firebotctl vehicle upgrade --sha <SHA>            # 升级
 #   firebotctl vehicle readonly-preflight             # 真实车辆只读接入前置检查（bootstrap/enrolled）
 #   firebotctl vehicle readonly-start                 # 只读启动 Bridge（唯一正式入口）
+#   firebotctl vehicle migration-stop-legacy           # 跨 Broker 迁移 cutover 切换点（停 legacy Bridge）
 # 服务器：
 #   firebotctl server deploy --sha <SHA>              # 一条命令部署
 #   firebotctl server verify / rollback / support-bundle
@@ -37,11 +38,17 @@ SCRIPT_DIR="$(dirname "$SELF")"
 REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ROS1_DIR="$SCRIPT_DIR"
 PROFILE_DIR="$ROS1_DIR/profiles"
-DEVICE_ENV="/etc/firebot/device.env"
-BRIDGE_ENV="/etc/firebot/bridge.env"
-BRIDGE_SECRET="/etc/firebot/bridge-secret.env"
+# 车端固定环境根（测试可经 FIREBOT_TEST_ETC_ROOT 注入 fixture；生产默认 /etc/firebot）
+FIREBOT_ETC="${FIREBOT_TEST_ETC_ROOT:-/etc/firebot}"
+export FIREBOT_ETC
+DEVICE_ENV="$FIREBOT_ETC/device.env"
+BRIDGE_ENV="$FIREBOT_ETC/bridge.env"
+BRIDGE_SECRET="$FIREBOT_ETC/bridge-secret.env"
 DEFAULT_PROFILE="firebot_ros1_standard_v1"
-BOOTSTRAP_ENV="/etc/firebot/bootstrap.env"
+BOOTSTRAP_ENV="$FIREBOT_ETC/bootstrap.env"
+# 允许测试注入 fixture 命令（生产调用不设置，走真实命令）。
+SYSTEMCTL="${FIREBOT_TEST_SYSTEMCTL:-systemctl}"
+CURL="${FIREBOT_TEST_CURL:-curl}"
 
 # 服务器 bootstrap 配置（非 secret）：FIREBOT_SERVER_URL=https://<server>
 if [ -f "$BOOTSTRAP_ENV" ]; then
@@ -51,7 +58,7 @@ fi
 # enrollment 正式入口（Nginx HTTPS API），禁止 http 默认地址、禁止 -k。
 ENROLL_URL_DEFAULT="${FIREBOT_SERVER_URL:+${FIREBOT_SERVER_URL%/}/api/v1/enrollment/activate}"
 
-DEVICE_TOKEN_FILE="/etc/firebot/device-token"
+DEVICE_TOKEN_FILE="$FIREBOT_ETC/device-token"
 
 device_token_value() { cat "$DEVICE_TOKEN_FILE" 2>/dev/null || true; }
 
@@ -74,9 +81,25 @@ server_put_assignment() {
     "$(server_base_url)/api/v1/robots/$did/assignment/$path" 2>/dev/null || true
 }
 
-require_root() { [ "$(id -u)" -eq 0 ] || { echo "ERROR: 需要 root（用 sudo）" >&2; exit 1; }; }
+require_root() {
+  # 测试逃逸：仅 CI fixture（FIREBOT_TEST_SKIP_ROOT=1）；生产必须 root。
+  [ "${FIREBOT_TEST_SKIP_ROOT:-0}" = "1" ] && return 0
+  [ "$(id -u)" -eq 0 ] || { echo "ERROR: 需要 root（用 sudo）" >&2; exit 1; }
+}
 require_sha() {
   echo "$1" | grep -qE '^[0-9a-f]{40}$' || { echo "ERROR: SHA 必须是 40 位 hex" >&2; exit 1; }
+}
+
+# P0-2/P0-3 公共门：firebot-bridge active/activating/reloading 时禁止 enroll/install。
+# fail-closed 语义：Bridge 未停前绝不写配置、绝不消费 token、绝不进入安装。
+bridge_active_state() {
+  "$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive
+}
+bridge_running() {
+  case "$(bridge_active_state)" in
+    active|activating|reloading) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 # 自动同步批准 SHA：fetch + checkout --detach，禁止 reset/stash/改代码。
@@ -124,7 +147,7 @@ generate_bridge_env() {
   local device_id="$1" profile_id="$2"
   [ -f "$PROFILE_DIR/$profile_id.yaml" ] || { echo "ERROR: profile 不存在: $profile_id" >&2; exit 1; }
   # site/map 由服务器 assignment 提供（/etc/firebot/assignment.env），可选。
-  local assignment="${FIREBOT_ASSIGNMENT_FILE:-/etc/firebot/assignment.env}"
+  local assignment="${FIREBOT_ASSIGNMENT_FILE:-$FIREBOT_ETC/assignment.env}"
   [ -f "$assignment" ] || assignment=/dev/null
   python3 - "$device_id" "$profile_id" "$PROFILE_DIR/$profile_id.yaml" "$assignment" <<'PY'
 import os, sys
@@ -212,8 +235,8 @@ PY
 generate_runtime_env() {
   local profile_id="${1:-$DEFAULT_PROFILE}"
   [ -f "$PROFILE_DIR/$profile_id.yaml" ] || { echo "ERROR: profile 不存在: $profile_id" >&2; exit 1; }
-  python3 "$ROS1_DIR/profile-render.py" runtime "$PROFILE_DIR/$profile_id.yaml" > /etc/firebot/runtime.env
-  chmod 644 /etc/firebot/runtime.env
+  python3 "$ROS1_DIR/profile-render.py" runtime "$PROFILE_DIR/$profile_id.yaml" > "$FIREBOT_ETC/runtime.env"
+  chmod 644 "$FIREBOT_ETC/runtime.env"
 }
 
 # ================= 车端 =================
@@ -247,34 +270,43 @@ cmd_vehicle() {
         echo "ERROR: 禁止 IP/Tailscale enrollment 地址（必须为正式公网域名）" >&2
         exit 1
       fi
+      # P0-2 cutover 事务门：Bridge 必须已停止（migration-stop-legacy 之后）才允许消费 token。
+      # fail-closed：active/activating/reloading 时绝不写任何文件、绝不 POST（token 零消费）。
+      if bridge_running; then
+        echo "ENROLL=REJECTED"
+        echo "LEGACY_BRIDGE_STILL_ACTIVE"
+        echo "原因：firebot-bridge 仍在运行；先 firebotctl vehicle migration-stop-legacy 进入 cutover。" >&2
+        exit 1
+      fi
       # 真实验证 token + 取得 per-device credential（服务器一次性消费，重放会 401）。
       # HTTPS 信任 = Ubuntu 系统 CA store（TrustAsia 公网证书）；禁止 --cacert / -k。
       local resp
-      resp="$(curl -sf -X POST "$server" \
+      resp="$("$CURL" -sf -X POST "$server" \
         -H 'Content-Type: application/json' \
         -d "{\"device_id\":\"$did\",\"token\":\"$token\"}" 2>/dev/null || true)"
       if [ -z "$resp" ]; then
         echo "ENROLL=FAIL（enrollment API 不可达 / token 无效或已使用）" >&2
         exit 1
       fi
-      mkdir -p /etc/firebot
+      mkdir -p "$FIREBOT_ETC"
       echo "$resp" | python3 -c '
 import json, os, sys
 d = json.load(sys.stdin)
 did = d["device_id"]
 pid = d.get("profile_id", "firebot_ros1_standard_v1")
-open("/etc/firebot/device.env", "w").write(f"DEVICE_ID={did}\nPROFILE_ID={pid}\n")
-os.chmod("/etc/firebot/device.env", 0o644)
-open("/etc/firebot/assignment.env", "w").write(
+etc = os.environ.get("FIREBOT_ETC", "/etc/firebot")
+open(f"{etc}/device.env", "w").write(f"DEVICE_ID={did}\nPROFILE_ID={pid}\n")
+os.chmod(f"{etc}/device.env", 0o644)
+open(f"{etc}/assignment.env", "w").write(
     "MQTT_HOST=%s\nMQTT_PORT=%s\nSITE_CODE=%s\nMAP_CODE=%s\nMAP_VERSION=%s\nMAP_CHECKSUM=%s\n"
     % (d.get("mqtt_host", ""), d.get("mqtt_port", 8883), d.get("site_code", ""),
        d.get("map_code", ""), d.get("map_version", ""), d.get("map_checksum", ""))
 )
-os.chmod("/etc/firebot/assignment.env", 0o644)
-open("/etc/firebot/bridge-secret.env", "w").write(f"FIREBOT_MQTT_PASSWORD={d['mqtt_password']}\n")
-os.chmod("/etc/firebot/bridge-secret.env", 0o600)
-open("/etc/firebot/device-token", "w").write(d.get("device_token", ""))
-os.chmod("/etc/firebot/device-token", 0o600)
+os.chmod(f"{etc}/assignment.env", 0o644)
+open(f"{etc}/bridge-secret.env", "w").write("FIREBOT_MQTT_PASSWORD=%s\n" % d["mqtt_password"])
+os.chmod(f"{etc}/bridge-secret.env", 0o600)
+open(f"{etc}/device-token", "w").write(d.get("device_token", ""))
+os.chmod(f"{etc}/device-token", 0o600)
 print(did)
 print(pid)
 '
@@ -288,6 +320,14 @@ print(pid)
     install)
       local sha=""; while [ $# -gt 0 ]; do case "$1" in --sha) sha="$2"; shift 2;; *) shift;; esac; done
       require_sha "$sha"
+      # P0-3 cutover 事务门：install ≠ start；Bridge 必须 inactive 才能进入 release_sync/安装。
+      # fail-closed：禁止进入 release_sync/vehicle-install.sh/catkin_make。
+      if bridge_running; then
+        echo "VEHICLE_INSTALL=REJECTED"
+        echo "BRIDGE_ACTIVE_BEFORE_INSTALL"
+        echo "原因：firebot-bridge 仍在运行；正式迁移路径必须先 migration-stop-legacy。" >&2
+        exit 1
+      fi
       release_sync "$sha"
       require_root
       FIREBOT_REQUIRE_SHA="$sha" bash "$ROS1_DIR/vehicle-install.sh" all
@@ -297,7 +337,7 @@ print(pid)
     verify)
       # fail-closed：期望 SHA 来自 release.env 或已安装 APPROVED_RUNTIME，绝不吞错。
       local expect=""
-      expect="$(grep -E '^FINAL_SHA=' /etc/firebot/release.env 2>/dev/null | cut -d= -f2- || true)"
+      expect="$(grep -E '^FINAL_SHA=' "$FIREBOT_ETC/release.env" 2>/dev/null | cut -d= -f2- || true)"
       if [ -z "$expect" ]; then
         expect="$(cat /opt/firebot/vehicle-bridge/APPROVED_RUNTIME.txt 2>/dev/null || true)"
       fi
@@ -311,8 +351,8 @@ print(pid)
       fi
       # P0-C 只读安全门：enabled 之外还必须 active 门（enabled/active/activating/reloading 均 FAIL）。
       local ctl_enabled ctl_active gate_fail=0
-      ctl_enabled="$(systemctl is-enabled firebot-control 2>/dev/null || echo disabled)"
-      ctl_active="$(systemctl is-active firebot-control 2>/dev/null || echo inactive)"
+      ctl_enabled="$("$SYSTEMCTL" is-enabled firebot-control 2>/dev/null || echo disabled)"
+      ctl_active="$("$SYSTEMCTL" is-active firebot-control 2>/dev/null || echo inactive)"
       case "$ctl_enabled" in enabled) gate_fail=1 ;; esac
       case "$ctl_active" in active|activating|reloading) gate_fail=1 ;; esac
       echo "DEVICE_ID=$(read_device_id)"
@@ -362,6 +402,11 @@ print(pid)
       # 绝不触碰 firebot-control/roscore/base/navigation/move_base/cmd_vel。
       require_root
       bash "$ROS1_DIR/readonly-start.sh" "$@" ;;
+    migration-stop-legacy)
+      # 跨 Broker 迁移正式 cutover 切换点（P0-1）：只 disable --now firebot-bridge。
+      # Control active/enabled → REJECTED/CONTROL_NOT_SAFE（不自动处理）。
+      require_root
+      bash "$ROS1_DIR/migration-stop-legacy.sh" "$@" ;;
     profile-sync)
       local did; did="$(read_device_id)"
       local pid; pid="$(grep -E '^PROFILE_ID=' "$DEVICE_ENV" 2>/dev/null | cut -d= -f2- || echo "$DEFAULT_PROFILE")"
@@ -378,7 +423,7 @@ print(pid)
       FIREBOT_REQUIRE_SHA="$sha" bash "$ROS1_DIR/vehicle-install.sh" all
       FIREBOT_REQUIRE_SHA="$sha" bash "$ROS1_DIR/vehicle-install.sh" verify ;;
     *)
-      echo "firebotctl vehicle <enroll|install|verify|status|start|stop|capability|location|profile-sync|support-bundle|rollback|upgrade|readonly-preflight|readonly-start>" >&2; exit 1 ;;
+      echo "firebotctl vehicle <enroll|install|verify|status|start|stop|capability|location|profile-sync|support-bundle|rollback|upgrade|readonly-preflight|readonly-start|migration-stop-legacy>" >&2; exit 1 ;;
   esac
 }
 
@@ -392,7 +437,7 @@ do_profile_sync() {
 import json, os, sys
 d = json.load(sys.stdin)
 old = {}
-p = "/etc/firebot/assignment.env"
+p = os.environ.get("FIREBOT_ETC", "/etc/firebot") + "/assignment.env"
 if os.path.exists(p):
     for line in open(p, encoding="utf-8"):
         line = line.strip()
@@ -624,6 +669,7 @@ print_help() {
   echo "  firebotctl vehicle verify                              车辆验收（含只读安全门）"
   echo "  firebotctl vehicle readonly-preflight --phase bootstrap|enrolled  只读前置检查"
   echo "  firebotctl vehicle readonly-start                      只读启动 Bridge（唯一正式入口）"
+  echo "  firebotctl vehicle migration-stop-legacy                迁移 cutover：停 legacy Bridge"
   echo "  firebotctl vehicle start base|navigation|control       模块化启动"
   echo "  firebotctl vehicle capability stop-only|patrol         能力提升"
   echo "  firebotctl vehicle location enable                     定位开启"
