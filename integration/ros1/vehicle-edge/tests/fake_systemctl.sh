@@ -62,6 +62,8 @@ case "$args" in
       enabled="$(st "$u" enabled disabled)"
       pid="$(st "$u" mainpid 0)"
       printf 'LoadState=%s\nActiveState=%s\nUnitFileState=%s\nMainPID=%s\n' "$load" "$active" "$enabled" "$pid"
+      # FAKE_SHOW_FAIL_WITH_OUTPUT：先输出合法字段，再以非零退出（模拟 stdout 残留）
+      if [ "${FAKE_SHOW_FAIL_WITH_OUTPUT:-0}" = "1" ]; then exit 1; fi
       exit 0
     fi
     if printf '%s' "$rest" | grep -q -- '-p MainPID'; then
@@ -80,6 +82,10 @@ case "$args" in
     [ -n "${FAKE_POST_LOAD:-}" ] && printf '%s\n' "$FAKE_POST_LOAD" > "$FAKE_STATE/$(fname "$u" load)"
     printf '%s\n' "$pa" > "$FAKE_STATE/$(fname "$u" active)"
     printf '%s\n' "$pe" > "$FAKE_STATE/$(fname "$u" enabled)"
+    # 故障注入：edge 启动时 legacy 意外变 active（模拟 final owner invariant 失败场景）
+    if [ "$u" = "firebot-vehicle-edge" ] && [ "$op" = "enable" ] && [ "${FAKE_FLIP_LEGACY_ACTIVE:-0}" = "1" ]; then
+      printf 'active\n' > "$FAKE_STATE/$(fname firebot-bridge active)"
+    fi
     if [ "$u" = "firebot-vehicle-edge" ] && [ "$op" = "enable" ] && [ -n "${FAKE_STATUS_JSON:-}" ]; then
       printf '{"mqtt_connected": %s, "boot_id": "%s", "pid": %s, "release_sha": "%s"}' \
         "${FAKE_STATUS_CONNECTED:-true}" "${FAKE_BOOT_ID:-boot-fixture}" "${FAKE_MAIN_PID:-4242}" "${FAKE_RELEASE_SHA:-}" > "$FAKE_STATUS_JSON"

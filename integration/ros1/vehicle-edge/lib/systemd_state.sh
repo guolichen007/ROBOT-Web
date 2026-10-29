@@ -29,6 +29,17 @@ unit_show_all() {
     --property=LoadState --property=ActiveState --property=UnitFileState --property=MainPID \
     --no-pager 2>/dev/null)" || rc=$?
   UNIT_SHOW_RC=$rc
+
+  # P0-1：systemctl show 非零返回必须真正 fail-closed。
+  # 即使 stdout 恰好残留 loaded/inactive/disabled，也绝不能继续通过 gate。
+  if [ "$rc" -ne 0 ]; then
+    UNIT_SHOW_LOAD="unknown"
+    UNIT_SHOW_ACTIVE="unknown"
+    UNIT_SHOW_ENABLED="unknown"
+    UNIT_SHOW_MAINPID="unknown"
+    return 0
+  fi
+
   UNIT_SHOW_LOAD="$(printf '%s\n' "$out" | sed -n 's/^LoadState=//p' | tail -n1)"
   UNIT_SHOW_ACTIVE="$(printf '%s\n' "$out" | sed -n 's/^ActiveState=//p' | tail -n1)"
   UNIT_SHOW_ENABLED="$(printf '%s\n' "$out" | sed -n 's/^UnitFileState=//p' | tail -n1)"
@@ -36,6 +47,7 @@ unit_show_all() {
   [ -n "$UNIT_SHOW_LOAD" ] || UNIT_SHOW_LOAD="unknown"
   [ -n "$UNIT_SHOW_ACTIVE" ] || UNIT_SHOW_ACTIVE="unknown"
   [ -n "$UNIT_SHOW_ENABLED" ] || UNIT_SHOW_ENABLED="unknown"
+  [ -n "$UNIT_SHOW_MAINPID" ] || UNIT_SHOW_MAINPID="unknown"
 }
 
 unit_load_state() { unit_show_all "$1"; printf '%s\n' "$UNIT_SHOW_LOAD"; }

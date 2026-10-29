@@ -99,7 +99,14 @@ Environment=FIREBOT_ROS_SETUP=$ros_setup"
 Environment=FIREBOT_ROS_WORKSPACE_SETUP=$ros_ws"
 
 # ---- 前置门 3：S2 状态（legacy down strict / edge absent或down strict / control safe / tailscale active）----
-if ! unit_is_down_strict firebot-bridge yes; then
+# P0-3：S2 时旧 Bridge unit 必须仍保留作为 rollback artifact（present + down strict）。
+if [ "$(unit_load_state firebot-bridge)" = "not-found" ]; then
+  echo "EDGE_INSTALL=REJECTED"
+  echo "LEGACY_ROLLBACK_PATH_MISSING"
+  echo "原因：firebot-bridge LoadState=not-found（rollback path 缺失）。" >&2
+  exit 1
+fi
+if ! unit_is_down_strict firebot-bridge no; then
   echo "EDGE_INSTALL=REJECTED"
   echo "LEGACY_BRIDGE_ACTIVE"
   echo "原因：firebot-bridge 未 down strict（LEGACY_AND_EDGE_MUTUAL_EXCLUSION）；先 migration-stop-legacy。" >&2

@@ -217,6 +217,13 @@ case "$edge_state" in
     pass "EDGE_ACTIVE=no"
     ;;
 esac
+# P0-3 bootstrap 严格 Edge gate：新 Edge 必须明确 not-found 或 down-strict；
+# unknown/failed/static+inactive/enabled-runtime+inactive 不得仅因「不属于 active」就 PASS。
+if unit_is_down_strict firebot-vehicle-edge yes; then
+  pass "EDGE_DOWN_STRICT=yes"
+else
+  fail "EDGE_DOWN_STRICT=no（bootstrap 新 Edge 必须 not-found 或 down-strict）"
+fi
 if [ "$PHASE" = "bootstrap" ]; then
   # pre-cutover：legacy active / inactive 均允许；preflight 纯只读，绝不操作服务。
   if [ "$legacy_state" = "active" ]; then
@@ -233,8 +240,18 @@ if [ "$PHASE" = "bootstrap" ]; then
     fail "LEGACY_BRIDGE_STATE=UNKNOWN（$legacy_state）"
   fi
 elif [ "$PHASE" = "enrolled" ]; then
-  # P0-2 post-cutover / pre-start：必须双 inactive + explicitly-disabled（COMMUNICATION_OWNER=NONE）。
-  if unit_is_down_strict firebot-bridge yes && unit_is_down_strict firebot-vehicle-edge yes; then
+  # P0-3：enrolled 阶段 legacy 与 edge 都必须 present + down strict（rollback readiness）。
+  if unit_is_down_strict firebot-bridge no; then
+    pass "LEGACY_ROLLBACK_READY=YES"
+  else
+    fail "LEGACY_ROLLBACK_READY=NO（legacy 必须 present + inactive + explicit-disabled）"
+  fi
+  if unit_is_down_strict firebot-vehicle-edge no; then
+    pass "EDGE_INSTALLATION_READY=YES"
+  else
+    fail "EDGE_INSTALLATION_READY=NO（edge 必须 present + inactive + explicit-disabled）"
+  fi
+  if unit_is_down_strict firebot-bridge no && unit_is_down_strict firebot-vehicle-edge no; then
     pass "COMMUNICATION_OWNER=NONE（legacy+edge down strict）"
   else
     fail "COMMUNICATION_OWNER=CONFLICT（legacy=$legacy_state edge=$edge_state；enrolled 必须双 down strict）"

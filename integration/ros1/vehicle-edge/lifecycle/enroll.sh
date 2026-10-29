@@ -71,9 +71,14 @@ if printf '%s' "$server_host" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$|^100\.(6
 fi
 
 # ---- S1 状态门：token 必须在 cutover 后（S1）才允许消费 ----
-# legacy inactive + explicitly-disabled；edge not-found 或 down-strict；control safe；tailscale active。
+# P0-3：legacy unit 必须存在（loaded+inactive+explicit-disabled）作为 rollback readiness，
+# 否则连一次性 token 都不能碰；edge not-found 或 down-strict；control safe；tailscale active。
 enroll_reject=0
-if unit_is_down_strict firebot-bridge yes; then :; else
+if [ "$(unit_load_state firebot-bridge)" = "not-found" ]; then
+  echo "ENROLL=REJECTED"
+  echo "LEGACY_ROLLBACK_PATH_MISSING"
+  enroll_reject=1
+elif ! unit_is_down_strict firebot-bridge no; then
   echo "ENROLL=REJECTED"
   echo "LEGACY_BRIDGE_STILL_ACTIVE"
   enroll_reject=1

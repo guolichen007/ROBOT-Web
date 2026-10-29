@@ -45,6 +45,23 @@ read_kv() {
 }
 utcnow() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
+# fail_closed_stop_edge：唯一 Edge 自动停止路径（start mutation 失败 / session 失败 / final owner 失败共用）。
+# 只负责保证新 Edge 停止；绝不自动 start legacy（恢复旧 owner 必须走 edge-rollback）。
+fail_closed_stop_edge() {
+  unit_disable_now_checked firebot-vehicle-edge
+  echo "EDGE_ACTIVE_STATE=$POST_ACTIVE_STATE"
+  echo "EDGE_ENABLED_STATE=$POST_ENABLED_STATE"
+  if [ "$POST_ACTIVE_STATE" = "inactive" ] && unit_is_explicitly_disabled firebot-vehicle-edge; then
+    echo "FAIL_CLOSED_EDGE_STOP=PASS"
+    echo "EDGE_STOP_VERIFIED=YES"
+    return 0
+  fi
+  echo "FAIL_CLOSED_EDGE_STOP=FAIL"
+  echo "EDGE_STATE=UNCERTAIN"
+  echo "MANUAL_INTERVENTION_REQUIRED=YES"
+  return 1
+}
+
 # ---- S3 前置门（readonly-start 只能从 S3 进入）----
 if control_is_safe; then pass "CONTROL_SAFE=YES"; else fail "CONTROL_SAFE=NO"; fi
 if tailscale_is_safe; then pass "TAILSCALE_ACTIVE=YES"; else fail "TAILSCALE_ACTIVE=NO"; fi
@@ -94,21 +111,8 @@ if [ "$SYSTEMD_MUTATION_RC" -eq 0 ] && [ "$POST_ACTIVE_STATE" = "active" ] && [ 
 fi
 
 if [ "$start_ok" -ne 1 ]; then
-  echo "EDGE_ACTIVE_STATE=$POST_ACTIVE_STATE"
-  echo "EDGE_ENABLED_STATE=$POST_ENABLED_STATE"
   echo "EDGE_START_MUTATION=FAIL（RC=$SYSTEMD_MUTATION_RC active=$POST_ACTIVE_STATE enabled=$POST_ENABLED_STATE）"
-  # fail-closed：立即停 edge；能证明已停才算 fail-closed stop 成功。
-  unit_disable_now_checked firebot-vehicle-edge
-  echo "EDGE_ACTIVE_STATE=$POST_ACTIVE_STATE"
-  echo "EDGE_ENABLED_STATE=$POST_ENABLED_STATE"
-  if [ "$POST_ACTIVE_STATE" = "inactive" ] && unit_is_explicitly_disabled firebot-vehicle-edge; then
-    echo "FAIL_CLOSED_EDGE_STOP=PASS"
-    echo "EDGE_STOP_VERIFIED=YES"
-  else
-    echo "FAIL_CLOSED_EDGE_STOP=FAIL"
-    echo "EDGE_STATE=UNCERTAIN"
-    echo "MANUAL_INTERVENTION_REQUIRED=YES"
-  fi
+  fail_closed_stop_edge || true
   echo "READONLY_BRIDGE_START=FAIL"
   echo "ROLLBACK_REQUIRED=YES"
   echo "CONTROL_ACTIVE=NO"
@@ -161,18 +165,8 @@ fi
 [ "$mqtt_connected" = "yes" ] && pass "MQTT_CONNECTED=YES" || fail "MQTT_CONNECTED=NO（${MQTT_WAIT}s 内未连接；不发布探测消息）"
 
 if [ "$FAILED" -ne 0 ]; then
-  # fail-closed：自动停 edge（统一 wrapper）+ 真实 post-state 输出。
-  unit_disable_now_checked firebot-vehicle-edge
-  echo "EDGE_ACTIVE_STATE=$POST_ACTIVE_STATE"
-  echo "EDGE_ENABLED_STATE=$POST_ENABLED_STATE"
-  if [ "$POST_ACTIVE_STATE" = "inactive" ] && unit_is_explicitly_disabled firebot-vehicle-edge; then
-    echo "FAIL_CLOSED_EDGE_STOP=PASS"
-    echo "EDGE_STOP_VERIFIED=YES"
-  else
-    echo "FAIL_CLOSED_EDGE_STOP=FAIL"
-    echo "EDGE_STATE=UNCERTAIN"
-    echo "MANUAL_INTERVENTION_REQUIRED=YES"
-  fi
+  # fail-closed：自动停 edge（统一 helper）+ 真实 post-state 输出。
+  fail_closed_stop_edge || true
   echo "BRIDGE_ACTIVE=NO"
   echo "READONLY_BRIDGE_START=FAIL"
   echo "ROLLBACK_REQUIRED=YES"
@@ -185,7 +179,9 @@ if unit_is_down_strict firebot-bridge no && unit_is_active_strict firebot-vehicl
    && control_is_safe >/dev/null && tailscale_is_safe >/dev/null; then
   echo "COMMUNICATION_OWNER=VEHICLE_EDGE"
 else
-  echo "DUAL_COMMUNICATION_OWNER_FORBIDDEN=FAIL"
+  # P0-2：最终 owner invariant 失败时 Edge 已 active，必须先 fail-closed 停 Edge。
+  echo "FINAL_OWNER_INVARIANT=FAIL"
+  fail_closed_stop_edge || true
   echo "READONLY_BRIDGE_START=FAIL"
   echo "ROLLBACK_REQUIRED=YES"
   exit 1

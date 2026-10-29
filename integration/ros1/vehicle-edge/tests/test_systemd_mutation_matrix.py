@@ -77,6 +77,22 @@ def test_query_failure_matrix() -> None:
         set_state(state, "firebot-control", load="loaded", active="inactive", enabled="disabled")
         r = run_helper(tmp, state, f'. "{LIB}/systemd_state.sh"; control_is_safe')
         check("DISABLED → CONTROL_SAFE=YES", "CONTROL_SAFE=YES" in r.stdout, r.stdout)
+        # P0-1：非零但 stdout 残留 loaded/inactive/disabled → 仍必须 unknown（fail-closed）
+        r = run_helper(tmp, state, f'. "{LIB}/systemd_state.sh"; unit_load_state firebot-control',
+                       FAKE_SHOW_FAIL_WITH_OUTPUT="1")
+        check("SYSTEMCTL_NONZERO_WITH_STDOUT_FAIL_CLOSED=load unknown", r.stdout == "unknown\n", repr(r.stdout))
+        r = run_helper(tmp, state, f'. "{LIB}/systemd_state.sh"; unit_active_state firebot-control',
+                       FAKE_SHOW_FAIL_WITH_OUTPUT="1")
+        check("SYSTEMCTL_NONZERO_WITH_STDOUT_FAIL_CLOSED=active unknown", r.stdout == "unknown\n", repr(r.stdout))
+        r = run_helper(tmp, state, f'. "{LIB}/systemd_state.sh"; unit_enabled_state firebot-control',
+                       FAKE_SHOW_FAIL_WITH_OUTPUT="1")
+        check("SYSTEMCTL_NONZERO_WITH_STDOUT_FAIL_CLOSED=enabled unknown", r.stdout == "unknown\n", repr(r.stdout))
+        r = run_helper(tmp, state, f'. "{LIB}/systemd_state.sh"; control_is_safe',
+                       FAKE_SHOW_FAIL_WITH_OUTPUT="1")
+        check("SYSTEMCTL_NONZERO_WITH_STDOUT_FAIL_CLOSED=control_safe FAIL", "CONTROL_SAFE=NO" in r.stdout, r.stdout)
+        r = run_helper(tmp, state, f'. "{LIB}/systemd_state.sh"; unit_is_down_strict firebot-bridge yes && echo DOWN || echo NOT_DOWN',
+                       FAKE_SHOW_FAIL_WITH_OUTPUT="1")
+        check("SYSTEMCTL_NONZERO_WITH_STDOUT_FAIL_CLOSED=down_strict FAIL", "NOT_DOWN" in r.stdout, r.stdout)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

@@ -101,7 +101,8 @@ def test_migration_stop_legacy_surface() -> None:
         "MIGRATION_STOP_LEGACY=REJECTED" in sh and "CONTROL_NOT_SAFE" in sh,
     )
     active = active_lines(sh)
-    # 唯一变更动作：unit_disable_now_checked firebot-bridge（统一 mutation wrapper）；不触碰 control 启动
+    # 唯一变更动作：unit_disable_now_checked firebot-bridge
+    # （统一 mutation wrapper）；不触碰 control 启动。
     check(
         "migration-stop-legacy 唯一变更动作 unit_disable_now_checked firebot-bridge",
         "unit_disable_now_checked firebot-bridge" in sh,
