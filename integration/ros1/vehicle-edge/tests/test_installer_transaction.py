@@ -152,6 +152,26 @@ def test_normal_install_mqtt_zero_downtime() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_control_absent_installer_regression() -> None:
+    """R002 absent-unit 回归：control unit 不存在（LoadState=not-found）时 installer 必须 PASS。"""
+    tmp = Path(tempfile.mkdtemp(prefix="installer-absent-"))
+    try:
+        fx = InstallerFixture(tmp)
+        # 真实 R002：firebot-control unit 不存在（无 ctl_enabled/ctl_active 显式 fixture）
+        (fx.state / "ctl_load").write_text("not-found")
+        (fx.state / "ctl_enabled").unlink(missing_ok=True)
+        (fx.state / "ctl_active").unlink(missing_ok=True)
+        r = fx.run_install(fx.sha)
+        check("CONTROL_ABSENT_INSTALLER_REGRESSION=TOOLS_INSTALL=PASS",
+              r.returncode == 0 and "TOOLS_INSTALL=PASS" in r.stdout, r.stdout[-400:])
+        check("POST_S0_VALIDATION=PASS", "POST_S0_VALIDATION=PASS" in r.stdout)
+        check("CONTROL_ENABLED_UNCHANGED=YES（not-found==not-found）", "CONTROL_ENABLED_UNCHANGED=YES" in r.stdout)
+        check("CONTROL_ACTIVE_UNCHANGED=YES", "CONTROL_ACTIVE_UNCHANGED=YES" in r.stdout)
+        check("不触发 unknown_fail（无 SYSTEM_STATE_UNCERTAIN）", "SYSTEM_STATE_UNCERTAIN" not in r.stdout)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_case_a_selftest_fail_keeps_old() -> None:
     tmp = Path(tempfile.mkdtemp(prefix="installer-caseA-"))
     try:
@@ -229,6 +249,7 @@ def test_case_d_mqtt_drift_fail() -> None:
 
 if __name__ == "__main__":
     test_normal_install_mqtt_zero_downtime()
+    test_control_absent_installer_regression()
     test_case_a_selftest_fail_keeps_old()
     test_case_b_tooling_status_fail_restores_pointers()
     test_case_c_postcheck_fail_restores_link_and_pointers()

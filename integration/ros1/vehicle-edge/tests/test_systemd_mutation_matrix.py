@@ -136,6 +136,38 @@ def test_mutation_matrix() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def test_absent_unit_semantics() -> None:
+    """R002 absent-unit 语义：LoadState=not-found → enabled state=not-found（与 control_is_safe 一致）。"""
+    tmp = Path(tempfile.mkdtemp(prefix="sysd-absent-"))
+    try:
+        state = tmp / "state"
+        state.mkdir()
+        # 真实 R002：control unit 不存在（LoadState=not-found，无显式 enabled fixture）
+        set_state(state, "firebot-control", load="not-found")
+        r = run_helper(tmp, state, f'. "{LIB}/systemd_state.sh"; '
+                       f'echo L=$(unit_load_state firebot-control); '
+                       f'echo A=$(unit_active_state firebot-control); '
+                       f'echo E=$(unit_enabled_state firebot-control)')
+        check("REAL_ABSENT_SYSTEMD_SEMANTICS=load not-found", "L=not-found" in r.stdout, r.stdout)
+        check("REAL_ABSENT_SYSTEMD_SEMANTICS=active inactive", "A=inactive" in r.stdout, r.stdout)
+        check("REAL_ABSENT_SYSTEMD_SEMANTICS=enabled not-found", "E=not-found" in r.stdout, r.stdout)
+        r = run_helper(tmp, state, f'. "{LIB}/systemd_state.sh"; control_is_safe')
+        check("CONTROL_ABSENT_SAFE（UNIT_PRESENT=NO + SAFE=YES）",
+              "CONTROL_UNIT_PRESENT=NO" in r.stdout and "CONTROL_SAFE=YES" in r.stdout, r.stdout)
+
+        # 严格区分查询失败：RC!=0 即便 stdout 残留 not-found 也必须 unknown
+        r = run_helper(tmp, state, f'. "{LIB}/systemd_state.sh"; '
+                       f'echo L=$(unit_load_state firebot-control); '
+                       f'echo A=$(unit_active_state firebot-control); '
+                       f'echo E=$(unit_enabled_state firebot-control)',
+                       FAKE_SHOW_FAIL_WITH_OUTPUT="1")
+        check("SYSTEMCTL_QUERY_FAILURE_STILL_UNKNOWN", r.stdout.strip() == "L=unknown\nA=unknown\nE=unknown", r.stdout)
+        r = run_helper(tmp, state, f'. "{LIB}/systemd_state.sh"; control_is_safe', FAKE_SHOW_FAIL_WITH_OUTPUT="1")
+        check("SYSTEMCTL_QUERY_FAILURE_STILL_UNKNOWN=control NOT safe", "CONTROL_SAFE=NO" in r.stdout, r.stdout)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def test_static_no_raw_systemctl() -> None:
     """spec 34：lifecycle/install 可执行行禁止 raw systemctl 状态/mutation gate。"""
     offenders = []
@@ -158,6 +190,7 @@ def test_static_no_raw_systemctl() -> None:
 
 if __name__ == "__main__":
     test_query_failure_matrix()
+    test_absent_unit_semantics()
     test_mutation_matrix()
     test_static_no_raw_systemctl()
     print(f"\nSYSTEMD_MUTATION_MATRIX_TEST total={PASS + FAIL} pass={PASS} fail={FAIL}")

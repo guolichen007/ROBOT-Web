@@ -62,8 +62,23 @@ unit_active_state() {
 
 unit_enabled_state() {
   unit_show_all "$1"
+
+  # systemctl show 查询本身失败时，unit_show_all 已把 UNIT_SHOW_LOAD 归一为 unknown。
+  if [ "$UNIT_SHOW_LOAD" = "unknown" ]; then
+    printf 'unknown\n'
+    return 0
+  fi
+
+  # 真实 absent-unit 语义：LoadState=not-found 时 UnitFileState 常为空。
+  # 这里统一暴露为 not-found，与 control_is_safe（CONTROL_UNIT_PRESENT=NO）一致，
+  # 避免把「unit 不存在」误判成「systemctl 查询不确定」。
+  if [ "$UNIT_SHOW_LOAD" = "not-found" ]; then
+    printf 'not-found\n'
+    return 0
+  fi
+
   case "$UNIT_SHOW_ENABLED" in
-    enabled|enabled-runtime|disabled|masked|masked-runtime|static|indirect|generated|transient|linked|linked-runtime|alias|not-found) printf '%s\n' "$UNIT_SHOW_ENABLED" ;;
+    enabled|enabled-runtime|disabled|masked|masked-runtime|static|indirect|generated|transient|linked|linked-runtime|alias) printf '%s\n' "$UNIT_SHOW_ENABLED" ;;
     *) printf 'unknown\n' ;;
   esac
 }

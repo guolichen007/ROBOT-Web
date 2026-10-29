@@ -59,7 +59,15 @@ case "$args" in
       if [ "${FAKE_SHOW_FAIL:-0}" = "1" ]; then exit 1; fi
       load="$(st "$u" load loaded)"
       active="$(st "$u" active "$(act_default "$u")")"
-      enabled="$(st "$u" enabled disabled)"
+      # absent 语义：显式 enabled fixture > 默认 absent（load=not-found → 空 UnitFileState）> 默认 disabled
+      enabled_file="$FAKE_STATE/$(fname "$u" enabled)"
+      if [ -f "$enabled_file" ]; then
+        enabled="$(cat "$enabled_file")"
+      elif [ "$load" = "not-found" ]; then
+        enabled=""
+      else
+        enabled="disabled"
+      fi
       pid="$(st "$u" mainpid 0)"
       printf 'LoadState=%s\nActiveState=%s\nUnitFileState=%s\nMainPID=%s\n' "$load" "$active" "$enabled" "$pid"
       # FAKE_SHOW_FAIL_WITH_OUTPUT：先输出合法字段，再以非零退出（模拟 stdout 残留）
