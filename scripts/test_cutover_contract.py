@@ -153,8 +153,16 @@ def test_readonly_start_fail_closed() -> None:
         not any(
             t in ln
             for ln in fail_active
-            for t in ("roscore", "roslaunch", "move_base", "enable firebot-control",
-                      "start firebot-control", "tailscale up", "tailscale down", "tailscale logout")
+            for t in (
+                "roscore",
+                "roslaunch",
+                "move_base",
+                "enable firebot-control",
+                "start firebot-control",
+                "tailscale up",
+                "tailscale down",
+                "tailscale logout",
+            )
         ),
     )
 
