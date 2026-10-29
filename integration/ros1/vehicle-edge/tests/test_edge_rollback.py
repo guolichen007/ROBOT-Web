@@ -73,21 +73,28 @@ class Fixture:
                 #!/usr/bin/env bash
                 echo "$*" >> "${FAKE_LOG:?}"
                 args="$*"
+                emit_active() {
+                  printf '%s\\n' "$1"
+                  case "$1" in active) exit 0 ;; *) exit 3 ;; esac
+                }
+                emit_enabled() {
+                  printf '%s\\n' "$1"
+                  case "$1" in enabled|linked|linked-runtime|alias) exit 0 ;; *) exit 1 ;; esac
+                }
                 case "$args" in
-                  "is-enabled firebot-control") cat "${FAKE_STATE:?}/ctl_enabled" 2>/dev/null || echo disabled ;;
-                  "is-active firebot-control") cat "$FAKE_STATE/ctl_active" 2>/dev/null || echo inactive ;;
-                  "is-enabled firebot-bridge") cat "$FAKE_STATE/bridge_enabled" 2>/dev/null || echo disabled ;;
-                  "is-active firebot-bridge") cat "$FAKE_STATE/bridge_active" 2>/dev/null || echo inactive ;;
-                  "is-active firebot-vehicle-edge") cat "$FAKE_STATE/edge_active" 2>/dev/null || echo inactive ;;
+                  "is-enabled firebot-control") emit_enabled "$(cat "${FAKE_STATE:?}/ctl_enabled" 2>/dev/null || echo disabled)" ;;
+                  "is-active firebot-control") emit_active "$(cat "$FAKE_STATE/ctl_active" 2>/dev/null || echo inactive)" ;;
+                  "is-enabled firebot-bridge") emit_enabled "$(cat "$FAKE_STATE/bridge_enabled" 2>/dev/null || echo disabled)" ;;
+                  "is-active firebot-bridge") emit_active "$(cat "$FAKE_STATE/bridge_active" 2>/dev/null || echo inactive)" ;;
+                  "is-active firebot-vehicle-edge") emit_active "$(cat "$FAKE_STATE/edge_active" 2>/dev/null || echo inactive)" ;;
                   "enable --now firebot-bridge")
-                    echo enabled > "$FAKE_STATE/bridge_enabled"; echo active > "$FAKE_STATE/bridge_active" ;;
+                    echo enabled > "$FAKE_STATE/bridge_enabled"; echo active > "$FAKE_STATE/bridge_active"; exit 0 ;;
                   "disable --now firebot-vehicle-edge")
-                    echo disabled > "$FAKE_STATE/edge_enabled" 2>/dev/null || true; echo inactive > "$FAKE_STATE/edge_active" ;;
+                    echo disabled > "$FAKE_STATE/edge_enabled" 2>/dev/null || true; echo inactive > "$FAKE_STATE/edge_active"; exit 0 ;;
                   "disable --now firebot-bridge")
-                    echo disabled > "$FAKE_STATE/bridge_enabled"; echo inactive > "$FAKE_STATE/bridge_active" ;;
+                    echo disabled > "$FAKE_STATE/bridge_enabled"; echo inactive > "$FAKE_STATE/bridge_active"; exit 0 ;;
                   *) echo "unexpected: $args" >&2; exit 1 ;;
                 esac
-                exit 0
                 """
             )
         )

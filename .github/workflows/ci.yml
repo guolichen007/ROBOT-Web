@@ -126,7 +126,8 @@ jobs:
                    test_tools_release test_edge_rollback test_directory_governance \
                    test_git_independence test_help_contract \
                    test_production_default_env test_production_allowlist \
-                   test_stable_edge_bin test_installer_transaction; do
+                   test_stable_edge_bin test_installer_transaction \
+                   test_real_systemd_semantics; do
             python3 "tests/$t.py" || exit 1
           done
           cd ../../..

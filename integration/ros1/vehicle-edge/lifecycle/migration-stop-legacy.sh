@@ -25,10 +25,12 @@ FIREBOT_ETC="${FIREBOT_TEST_ETC_ROOT:-/etc/firebot}"
 
 # 允许测试注入 fixture 命令（生产调用不设置，走真实命令）。
 SYSTEMCTL="${FIREBOT_TEST_SYSTEMCTL:-systemctl}"
+# shellcheck disable=SC1091
+. "$SELF_DIR/../lib/systemd_state.sh"
 
 # ---- 0) Control 安全门（只检查，绝不自动处理）----
-ctl_enabled="$("$SYSTEMCTL" is-enabled firebot-control 2>/dev/null || echo disabled)"
-ctl_active="$("$SYSTEMCTL" is-active firebot-control 2>/dev/null || echo inactive)"
+ctl_enabled="$(unit_enabled_state firebot-control)"
+ctl_active="$(unit_active_state firebot-control)"
 if [ "$ctl_enabled" = "enabled" ] || [ "$ctl_active" = "active" ] || \
    [ "$ctl_active" = "activating" ] || [ "$ctl_active" = "reloading" ]; then
   echo "MIGRATION_STOP_LEGACY=REJECTED"
@@ -38,8 +40,8 @@ if [ "$ctl_enabled" = "enabled" ] || [ "$ctl_active" = "active" ] || \
 fi
 
 # ---- 1) 记录 legacy Bridge 当前状态 ----
-bridge_was_enabled="$("$SYSTEMCTL" is-enabled firebot-bridge 2>/dev/null || echo disabled)"
-bridge_was_active="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive)"
+bridge_was_enabled="$(unit_enabled_state firebot-bridge)"
+bridge_was_active="$(unit_active_state firebot-bridge)"
 [ "$bridge_was_enabled" = "enabled" ] && WAS_ENABLED=YES || WAS_ENABLED=NO
 case "$bridge_was_active" in
   active) WAS_ACTIVE=YES ;;
@@ -51,13 +53,26 @@ esac
   echo "MIGRATION_STOP_LEGACY=FAIL（firebot-bridge disable --now 失败）" >&2
   exit 1
 }
+# 立即记录 cutover 已发起：stop 动作已成功发出，此刻起可能已停止旧通信 owner。
+# 绝不能在 stop 已发出后输出 CUTOVER_STARTED=NO。
+echo "LEGACY_STOP_ACTION_ISSUED=YES"
+echo "CUTOVER_STARTED=YES"
 
-# ---- 3) 确认 inactive ----
-bridge_now="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive)"
-if [ "$bridge_now" != "inactive" ]; then
-  echo "MIGRATION_STOP_LEGACY=FAIL（firebot-bridge 仍 is-active=$bridge_now）" >&2
-  exit 1
-fi
+# ---- 3) 确认 inactive（fail-closed：无法可靠确定即停止）----
+bridge_now="$(unit_active_state firebot-bridge)"
+case "$bridge_now" in
+  inactive)
+    echo "CUTOVER_BOUNDARY_CROSSED=YES"
+    echo "LEGACY_BRIDGE_ACTIVE=NO"
+    ;;
+  *)
+    echo "MIGRATION_STOP_LEGACY=UNCERTAIN"
+    echo "CUTOVER_STARTED=YES"
+    echo "CUTOVER_STATE=UNCERTAIN"
+    echo "原因：firebot-bridge 状态无法可靠确定为 inactive（is-active=$bridge_now）；立即停止，不得继续。" >&2
+    exit 1
+    ;;
+esac
 
 echo "LEGACY_BRIDGE_WAS_ACTIVE=$WAS_ACTIVE"
 echo "LEGACY_BRIDGE_WAS_ENABLED=$WAS_ENABLED"

@@ -93,8 +93,10 @@ mqtt_connected_value() {
     "$(bridge_status_file)" 2>/dev/null || echo "false"
 }
 
-svc_active() { "$SYSTEMCTL" is-active "$1" 2>/dev/null || echo inactive; }
-svc_enabled() { "$SYSTEMCTL" is-enabled "$1" 2>/dev/null || echo disabled; }
+# shellcheck disable=SC1091
+. "$SELF_DIR/../lib/systemd_state.sh"
+svc_active() { unit_active_state "$1"; }
+svc_enabled() { unit_enabled_state "$1"; }
 
 # ---- 2) 记录旧生产管理状态（只读快照，不记录 secret）----
 OLD_FIREBOTCTL_LINK="none"
@@ -243,6 +245,13 @@ if [ "$LEGACY_BRIDGE_STATE_UNCHANGED" != "YES" ] || [ "$LEGACY_MQTT_HOST_UNCHANG
    || [ "$LEGACY_MQTT_CONNECTED_UNCHANGED" != "YES" ] || [ "$EDGE_STATE_UNCHANGED" != "YES" ] \
    || [ "$CONTROL_ENABLED_UNCHANGED" != "YES" ] || [ "$CONTROL_ACTIVE_UNCHANGED" != "YES" ] \
    || [ "$TAILSCALE_STATE_UNCHANGED" != "YES" ]; then
-  echo "TOOLS_INSTALL=FAIL（安装前后状态不一致，禁止自动补救）" >&2
+  # B0-FIX3：tools release 已切换但最终 postcondition（零中断）失败 →
+  # 恢复管理平面 pointers/link（TOOLS_INSTALL_ROLLED_BACK=YES），
+  # 但绝不自动 restart/stop 任何通信服务（COMMUNICATION_STATE_NOT_AUTO_REPAIRED=YES）。
+  restore_firebotctl_link
+  restore_tools_pointers
+  echo "TOOLS_INSTALL=FAIL（安装前后状态不一致）"
+  echo "TOOLS_INSTALL_ROLLED_BACK=YES"
+  echo "COMMUNICATION_STATE_NOT_AUTO_REPAIRED=YES"
   exit 1
 fi

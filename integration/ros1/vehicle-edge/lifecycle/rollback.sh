@@ -23,6 +23,9 @@ LEGACY_BRIDGE_ENV="${FIREBOT_TEST_LEGACY_BRIDGE_ENV:-/etc/firebot/bridge.env}"
 LEGACY_STATUS="${FIREBOT_TEST_LEGACY_STATUS:-/run/firebot-bridge/status.json}"
 LEGACY_UNIT="${FIREBOT_TEST_LEGACY_UNIT:-/etc/systemd/system/firebot-bridge.service}"
 LEGACY_MQTT_HOST="100.110.31.112"
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+. "$SELF_DIR/../lib/systemd_state.sh"
 
 # 第二层 --help 零副作用（dispatcher 已拦，此处兜底，绝不执行 gate）。
 for a in "$@"; do
@@ -48,8 +51,8 @@ read_kv() {
 }
 
 # ---- 0) Control 安全门（只检查，绝不自动处理）----
-ctl_enabled="$("$SYSTEMCTL" is-enabled firebot-control 2>/dev/null || echo disabled)"
-ctl_active="$("$SYSTEMCTL" is-active firebot-control 2>/dev/null || echo inactive)"
+ctl_enabled="$(unit_enabled_state firebot-control)"
+ctl_active="$(unit_active_state firebot-control)"
 if [ "$ctl_enabled" = "enabled" ] || [ "$ctl_active" = "active" ] || \
    [ "$ctl_active" = "activating" ] || [ "$ctl_active" = "reloading" ]; then
   echo "EDGE_ROLLBACK=REJECTED"
@@ -77,8 +80,8 @@ if [ "$legacy_host" != "$LEGACY_MQTT_HOST" ]; then
 fi
 
 # ---- 3) 幂等分派（规格二十七 A/B/C/D）----
-legacy_state="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive)"
-edge_state="$("$SYSTEMCTL" is-active firebot-vehicle-edge 2>/dev/null || echo inactive)"
+legacy_state="$(unit_active_state firebot-bridge)"
+edge_state="$(unit_active_state firebot-vehicle-edge)"
 already_rolled_back="no"
 
 case "$edge_state/$legacy_state" in
@@ -101,7 +104,7 @@ esac
 # ---- 4) 停新 Edge（不删除 service/unit/release）----
 if [ "$edge_state" = "active" ]; then
   "$SYSTEMCTL" disable --now firebot-vehicle-edge >/dev/null 2>&1 || true
-  edge_after="$("$SYSTEMCTL" is-active firebot-vehicle-edge 2>/dev/null || echo inactive)"
+  edge_after="$(unit_active_state firebot-vehicle-edge)"
   if [ "$edge_after" != "inactive" ]; then
     echo "EDGE_ROLLBACK=FAIL（firebot-vehicle-edge 仍 $edge_after）" >&2
     exit 1
@@ -118,7 +121,7 @@ if [ "$legacy_state" != "active" ]; then
     exit 1
   }
 fi
-legacy_now="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive)"
+legacy_now="$(unit_active_state firebot-bridge)"
 if [ "$legacy_now" != "active" ]; then
   echo "EDGE_ROLLBACK=FAIL（firebot-bridge 未 active）" >&2
   exit 1

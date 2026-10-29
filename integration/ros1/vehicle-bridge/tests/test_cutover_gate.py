@@ -92,6 +92,10 @@ class Fixture:
                      "migration-stop-legacy.sh", "edge-init.sh", "edge-install.sh",
                      "edge-verify.sh", "rollback.sh"):
             shutil.copy(ROS1_DIR / "vehicle-edge" / "lifecycle" / name, lifecycle_dst / name)
+        # lifecycle 依赖的共享 systemd 状态 helper
+        lib_dst = self.repo / "integration" / "ros1" / "vehicle-edge" / "lib"
+        lib_dst.mkdir(parents=True)
+        shutil.copy(ROS1_DIR / "vehicle-edge" / "lib" / "systemd_state.sh", lib_dst / "systemd_state.sh")
         shutil.copy(
             ROS1_DIR / "profile-render.py",
             self.repo / "integration" / "ros1" / "profile-render.py",

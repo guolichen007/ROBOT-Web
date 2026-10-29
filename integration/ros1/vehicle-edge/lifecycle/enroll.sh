@@ -28,6 +28,8 @@ PROFILE_DIR="${FIREBOT_PROFILE_DIR:-$VEHICLE_EDGE_SRC/config/profiles}"
 EDGE_HOME="${FIREBOT_EDGE_HOME:-/home/tl/firebot-edge}"
 SYSTEMCTL="${FIREBOT_TEST_SYSTEMCTL:-systemctl}"
 CURL="${FIREBOT_TEST_CURL:-curl}"
+# shellcheck disable=SC1091
+. "$SELF_DIR/../lib/systemd_state.sh"
 LEGACY_BOOTSTRAP="/etc/firebot/bootstrap.env"
 
 DEVICE_ID="${1:-}"
@@ -69,8 +71,8 @@ if printf '%s' "$server_host" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$|^100\.(6
 fi
 
 # ---- cutover 门：token 必须 Bridge/Edge 已停止后才允许消费 ----
-legacy_state="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive)"
-edge_state="$("$SYSTEMCTL" is-active firebot-vehicle-edge 2>/dev/null || echo inactive)"
+legacy_state="$(unit_active_state firebot-bridge)"
+edge_state="$(unit_active_state firebot-vehicle-edge)"
 if [ "$legacy_state" != "inactive" ] || [ "$edge_state" != "inactive" ]; then
   echo "ENROLL=REJECTED"
   echo "LEGACY_BRIDGE_STILL_ACTIVE"

@@ -112,10 +112,10 @@ def test_firebotctl_wiring() -> None:
         "readonly-preflight)" in ctl and "readonly-preflight.sh" in ctl,
     )
     check("readonly-start 子命令接线", "readonly-start)" in ctl and "readonly-start.sh" in ctl)
-    # P0-C：verify 必须同时检查 is-enabled + is-active
+    # P0-C：verify 必须同时检查 enabled + active（经 systemd_state.sh 规范化，stdout/exit 分离）
     check(
-        "VERIFY_CONTROL_ACTIVE_GATE（is-enabled + is-active 双检查）",
-        "is-enabled firebot-control" in ctl and "is-active firebot-control" in ctl,
+        "VERIFY_CONTROL_ACTIVE_GATE（unit_enabled_state + unit_active_state 双检查）",
+        "unit_enabled_state firebot-control" in ctl and "unit_active_state firebot-control" in ctl,
     )
     check("verify active|activating|reloading 门", "active|activating|reloading" in ctl)
     check("verify READONLY_SAFETY_GATE=FAIL 语义", "READONLY_SAFETY_GATE=FAIL" in ctl)
@@ -151,8 +151,8 @@ def test_readonly_scripts_surface() -> None:
     )
     check("SUPPORTED_COMMANDS_NOT_EMPTY 语义", "SUPPORTED_COMMANDS_NOT_EMPTY" in pre)
     check(
-        "Control enabled/active 门",
-        "is-enabled firebot-control" in pre and "is-active firebot-control" in pre,
+        "Control enabled/active 门（经 systemd_state.sh）",
+        "unit_enabled_state firebot-control" in pre and "unit_active_state firebot-control" in pre,
     )
     check("NTP 检查", "NTPSynchronized" in pre)
 

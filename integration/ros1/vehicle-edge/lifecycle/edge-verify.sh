@@ -15,9 +15,12 @@ for a in "$@"; do
   esac
 done
 
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REQUIRE_SHA="${FIREBOT_REQUIRE_SHA:-}"
 EDGE_HOME="${FIREBOT_EDGE_HOME:-/home/tl/firebot-edge}"
 SYSTEMCTL="${FIREBOT_TEST_SYSTEMCTL:-systemctl}"
+# shellcheck disable=SC1091
+. "$SELF_DIR/../lib/systemd_state.sh"
 while [ $# -gt 0 ]; do
   case "$1" in
     --edge-home) EDGE_HOME="${2:-}"; shift 2 ;;
@@ -127,8 +130,8 @@ grep -qE '^FIREBOT_EDGE_USER=[a-z_][a-z0-9_-]*$' "$EDGE_HOME/config/install.env"
   && pass "EDGE_RUNTIME_USER=configured" || fail "EDGE_RUNTIME_USER=not-configured"
 
 # 安装≠启动：service inactive + disabled
-edge_state="$("$SYSTEMCTL" is-active firebot-vehicle-edge 2>/dev/null || echo inactive)"
-edge_enabled="$("$SYSTEMCTL" is-enabled firebot-vehicle-edge 2>/dev/null || echo disabled)"
+edge_state="$(unit_active_state firebot-vehicle-edge)"
+edge_enabled="$(unit_enabled_state firebot-vehicle-edge)"
 [ "$edge_state" = "inactive" ] && pass "EDGE_SERVICE_INACTIVE=yes" || fail "EDGE_SERVICE_INACTIVE=no（$edge_state）"
 [ "$edge_enabled" != "enabled" ] && pass "EDGE_SERVICE_DISABLED=yes" || fail "EDGE_SERVICE_DISABLED=no"
 

@@ -76,6 +76,8 @@ else
   REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
   ROS1_DIR="$SCRIPT_DIR"
 fi
+# shellcheck disable=SC1091
+. "$ROS1_DIR/vehicle-edge/lib/systemd_state.sh"
 PROFILE_DIR="$ROS1_DIR/profiles"
 # 车端固定环境根（测试可经 FIREBOT_TEST_ETC_ROOT 注入 fixture；生产默认 /etc/firebot）
 FIREBOT_ETC="${FIREBOT_TEST_ETC_ROOT:-/etc/firebot}"
@@ -257,7 +259,7 @@ cmd_tooling_status() {
 # P0-2/P0-3 公共门：firebot-bridge active/activating/reloading 时禁止 enroll/install。
 # fail-closed 语义：Bridge 未停前绝不写配置、绝不消费 token、绝不进入安装。
 bridge_active_state() {
-  "$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive
+  unit_active_state firebot-bridge
 }
 bridge_running() {
   case "$(bridge_active_state)" in
@@ -471,8 +473,8 @@ cmd_vehicle() {
       fi
       # P0-C 只读安全门：enabled 之外还必须 active 门（enabled/active/activating/reloading 均 FAIL）。
       local ctl_enabled ctl_active gate_fail=0
-      ctl_enabled="$("$SYSTEMCTL" is-enabled firebot-control 2>/dev/null || echo disabled)"
-      ctl_active="$("$SYSTEMCTL" is-active firebot-control 2>/dev/null || echo inactive)"
+      ctl_enabled="$(unit_enabled_state firebot-control)"
+      ctl_active="$(unit_active_state firebot-control)"
       case "$ctl_enabled" in enabled) gate_fail=1 ;; esac
       case "$ctl_active" in active|activating|reloading) gate_fail=1 ;; esac
       echo "DEVICE_ID=$(read_device_id)"
@@ -768,8 +770,8 @@ vehicle_support_bundle() {
     echo "bridge_runtime=$(cat /opt/firebot/vehicle-bridge/APPROVED_RUNTIME.txt 2>/dev/null || echo UNKNOWN)"
     echo "control_runtime=$(cat /home/tl/firerobot_ws/src/firebot_control/APPROVED_RUNTIME.txt 2>/dev/null || echo UNKNOWN)"
     echo "boot_id=$(cat /run/firebot-bridge/status.json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("boot_id",""))' 2>/dev/null || echo UNKNOWN)"
-    systemctl is-active firebot-bridge 2>/dev/null || true
-    systemctl is-enabled firebot-control 2>/dev/null || true
+    "$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || true
+    "$SYSTEMCTL" is-enabled firebot-control 2>/dev/null || true
     rostopic list 2>/dev/null || true
     echo "control_mode=$(timeout 3 rostopic echo -n1 /robot_status 2>/dev/null | grep -oP '(?<=control_mode: )\S+' | head -1 || true)"
     echo "cmd_vel_info=$(rostopic info /cmd_vel 2>/dev/null || true)"

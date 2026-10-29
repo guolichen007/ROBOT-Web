@@ -59,6 +59,8 @@ TIMEDATECTL="${FIREBOT_TEST_TIMEDATECTL:-timedatectl}"
 OS_RELEASE="${FIREBOT_TEST_OS_RELEASE:-/etc/os-release}"
 ROS_NOETIC_SETUP="${FIREBOT_TEST_ROS_NOETIC_SETUP:-/opt/ros/noetic/setup.bash}"
 PGREP="${FIREBOT_TEST_PGREP:-pgrep}"
+# shellcheck disable=SC1091
+. "$SELF_DIR/../lib/systemd_state.sh"
 
 FAILED=0
 pass() { echo "PASS $1"; }
@@ -148,19 +150,19 @@ mqtt_verify="$(echo | timeout 15 "$OPENSSL" s_client -connect "$MQTT_HOST:$MQTT_
 # ---- NTP / 系统时钟 ----
 ntp_ok=no
 [ "$("$TIMEDATECTL" show -p NTPSynchronized 2>/dev/null | cut -d= -f2)" = "yes" ] && ntp_ok=yes
-[ "$("$SYSTEMCTL" is-active systemd-timesyncd 2>/dev/null)" = "active" ] && ntp_ok=yes
+[ "$(unit_active_state systemd-timesyncd)" = "active" ] && ntp_ok=yes
 [ "$ntp_ok" = "yes" ] && pass "NTP_SANE=yes" || fail "NTP_SANE=no"
 
 # ---- 控制面全关 + communication-owner 语义（VEHICLE_EDGE_PRE_CUTOVER_SEMANTICS_FIX）----
-ctl_enabled="$("$SYSTEMCTL" is-enabled firebot-control 2>/dev/null || echo disabled)"
-ctl_active="$("$SYSTEMCTL" is-active firebot-control 2>/dev/null || echo inactive)"
+ctl_enabled="$(unit_enabled_state firebot-control)"
+ctl_active="$(unit_active_state firebot-control)"
 [ "$ctl_enabled" = "enabled" ] && fail "CONTROL_ENABLED=yes" || pass "CONTROL_ENABLED=no"
 case "$ctl_active" in
   active|activating|reloading) fail "CONTROL_ACTIVE=yes" ;;
   *) pass "CONTROL_ACTIVE=no" ;;
 esac
-legacy_state="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive)"
-edge_state="$("$SYSTEMCTL" is-active firebot-vehicle-edge 2>/dev/null || echo inactive)"
+legacy_state="$(unit_active_state firebot-bridge)"
+edge_state="$(unit_active_state firebot-vehicle-edge)"
 # P0-1 phase-aware：bootstrap = pre-cutover（旧链路仍在线允许 legacy active）；
 # 新 Edge 在 cutover 前绝不允许 active（EDGE_STARTED_BEFORE_CUTOVER）。
 case "$edge_state" in

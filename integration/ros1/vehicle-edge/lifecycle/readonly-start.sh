@@ -34,6 +34,9 @@ MQTT_HOST="firebot.youdaozd.com"
 
 SYSTEMCTL="${FIREBOT_TEST_SYSTEMCTL:-systemctl}"
 STATUS_JSON="${FIREBOT_TEST_STATUS_JSON:-$RUNTIME/status.json}"
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+. "$SELF_DIR/../lib/systemd_state.sh"
 
 FAILED=0
 pass() { echo "PASS $1"; }
@@ -44,8 +47,8 @@ read_kv() {
 utcnow() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
 # ---- 启动前只读铁律门 ----
-ctl_enabled="$("$SYSTEMCTL" is-enabled firebot-control 2>/dev/null || echo disabled)"
-ctl_active="$("$SYSTEMCTL" is-active firebot-control 2>/dev/null || echo inactive)"
+ctl_enabled="$(unit_enabled_state firebot-control)"
+ctl_active="$(unit_active_state firebot-control)"
 [ "$ctl_enabled" = "enabled" ] && fail "CONTROL_ENABLED=yes" || pass "CONTROL_ENABLED=NO"
 case "$ctl_active" in
   active|activating|reloading) fail "CONTROL_ACTIVE=yes" ;;
@@ -60,7 +63,7 @@ sc="$(read_kv "$CONFIG/bridge.env" FIREBOT_SUPPORTED_COMMANDS)"
 [ "$(read_kv "$CONFIG/bridge.env" FIREBOT_CA_CERT)" = "$CERTS/mqtt-ca.crt" ] \
   && pass "MQTT_CA=$CERTS/mqtt-ca.crt" || fail "MQTT_CA 必须 $CERTS/mqtt-ca.crt"
 
-legacy_state="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive)"
+legacy_state="$(unit_active_state firebot-bridge)"
 [ "$legacy_state" = "inactive" ] && pass "LEGACY_BRIDGE_INACTIVE=yes" \
   || fail "LEGACY_BRIDGE_INACTIVE=no（$legacy_state；LEGACY_AND_EDGE_MUTUAL_EXCLUSION）"
 
@@ -94,7 +97,7 @@ echo "START_REQUESTED_AT=$START_REQUESTED_AT"
 }
 
 # ---- P0-2 新会话验证（stale 检测；有界轮询）----
-edge_active="$("$SYSTEMCTL" is-active firebot-vehicle-edge 2>/dev/null || echo inactive)"
+edge_active="$(unit_active_state firebot-vehicle-edge)"
 [ "$edge_active" = "active" ] && pass "BRIDGE_ACTIVE=YES" || fail "BRIDGE_ACTIVE=NO"
 
 main_pid="$("$SYSTEMCTL" show firebot-vehicle-edge -p MainPID --value 2>/dev/null || echo 0)"
@@ -149,8 +152,8 @@ fi
 if [ "$FAILED" -ne 0 ]; then
   # fail-closed：自动退回 inactive（disable + 确认）；绝不触碰 control/ROS/Tailscale
   "$SYSTEMCTL" disable --now firebot-vehicle-edge >/dev/null 2>&1 || true
-  edge_after="$("$SYSTEMCTL" is-active firebot-vehicle-edge 2>/dev/null || echo inactive)"
-  edge_enabled_after="$("$SYSTEMCTL" is-enabled firebot-vehicle-edge 2>/dev/null || echo disabled)"
+  edge_after="$(unit_active_state firebot-vehicle-edge)"
+  edge_enabled_after="$(unit_enabled_state firebot-vehicle-edge)"
   if [ "$edge_after" = "inactive" ] && [ "$edge_enabled_after" != "enabled" ]; then
     echo "FAIL_CLOSED_BRIDGE_STOP=PASS"
   else

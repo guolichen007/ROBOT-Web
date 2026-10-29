@@ -31,6 +31,9 @@ REPO_ROOT="${FIREBOT_REPO_ROOT:-/home/tl/ROBOT-Web}"
 LEGACY_ETC="${FIREBOT_TEST_LEGACY_ETC:-/etc/firebot}"
 LEGACY_BRIDGE="${FIREBOT_TEST_LEGACY_BRIDGE:-/opt/firebot/vehicle-bridge}"
 SYSTEMD_UNIT_DIR="${FIREBOT_TEST_SYSTEMD_DIR:-/etc/systemd/system}"
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1091
+. "$SELF_DIR/../lib/systemd_state.sh"
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo-root) REPO_ROOT="${2:-}"; shift 2 ;;
@@ -43,8 +46,8 @@ if [ "${FIREBOT_TEST_SKIP_ROOT:-0}" != "1" ]; then
 fi
 
 # ---- 前置：记录 legacy 运行状态（零影响断言基线）----
-LEGACY_ACTIVE_BEFORE="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive)"
-LEGACY_ENABLED_BEFORE="$("$SYSTEMCTL" is-enabled firebot-bridge 2>/dev/null || echo disabled)"
+LEGACY_ACTIVE_BEFORE="$(unit_active_state firebot-bridge)"
+LEGACY_ENABLED_BEFORE="$(unit_enabled_state firebot-bridge)"
 LEGACY_MQTT_HOST_BEFORE="$(grep -E '^FIREBOT_MQTT_HOST=' "$LEGACY_ETC/bridge.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"'[:space:]' || echo UNKNOWN)"
 TAILSCALE_BEFORE="NOT_PRESENT"
 if command -v tailscale >/dev/null 2>&1; then
@@ -100,8 +103,8 @@ fi
 chmod -R go-rwx "$BACKUP_ROOT" 2>/dev/null || true
 
 # ---- 后置：零影响断言（P1-6）----
-LEGACY_ACTIVE_AFTER="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive)"
-LEGACY_ENABLED_AFTER="$("$SYSTEMCTL" is-enabled firebot-bridge 2>/dev/null || echo disabled)"
+LEGACY_ACTIVE_AFTER="$(unit_active_state firebot-bridge)"
+LEGACY_ENABLED_AFTER="$(unit_enabled_state firebot-bridge)"
 LEGACY_MQTT_HOST_AFTER="$(grep -E '^FIREBOT_MQTT_HOST=' "$LEGACY_ETC/bridge.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"'[:space:]' || echo UNKNOWN)"
 if [ "$LEGACY_ACTIVE_BEFORE" = "$LEGACY_ACTIVE_AFTER" ] && [ "$LEGACY_ENABLED_BEFORE" = "$LEGACY_ENABLED_AFTER" ] \
    && [ "$LEGACY_MQTT_HOST_BEFORE" = "$LEGACY_MQTT_HOST_AFTER" ] && [ "$TAILSCALE_BEFORE" = "$(tailscale status --json 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("Self",{}).get("TailscaleIPs","") or d.get("BackendState",""))' 2>/dev/null || echo NOT_PRESENT)" ]; then

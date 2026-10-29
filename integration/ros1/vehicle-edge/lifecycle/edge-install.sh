@@ -29,6 +29,8 @@ REPO_ROOT="${1:-$(cd "$VEHICLE_EDGE_SRC/.." && pwd)}"
 REQUIRE_SHA="${FIREBOT_REQUIRE_SHA:-}"
 EDGE_HOME="${FIREBOT_EDGE_HOME:-/home/tl/firebot-edge}"
 SYSTEMCTL="${FIREBOT_TEST_SYSTEMCTL:-systemctl}"
+# shellcheck disable=SC1091
+. "$SELF_DIR/../lib/systemd_state.sh"
 
 # 测试逃逸：仅 CI fixture；生产必须 root（/etc/systemd/system 与权限模型需要）。
 if [ "${FIREBOT_TEST_SKIP_ROOT:-0}" != "1" ]; then
@@ -97,8 +99,8 @@ Environment=FIREBOT_ROS_SETUP=$ros_setup"
 Environment=FIREBOT_ROS_WORKSPACE_SETUP=$ros_ws"
 
 # ---- 前置门 3：legacy/new 互斥 + 安装≠启动 ----
-legacy_state="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive)"
-edge_state="$("$SYSTEMCTL" is-active firebot-vehicle-edge 2>/dev/null || echo inactive)"
+legacy_state="$(unit_active_state firebot-bridge)"
+edge_state="$(unit_active_state firebot-vehicle-edge)"
 if [ "$legacy_state" != "inactive" ]; then
   echo "EDGE_INSTALL=REJECTED"
   echo "LEGACY_BRIDGE_ACTIVE"
@@ -192,8 +194,8 @@ fi
 echo "EDGE_STABLE_BIN_RELEASE_SHA=$REQUIRE_SHA"
 
 # ---- 安装后确认：inactive + disabled ----
-edge_now="$("$SYSTEMCTL" is-active firebot-vehicle-edge 2>/dev/null || echo inactive)"
-edge_enabled="$("$SYSTEMCTL" is-enabled firebot-vehicle-edge 2>/dev/null || echo disabled)"
+edge_now="$(unit_active_state firebot-vehicle-edge)"
+edge_enabled="$(unit_enabled_state firebot-vehicle-edge)"
 if [ "$edge_now" != "inactive" ] || [ "$edge_enabled" = "enabled" ]; then
   echo "EDGE_INSTALL=FAIL（安装后 service 必须 inactive+disabled；实际 active=$edge_now enabled=$edge_enabled）" >&2
   exit 1

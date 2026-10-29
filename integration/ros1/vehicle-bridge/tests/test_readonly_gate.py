@@ -78,6 +78,10 @@ class Fixture:
         lifecycle_dst.mkdir(parents=True)
         for name in ("readonly-preflight.sh", "readonly-start.sh", "migration-stop-legacy.sh"):
             shutil.copy(SRC_DIR / "vehicle-edge" / "lifecycle" / name, lifecycle_dst / name)
+        # lifecycle 依赖的共享 systemd 状态 helper
+        lib_dst = ros1_fake / "vehicle-edge" / "lib"
+        lib_dst.mkdir(parents=True)
+        shutil.copy(SRC_DIR / "vehicle-edge" / "lib" / "systemd_state.sh", lib_dst / "systemd_state.sh")
         git(self.repo, "init", "-q")
         git(self.repo, "add", ".")
         git(self.repo, "commit", "-qm", "fixture")

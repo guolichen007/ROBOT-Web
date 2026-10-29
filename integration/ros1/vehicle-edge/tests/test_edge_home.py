@@ -109,6 +109,12 @@ class Fixture:
             f.chmod(f.stat().st_mode | stat.S_IXUSR)
 
     def _write_fake_systemctl(self) -> None:
+        # B0-FIX3：真实 systemd exit 语义。
+        #   is-active  active   → stdout=active   exit 0
+        #   is-active  inactive → stdout=inactive exit 3（非 0）
+        #   is-enabled enabled  → stdout=enabled  exit 0
+        #   is-enabled disabled → stdout=disabled exit 1（非 0）
+        # 这样 lifecycle 若仍用「|| echo inactive」拼接，会得到「inactive\ninactive」被漏检。
         self.fake_systemctl = self.fakebin / "systemctl"
         self.fake_systemctl.write_text(
             textwrap.dedent(
@@ -116,28 +122,37 @@ class Fixture:
                 #!/usr/bin/env bash
                 echo "$*" >> "${FAKE_LOG:?}"
                 args="$*"
+                emit_active() {
+                  printf '%s\\n' "$1"
+                  case "$1" in active) exit 0 ;; *) exit 3 ;; esac
+                }
+                emit_enabled() {
+                  printf '%s\\n' "$1"
+                  case "$1" in enabled|linked|linked-runtime|alias) exit 0 ;; *) exit 1 ;; esac
+                }
                 case "$args" in
-                  "is-active firebot-bridge") cat "${FAKE_STATE:?}/bridge_active" 2>/dev/null || echo inactive ;;
-                  "is-active firebot-vehicle-edge") cat "$FAKE_STATE/edge_active" 2>/dev/null || echo inactive ;;
-                  "is-enabled firebot-vehicle-edge") cat "$FAKE_STATE/edge_enabled" 2>/dev/null || echo disabled ;;
-                  "is-enabled firebot-control") cat "$FAKE_STATE/ctl_enabled" 2>/dev/null || echo disabled ;;
-                  "is-active firebot-control") cat "$FAKE_STATE/ctl_active" 2>/dev/null || echo inactive ;;
-                  "is-active firebot-bridge.service"*) echo inactive ;;
-                  "show firebot-vehicle-edge -p MainPID --value") cat "$FAKE_STATE/main_pid" 2>/dev/null || echo 0 ;;
+                  "is-active firebot-bridge") emit_active "$(cat "${FAKE_STATE:?}/bridge_active" 2>/dev/null || echo inactive)" ;;
+                  "is-active firebot-vehicle-edge") emit_active "$(cat "$FAKE_STATE/edge_active" 2>/dev/null || echo inactive)" ;;
+                  "is-enabled firebot-vehicle-edge") emit_enabled "$(cat "$FAKE_STATE/edge_enabled" 2>/dev/null || echo disabled)" ;;
+                  "is-enabled firebot-control") emit_enabled "$(cat "$FAKE_STATE/ctl_enabled" 2>/dev/null || echo disabled)" ;;
+                  "is-active firebot-control") emit_active "$(cat "$FAKE_STATE/ctl_active" 2>/dev/null || echo inactive)" ;;
+                  "is-active firebot-bridge.service"*) emit_active inactive ;;
+                  "show firebot-vehicle-edge -p MainPID --value") printf '%s\\n' "$(cat "$FAKE_STATE/main_pid" 2>/dev/null || echo 0)"; exit 0 ;;
                   "enable --now firebot-vehicle-edge")
                     echo enabled > "$FAKE_STATE/edge_enabled"; echo active > "$FAKE_STATE/edge_active"
                     echo "${FAKE_MAIN_PID:-4242}" > "$FAKE_STATE/main_pid"
                     printf '{"mqtt_connected": %s, "boot_id": "%s", "pid": %s, "release_sha": "%s", "process_started_at": "2026-10-28T00:00:01Z", "status_updated_at": "2026-10-28T00:00:01Z"}' \
                       "${FAKE_STATUS_CONNECTED:-true}" "${FAKE_BOOT_ID:-boot-fixture}" "${FAKE_MAIN_PID:-4242}" "${FAKE_RELEASE_SHA:-}" > "${FAKE_STATUS_JSON:?}"
+                    exit 0
                     ;;
                   "disable --now firebot-vehicle-edge")
                     echo disabled > "$FAKE_STATE/edge_enabled"; echo inactive > "$FAKE_STATE/edge_active"
                     echo 0 > "$FAKE_STATE/main_pid"
+                    exit 0
                     ;;
-                  "daemon-reload") ;;
+                  "daemon-reload") exit 0 ;;
                   *) echo "unexpected: $args" >&2; exit 1 ;;
                 esac
-                exit 0
                 """
             )
         )

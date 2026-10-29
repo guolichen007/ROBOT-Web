@@ -136,12 +136,20 @@ def test_tools_deploy_zero_downtime() -> None:
         (fakebin / "systemctl").write_text(textwrap.dedent(
             """\
             #!/usr/bin/env bash
+            emit_active() {
+              printf '%s\\n' "$1"
+              case "$1" in active) exit 0 ;; *) exit 3 ;; esac
+            }
+            emit_enabled() {
+              printf '%s\\n' "$1"
+              case "$1" in enabled|linked|linked-runtime|alias) exit 0 ;; *) exit 1 ;; esac
+            }
             case "$*" in
-              "is-active firebot-bridge") cat "${FAKE_STATE:?}/bridge_active" ;;
-              "is-active firebot-vehicle-edge") cat "$FAKE_STATE/edge_active" ;;
-              "is-enabled firebot-control") cat "$FAKE_STATE/ctl_enabled" ;;
-              "is-active firebot-control") cat "$FAKE_STATE/ctl_active" ;;
-              "is-active tailscaled") cat "$FAKE_STATE/tailscaled_active" ;;
+              "is-active firebot-bridge") emit_active "$(cat "${FAKE_STATE:?}/bridge_active" 2>/dev/null || echo inactive)" ;;
+              "is-active firebot-vehicle-edge") emit_active "$(cat "$FAKE_STATE/edge_active" 2>/dev/null || echo inactive)" ;;
+              "is-enabled firebot-control") emit_enabled "$(cat "$FAKE_STATE/ctl_enabled" 2>/dev/null || echo disabled)" ;;
+              "is-active firebot-control") emit_active "$(cat "$FAKE_STATE/ctl_active" 2>/dev/null || echo inactive)" ;;
+              "is-active tailscaled") emit_active "$(cat "$FAKE_STATE/tailscaled_active" 2>/dev/null || echo inactive)" ;;
               *) echo "unexpected: $*" >&2; exit 1 ;;
             esac
             """
