@@ -318,6 +318,7 @@ def test_ros_setup_explicit() -> None:
               and f"FIREBOT_ROS_SETUP={ros_setup}" in (fx.edge_home / "config" / "install.env").read_text()
               and f"FIREBOT_ROS_WORKSPACE_SETUP={ros_ws}" in (fx.edge_home / "config" / "install.env").read_text())
         # edge-install：systemd unit 注入 Environment（只 source，绝不启动 ROS）
+        fx.write_public_bridge_env()
         ri = fx.run(fx.lifecycle("edge-install.sh"), str(fx.repo), FIREBOT_REQUIRE_SHA=fx.sha)
         unit = (fx.systemd_dir / "firebot-vehicle-edge.service").read_text()
         check("ROS_SETUP_EXPLICIT（systemd 注入 Environment）",

@@ -21,6 +21,8 @@ import tempfile
 import textwrap
 from pathlib import Path
 
+from fake_systemctl import write_fake
+
 TESTS_DIR = Path(__file__).resolve().parent
 VEHICLE_EDGE_SRC = TESTS_DIR.parent
 ROS1_SRC = VEHICLE_EDGE_SRC.parent
@@ -78,6 +80,9 @@ class InstallerFixture:
         (self.state / "tailscaled_active").write_text("active")
         self.status_file = tmp / "bridge-status.json"
         self._write_status(connected=True)
+        # legacy 健康：MQTT host 权威来源 = bridge.env（精确 100.110.31.112）
+        self.bridge_env = tmp / "bridge.env"
+        self.bridge_env.write_text("FIREBOT_MQTT_HOST=100.110.31.112\nFIREBOT_MQTT_PORT=8883\n")
         self.calls = tmp / "systemctl-mutations.log"
         self._write_fake_systemctl()
 
@@ -88,30 +93,7 @@ class InstallerFixture:
     def _write_fake_systemctl(self) -> None:
         self.fakebin = self.tmp / "fakebin"
         self.fakebin.mkdir()
-        self.fake_systemctl = self.fakebin / "systemctl"
-        self.fake_systemctl.write_text(textwrap.dedent(
-            """\
-            #!/usr/bin/env bash
-            args="$*"
-            emit_active() {
-              printf '%s\\n' "$1"
-              case "$1" in active) exit 0 ;; *) exit 3 ;; esac
-            }
-            emit_enabled() {
-              printf '%s\\n' "$1"
-              case "$1" in enabled|linked|linked-runtime|alias) exit 0 ;; *) exit 1 ;; esac
-            }
-            case "$args" in
-              "is-active firebot-bridge") emit_active "$(cat "${FAKE_STATE:?}/bridge_active" 2>/dev/null || echo inactive)" ;;
-              "is-active firebot-vehicle-edge") emit_active "$(cat "$FAKE_STATE/edge_active" 2>/dev/null || echo inactive)" ;;
-              "is-enabled firebot-control") emit_enabled "$(cat "$FAKE_STATE/ctl_enabled" 2>/dev/null || echo disabled)" ;;
-              "is-active firebot-control") emit_active "$(cat "$FAKE_STATE/ctl_active" 2>/dev/null || echo inactive)" ;;
-              "is-active tailscaled") emit_active "$(cat "$FAKE_STATE/tailscaled_active" 2>/dev/null || echo inactive)" ;;
-              *) echo "$args" >> "${FAKE_CALLS:?}"; exit 0 ;;
-            esac
-            """
-        ))
-        self.fake_systemctl.chmod(0o755)
+        self.fake_systemctl = write_fake(self.fakebin)
 
     def env(self, **extra: str) -> dict:
         e = {
@@ -120,6 +102,7 @@ class InstallerFixture:
             "FIREBOT_EDGE_HOME": str(self.edge_home),
             "FIREBOT_TEST_SYSTEMCTL": str(self.fake_systemctl),
             "FIREBOT_TEST_BRIDGE_STATUS_FILE": str(self.status_file),
+            "FIREBOT_TEST_LEGACY_BRIDGE_ENV": str(self.bridge_env),
             "FIREBOT_TEST_SKIP_ROOT": "1",
             "FIREBOT_TEST_SKIP_CHOWN": "1",
             "FAKE_STATE": str(self.state),

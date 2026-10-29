@@ -159,8 +159,8 @@ def test_readonly_scripts_surface() -> None:
     start = read("integration/ros1/vehicle-edge/lifecycle/readonly-start.sh")
     check("READONLY_BRIDGE_START 输出存在", "READONLY_BRIDGE_START=" in start)
     check(
-        "readonly-start 唯一启动点 enable --now firebot-vehicle-edge",
-        "enable --now firebot-vehicle-edge" in start,
+        "readonly-start 唯一启动点 unit_enable_now_checked firebot-vehicle-edge",
+        "unit_enable_now_checked firebot-vehicle-edge" in start,
     )
     start_active = active_lines(start)
     check(

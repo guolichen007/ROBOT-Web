@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # rollback.sh（Vehicle Edge 版）— 通信迁移唯一回滚入口（规格二十四/二十五）。
 #
-# 语义：cutover 之后（migration-stop-legacy 已执行）新链路失败 → 恢复 legacy 通信 owner。
+# 回滚目标优先级：第一绝不能双 MQTT owner；第二恢复旧链路；第三报告 systemctl command RC。
 #
 # 步骤（fail-closed）：
-#   0. 检查 firebot-control disabled + inactive（不安全 → REJECTED / CONTROL_NOT_SAFE，绝不自动处理）
-#   1. 检查 legacy unit（firebot-bridge.service）仍存在
-#   2. 检查 legacy bridge.env 仍指 100.110.31.112（漂移 → LEGACY_CONFIG_DRIFTED / MANUAL_RESTORE_REQUIRED=YES）
-#   3. 幂等分派（规格二十七 A/B/C/D）
-#   4. 需要时 disable --now firebot-vehicle-edge；enable --now firebot-bridge
-#   5. 验证 MQTT_HOST=100.110.31.112 + mqtt_connected=true → LEGACY_ROLLBACK=PASS
+#   0. CONTROL_SAFE=YES + TAILSCALE_ACTIVE=YES（否则 REJECTED，绝不自动处理）
+#   1. legacy unit 存在（unit_load_state != not-found）
+#   2. legacy bridge.env MQTT_HOST 仍 = 100.110.31.112（漂移 → LEGACY_CONFIG_DRIFTED / MANUAL_RESTORE_REQUIRED=YES）
+#   3. 幂等分派（A/B/C/D）
+#   4. 需要时 unit_disable_now_checked firebot-vehicle-edge（post-state 权威，必须 EDGE_DOWN_STRICT）
+#   5. 需要时 unit_enable_now_checked firebot-bridge（post-state 权威，必须 active）
+#   6. 验证 legacy mqtt_connected=true → LEGACY_ROLLBACK=PASS + COMMUNICATION_OWNER=LEGACY
 #
 # 绝不：自动覆盖 /etc/firebot/*、自动恢复 secret、catkin_make、修改 Control、修改 Tailscale。
 # legacy backup（backups/legacy/）是 DISASTER_RECOVERY_ARTIFACT，不是自动覆盖源。
@@ -26,6 +27,8 @@ LEGACY_MQTT_HOST="100.110.31.112"
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
 . "$SELF_DIR/../lib/systemd_state.sh"
+# shellcheck disable=SC1091
+. "$SELF_DIR/../lib/legacy_health.sh"
 
 # 第二层 --help 零副作用（dispatcher 已拦，此处兜底，绝不执行 gate）。
 for a in "$@"; do
@@ -50,22 +53,24 @@ read_kv() {
   grep -E "^$2=" "$1" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"'[:space:]' || true
 }
 
-# ---- 0) Control 安全门（只检查，绝不自动处理）----
-ctl_enabled="$(unit_enabled_state firebot-control)"
-ctl_active="$(unit_active_state firebot-control)"
-if [ "$ctl_enabled" = "enabled" ] || [ "$ctl_active" = "active" ] || \
-   [ "$ctl_active" = "activating" ] || [ "$ctl_active" = "reloading" ]; then
+# ---- 0) Control/Tailscale 安全门（只检查，绝不自动处理）----
+if control_is_safe; then :; else
   echo "EDGE_ROLLBACK=REJECTED"
   echo "CONTROL_NOT_SAFE"
-  echo "原因：firebot-control enabled=$ctl_enabled active=$ctl_active；不得自动处理，由人工确认。" >&2
+  echo "原因：firebot-control 不安全；不得自动处理，由人工确认。" >&2
+  exit 1
+fi
+if tailscale_is_safe; then :; else
+  echo "EDGE_ROLLBACK=REJECTED"
+  echo "TAILSCALE_NOT_SAFE"
   exit 1
 fi
 
-# ---- 1) legacy unit 仍存在 ----
-if [ ! -f "$LEGACY_UNIT" ]; then
+# ---- 1) legacy unit 存在（unit_load_state != not-found，覆盖非 /etc/systemd/system 安装路径）----
+if [ "$(unit_load_state firebot-bridge)" = "not-found" ]; then
   echo "EDGE_ROLLBACK=REJECTED"
   echo "LEGACY_UNIT_MISSING"
-  echo "原因：legacy unit $LEGACY_UNIT 不存在；进入人工灾难恢复。" >&2
+  echo "原因：legacy firebot-bridge LoadState=not-found；进入人工灾难恢复。" >&2
   exit 1
 fi
 
@@ -79,7 +84,7 @@ if [ "$legacy_host" != "$LEGACY_MQTT_HOST" ]; then
   exit 1
 fi
 
-# ---- 3) 幂等分派（规格二十七 A/B/C/D）----
+# ---- 3) 幂等分派（A/B/C/D）----
 legacy_state="$(unit_active_state firebot-bridge)"
 edge_state="$(unit_active_state firebot-vehicle-edge)"
 already_rolled_back="no"
@@ -101,29 +106,31 @@ case "$edge_state/$legacy_state" in
     ;;
 esac
 
-# ---- 4) 停新 Edge（不删除 service/unit/release）----
-if [ "$edge_state" = "active" ]; then
-  "$SYSTEMCTL" disable --now firebot-vehicle-edge >/dev/null 2>&1 || true
-  edge_after="$(unit_active_state firebot-vehicle-edge)"
-  if [ "$edge_after" != "inactive" ]; then
-    echo "EDGE_ROLLBACK=FAIL（firebot-vehicle-edge 仍 $edge_after）" >&2
+# ---- 4) 停新 Edge（post-state 权威；必须 EDGE_DOWN_STRICT 才能继续恢复 legacy）----
+if [ "$edge_state" = "active" ] || unit_is_enabled_like firebot-vehicle-edge; then
+  unit_disable_now_checked firebot-vehicle-edge
+  if unit_is_down_strict firebot-vehicle-edge yes; then
+    echo "EDGE_DOWN_STRICT=YES"
+    echo "EDGE_SERVICE_STOPPED=YES"
+  else
+    echo "EDGE_ROLLBACK=FAIL"
+    echo "EDGE_DOWN_STRICT=NO"
+    echo "MANUAL_INTERVENTION_REQUIRED=YES"
+    echo "原因：无法证明 firebot-vehicle-edge 已 down strict；绝不启动 legacy（避免双 owner）。" >&2
     exit 1
   fi
-  echo "EDGE_SERVICE_STOPPED=YES"
 else
+  echo "EDGE_DOWN_STRICT=YES"
   echo "EDGE_SERVICE_STOPPED=NOT_NEEDED"
 fi
 
-# ---- 5) 启动 legacy bridge（幂等：active 则跳过）----
+# ---- 5) 启动 legacy bridge（post-state 权威；command RC != 0 但 post active 仍继续恢复）----
 if [ "$legacy_state" != "active" ]; then
-  "$SYSTEMCTL" enable --now firebot-bridge >/dev/null 2>&1 || {
-    echo "EDGE_ROLLBACK=FAIL（firebot-bridge enable/start 失败）" >&2
-    exit 1
-  }
+  unit_enable_now_checked firebot-bridge
 fi
-legacy_now="$(unit_active_state firebot-bridge)"
-if [ "$legacy_now" != "active" ]; then
+if ! unit_is_active_strict firebot-bridge; then
   echo "EDGE_ROLLBACK=FAIL（firebot-bridge 未 active）" >&2
+  echo "MANUAL_INTERVENTION_REQUIRED=YES"
   exit 1
 fi
 
@@ -146,6 +153,16 @@ if [ "$mqtt_connected" != "yes" ]; then
   exit 1
 fi
 
+# ---- 最终 owner 反证 + PASS 条件 ----
+if unit_is_down_strict firebot-vehicle-edge yes && unit_is_active_strict firebot-bridge \
+   && control_is_safe >/dev/null && tailscale_is_safe >/dev/null; then
+  :
+else
+  echo "DUAL_COMMUNICATION_OWNER_FORBIDDEN=FAIL"
+  echo "EDGE_ROLLBACK=FAIL"
+  exit 1
+fi
+
 if [ "$already_rolled_back" = "yes" ]; then
   echo "EDGE_ROLLBACK=ALREADY_ROLLED_BACK"
 else
@@ -154,4 +171,5 @@ fi
 echo "LEGACY_ROLLBACK=PASS"
 echo "MQTT_HOST=$LEGACY_MQTT_HOST"
 echo "MQTT_CONNECTED=YES"
+echo "COMMUNICATION_OWNER=LEGACY"
 echo "CONTROL_ACTIVE=NO"

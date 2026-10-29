@@ -101,10 +101,10 @@ def test_migration_stop_legacy_surface() -> None:
         "MIGRATION_STOP_LEGACY=REJECTED" in sh and "CONTROL_NOT_SAFE" in sh,
     )
     active = active_lines(sh)
-    # 唯一变更动作：disable --now firebot-bridge；不触碰 control 启动
+    # 唯一变更动作：unit_disable_now_checked firebot-bridge（统一 mutation wrapper）；不触碰 control 启动
     check(
-        "migration-stop-legacy 唯一变更动作 disable --now firebot-bridge",
-        "disable --now firebot-bridge" in sh,
+        "migration-stop-legacy 唯一变更动作 unit_disable_now_checked firebot-bridge",
+        "unit_disable_now_checked firebot-bridge" in sh,
     )
     check(
         "migration-stop-legacy 不启动 control（可执行行无 enable/start firebot-control）",
@@ -136,23 +136,24 @@ def test_migration_stop_legacy_surface() -> None:
 def test_readonly_start_fail_closed() -> None:
     sh = read("integration/ros1/vehicle-edge/lifecycle/readonly-start.sh")
     check(
-        "readonly-start 失败分支 disable --now firebot-vehicle-edge",
-        '"$SYSTEMCTL" disable --now firebot-vehicle-edge' in sh,
+        "readonly-start 失败分支 unit_disable_now_checked firebot-vehicle-edge",
+        "unit_disable_now_checked firebot-vehicle-edge" in sh,
     )
-    check("readonly-start 输出 FAIL_CLOSED_BRIDGE_STOP", "FAIL_CLOSED_BRIDGE_STOP" in sh)
+    check("readonly-start 输出 FAIL_CLOSED_EDGE_STOP", "FAIL_CLOSED_EDGE_STOP" in sh)
     check(
-        "readonly-start 失败输出 BRIDGE_ACTIVE=NO + BRIDGE_ENABLED=NO",
-        "BRIDGE_ACTIVE=NO" in sh and "BRIDGE_ENABLED=NO" in sh,
+        "readonly-start 失败输出真实 EDGE_ACTIVE_STATE/EDGE_ENABLED_STATE",
+        "EDGE_ACTIVE_STATE=" in sh and "EDGE_ENABLED_STATE=" in sh,
     )
     marker = 'if [ "$FAILED" -ne 0 ]; then'
     fail_branch = sh.split(marker, 1)[1] if marker in sh else ""
     fail_active = active_lines(fail_branch)
     check(
-        "readonly-start 失败分支不触碰 control/ROS/Tailscale（可执行行）",
+        "readonly-start 失败分支不触碰 control/ROS/Tailscale（可执行行；只读 predicate 不算变更）",
         not any(
             t in ln
             for ln in fail_active
-            for t in ("roscore", "roslaunch", "move_base", "tailscale", "firebot-control")
+            for t in ("roscore", "roslaunch", "move_base", "enable firebot-control",
+                      "start firebot-control", "tailscale up", "tailscale down", "tailscale logout")
         ),
     )
 

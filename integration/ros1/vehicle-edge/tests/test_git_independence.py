@@ -19,6 +19,8 @@ import tempfile
 import textwrap
 from pathlib import Path
 
+from fake_systemctl import write_fake
+
 TESTS_DIR = Path(__file__).resolve().parent
 VEHICLE_EDGE_SRC = TESTS_DIR.parent
 ROS1_SRC = VEHICLE_EDGE_SRC.parent
@@ -127,34 +129,15 @@ def test_tools_deploy_zero_downtime() -> None:
         (state / "ctl_active").write_text("inactive")
         (state / "tailscaled_active").write_text("active")
 
-        # B0-FIX2：legacy active 时必须有健康的 MQTT 状态（host 非空 + mqtt_connected=true）。
+        # B0-FIX2：legacy active 时必须有健康的 MQTT 状态（host 精确 100.110.31.112 + mqtt_connected=true）。
         status_file = tmp / "bridge-status.json"
         status_file.write_text('{"mqtt_host": "100.110.31.112", "mqtt_connected": true, "boot_id": "b1"}\n')
+        bridge_env = tmp / "bridge.env"
+        bridge_env.write_text("FIREBOT_MQTT_HOST=100.110.31.112\nFIREBOT_MQTT_PORT=8883\n")
 
         fakebin = tmp / "fakebin"
         fakebin.mkdir()
-        (fakebin / "systemctl").write_text(textwrap.dedent(
-            """\
-            #!/usr/bin/env bash
-            emit_active() {
-              printf '%s\\n' "$1"
-              case "$1" in active) exit 0 ;; *) exit 3 ;; esac
-            }
-            emit_enabled() {
-              printf '%s\\n' "$1"
-              case "$1" in enabled|linked|linked-runtime|alias) exit 0 ;; *) exit 1 ;; esac
-            }
-            case "$*" in
-              "is-active firebot-bridge") emit_active "$(cat "${FAKE_STATE:?}/bridge_active" 2>/dev/null || echo inactive)" ;;
-              "is-active firebot-vehicle-edge") emit_active "$(cat "$FAKE_STATE/edge_active" 2>/dev/null || echo inactive)" ;;
-              "is-enabled firebot-control") emit_enabled "$(cat "$FAKE_STATE/ctl_enabled" 2>/dev/null || echo disabled)" ;;
-              "is-active firebot-control") emit_active "$(cat "$FAKE_STATE/ctl_active" 2>/dev/null || echo inactive)" ;;
-              "is-active tailscaled") emit_active "$(cat "$FAKE_STATE/tailscaled_active" 2>/dev/null || echo inactive)" ;;
-              *) echo "unexpected: $*" >&2; exit 1 ;;
-            esac
-            """
-        ))
-        (fakebin / "systemctl").chmod(0o755)
+        write_fake(fakebin)
 
         installer = repo / "integration" / "ros1" / "vehicle-edge" / "install" / "install-tools-release.sh"
         env = {
@@ -163,6 +146,7 @@ def test_tools_deploy_zero_downtime() -> None:
             "FIREBOT_EDGE_HOME": str(edge_home),
             "FIREBOT_TEST_SYSTEMCTL": str(fakebin / "systemctl"),
             "FIREBOT_TEST_BRIDGE_STATUS_FILE": str(status_file),
+            "FIREBOT_TEST_LEGACY_BRIDGE_ENV": str(bridge_env),
             "FIREBOT_TEST_SKIP_ROOT": "1",
             "FIREBOT_TEST_SKIP_CHOWN": "1",
             "FAKE_STATE": str(state),

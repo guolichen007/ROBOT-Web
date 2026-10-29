@@ -78,6 +78,12 @@ else
 fi
 # shellcheck disable=SC1091
 . "$ROS1_DIR/vehicle-edge/lib/systemd_state.sh"
+# 生产 tools 模式统一导出 production context，所有 lifecycle 据此区分 production vs source tree。
+if [ "$FIREBOTCTL_LAYOUT" = "VEHICLE_TOOLS_RELEASE" ]; then
+  export FIREBOT_EDGE_TOOLS_MODE=1
+  export FIREBOT_TOOLS_SOURCE_SHA="$TOOLS_SOURCE_SHA"
+  export FIREBOT_EDGE_HOME="$EDGE_HOME"
+fi
 PROFILE_DIR="$ROS1_DIR/profiles"
 # 车端固定环境根（测试可经 FIREBOT_TEST_ETC_ROOT 注入 fixture；生产默认 /etc/firebot）
 FIREBOT_ETC="${FIREBOT_TEST_ETC_ROOT:-/etc/firebot}"

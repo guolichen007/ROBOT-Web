@@ -127,7 +127,8 @@ jobs:
                    test_git_independence test_help_contract \
                    test_production_default_env test_production_allowlist \
                    test_stable_edge_bin test_installer_transaction \
-                   test_real_systemd_semantics; do
+                   test_real_systemd_semantics test_systemd_mutation_matrix \
+                   test_cutover_state_machine; do
             python3 "tests/$t.py" || exit 1
           done
           cd ../../..

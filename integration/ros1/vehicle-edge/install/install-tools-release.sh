@@ -72,31 +72,16 @@ head_sha="$(git -C "$SOURCE_DIR" rev-parse HEAD 2>/dev/null || echo UNKNOWN)"
 LINK="$BIN_DIR/firebotctl"
 RELEASE_DIR="$EDGE_HOME/tools/releases/$SHA"
 
-# ---- MQTT 状态读取（只读；测试可注入 FIREBOT_TEST_BRIDGE_STATUS_FILE）----
-bridge_status_file() {
-  if [ -n "${FIREBOT_TEST_BRIDGE_STATUS_FILE:-}" ]; then
-    echo "$FIREBOT_TEST_BRIDGE_STATUS_FILE"
-    return
-  fi
-  if [ -f "/run/firebot-bridge/status.json" ]; then
-    echo "/run/firebot-bridge/status.json"
-  else
-    echo "/tmp/firebot-bridge-status.json"
-  fi
-}
-mqtt_host_value() {
-  python3 -c 'import json,sys; print(json.load(open(sys.argv[1],encoding="utf-8")).get("mqtt_host") or "")' \
-    "$(bridge_status_file)" 2>/dev/null || echo ""
-}
-mqtt_connected_value() {
-  python3 -c 'import json,sys; print("true" if json.load(open(sys.argv[1],encoding="utf-8")).get("mqtt_connected") is True else "false")' \
-    "$(bridge_status_file)" 2>/dev/null || echo "false"
-}
-
 # shellcheck disable=SC1091
 . "$SELF_DIR/../lib/systemd_state.sh"
+# shellcheck disable=SC1091
+. "$SELF_DIR/../lib/legacy_health.sh"
 svc_active() { unit_active_state "$1"; }
 svc_enabled() { unit_enabled_state "$1"; }
+# MQTT 权威来源：host 读 bridge.env（精确 100.110.31.112），connected 读 /run status.json；
+# 生产禁止 /tmp fallback（测试只能经 FIREBOT_TEST_BRIDGE_STATUS_FILE / FIREBOT_TEST_LEGACY_BRIDGE_ENV 注入）。
+mqtt_host_value() { legacy_mqtt_host; }
+mqtt_connected_value() { legacy_mqtt_connected; }
 
 # ---- 2) 记录旧生产管理状态（只读快照，不记录 secret）----
 OLD_FIREBOTCTL_LINK="none"
@@ -118,14 +103,21 @@ ctl_enabled_before="$(svc_enabled firebot-control)"
 ctl_active_before="$(svc_active firebot-control)"
 tailscale_before="$(svc_active tailscaled)"
 
-# ---- 3) legacy MQTT 健康门（PRE-CUTOVER：legacy active 时必须链路健康）----
-if [ "$legacy_state_before" = "active" ]; then
-  if [ -z "$mqtt_host_before" ] || [ "$mqtt_connected_before" != "true" ]; then
-    echo "TOOLS_INSTALL=REJECTED"
-    echo "LEGACY_LINK_NOT_HEALTHY"
-    echo "原因：firebot-bridge active 但 MQTT_HOST 为空或 mqtt_connected != true（旧链路已异常，禁止继续 tooling migration）。" >&2
-    exit 1
-  fi
+# ---- 3) S0 前置状态（严格：写任何 production pointer 前必须明确处于 S0）----
+precheck_fail=0
+if legacy_link_health; then :; else precheck_fail=1; echo "LEGACY_LINK_NOT_HEALTHY"; fi
+if control_is_safe; then :; else precheck_fail=1; echo "CONTROL_NOT_SAFE"; fi
+if tailscale_is_safe; then :; else precheck_fail=1; echo "TAILSCALE_NOT_SAFE"; fi
+if unit_is_down_strict firebot-vehicle-edge yes; then :; else precheck_fail=1; echo "EDGE_NOT_DOWN_STRICT"; fi
+# MQTT 必须精确 100.110.31.112 + connected=true（不再仅非空）
+if [ "$mqtt_host_before" != "100.110.31.112" ]; then precheck_fail=1; echo "LEGACY_MQTT_HOST_NOT_EXACT"; fi
+if [ "$mqtt_connected_before" != "true" ]; then precheck_fail=1; echo "LEGACY_MQTT_NOT_CONNECTED"; fi
+
+if [ "$precheck_fail" -ne 0 ]; then
+  echo "TOOLS_INSTALL=REJECTED"
+  echo "SYSTEM_STATE_UNCERTAIN"
+  echo "原因：安装前必须处于 S0（legacy 健康 + control safe + tailscale active + edge down + MQTT 精确 100.110.31.112）。" >&2
+  exit 1
 fi
 
 # ---- 回滚 helper（只恢复管理平面 pointers，绝不触碰任何服务）----
@@ -229,6 +221,19 @@ tailscale_after="$(svc_active tailscaled)"
 [ "$ctl_active_before" = "$ctl_active_after" ] && CONTROL_ACTIVE_UNCHANGED=YES || CONTROL_ACTIVE_UNCHANGED=NO
 [ "$tailscale_before" = "$tailscale_after" ] && TAILSCALE_STATE_UNCHANGED=YES || TAILSCALE_STATE_UNCHANGED=NO
 
+# unknown==unknown 永远不得 PASS
+unknown_fail=0
+for _v in "$legacy_state_before" "$edge_state_before" "$ctl_enabled_before" "$ctl_active_before" "$tailscale_before"; do
+  [ "$_v" = "unknown" ] && unknown_fail=1
+done
+# 安装后重新完整验证 S0
+post_s0_ok=1
+legacy_link_health >/dev/null 2>&1 || post_s0_ok=0
+control_is_safe >/dev/null 2>&1 || post_s0_ok=0
+tailscale_is_safe >/dev/null 2>&1 || post_s0_ok=0
+unit_is_down_strict firebot-vehicle-edge yes || post_s0_ok=0
+[ "$post_s0_ok" -eq 1 ] && POST_S0_VALIDATION=PASS || POST_S0_VALIDATION=FAIL
+
 final_realpath="$(readlink -f "$LINK" 2>/dev/null || echo UNKNOWN)"
 
 echo "TOOLS_INSTALL=PASS sha=$SHA"
@@ -240,17 +245,19 @@ echo "EDGE_STATE_UNCHANGED=$EDGE_STATE_UNCHANGED"
 echo "CONTROL_ENABLED_UNCHANGED=$CONTROL_ENABLED_UNCHANGED"
 echo "CONTROL_ACTIVE_UNCHANGED=$CONTROL_ACTIVE_UNCHANGED"
 echo "TAILSCALE_STATE_UNCHANGED=$TAILSCALE_STATE_UNCHANGED"
+echo "POST_S0_VALIDATION=$POST_S0_VALIDATION"
 
 if [ "$LEGACY_BRIDGE_STATE_UNCHANGED" != "YES" ] || [ "$LEGACY_MQTT_HOST_UNCHANGED" != "YES" ] \
    || [ "$LEGACY_MQTT_CONNECTED_UNCHANGED" != "YES" ] || [ "$EDGE_STATE_UNCHANGED" != "YES" ] \
    || [ "$CONTROL_ENABLED_UNCHANGED" != "YES" ] || [ "$CONTROL_ACTIVE_UNCHANGED" != "YES" ] \
-   || [ "$TAILSCALE_STATE_UNCHANGED" != "YES" ]; then
-  # B0-FIX3：tools release 已切换但最终 postcondition（零中断）失败 →
+   || [ "$TAILSCALE_STATE_UNCHANGED" != "YES" ] || [ "$unknown_fail" -ne 0 ] \
+   || [ "$post_s0_ok" -ne 1 ]; then
+  # tools release 已切换但最终 postcondition（零中断/S0）失败 →
   # 恢复管理平面 pointers/link（TOOLS_INSTALL_ROLLED_BACK=YES），
   # 但绝不自动 restart/stop 任何通信服务（COMMUNICATION_STATE_NOT_AUTO_REPAIRED=YES）。
   restore_firebotctl_link
   restore_tools_pointers
-  echo "TOOLS_INSTALL=FAIL（安装前后状态不一致）"
+  echo "TOOLS_INSTALL=FAIL（安装前后状态不一致或 S0 验证失败）"
   echo "TOOLS_INSTALL_ROLLED_BACK=YES"
   echo "COMMUNICATION_STATE_NOT_AUTO_REPAIRED=YES"
   exit 1

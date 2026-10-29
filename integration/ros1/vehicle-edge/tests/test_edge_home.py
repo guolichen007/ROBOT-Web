@@ -30,6 +30,8 @@ import tempfile
 import textwrap
 from pathlib import Path
 
+from fake_systemctl import write_fake
+
 VEHICLE_EDGE_SRC = Path(__file__).resolve().parents[1]  # integration/ros1/vehicle-edge
 
 PASS = 0
@@ -90,6 +92,11 @@ class Fixture:
         self.systemd_dir.mkdir()
         self.wrap_dir = self.tmp / "wrapbin"
         self.wrap_dir.mkdir()
+        # legacy 健康默认 fixture（精确 host 100.110.31.112 + mqtt_connected=true）
+        self.legacy_bridge_env = self.tmp / "legacy-bridge.env"
+        self.legacy_bridge_env.write_text("FIREBOT_MQTT_HOST=100.110.31.112\nFIREBOT_MQTT_PORT=8883\n")
+        self.legacy_status = self.tmp / "legacy-status.json"
+        self.legacy_status.write_text('{"mqtt_connected": true, "boot_id": "b1"}\n')
 
         self.fakebin = self.tmp / "fakebin"
         self.fakebin.mkdir()
@@ -109,52 +116,16 @@ class Fixture:
             f.chmod(f.stat().st_mode | stat.S_IXUSR)
 
     def _write_fake_systemctl(self) -> None:
-        # B0-FIX3：真实 systemd exit 语义。
-        #   is-active  active   → stdout=active   exit 0
-        #   is-active  inactive → stdout=inactive exit 3（非 0）
-        #   is-enabled enabled  → stdout=enabled  exit 0
-        #   is-enabled disabled → stdout=disabled exit 1（非 0）
-        # 这样 lifecycle 若仍用「|| echo inactive」拼接，会得到「inactive\ninactive」被漏检。
-        self.fake_systemctl = self.fakebin / "systemctl"
-        self.fake_systemctl.write_text(
-            textwrap.dedent(
-                """\
-                #!/usr/bin/env bash
-                echo "$*" >> "${FAKE_LOG:?}"
-                args="$*"
-                emit_active() {
-                  printf '%s\\n' "$1"
-                  case "$1" in active) exit 0 ;; *) exit 3 ;; esac
-                }
-                emit_enabled() {
-                  printf '%s\\n' "$1"
-                  case "$1" in enabled|linked|linked-runtime|alias) exit 0 ;; *) exit 1 ;; esac
-                }
-                case "$args" in
-                  "is-active firebot-bridge") emit_active "$(cat "${FAKE_STATE:?}/bridge_active" 2>/dev/null || echo inactive)" ;;
-                  "is-active firebot-vehicle-edge") emit_active "$(cat "$FAKE_STATE/edge_active" 2>/dev/null || echo inactive)" ;;
-                  "is-enabled firebot-vehicle-edge") emit_enabled "$(cat "$FAKE_STATE/edge_enabled" 2>/dev/null || echo disabled)" ;;
-                  "is-enabled firebot-control") emit_enabled "$(cat "$FAKE_STATE/ctl_enabled" 2>/dev/null || echo disabled)" ;;
-                  "is-active firebot-control") emit_active "$(cat "$FAKE_STATE/ctl_active" 2>/dev/null || echo inactive)" ;;
-                  "is-active firebot-bridge.service"*) emit_active inactive ;;
-                  "show firebot-vehicle-edge -p MainPID --value") printf '%s\\n' "$(cat "$FAKE_STATE/main_pid" 2>/dev/null || echo 0)"; exit 0 ;;
-                  "enable --now firebot-vehicle-edge")
-                    echo enabled > "$FAKE_STATE/edge_enabled"; echo active > "$FAKE_STATE/edge_active"
-                    echo "${FAKE_MAIN_PID:-4242}" > "$FAKE_STATE/main_pid"
-                    printf '{"mqtt_connected": %s, "boot_id": "%s", "pid": %s, "release_sha": "%s", "process_started_at": "2026-10-28T00:00:01Z", "status_updated_at": "2026-10-28T00:00:01Z"}' \
-                      "${FAKE_STATUS_CONNECTED:-true}" "${FAKE_BOOT_ID:-boot-fixture}" "${FAKE_MAIN_PID:-4242}" "${FAKE_RELEASE_SHA:-}" > "${FAKE_STATUS_JSON:?}"
-                    exit 0
-                    ;;
-                  "disable --now firebot-vehicle-edge")
-                    echo disabled > "$FAKE_STATE/edge_enabled"; echo inactive > "$FAKE_STATE/edge_active"
-                    echo 0 > "$FAKE_STATE/main_pid"
-                    exit 0
-                    ;;
-                  "daemon-reload") exit 0 ;;
-                  *) echo "unexpected: $args" >&2; exit 1 ;;
-                esac
-                """
-            )
+        # 统一 canonical fake（systemctl show + is-active/is-enabled + mutation 四象限注入）。
+        self.fake_systemctl = write_fake(self.fakebin)
+
+    def write_public_bridge_env(self) -> None:
+        """写 S2 所需 config/bridge.env（公网 MQTT + SUPPORTED_COMMANDS 空）。"""
+        (self.edge_home / "config").mkdir(parents=True, exist_ok=True)
+        (self.edge_home / "config" / "bridge.env").write_text(
+            "FIREBOT_MQTT_HOST=firebot.youdaozd.com\n"
+            "FIREBOT_MQTT_PORT=8883\n"
+            "FIREBOT_SUPPORTED_COMMANDS=\n"
         )
 
     def env(self) -> dict:
@@ -181,6 +152,8 @@ class Fixture:
             "FAKE_BOOT_ID": os.environ.get("FAKE_BOOT_ID", "boot-fixture"),
             "FAKE_RELEASE_SHA": os.environ.get("FAKE_RELEASE_SHA", ""),
             "FAKE_STATUS_CONNECTED": os.environ.get("FAKE_STATUS_CONNECTED", "true"),
+            "FIREBOT_TEST_LEGACY_BRIDGE_ENV": str(self.legacy_bridge_env),
+            "FIREBOT_TEST_BRIDGE_STATUS_FILE": str(self.legacy_status),
         }
 
     def run(self, script: Path, *args: str, **extra_env: str) -> subprocess.CompletedProcess:
@@ -265,6 +238,7 @@ def test_edge_install_success_and_no_control_touch() -> None:
     fx = Fixture()
     try:
         fx.run(fx.lifecycle("edge-init.sh"), "--runtime-user", "tl")
+        fx.write_public_bridge_env()
         r = fx.run(fx.lifecycle("edge-install.sh"), str(fx.repo),
                    FIREBOT_REQUIRE_SHA=fx.sha)
         check("EDGE_INSTALL_SUCCESS", r.returncode == 0 and "EDGE_INSTALL=PASS" in r.stdout, r.stdout[-300:])
@@ -289,8 +263,8 @@ def test_edge_install_success_and_no_control_touch() -> None:
         for name in ("vehicle-connection-status", "vehicle-connection-watch",
                      "vehicle-connectivity-selftest", "vehicle-edge-doctor"):
             check(f"wrapper {name}", (fx.wrap_dir / name).exists())
-        # 安装后 inactive+disabled
-        check("EDGE 安装后 inactive+disabled", "EDGE_SERVICE_STATE=inactive+disabled" in r.stdout)
+        # 安装后 inactive+explicit-disabled
+        check("EDGE 安装后 inactive+explicit-disabled", "EDGE_SERVICE_STATE=inactive+explicit-disabled" in r.stdout)
         # 绝不触碰 ROS workspace / control（可执行行无 firerobot_ws/catkin/firebot-control 安装动作）
         sh = (fx.repo / "integration/ros1/vehicle-edge/lifecycle/edge-install.sh").read_text()
         active = [ln for ln in sh.splitlines() if ln.strip() and not ln.lstrip().startswith("#")]
@@ -354,7 +328,7 @@ def test_legacy_and_edge_mutual_exclusion() -> None:
         (fx.state / "bridge_active").write_text("active")
         r = fx.run(fx.lifecycle("readonly-start.sh"))
         check("LEGACY_AND_EDGE_MUTUAL_EXCLUSION（legacy active → readonly-start REJECTED）",
-              r.returncode != 0 and "LEGACY_BRIDGE_INACTIVE=no" in r.stdout, r.stdout[-300:])
+              r.returncode != 0 and "LEGACY_BRIDGE_DOWN_STRICT=no" in r.stdout, r.stdout[-300:])
     finally:
         shutil.rmtree(fx.tmp, ignore_errors=True)
 

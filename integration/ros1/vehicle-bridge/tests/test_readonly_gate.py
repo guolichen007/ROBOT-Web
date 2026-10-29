@@ -82,6 +82,7 @@ class Fixture:
         lib_dst = ros1_fake / "vehicle-edge" / "lib"
         lib_dst.mkdir(parents=True)
         shutil.copy(SRC_DIR / "vehicle-edge" / "lib" / "systemd_state.sh", lib_dst / "systemd_state.sh")
+        shutil.copy(SRC_DIR / "vehicle-edge" / "lib" / "legacy_health.sh", lib_dst / "legacy_health.sh")
         git(self.repo, "init", "-q")
         git(self.repo, "add", ".")
         git(self.repo, "commit", "-qm", "fixture")
@@ -109,6 +110,11 @@ class Fixture:
         (self.state / "ctl_enabled").write_text("disabled")
         (self.state / "ctl_active").write_text("inactive")
         (self.state / "bridge_active").write_text("inactive")
+        # legacy 健康默认 fixture（bootstrap legacy-active 时 legacy_link_health 需要）
+        self.legacy_bridge_env = self.tmp / "legacy-bridge.env"
+        self.legacy_bridge_env.write_text("FIREBOT_MQTT_HOST=100.110.31.112\nFIREBOT_MQTT_PORT=8883\n")
+        self.legacy_status = self.tmp / "legacy-status.json"
+        self.legacy_status.write_text('{"mqtt_connected": true, "boot_id": "b1"}\n')
 
         # fakebin
         self.fakebin = self.tmp / "fakebin"
@@ -130,53 +136,7 @@ class Fixture:
 
     def _write_fake_systemctl(self) -> None:
         self.fake_systemctl = self.fakebin / "systemctl"
-        self.fake_systemctl.write_text(
-            textwrap.dedent(
-                """\
-                #!/usr/bin/env bash
-                # 记录全部调用（用于 READONLY_START_CONTROL_UNTOUCHED 断言）
-                echo "$*" >> "${FAKE_LOG:?}"
-                args="$*"
-                case "$args" in
-                  "is-enabled firebot-control") cat "${FAKE_STATE:?}/ctl_enabled" 2>/dev/null || echo disabled ;;
-                  "is-active firebot-control") cat "$FAKE_STATE/ctl_active" 2>/dev/null || echo inactive ;;
-                  "is-active firebot-bridge") cat "$FAKE_STATE/bridge_active" 2>/dev/null || echo inactive ;;
-                  "is-active firebot-vehicle-edge") cat "$FAKE_STATE/edge_active" 2>/dev/null || echo inactive ;;
-                  "is-enabled firebot-vehicle-edge") cat "$FAKE_STATE/edge_enabled" 2>/dev/null || echo disabled ;;
-                  "is-active systemd-timesyncd") echo inactive ;;
-                  "enable --now firebot-bridge")
-                    echo active > "$FAKE_STATE/bridge_active"
-                    printf '{"mqtt_connected": true, "boot_id": "boot-fixture-0001"}' > "${FAKE_STATUS_JSON:?}"
-                    ;;
-                  "show firebot-vehicle-edge -p MainPID --value") cat "$FAKE_STATE/main_pid" 2>/dev/null || echo 0 ;;
-                  "enable --now firebot-vehicle-edge")
-                    echo active > "$FAKE_STATE/edge_active"
-                    echo enabled > "$FAKE_STATE/edge_enabled"
-                    echo 4242 > "$FAKE_STATE/main_pid"
-                    printf '{"mqtt_connected": %s, "boot_id": "boot-fixture-0001", "pid": 4242, "release_sha": "%s", "process_started_at": "2026-10-28T00:00:01Z", "status_updated_at": "2026-10-28T00:00:01Z"}' \
-                      "${FAKE_EDGE_STATUS_CONNECTED:-true}" "${FAKE_RELEASE_SHA:-}" > "${FAKE_STATUS_JSON:?}"
-                    ;;
-                  "disable --now firebot-vehicle-edge")
-                    echo inactive > "$FAKE_STATE/edge_active"
-                    echo disabled > "$FAKE_STATE/edge_enabled"
-                    ;;
-                  "enable --now firebot-vehicle-edge")
-                    echo active > "$FAKE_STATE/edge_active"
-                    echo enabled > "$FAKE_STATE/edge_enabled"
-                    echo 4242 > "$FAKE_STATE/main_pid"
-                    printf '{"mqtt_connected": %s, "boot_id": "boot-fixture-0001", "pid": 4242, "release_sha": "%s", "process_started_at": "2026-10-28T00:00:01Z", "status_updated_at": "2026-10-28T00:00:01Z"}' \
-                      "${FAKE_EDGE_STATUS_CONNECTED:-true}" "${FAKE_RELEASE_SHA:-}" > "${FAKE_STATUS_JSON:?}"
-                    ;;
-                  "disable --now firebot-vehicle-edge")
-                    echo inactive > "$FAKE_STATE/edge_active"
-                    echo disabled > "$FAKE_STATE/edge_enabled"
-                    ;;
-                  *) echo "unexpected systemctl call: $args" >&2; exit 1 ;;
-                esac
-                exit 0
-                """
-            )
-        )
+        shutil.copy(SRC_DIR / "vehicle-edge" / "tests" / "fake_systemctl.sh", self.fake_systemctl)
         self.fake_systemctl.chmod(self.fake_systemctl.stat().st_mode | stat.S_IXUSR)
 
     def write_os_release(self, version: str = "20.04") -> Path:
@@ -203,6 +163,8 @@ class Fixture:
             "FIREBOT_TEST_OS_RELEASE": str(self.write_os_release()),
             "FIREBOT_TEST_ROS_NOETIC_SETUP": str(self.write_ros_noetic()),
             "FIREBOT_TEST_STATUS_JSON": str(self.status_json),
+            "FIREBOT_TEST_LEGACY_BRIDGE_ENV": str(self.legacy_bridge_env),
+            "FIREBOT_TEST_BRIDGE_STATUS_FILE": str(self.legacy_status),
             "FIREBOT_READONLY_MQTT_WAIT_SECONDS": "6",
             "FAKE_STATE": str(self.state),
             "FAKE_STATUS_JSON": str(self.status_json),

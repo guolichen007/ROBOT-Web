@@ -18,6 +18,8 @@ import tempfile
 import textwrap
 from pathlib import Path
 
+from fake_systemctl import write_fake
+
 TESTS_DIR = Path(__file__).resolve().parent
 VEHICLE_EDGE_SRC = TESTS_DIR.parent
 ROLLBACK = VEHICLE_EDGE_SRC / "lifecycle" / "rollback.sh"
@@ -66,38 +68,7 @@ class Fixture:
             f.chmod(f.stat().st_mode | stat.S_IXUSR)
 
     def _write_fake_systemctl(self) -> None:
-        self.fake_systemctl = self.fakebin / "systemctl"
-        self.fake_systemctl.write_text(
-            textwrap.dedent(
-                """\
-                #!/usr/bin/env bash
-                echo "$*" >> "${FAKE_LOG:?}"
-                args="$*"
-                emit_active() {
-                  printf '%s\\n' "$1"
-                  case "$1" in active) exit 0 ;; *) exit 3 ;; esac
-                }
-                emit_enabled() {
-                  printf '%s\\n' "$1"
-                  case "$1" in enabled|linked|linked-runtime|alias) exit 0 ;; *) exit 1 ;; esac
-                }
-                case "$args" in
-                  "is-enabled firebot-control") emit_enabled "$(cat "${FAKE_STATE:?}/ctl_enabled" 2>/dev/null || echo disabled)" ;;
-                  "is-active firebot-control") emit_active "$(cat "$FAKE_STATE/ctl_active" 2>/dev/null || echo inactive)" ;;
-                  "is-enabled firebot-bridge") emit_enabled "$(cat "$FAKE_STATE/bridge_enabled" 2>/dev/null || echo disabled)" ;;
-                  "is-active firebot-bridge") emit_active "$(cat "$FAKE_STATE/bridge_active" 2>/dev/null || echo inactive)" ;;
-                  "is-active firebot-vehicle-edge") emit_active "$(cat "$FAKE_STATE/edge_active" 2>/dev/null || echo inactive)" ;;
-                  "enable --now firebot-bridge")
-                    echo enabled > "$FAKE_STATE/bridge_enabled"; echo active > "$FAKE_STATE/bridge_active"; exit 0 ;;
-                  "disable --now firebot-vehicle-edge")
-                    echo disabled > "$FAKE_STATE/edge_enabled" 2>/dev/null || true; echo inactive > "$FAKE_STATE/edge_active"; exit 0 ;;
-                  "disable --now firebot-bridge")
-                    echo disabled > "$FAKE_STATE/bridge_enabled"; echo inactive > "$FAKE_STATE/bridge_active"; exit 0 ;;
-                  *) echo "unexpected: $args" >&2; exit 1 ;;
-                esac
-                """
-            )
-        )
+        self.fake_systemctl = write_fake(self.fakebin)
 
     def env(self) -> dict:
         return {
@@ -195,7 +166,9 @@ def test_rollback_legacy_config_drift() -> None:
 def test_rollback_legacy_unit_missing() -> None:
     fx = Fixture()
     try:
+        # B0-FINAL-HARDENING：legacy unit 存在性改用 unit_load_state（LoadState=not-found）。
         fx.legacy_unit.unlink()
+        (fx.state / "bridge_load").write_text("not-found")
         r = fx.run()
         check("EDGE_ROLLBACK LEGACY_UNIT_MISSING", r.returncode != 0
               and "LEGACY_UNIT_MISSING" in r.stdout, r.stdout[-300:])
@@ -219,9 +192,11 @@ def test_rollback_static_contracts() -> None:
         check("无 firebot-control enable/start", not mutates_control, str(mutates_control)[:200])
         check("无 catkin_make", not any("catkin_make" in ln for ln in active))
         check("无 cmd_vel", not any("cmd_vel" in ln for ln in active))
-        # M. Tailscale：不得修改 Tailscale
+        # M. Tailscale：不得修改 Tailscale（只读 tailscale_is_safe 不算变更动作）
         check("无 tailscale 修改（tailscale up/down/logout/disable）",
-              not any("tailscale" in ln for ln in active))
+              not any(t in ln for ln in active
+                      for t in ("tailscale up", "tailscale down", "tailscale logout",
+                                "disable tailscaled", "stop tailscaled", "restart tailscaled")))
         # 不得自动覆盖 /etc/firebot（cp/mv 到 legacy etc）
         check("不自动覆盖 legacy config（无 cp/mv 到 /etc/firebot）",
               not any(("cp" in ln or "mv" in ln) and "/etc/firebot" in ln for ln in active))

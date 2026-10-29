@@ -249,8 +249,8 @@ def test_stage_a_zero_downtime_contract() -> None:
         "EDGE_STARTED_BEFORE_CUTOVER" in pre,
     )
     check(
-        "enrolled 强制双 inactive（COMMUNICATION_OWNER=NONE）",
-        "COMMUNICATION_OWNER=NONE" in pre and "enrolled 必须双 inactive" in pre,
+        "enrolled 强制双 down strict（COMMUNICATION_OWNER=NONE）",
+        "COMMUNICATION_OWNER=NONE" in pre and "enrolled 必须双 down strict" in pre,
     )
     check(
         "无绕过参数（--allow-legacy/--skip-service-check/--force 不在 preflight）",

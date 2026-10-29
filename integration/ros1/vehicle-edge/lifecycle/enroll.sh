@@ -70,13 +70,31 @@ if printf '%s' "$server_host" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$|^100\.(6
   exit 1
 fi
 
-# ---- cutover 门：token 必须 Bridge/Edge 已停止后才允许消费 ----
-legacy_state="$(unit_active_state firebot-bridge)"
-edge_state="$(unit_active_state firebot-vehicle-edge)"
-if [ "$legacy_state" != "inactive" ] || [ "$edge_state" != "inactive" ]; then
+# ---- S1 状态门：token 必须在 cutover 后（S1）才允许消费 ----
+# legacy inactive + explicitly-disabled；edge not-found 或 down-strict；control safe；tailscale active。
+enroll_reject=0
+if unit_is_down_strict firebot-bridge yes; then :; else
   echo "ENROLL=REJECTED"
   echo "LEGACY_BRIDGE_STILL_ACTIVE"
-  echo "原因：firebot-bridge/edge 仍在运行；先 firebotctl vehicle migration-stop-legacy 进入 cutover。" >&2
+  enroll_reject=1
+fi
+if unit_is_down_strict firebot-vehicle-edge yes; then :; else
+  echo "ENROLL=REJECTED"
+  echo "EDGE_NOT_DOWN_STRICT"
+  enroll_reject=1
+fi
+if control_is_safe; then :; else
+  echo "ENROLL=REJECTED"
+  echo "CONTROL_NOT_SAFE"
+  enroll_reject=1
+fi
+if tailscale_is_safe; then :; else
+  echo "ENROLL=REJECTED"
+  echo "TAILSCALE_NOT_SAFE"
+  enroll_reject=1
+fi
+if [ "$enroll_reject" -ne 0 ]; then
+  echo "原因：enroll 仅允许在 S1（cutover 后：legacy down + edge down + control safe + tailscale active）。" >&2
   exit 1
 fi
 
@@ -86,10 +104,19 @@ if [ "${FIREBOT_TEST_SKIP_ROOT:-0}" != "1" ]; then
 fi
 
 # ---- 一次性消费 token（服务器事务化；HTTPS 走系统 CA，禁止 -k/--cacert）----
+# 审计边界：真正 POST 前记账 ENROLL_TOKEN_CONSUMPTION_ATTEMPTED=YES。
+echo "ENROLL_TOKEN_CONSUMPTION_ATTEMPTED=YES"
 resp="$("$CURL" -sf -X POST "$SERVER" \
   -H 'Content-Type: application/json' \
   -d "{\"device_id\":\"$DEVICE_ID\",\"token\":\"$TOKEN\"}" 2>/dev/null || true)"
-[ -n "$resp" ] || { echo "ENROLL=FAIL（enrollment API 不可达 / token 无效或已使用）" >&2; exit 1; }
+if [ -n "$resp" ]; then
+  # HTTP 成功即真实消费 token；本地后续任何失败都不得回退这个事实。
+  echo "REAL_ENROLLMENT_TOKEN_CONSUMED=YES"
+else
+  echo "REAL_ENROLLMENT_TOKEN_CONSUMED=NO"
+  echo "ENROLL=FAIL（enrollment API 不可达 / token 无效或已使用）" >&2
+  exit 1
+fi
 
 # ---- 写入 Edge Home（identity/assignment/secrets；值不回显）----
 mkdir -p "$EDGE_HOME/config" "$EDGE_HOME/secrets" "$EDGE_HOME/certs"

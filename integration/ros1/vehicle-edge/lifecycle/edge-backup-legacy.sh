@@ -85,7 +85,11 @@ done
 } > "$BACKUP_ROOT/legacy-release-info.txt"
 chmod 0600 "$BACKUP_ROOT/legacy-release-info.txt"
 # repo 信息（探测实证：git rev-parse 成功才记录）
-if [ -d "$REPO_ROOT/.git" ] && git -C "$REPO_ROOT" rev-parse HEAD >/dev/null 2>&1; then
+if [ "${FIREBOT_EDGE_TOOLS_MODE:-0}" = "1" ]; then
+  # 生产 tools 模式：不探测源码仓库（无 Git runtime dependency）。
+  echo "REPO_INFO=NOT_APPLICABLE_PRODUCTION" > "$BACKUP_ROOT/repo-info.txt"
+  echo "BACKUP_ITEM=repo-info（production：不探测源码仓库）"
+elif [ -d "$REPO_ROOT/.git" ] && git -C "$REPO_ROOT" rev-parse HEAD >/dev/null 2>&1; then
   {
     echo "REPO_HEAD=$(git -C "$REPO_ROOT" rev-parse HEAD)"
     echo "REPO_BRANCH=$(git -C "$REPO_ROOT" branch --show-current 2>/dev/null || echo detached)"

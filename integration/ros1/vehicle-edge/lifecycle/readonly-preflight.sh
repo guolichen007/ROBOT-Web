@@ -33,7 +33,7 @@ while [ $# -gt 0 ]; do
     --device-id) DEVICE_ID="${2:-}"; shift 2 ;;
     --expected-sha) EXPECTED_SHA="${2:-}"; shift 2 ;;
     --edge-home) EDGE_HOME="${2:-}"; shift 2 ;;
-    --repo-dir) REPO_DIR="${2:-}"; shift 2 ;;
+    --repo-dir) REPO_DIR="${2:-}"; REPO_DIR_ARG=1; shift 2 ;;
     *) shift ;;
   esac
 done
@@ -43,6 +43,13 @@ case "$PHASE" in
 esac
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 [ -n "$REPO_DIR" ] || REPO_DIR="$(cd "$SELF_DIR/../.." && pwd)"
+# 生产 tools 模式：禁止 --repo-dir（避免人为重新引入 repo runtime dependency）。
+if [ "${FIREBOT_EDGE_TOOLS_MODE:-0}" = "1" ] && [ "${REPO_DIR_ARG:-0}" = "1" ]; then
+  echo "READONLY_PREFLIGHT=REJECTED"
+  echo "REPO_DIR_NOT_ALLOWED_IN_PRODUCTION"
+  echo "原因：生产 tools 模式禁止 --repo-dir（批准 SHA 来源 = FIREBOT_TOOLS_SOURCE_SHA + tools manifest）。" >&2
+  exit 1
+fi
 
 CONFIG="$EDGE_HOME/config"
 SECRETS="$EDGE_HOME/secrets"
@@ -61,6 +68,8 @@ ROS_NOETIC_SETUP="${FIREBOT_TEST_ROS_NOETIC_SETUP:-/opt/ros/noetic/setup.bash}"
 PGREP="${FIREBOT_TEST_PGREP:-pgrep}"
 # shellcheck disable=SC1091
 . "$SELF_DIR/../lib/systemd_state.sh"
+# shellcheck disable=SC1091
+. "$SELF_DIR/../lib/legacy_health.sh"
 
 FAILED=0
 pass() { echo "PASS $1"; }
@@ -83,25 +92,52 @@ else
   [ "$rosver" = "noetic" ] && pass "ROS_NOETIC_INSTALLED=yes" || fail "ROS Noetic 未安装（rosversion=$rosver）"
 fi
 
-# ---- repo clean + approved SHA ----
-if [ -n "$(git -C "$REPO_DIR" status --porcelain 2>/dev/null)" ]; then
-  fail "REPO_CLEAN=no"
-else
-  pass "REPO_CLEAN=yes"
-fi
-if [ -z "$EXPECTED_SHA" ]; then
-  EXPECTED_SHA="$(read_kv "$EDGE_HOME/config/release.env" FINAL_SHA)"
-fi
-if [ -z "$EXPECTED_SHA" ]; then
-  EXPECTED_SHA="${FIREBOT_EXPECTED_SHA:-}"
-fi
-if [ -z "$EXPECTED_SHA" ] || ! echo "$EXPECTED_SHA" | grep -qE '^[0-9a-f]{40}$'; then
-  fail "APPROVED_SHA_PRESENT=no（需 --expected-sha <40hex> 或 release.env FINAL_SHA）"
-else
-  if git -C "$REPO_DIR" cat-file -e "$EXPECTED_SHA^{commit}" 2>/dev/null; then
-    pass "APPROVED_SHA_PRESENT=yes sha=$EXPECTED_SHA"
+# ---- approved SHA（生产无 Git；SOURCE_TREE 用 Git）----
+if [ "${FIREBOT_EDGE_TOOLS_MODE:-0}" = "1" ]; then
+  # 生产：批准 SHA 来源 = FIREBOT_TOOLS_SOURCE_SHA + tools/current manifest/checksum。
+  if [ -z "$EXPECTED_SHA" ]; then
+    EXPECTED_SHA="${FIREBOT_TOOLS_SOURCE_SHA:-}"
+  fi
+  if [ -z "$EXPECTED_SHA" ] || ! echo "$EXPECTED_SHA" | grep -qE '^[0-9a-f]{40}$'; then
+    fail "APPROVED_SHA_PRESENT=no（生产需 FIREBOT_TOOLS_SOURCE_SHA）"
   else
-    fail "APPROVED_SHA_PRESENT=no（$EXPECTED_SHA 不在本地仓库，先 git fetch）"
+    pass "APPROVED_SHA_PRESENT=yes sha=$EXPECTED_SHA"
+  fi
+  if [ "$EXPECTED_SHA" = "${FIREBOT_TOOLS_SOURCE_SHA:-}" ]; then
+    pass "EXPECTED_SHA_MATCHES_TOOLS=yes"
+  else
+    fail "EXPECTED_SHA_MATCHES_TOOLS=no（expected=$EXPECTED_SHA tools=${FIREBOT_TOOLS_SOURCE_SHA:-}）"
+  fi
+  if grep -q "\"source_sha\": \"$EXPECTED_SHA\"" "$EDGE_HOME/tools/current/manifest.json" 2>/dev/null; then
+    pass "TOOLS_MANIFEST_VALID=YES"
+  else
+    fail "TOOLS_MANIFEST_VALID=NO"
+  fi
+  if (cd "$EDGE_HOME/tools/current" 2>/dev/null && sha256sum -c checksums.sha256 --quiet >/dev/null 2>&1); then
+    pass "TOOLS_CHECKSUM_VALID=YES"
+  else
+    fail "TOOLS_CHECKSUM_VALID=NO"
+  fi
+else
+  if [ -n "$(git -C "$REPO_DIR" status --porcelain 2>/dev/null)" ]; then
+    fail "REPO_CLEAN=no"
+  else
+    pass "REPO_CLEAN=yes"
+  fi
+  if [ -z "$EXPECTED_SHA" ]; then
+    EXPECTED_SHA="$(read_kv "$EDGE_HOME/config/release.env" FINAL_SHA)"
+  fi
+  if [ -z "$EXPECTED_SHA" ]; then
+    EXPECTED_SHA="${FIREBOT_EXPECTED_SHA:-}"
+  fi
+  if [ -z "$EXPECTED_SHA" ] || ! echo "$EXPECTED_SHA" | grep -qE '^[0-9a-f]{40}$'; then
+    fail "APPROVED_SHA_PRESENT=no（需 --expected-sha <40hex> 或 release.env FINAL_SHA）"
+  else
+    if git -C "$REPO_DIR" cat-file -e "$EXPECTED_SHA^{commit}" 2>/dev/null; then
+      pass "APPROVED_SHA_PRESENT=yes sha=$EXPECTED_SHA"
+    else
+      fail "APPROVED_SHA_PRESENT=no（$EXPECTED_SHA 不在本地仓库，先 git fetch）"
+    fi
   fi
 fi
 
@@ -153,14 +189,21 @@ ntp_ok=no
 [ "$(unit_active_state systemd-timesyncd)" = "active" ] && ntp_ok=yes
 [ "$ntp_ok" = "yes" ] && pass "NTP_SANE=yes" || fail "NTP_SANE=no"
 
-# ---- 控制面全关 + communication-owner 语义（VEHICLE_EDGE_PRE_CUTOVER_SEMANTICS_FIX）----
+# ---- 控制面全关 + communication-owner 语义（systemd_state.sh 统一 predicate）----
 ctl_enabled="$(unit_enabled_state firebot-control)"
 ctl_active="$(unit_active_state firebot-control)"
-[ "$ctl_enabled" = "enabled" ] && fail "CONTROL_ENABLED=yes" || pass "CONTROL_ENABLED=no"
+if control_is_safe; then
+  pass "CONTROL_SAFE=YES"
+  [ "$ctl_enabled" = "enabled" ] && fail "CONTROL_ENABLED=yes" || pass "CONTROL_ENABLED=no"
+else
+  fail "CONTROL_SAFE=NO"
+  [ "$ctl_enabled" = "enabled" ] && fail "CONTROL_ENABLED=yes" || pass "CONTROL_ENABLED=no"
+fi
 case "$ctl_active" in
   active|activating|reloading) fail "CONTROL_ACTIVE=yes" ;;
   *) pass "CONTROL_ACTIVE=no" ;;
 esac
+if tailscale_is_safe; then pass "TAILSCALE_ACTIVE=YES"; else fail "TAILSCALE_ACTIVE=NO"; fi
 legacy_state="$(unit_active_state firebot-bridge)"
 edge_state="$(unit_active_state firebot-vehicle-edge)"
 # P0-1 phase-aware：bootstrap = pre-cutover（旧链路仍在线允许 legacy active）；
@@ -180,6 +223,8 @@ if [ "$PHASE" = "bootstrap" ]; then
     pass "LEGACY_BRIDGE_STATE=ACTIVE"
     pass "PRE_CUTOVER_LEGACY_LINK_PRESERVED=YES"
     pass "COMMUNICATION_OWNER=LEGACY"
+    # 旧链路健康门（S0）：active 时必须 legacy MQTT 健康。
+    if legacy_link_health; then pass "LEGACY_LINK_HEALTH=PASS"; else fail "LEGACY_LINK_HEALTH=FAIL"; fi
   elif [ "$legacy_state" = "inactive" ]; then
     pass "LEGACY_BRIDGE_STATE=INACTIVE"
     pass "PRE_CUTOVER_LEGACY_LINK_PRESERVED=NOT_APPLICABLE"
@@ -188,11 +233,11 @@ if [ "$PHASE" = "bootstrap" ]; then
     fail "LEGACY_BRIDGE_STATE=UNKNOWN（$legacy_state）"
   fi
 elif [ "$PHASE" = "enrolled" ]; then
-  # P0-2 post-cutover / pre-start：必须双 inactive（COMMUNICATION_OWNER=NONE）。
-  if [ "$legacy_state" = "inactive" ] && [ "$edge_state" = "inactive" ]; then
-    pass "COMMUNICATION_OWNER=NONE（legacy+edge 双 inactive）"
+  # P0-2 post-cutover / pre-start：必须双 inactive + explicitly-disabled（COMMUNICATION_OWNER=NONE）。
+  if unit_is_down_strict firebot-bridge yes && unit_is_down_strict firebot-vehicle-edge yes; then
+    pass "COMMUNICATION_OWNER=NONE（legacy+edge down strict）"
   else
-    fail "COMMUNICATION_OWNER=CONFLICT（legacy=$legacy_state edge=$edge_state；enrolled 必须双 inactive）"
+    fail "COMMUNICATION_OWNER=CONFLICT（legacy=$legacy_state edge=$edge_state；enrolled 必须双 down strict）"
   fi
 fi
 if "$PGREP" -f "rosmaster|roscore" >/dev/null 2>&1; then
@@ -209,11 +254,24 @@ fi
 # ---- enrolled phase 特有 ----
 if [ "$PHASE" = "enrolled" ]; then
   if [ -n "$EXPECTED_SHA" ] && echo "$EXPECTED_SHA" | grep -qE '^[0-9a-f]{40}$'; then
-    head_sha="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || echo UNKNOWN)"
-    if [ "$head_sha" = "$EXPECTED_SHA" ]; then
-      pass "EXACT_SHA_MATCH=YES"
+    if [ "${FIREBOT_EDGE_TOOLS_MODE:-0}" = "1" ]; then
+      # 生产：数据 release current → releases/<EXPECTED_SHA> + manifest + checksum（无 Git）。
+      cur_target=""
+      [ -L "$EDGE_HOME/current" ] && cur_target="$(readlink "$EDGE_HOME/current")"
+      if [ "$cur_target" = "releases/$EXPECTED_SHA" ] \
+         && grep -q "\"source_sha\": \"$EXPECTED_SHA\"" "$EDGE_HOME/current/manifest.json" 2>/dev/null \
+         && (cd "$EDGE_HOME/current" 2>/dev/null && sha256sum -c checksums.sha256 --quiet >/dev/null 2>&1); then
+        pass "EXACT_SHA_MATCH=YES"
+      else
+        fail "EXACT_SHA_MATCH=NO（data current=$cur_target 期望 releases/$EXPECTED_SHA）"
+      fi
     else
-      fail "EXACT_SHA_MATCH=NO（HEAD=$head_sha 期望=$EXPECTED_SHA）"
+      head_sha="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || echo UNKNOWN)"
+      if [ "$head_sha" = "$EXPECTED_SHA" ]; then
+        pass "EXACT_SHA_MATCH=YES"
+      else
+        fail "EXACT_SHA_MATCH=NO（HEAD=$head_sha 期望=$EXPECTED_SHA）"
+      fi
     fi
   fi
   [ -f "$SECRETS/mqtt.env" ] && [ "$(stat -c %a "$SECRETS/mqtt.env" 2>/dev/null)" = "600" ] \

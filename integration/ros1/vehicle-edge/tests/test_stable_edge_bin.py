@@ -40,6 +40,7 @@ def test_stable_edge_bin_created() -> None:
     fx = Fixture()
     try:
         fx.run(fx.lifecycle("edge-init.sh"), "--runtime-user", "tl")
+        fx.write_public_bridge_env()
         r = fx.run(fx.lifecycle("edge-install.sh"), str(fx.repo), FIREBOT_REQUIRE_SHA=fx.sha)
         check("EDGE_INSTALL=PASS", r.returncode == 0 and "EDGE_INSTALL=PASS" in r.stdout, r.stdout[-300:])
 
@@ -77,6 +78,7 @@ def test_stable_edge_bin_conflict_rejected() -> None:
     fx = Fixture()
     try:
         fx.run(fx.lifecycle("edge-init.sh"), "--runtime-user", "tl")
+        fx.write_public_bridge_env()
         # 预置 bin/firebot-edge 为普通文件 → EDGE_BIN_CONFLICT，禁止静默覆盖
         (fx.edge_home / "bin").mkdir(parents=True, exist_ok=True)
         (fx.edge_home / "bin" / "firebot-edge").write_text("#!/usr/bin/env bash\necho evil\n")

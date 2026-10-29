@@ -98,19 +98,41 @@ Environment=FIREBOT_ROS_SETUP=$ros_setup"
 [ -n "$ros_ws" ] && ROS_ENV_LINES="$ROS_ENV_LINES
 Environment=FIREBOT_ROS_WORKSPACE_SETUP=$ros_ws"
 
-# ---- 前置门 3：legacy/new 互斥 + 安装≠启动 ----
-legacy_state="$(unit_active_state firebot-bridge)"
-edge_state="$(unit_active_state firebot-vehicle-edge)"
-if [ "$legacy_state" != "inactive" ]; then
+# ---- 前置门 3：S2 状态（legacy down strict / edge absent或down strict / control safe / tailscale active）----
+if ! unit_is_down_strict firebot-bridge yes; then
   echo "EDGE_INSTALL=REJECTED"
   echo "LEGACY_BRIDGE_ACTIVE"
-  echo "原因：firebot-bridge 仍在运行（LEGACY_AND_EDGE_MUTUAL_EXCLUSION）；先 migration-stop-legacy。" >&2
+  echo "原因：firebot-bridge 未 down strict（LEGACY_AND_EDGE_MUTUAL_EXCLUSION）；先 migration-stop-legacy。" >&2
   exit 1
 fi
-if [ "$edge_state" != "inactive" ]; then
+if ! unit_is_down_strict firebot-vehicle-edge yes; then
   echo "EDGE_INSTALL=REJECTED"
   echo "EDGE_SERVICE_ACTIVE"
-  echo "原因：firebot-vehicle-edge 正在运行；安装 ≠ 启动。" >&2
+  echo "原因：firebot-vehicle-edge 未 down strict；安装 ≠ 启动。" >&2
+  exit 1
+fi
+if ! control_is_safe; then
+  echo "EDGE_INSTALL=REJECTED"
+  echo "CONTROL_NOT_SAFE"
+  exit 1
+fi
+if ! tailscale_is_safe; then
+  echo "EDGE_INSTALL=REJECTED"
+  echo "TAILSCALE_NOT_SAFE"
+  exit 1
+fi
+# S2 还需公网 MQTT host/port + SUPPORTED_COMMANDS 空（权威来源 bridge.env，enroll 生成）
+BRIDGE_ENV_MQTT_HOST="$(grep -E '^FIREBOT_MQTT_HOST=' "$EDGE_HOME/config/bridge.env" 2>/dev/null | cut -d= -f2- | tr -d '"'"'"'[:space:]' || true)"
+BRIDGE_ENV_MQTT_PORT="$(grep -E '^FIREBOT_MQTT_PORT=' "$EDGE_HOME/config/bridge.env" 2>/dev/null | cut -d= -f2- | tr -d '"'"'"'[:space:]' || echo 8883)"
+SUPPORTED_CMDS="$(grep -E '^FIREBOT_SUPPORTED_COMMANDS=' "$EDGE_HOME/config/bridge.env" 2>/dev/null | cut -d= -f2- | tr -d '"'"'"'[:space:]' || true)"
+if [ "$BRIDGE_ENV_MQTT_HOST" != "firebot.youdaozd.com" ] || [ "$BRIDGE_ENV_MQTT_PORT" != "8883" ]; then
+  echo "EDGE_INSTALL=REJECTED"
+  echo "MQTT_ASSIGNMENT_NOT_PUBLIC（host=$BRIDGE_ENV_MQTT_HOST port=$BRIDGE_ENV_MQTT_PORT；期望 firebot.youdaozd.com:8883）" >&2
+  exit 1
+fi
+if [ -n "$SUPPORTED_CMDS" ]; then
+  echo "EDGE_INSTALL=REJECTED"
+  echo "SUPPORTED_COMMANDS_NOT_EMPTY"
   exit 1
 fi
 
@@ -193,15 +215,15 @@ if [ "$STABLE_REALPATH" != "$EXPECT_STABLE" ]; then
 fi
 echo "EDGE_STABLE_BIN_RELEASE_SHA=$REQUIRE_SHA"
 
-# ---- 安装后确认：inactive + disabled ----
+# ---- 安装后确认：inactive + explicitly-disabled（enabled-runtime/static/unknown 均 FAIL）----
 edge_now="$(unit_active_state firebot-vehicle-edge)"
-edge_enabled="$(unit_enabled_state firebot-vehicle-edge)"
-if [ "$edge_now" != "inactive" ] || [ "$edge_enabled" = "enabled" ]; then
-  echo "EDGE_INSTALL=FAIL（安装后 service 必须 inactive+disabled；实际 active=$edge_now enabled=$edge_enabled）" >&2
+if [ "$edge_now" != "inactive" ] || ! unit_is_explicitly_disabled firebot-vehicle-edge; then
+  echo "EDGE_INSTALL=FAIL（安装后 service 必须 inactive+explicit-disabled；实际 active=$edge_now）" >&2
   exit 1
 fi
 
 echo "EDGE_INSTALL=PASS sha=$REQUIRE_SHA"
 echo "EDGE_INSTALL_NO_CONTROL_TOUCH=PASS"
 echo "EDGE_INSTALL_NO_CATKIN=PASS"
-echo "EDGE_SERVICE_STATE=inactive+disabled"
+echo "EDGE_SERVICE_STATE=inactive+explicit-disabled"
+echo "COMMUNICATION_OWNER=NONE"
