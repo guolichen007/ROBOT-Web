@@ -46,6 +46,11 @@ def check(name: str, cond: bool, detail: str = "") -> None:
         print(f"  [FAIL] {name} {detail}")
 
 
+def readlink(p: Path) -> Path:
+    """Path.readlink 兼容 shim（Python 3.8 无 Path.readlink）。"""
+    return Path(os.readlink(str(p)))
+
+
 def git(cwd: Path, *args: str) -> str:
     return subprocess.run(
         ["git", "-c", "user.email=test@ci.local", "-c", "user.name=ci", *args],
@@ -253,7 +258,7 @@ def test_edge_install_success_and_no_control_touch() -> None:
         # release + current symlink + manifest
         current = fx.edge_home / "current"
         check("current symlink 指向 releases/<SHA>", current.is_symlink()
-              and current.readlink() == Path("releases") / fx.sha)
+              and readlink(current) == Path("releases") / fx.sha)
         manifest = json.loads((current / "manifest.json").read_text())
         check("manifest product/source_sha", manifest["product"] == "firebot-edge"
               and manifest["source_sha"] == fx.sha)
@@ -300,12 +305,12 @@ def test_release_atomic_switch() -> None:
         s2 = fx.run(fx.installer("release-manager.sh"), "switch", sha2, str(fx.edge_home))
         check("RELEASE_SWITCH 第二次（previous 轮转）", s2.returncode == 0
               and f"previous={fx.sha}" in s2.stdout, s2.stdout[-200:])
-        check("current → sha2", (fx.edge_home / "current").readlink() == Path("releases") / sha2)
-        check("previous → sha1", (fx.edge_home / "previous").readlink() == Path("releases") / fx.sha)
+        check("current → sha2", readlink(fx.edge_home / "current") == Path("releases") / sha2)
+        check("previous → sha1", readlink(fx.edge_home / "previous") == Path("releases") / fx.sha)
         # 失败 switch（不存在 SHA）current 不变
         bad = fx.run(fx.installer("release-manager.sh"), "switch", "0" * 40, str(fx.edge_home))
         check("RELEASE_SWITCH_FAIL_KEEPS_CURRENT", bad.returncode != 0
-              and (fx.edge_home / "current").readlink() == Path("releases") / sha2)
+              and readlink(fx.edge_home / "current") == Path("releases") / sha2)
         # 车辆特定目录禁止组装
         ve = fx.repo / "integration/ros1/vehicle-edge"
         (ve / "R002").mkdir()

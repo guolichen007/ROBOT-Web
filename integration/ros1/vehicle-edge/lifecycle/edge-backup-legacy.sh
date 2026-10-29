@@ -17,6 +17,13 @@
 # 用法（root）：edge-backup-legacy.sh [--repo-root <路径>]
 set -euo pipefail
 
+# --help/-h/help 零副作用（规格二十八）：绝不 systemctl / 写备份 / 读 tailscale。
+for a in "$@"; do
+  case "$a" in
+    -h|--help|help) echo "用法: firebotctl vehicle edge-backup-legacy [--repo-root <路径>]"; exit 0 ;;
+  esac
+done
+
 EDGE_HOME="${FIREBOT_EDGE_HOME:-/home/tl/firebot-edge}"
 SYSTEMCTL="${FIREBOT_TEST_SYSTEMCTL:-systemctl}"
 REPO_ROOT="${FIREBOT_REPO_ROOT:-/home/tl/ROBOT-Web}"

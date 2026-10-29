@@ -8,6 +8,13 @@
 # 用法：FIREBOT_REQUIRE_SHA=<FINAL_SHA> edge-verify.sh [--edge-home …]
 set -euo pipefail
 
+# --help/-h/help 零副作用（规格二十八）：绝不 systemctl / 写文件。
+for a in "$@"; do
+  case "$a" in
+    -h|--help|help) echo "用法: firebotctl vehicle edge-verify --sha <SHA>"; exit 0 ;;
+  esac
+done
+
 REQUIRE_SHA="${FIREBOT_REQUIRE_SHA:-}"
 EDGE_HOME="${FIREBOT_EDGE_HOME:-/home/tl/firebot-edge}"
 SYSTEMCTL="${FIREBOT_TEST_SYSTEMCTL:-systemctl}"

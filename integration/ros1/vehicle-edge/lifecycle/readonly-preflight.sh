@@ -15,6 +15,13 @@
 #   readonly-preflight.sh --phase enrolled  [--expected-sha <SHA>]
 set -euo pipefail
 
+# --help/-h/help 零副作用（规格二十八）：绝不 curl / openssl / systemctl / 写文件。
+for a in "$@"; do
+  case "$a" in
+    -h|--help|help) echo "用法: firebotctl vehicle readonly-preflight --phase bootstrap|enrolled [--device-id <ID>] [--expected-sha <SHA>]"; exit 0 ;;
+  esac
+done
+
 PHASE=""
 DEVICE_ID=""
 EXPECTED_SHA=""

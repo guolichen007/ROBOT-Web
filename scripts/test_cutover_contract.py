@@ -16,6 +16,8 @@
 用法：python3 scripts/test_cutover_contract.py
 """
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

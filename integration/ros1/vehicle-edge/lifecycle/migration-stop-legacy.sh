@@ -13,6 +13,13 @@
 #   firebotctl vehicle migration-stop-legacy
 set -euo pipefail
 
+# --help/-h/help 零副作用（规格二十八）：绝不 systemctl / 停服务 / 进入 cutover。
+for a in "$@"; do
+  case "$a" in
+    -h|--help|help) echo "用法: firebotctl vehicle migration-stop-legacy"; exit 0 ;;
+  esac
+done
+
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIREBOT_ETC="${FIREBOT_TEST_ETC_ROOT:-/etc/firebot}"
 

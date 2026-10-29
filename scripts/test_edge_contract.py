@@ -18,6 +18,8 @@
 用法：python3 scripts/test_edge_contract.py
 """
 
+from __future__ import annotations
+
 import sys
 from pathlib import Path
 

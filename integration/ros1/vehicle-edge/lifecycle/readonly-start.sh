@@ -19,6 +19,13 @@
 # 绝不触碰 firebot-control/roscore/base/navigation/move_base/cmd_vel/Tailscale。
 set -euo pipefail
 
+# --help/-h/help 零副作用（规格二十八）：绝不 systemctl / 写文件 / 启动服务。
+for a in "$@"; do
+  case "$a" in
+    -h|--help|help) echo "用法: firebotctl vehicle readonly-start"; exit 0 ;;
+  esac
+done
+
 EDGE_HOME="${FIREBOT_EDGE_HOME:-/home/tl/firebot-edge}"
 CONFIG="$EDGE_HOME/config"
 CERTS="$EDGE_HOME/certs"

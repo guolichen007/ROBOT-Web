@@ -32,12 +32,35 @@
 #   firebotctl fleet status
 set -euo pipefail
 
-# 用真实路径（resolve symlink），保证从任意 cwd / /usr/local/bin 符号链接都能正确定位 ROBOT-Web 根。
-# SCRIPT_DIR = ROBOT-Web/integration/ros1（firebotctl 所在目录），因此 REPO_DIR 需上两级到 ROBOT-Web。
+# 用真实路径（resolve symlink），保证从任意 cwd / /usr/local/bin 符号链接都能正确定位。
+# 布局发现（规格十六/十七）：生产 tools release 与源码树两种模式互斥，生产模式禁止 Git 依赖。
+#   SOURCE_TREE            <repo>/integration/ros1/firebotctl（开发/测试/构建/bootstrap 交付源）
+#   VEHICLE_TOOLS_RELEASE  <edge-home>/tools/releases/<SHA>/firebotctl（生产管理平面）
 SELF="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(dirname "$SELF")"
-REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
-ROS1_DIR="$SCRIPT_DIR"
+
+FIREBOTCTL_LAYOUT=""
+FIREBOTCTL_ROOT=""
+TOOLS_SOURCE_SHA=""
+REPO_DIR=""
+ROS1_DIR=""
+EDGE_HOME="${FIREBOT_EDGE_HOME:-/home/tl/firebot-edge}"
+
+if [ -f "$SCRIPT_DIR/manifest.json" ] \
+   && grep -q '"product": *"firebot-edge-tools"' "$SCRIPT_DIR/manifest.json" 2>/dev/null; then
+  FIREBOTCTL_LAYOUT="VEHICLE_TOOLS_RELEASE"
+  FIREBOTCTL_ROOT="$SCRIPT_DIR"
+  TOOLS_SOURCE_SHA="$(sed -n 's/.*"source_sha": *"\([0-9a-f]\{40\}\)".*/\1/p' "$SCRIPT_DIR/manifest.json" | head -1)"
+  ROS1_DIR="$SCRIPT_DIR"
+  REPO_DIR=""
+  # readlink -f 已把 tools/current 解析到 tools/releases/<SHA>，../.. 即 Edge Home。
+  [ -n "$FIREBOT_EDGE_HOME" ] || EDGE_HOME="$(cd "$SCRIPT_DIR/../.." && pwd)"
+else
+  FIREBOTCTL_LAYOUT="SOURCE_TREE"
+  FIREBOTCTL_ROOT="$SCRIPT_DIR"
+  REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+  ROS1_DIR="$SCRIPT_DIR"
+fi
 PROFILE_DIR="$ROS1_DIR/profiles"
 # 车端固定环境根（测试可经 FIREBOT_TEST_ETC_ROOT 注入 fixture；生产默认 /etc/firebot）
 FIREBOT_ETC="${FIREBOT_TEST_ETC_ROOT:-/etc/firebot}"
@@ -89,6 +112,108 @@ require_root() {
 }
 require_sha() {
   echo "$1" | grep -qE '^[0-9a-f]{40}$' || { echo "ERROR: SHA 必须是 40 位 hex" >&2; exit 1; }
+}
+
+# ---- lifecycle help 零副作用（规格二十八）----
+has_help_arg() {
+  local a
+  for a in "$@"; do
+    case "$a" in -h|--help|help) return 0 ;; esac
+  done
+  return 1
+}
+
+vehicle_usage() {
+  case "$1" in
+    enroll) echo "用法: firebotctl vehicle enroll <DEVICE_ID> --token <TOKEN>" ;;
+    edge-install) echo "用法: firebotctl vehicle edge-install --sha <SHA>" ;;
+    edge-verify) echo "用法: firebotctl vehicle edge-verify --sha <SHA>" ;;
+    edge-rollback) echo "用法: firebotctl vehicle edge-rollback" ;;
+    edge-init) echo "用法: firebotctl vehicle edge-init --runtime-user <USER> [--ros-setup <path>] [--ros-workspace-setup <path>]" ;;
+    edge-backup-legacy) echo "用法: firebotctl vehicle edge-backup-legacy" ;;
+    readonly-preflight) echo "用法: firebotctl vehicle readonly-preflight --phase bootstrap|enrolled [--device-id <ID>] [--expected-sha <SHA>]" ;;
+    readonly-start) echo "用法: firebotctl vehicle readonly-start" ;;
+    migration-stop-legacy) echo "用法: firebotctl vehicle migration-stop-legacy" ;;
+    tooling-status) echo "用法: firebotctl vehicle tooling-status" ;;
+    *) echo "用法: firebotctl vehicle <命令>（firebotctl vehicle --help 查看）" ;;
+  esac
+}
+
+print_vehicle_help() {
+  echo "firebotctl vehicle <子命令>"
+  echo ""
+  echo "  通信迁移生命周期（Vehicle Edge）："
+  echo "    edge-init --runtime-user <USER>            初始化 Edge Home 目录/权限/tools"
+  echo "    edge-install --sha <SHA>                   安装通信 release（不启动）"
+  echo "    edge-verify --sha <SHA>                    验收 release/manifest/权限"
+  echo "    edge-rollback                              通信迁移回滚（恢复 legacy 通信 owner）"
+  echo "    edge-backup-legacy                         legacy 备份（零运行影响）"
+  echo "    readonly-preflight --phase bootstrap|enrolled  只读前置检查"
+  echo "    readonly-start                             只读启动 firebot-vehicle-edge（唯一入口）"
+  echo "    migration-stop-legacy                      迁移 cutover：停 legacy Bridge"
+  echo "    tooling-status                             管理平面 tools release 只读状态"
+  echo ""
+  echo "  （legacy 整车安装/控制命令仅 SOURCE_TREE 模式可用）"
+}
+
+# ---- 生产 scope 收紧（规格二十三）----
+# VEHICLE_TOOLS_RELEASE 模式只允许 vehicle 管理平面命令；server/fleet 一律拒绝。
+require_vehicle_scope() {
+  if [ "$FIREBOTCTL_LAYOUT" = "VEHICLE_TOOLS_RELEASE" ]; then
+    echo "COMMAND_SCOPE_REJECTED"
+    echo "AVAILABLE_SCOPE=vehicle"
+    echo "原因：生产 tools 模式禁止 $1（服务器/舰队职责在 U-Dao 云服务器执行）。" >&2
+    exit 1
+  fi
+}
+
+# ---- firebotctl 自检（规格二十二）----
+# 只输出身份信息；不得联网 / systemctl / 写文件 / 读 secret。
+cmd_version() {
+  local product sha
+  if [ "$FIREBOTCTL_LAYOUT" = "VEHICLE_TOOLS_RELEASE" ]; then
+    product="firebot-edge-tools"
+    sha="$TOOLS_SOURCE_SHA"
+  else
+    product="firebot-edge-tools-dev"
+    sha="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || echo UNKNOWN)"
+  fi
+  echo "FIREBOTCTL_PRODUCT=$product"
+  echo "FIREBOTCTL_SOURCE_SHA=$sha"
+  echo "FIREBOTCTL_LAYOUT=$FIREBOTCTL_LAYOUT"
+  echo "FIREBOTCTL_ROOT=$FIREBOTCTL_ROOT"
+}
+
+# ---- 管理平面 tools release 只读状态（规格二十二）----
+cmd_tooling_status() {
+  if [ "$FIREBOTCTL_LAYOUT" != "VEHICLE_TOOLS_RELEASE" ]; then
+    echo "TOOLS_CURRENT_SHA=none"
+    echo "TOOLS_PREVIOUS_SHA=none"
+    echo "TOOLS_MANIFEST_VALID=NO"
+    echo "TOOLS_CHECKSUM_VALID=NO"
+    echo "GIT_RUNTIME_DEPENDENCY=YES"
+    echo "原因：当前为 SOURCE_TREE 布局（开发模式），非生产 tools release。" >&2
+    exit 1
+  fi
+  local tools_dir="$EDGE_HOME/tools"
+  local cur="none" prev="none" manifest_valid="NO" checksum_valid="NO"
+  if [ -L "$tools_dir/current" ]; then
+    cur="$(basename "$(readlink "$tools_dir/current")")"
+  fi
+  if [ -L "$tools_dir/previous" ]; then
+    prev="$(basename "$(readlink "$tools_dir/previous")")"
+  fi
+  if [ "$cur" != "none" ] && [ -f "$tools_dir/releases/$cur/manifest.json" ]; then
+    grep -q "\"source_sha\": \"$cur\"" "$tools_dir/releases/$cur/manifest.json" 2>/dev/null && manifest_valid="YES"
+    if (cd "$tools_dir/releases/$cur" && sha256sum -c checksums.sha256 --quiet >/dev/null 2>&1); then
+      checksum_valid="YES"
+    fi
+  fi
+  echo "TOOLS_CURRENT_SHA=$cur"
+  echo "TOOLS_PREVIOUS_SHA=$prev"
+  echo "TOOLS_MANIFEST_VALID=$manifest_valid"
+  echo "TOOLS_CHECKSUM_VALID=$checksum_valid"
+  echo "GIT_RUNTIME_DEPENDENCY=NO"
 }
 
 # P0-2/P0-3 公共门：firebot-bridge active/activating/reloading 时禁止 enroll/install。
@@ -243,6 +368,14 @@ generate_runtime_env() {
 # ================= 车端 =================
 cmd_vehicle() {
   local sub="${1:-}"; shift || true
+  # lifecycle 级 --help/-h/help：在进入任何底层脚本前零副作用退出（规格二十八）。
+  if has_help_arg "$sub" "$@"; then
+    case "$sub" in
+      -h|--help|help) print_vehicle_help ;;
+      *) vehicle_usage "$sub" ;;
+    esac
+    exit 0
+  fi
   case "$sub" in
     enroll)
       # Vehicle Edge canonical：Enrollment 输出到 Edge Home（config/identity、secrets/mqtt.env 等）。
@@ -356,16 +489,32 @@ cmd_vehicle() {
       # 绝不触碰 ROS workspace/Control/catkin_make）。
       local esha=""; while [ $# -gt 0 ]; do case "$1" in --sha) esha="$2"; shift 2;; *) shift;; esac; done
       require_sha "$esha"
-      # exact SHA：edge-install 要求 HEAD == SHA（release 组装来源可证明）
-      local ehead; ehead="$(git -C "$REPO_DIR" rev-parse HEAD)"
-      if [ "$ehead" != "$esha" ]; then
-        echo "EDGE_INSTALL=REJECTED"
-        echo "HEAD_SHA_MISMATCH"
-        echo "原因：git HEAD($ehead) != --sha($esha)；先 checkout exact SHA。" >&2
-        exit 1
-      fi
       require_root
-      FIREBOT_REQUIRE_SHA="$esha" bash "$ROS1_DIR/vehicle-edge/lifecycle/edge-install.sh" "$REPO_DIR" ;;
+      if [ "$FIREBOTCTL_LAYOUT" = "VEHICLE_TOOLS_RELEASE" ]; then
+        # 生产模式：无 Git 依赖。完整性门 = tools manifest source_sha + checksum（规格十八/二十）。
+        # requested SHA 必须 == tools release source SHA。
+        if [ "$esha" != "$TOOLS_SOURCE_SHA" ]; then
+          echo "EDGE_INSTALL=REJECTED"
+          echo "TOOLS_SOURCE_SHA_MISMATCH"
+          echo "原因：requested SHA($esha) != tools release source SHA($TOOLS_SOURCE_SHA)。" >&2
+          exit 1
+        fi
+        # bundled source = 当前 tools release 内的 vehicle-edge（规格十九）。
+        FIREBOT_REQUIRE_SHA="$esha" \
+        FIREBOT_EDGE_TOOLS_MODE=1 \
+        bash "$ROS1_DIR/vehicle-edge/lifecycle/edge-install.sh" "$ROS1_DIR/vehicle-edge"
+      else
+        # 源码树模式（开发/交付 bootstrap）：保留 Git exact-SHA 门。
+        local ehead; ehead="$(git -C "$REPO_DIR" rev-parse HEAD)"
+        if [ "$ehead" != "$esha" ]; then
+          echo "EDGE_INSTALL=REJECTED"
+          echo "HEAD_SHA_MISMATCH"
+          echo "原因：git HEAD($ehead) != --sha($esha)；先 checkout exact SHA。" >&2
+          exit 1
+        fi
+        FIREBOT_REQUIRE_SHA="$esha" bash "$ROS1_DIR/vehicle-edge/lifecycle/edge-install.sh" "$REPO_DIR"
+      fi
+      ;;
     edge-verify)
       # 验证当前 release/manifest/权限模型（ownership+mode）/service inactive（安装≠启动）。
       local vsha=""; while [ $# -gt 0 ]; do case "$1" in --sha) vsha="$2"; shift 2;; *) shift;; esac; done
@@ -385,14 +534,28 @@ cmd_vehicle() {
     support-bundle)
       vehicle_support_bundle ;;
     rollback)
+      # LEGACY / FULL VEHICLE INSTALL rollback（vehicle-install.sh rollback，回 previous 重编译）。
+      # 生产 Vehicle Edge tools 中禁用，避免操作员误用（通信迁移回滚唯一入口 = edge-rollback）。
+      if [ "$FIREBOTCTL_LAYOUT" = "VEHICLE_TOOLS_RELEASE" ]; then
+        echo "LEGACY_FULL_INSTALL_COMMAND_NOT_AVAILABLE_IN_EDGE_TOOLS"
+        echo "原因：firebotctl vehicle rollback 属于旧整车安装回滚；通信迁移回滚请用 firebotctl vehicle edge-rollback。" >&2
+        exit 1
+      fi
       bash "$ROS1_DIR/vehicle-install.sh" rollback ;;
+    edge-rollback)
+      # 通信迁移唯一回滚入口（规格二十四/二十五）：恢复 legacy 通信 owner。
+      # 实现唯一 source of truth = vehicle-edge/lifecycle/rollback.sh。
+      require_root
+      bash "$ROS1_DIR/vehicle-edge/lifecycle/rollback.sh" "$@" ;;
+    tooling-status)
+      cmd_tooling_status ;;
     upgrade)
       local sha=""; while [ $# -gt 0 ]; do case "$1" in --sha) sha="$2"; shift 2;; *) shift;; esac; done
       require_sha "$sha"; release_sync "$sha"; require_root
       FIREBOT_REQUIRE_SHA="$sha" bash "$ROS1_DIR/vehicle-install.sh" all
       FIREBOT_REQUIRE_SHA="$sha" bash "$ROS1_DIR/vehicle-install.sh" verify ;;
     *)
-      echo "firebotctl vehicle <enroll|install|verify|status|start|stop|capability|location|profile-sync|support-bundle|rollback|upgrade|readonly-preflight|readonly-start|migration-stop-legacy|edge-init|edge-install|edge-verify|edge-backup-legacy>" >&2; exit 1 ;;
+      echo "firebotctl vehicle <enroll|install|verify|status|start|stop|capability|location|profile-sync|support-bundle|rollback|upgrade|readonly-preflight|readonly-start|migration-stop-legacy|edge-init|edge-install|edge-verify|edge-backup-legacy|edge-rollback|tooling-status>" >&2; exit 1 ;;
   esac
 }
 
@@ -574,6 +737,7 @@ vehicle_support_bundle() {
 
 # ================= 服务器 =================
 cmd_server() {
+  require_vehicle_scope "server"
   local sub="${1:-}"; shift || true
   # 服务器操作依赖 .env.server / docker-compose.server.yml / ./secrets 的相对路径，必须 cd 到仓库根执行。
   (
@@ -605,6 +769,7 @@ cmd_server() {
 
 # ================= 舰队 =================
 cmd_fleet() {
+  require_vehicle_scope "fleet"
   local sub="${1:-}"; shift || true
   # fleet-register（U-Dao 生产语义）：复用 canonical onboarding，不操作 ./secrets、不重启 broker。
   (
@@ -644,6 +809,9 @@ print_help() {
   echo "  firebotctl vehicle location enable                     定位开启"
   echo "  firebotctl vehicle media-secret check                  媒体 secret 落盘规范检查"
   echo "  firebotctl vehicle rollback / support-bundle           回滚 / 诊断包"
+  echo "  firebotctl vehicle edge-rollback                       通信迁移回滚（恢复 legacy）"
+  echo "  firebotctl vehicle tooling-status                      管理平面 tools release 只读状态"
+  echo "  firebotctl version / --version                         只读自检（布局/SHA）"
   echo "  firebotctl server deploy --sha <SHA> / verify / rollback  服务器部署/验收/回滚"
   echo "  firebotctl fleet sites                                 只读列出 Site"
   echo "  firebotctl fleet preregister <设备编号> --name <名> --site-code <站点>  预登记"
@@ -656,6 +824,7 @@ case "${1:-}" in
   vehicle) shift; cmd_vehicle "$@" ;;
   server) shift; cmd_server "$@" ;;
   fleet) shift; cmd_fleet "$@" ;;
+  version|--version) cmd_version ;;
   -h|--help|help) print_help ;;
   __pathcheck__)
     # 内部测试用：验证 REPO_DIR 正确定位到 ROBOT-Web 根（而非 integration/）。

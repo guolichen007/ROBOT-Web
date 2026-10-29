@@ -15,6 +15,13 @@
 #   enroll.sh <DEVICE_ID> --token <TOKEN> [--server https://…] [--edge-home …]
 set -euo pipefail
 
+# --help/-h/help 零副作用（规格二十八）：绝不 systemctl / curl / 写文件 / 消费 token。
+for a in "$@"; do
+  case "$a" in
+    -h|--help|help) echo "用法: firebotctl vehicle enroll <DEVICE_ID> --token <TOKEN> [--server https://…] [--edge-home …]"; exit 0 ;;
+  esac
+done
+
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VEHICLE_EDGE_SRC="$(cd "$SELF_DIR/.." && pwd)"
 PROFILE_DIR="${FIREBOT_PROFILE_DIR:-$VEHICLE_EDGE_SRC/config/profiles}"

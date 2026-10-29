@@ -34,6 +34,10 @@ C. 新链路安装（Bridge/Edge 全程 inactive，只有 readonly-start 允许 
    firebotctl vehicle readonly-start          # 启动 firebot-vehicle-edge（新 service）
    vehicle-connection-status                  # 期望 Overall HEALTHY
 
+D. 新链路失败 → 回滚（见回滚.md；唯一入口 = edge-rollback）
+   firebotctl vehicle edge-rollback          # 恢复 legacy 通信 owner
+   → LEGACY_ROLLBACK=PASS / MQTT_HOST=100.110.31.112 / MQTT_CONNECTED=YES
+
 只读观测：平台 check_real_vehicle_readonly.py；
 REAL_ROBOT_READONLY_READY=YES 前禁止任何控制步骤。
 ```
@@ -41,3 +45,7 @@ REAL_ROBOT_READONLY_READY=YES 前禁止任何控制步骤。
 - 旧 firebot-bridge.service 保留 disabled/inactive 作为回滚 artifact；
   migration-stop-legacy 停的是 firebot-bridge.service。
 - 迁移期间 TAILSCALE=ROLLBACK_CHANNEL_ONLY。
+- 生产 tools release（管理平面）：交付时 `install-tools-release.sh` 一次性 bootstrap 到
+  `/home/tl/firebot-edge/tools/`，`/usr/local/bin/firebotctl -> tools/current/firebotctl`；
+  生产 mode（VEHICLE_TOOLS_RELEASE）无 Git 依赖、无 server/fleet scope。
+- 通信迁移回滚唯一入口 = `firebotctl vehicle edge-rollback`（≠ `vehicle rollback`）。

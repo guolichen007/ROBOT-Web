@@ -62,6 +62,14 @@ for d in $ROOT_OWNS; do
     chown root:root "$EDGE_HOME/$d"
   fi
 done
+# 管理平面 tools 正式 layout（规格十四）：tools/releases + tools/bootstrap 均 root:root 0755。
+for d in tools/releases tools/bootstrap; do
+  mkdir -p "$EDGE_HOME/$d"
+  chmod 0755 "$EDGE_HOME/$d"
+  if [ "${FIREBOT_TEST_SKIP_CHOWN:-0}" != "1" ]; then
+    chown root:root "$EDGE_HOME/$d"
+  fi
+done
 mkdir -p "$EDGE_HOME/secrets" "$EDGE_HOME/backups"
 chmod 0700 "$EDGE_HOME/secrets" "$EDGE_HOME/backups"
 if [ "${FIREBOT_TEST_SKIP_CHOWN:-0}" != "1" ]; then
@@ -80,6 +88,13 @@ ensure_ownership_model() {
   local home="$1" user="$2"
   chmod 0755 "$home" 2>/dev/null || true
   for d in bin config certs releases tools docs; do
+    [ -d "$home/$d" ] || mkdir -p "$home/$d"
+    chmod 0755 "$home/$d" 2>/dev/null || true
+    if [ "${FIREBOT_TEST_SKIP_CHOWN:-0}" != "1" ]; then
+      chown root:root "$home/$d" 2>/dev/null || true
+    fi
+  done
+  for d in tools/releases tools/bootstrap; do
     [ -d "$home/$d" ] || mkdir -p "$home/$d"
     chmod 0755 "$home/$d" 2>/dev/null || true
     if [ "${FIREBOT_TEST_SKIP_CHOWN:-0}" != "1" ]; then

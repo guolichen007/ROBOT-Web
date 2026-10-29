@@ -33,8 +33,23 @@
 ├── data/                 connection-state.json（运行用户 0750）
 ├── logs/                 connection.log / audit.log（运行用户 0750；轮转 10MB×5/×10）
 ├── backups/              legacy/ releases/（root:root 0700，可能含 secret）
+├── tools/                管理平面（management plane）release domain（root:root 0755）
+│   ├── releases/<SHA>/   firebotctl + vehicle-edge/{lifecycle,install,systemd,config,lib,bin,bridge,monitor}
+│   ├── current -> releases/<SHA>    root-only 原子切换；previous -> releases/<PREV>
+│   └── bootstrap/        （预留）
 └── manifest.json         非 secret；lifecycle 自动生成，禁止人工维护
 ```
+
+## 双 release 平面（数据平面 / 管理平面）
+
+```text
+数据平面  /home/tl/firebot-edge/releases/<SHA>     firebot-vehicle-edge 运行时
+管理平面  /home/tl/firebot-edge/tools/releases/<SHA> firebotctl + lifecycle/install/systemd/config
+```
+
+两者独立 current/previous、完整性验证、回滚。升级 CLI 绝不自动改变运行中的数据平面版本。
+生产 firebotctl = `/usr/local/bin/firebotctl -> /home/tl/firebot-edge/tools/current/firebotctl`；
+生产模式（VEHICLE_TOOLS_RELEASE）禁止 Git 依赖、禁止 server/fleet scope。
 
 ## 正式命令（firebotctl 分发）
 
@@ -49,6 +64,9 @@
   edge-verify --sha <SHA>                 release/manifest/权限/service inactive 验证
   readonly-preflight --phase enrolled     EXACT_SHA_MATCH 强制 + SUPPORTED_COMMANDS 空
   readonly-start                          唯一允许启动 firebot-vehicle-edge 的入口
+  edge-rollback                           通信迁移唯一回滚入口（恢复 legacy 通信 owner）
+  tooling-status                          管理平面 tools release 只读状态
+  version / --version                     只读自检（布局/SHA）
   vehicle-connection-status / -watch / connectivity-selftest / edge-doctor
 ```
 
@@ -62,7 +80,11 @@
 - 状态模型：HEALTHY(0)/DEGRADED(10)/OFFLINE(20)/UNSAFE(30)/CONFIG_ERROR(40)/
   INTERNAL_ERROR(50)；selftest/watch 只读本地 status.json，绝不新建第二 MQTT
   session、不发 publish/subscribe probe。
-- 回滚：新链路失败 → `disable --now firebot-vehicle-edge` → 恢复 legacy →
-  `enable/start firebot-bridge` → 验证 MQTT_HOST=100.110.31.112 + MQTT_CONNECTED=YES。
+- 回滚：新链路失败 → `firebotctl vehicle edge-rollback`（唯一通信迁移回滚入口）：
+  Control 安全门 → legacy unit 存在 → legacy bridge.env 仍指 100.110.31.112
+  （漂移 → LEGACY_CONFIG_DRIFTED / MANUAL_RESTORE_REQUIRED=YES）→
+  `disable --now firebot-vehicle-edge` → `enable --now firebot-bridge` →
+  验证 MQTT_HOST=100.110.31.112 + MQTT_CONNECTED=YES；幂等（A/B/C/D）。
+  与 `firebotctl vehicle rollback`（旧整车安装回滚）严格区分。
 
 详见 `docs/`（新车辆接入 / 现场操作 / 连接状态说明 / R002跨Broker迁移 / 故障排查 / 回滚）。

@@ -93,6 +93,12 @@ def edge_paths(home: str | None = None) -> dict:
         "previous": os.path.join(root, "previous"),
         "manifest": os.path.join(root, "manifest.json"),
         "version": os.path.join(root, "VERSION"),
+        # 管理平面 tools release domain（与数据平面 releases 独立）。
+        "tools": os.path.join(root, "tools"),
+        "tools_releases": os.path.join(root, "tools", "releases"),
+        "tools_current": os.path.join(root, "tools", "current"),
+        "tools_previous": os.path.join(root, "tools", "previous"),
+        "tools_bootstrap": os.path.join(root, "tools", "bootstrap"),
     }
 
 

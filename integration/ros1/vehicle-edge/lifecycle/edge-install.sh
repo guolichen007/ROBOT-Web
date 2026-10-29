@@ -16,6 +16,13 @@
 #   FIREBOT_REQUIRE_SHA=<SHA> edge-install.sh [REPO_ROOT]
 set -euo pipefail
 
+# --help/-h/help 零副作用（规格二十八）：绝不 systemctl / 写文件 / 组装 release。
+for a in "$@"; do
+  case "$a" in
+    -h|--help|help) echo "用法: firebotctl vehicle edge-install --sha <SHA>"; exit 0 ;;
+  esac
+done
+
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VEHICLE_EDGE_SRC="$(cd "$SELF_DIR/.." && pwd)"
 REPO_ROOT="${1:-$(cd "$VEHICLE_EDGE_SRC/.." && pwd)}"
@@ -29,23 +36,46 @@ if [ "${FIREBOT_TEST_SKIP_ROOT:-0}" != "1" ]; then
 fi
 echo "$REQUIRE_SHA" | grep -qE '^[0-9a-f]{40}$' || { echo "ERROR: FIREBOT_REQUIRE_SHA 必须 40 位 hex" >&2; exit 1; }
 
-# ---- 前置门 1：repo clean + exact SHA ----
-if [ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)" ]; then
-  echo "EDGE_INSTALL=REJECTED"
-  echo "REPO_NOT_CLEAN"
-  exit 1
+# ---- 前置门 1：完整性来源（生产 tools 模式用 manifest/checksum；源码树用 Git）----
+if [ "${FIREBOT_EDGE_TOOLS_MODE:-0}" = "1" ]; then
+  # 生产模式（规格十八/十九/二十）：无 Git 依赖。
+  # 完整性门 = 当前 tools release 的 manifest source_sha + checksums.sha256。
+  # bundled source = 本脚本所在 tools/releases/<SHA>/vehicle-edge。
+  TOOLS_ROOT="$(cd "$VEHICLE_EDGE_SRC/.." && pwd)"
+  if ! grep -q "\"source_sha\": \"$REQUIRE_SHA\"" "$TOOLS_ROOT/manifest.json" 2>/dev/null; then
+    echo "EDGE_INSTALL=REJECTED"
+    echo "TOOLS_MANIFEST_INVALID"
+    echo "原因：tools manifest source_sha != requested SHA。" >&2
+    exit 1
+  fi
+  if ! (cd "$TOOLS_ROOT" && sha256sum -c checksums.sha256 --quiet >/dev/null 2>&1); then
+    echo "EDGE_INSTALL=REJECTED"
+    echo "TOOLS_CHECKSUM_INVALID"
+    echo "原因：tools release checksums.sha256 校验失败。" >&2
+    exit 1
+  fi
+  echo "TOOLS_MANIFEST_VALID=YES"
+  echo "TOOLS_CHECKSUM_VALID=YES"
+  echo "TOOLS_SOURCE_SHA=$REQUIRE_SHA"
+else
+  # 源码树模式（开发/交付 bootstrap）：Git exact-SHA 门。
+  if [ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)" ]; then
+    echo "EDGE_INSTALL=REJECTED"
+    echo "REPO_NOT_CLEAN"
+    exit 1
+  fi
+  git -C "$REPO_ROOT" cat-file -e "$REQUIRE_SHA^{commit}" 2>/dev/null || {
+    echo "EDGE_INSTALL=REJECTED"
+    echo "SHA_NOT_PRESENT"
+    exit 1
+  }
+  head_sha="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+  [ "$head_sha" = "$REQUIRE_SHA" ] || {
+    echo "EDGE_INSTALL=REJECTED"
+    echo "HEAD_SHA_MISMATCH"
+    exit 1
+  }
 fi
-git -C "$REPO_ROOT" cat-file -e "$REQUIRE_SHA^{commit}" 2>/dev/null || {
-  echo "EDGE_INSTALL=REJECTED"
-  echo "SHA_NOT_PRESENT"
-  exit 1
-}
-head_sha="$(git -C "$REPO_ROOT" rev-parse HEAD)"
-[ "$head_sha" = "$REQUIRE_SHA" ] || {
-  echo "EDGE_INSTALL=REJECTED"
-  echo "HEAD_SHA_MISMATCH"
-  exit 1
-}
 
 # ---- 前置门 2：runtime user 已配置（禁止自动猜）----
 INSTALL_ENV="$EDGE_HOME/config/install.env"
