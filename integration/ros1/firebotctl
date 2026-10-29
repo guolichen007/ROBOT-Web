@@ -45,6 +45,9 @@ TOOLS_SOURCE_SHA=""
 REPO_DIR=""
 ROS1_DIR=""
 EDGE_HOME="${FIREBOT_EDGE_HOME:-/home/tl/firebot-edge}"
+# 管理平面 tools release 目录拓扑（生产 fail-closed）。
+TOOLS_RELEASE_ROOT=""
+TOOLS_ROOT=""
 
 if [ -f "$SCRIPT_DIR/manifest.json" ] \
    && grep -q '"product": *"firebot-edge-tools"' "$SCRIPT_DIR/manifest.json" 2>/dev/null; then
@@ -53,8 +56,20 @@ if [ -f "$SCRIPT_DIR/manifest.json" ] \
   TOOLS_SOURCE_SHA="$(sed -n 's/.*"source_sha": *"\([0-9a-f]\{40\}\)".*/\1/p' "$SCRIPT_DIR/manifest.json" | head -1)"
   ROS1_DIR="$SCRIPT_DIR"
   REPO_DIR=""
-  # readlink -f 已把 tools/current 解析到 tools/releases/<SHA>，../.. 即 Edge Home。
-  [ -n "$FIREBOT_EDGE_HOME" ] || EDGE_HOME="$(cd "$SCRIPT_DIR/../.." && pwd)"
+  # readlink -f 已把 tools/current 解析到 tools/releases/<SHA>。
+  # 目录拓扑（fail-closed）：
+  #   release root = <edge-home>/tools/releases/<SHA>   basename == manifest.source_sha
+  #   父 = releases；祖父 = tools；曾祖父 = Edge Home（<edge-home>）。
+  # 不能错误得到 <edge-home>/tools（旧 bug：少上一级）。
+  TOOLS_RELEASE_ROOT="$SCRIPT_DIR"
+  TOOLS_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+  if [ "$(basename "$SCRIPT_DIR")" != "$TOOLS_SOURCE_SHA" ] \
+     || [ "$(basename "$(dirname "$SCRIPT_DIR")")" != "releases" ] \
+     || [ "$(basename "$TOOLS_ROOT")" != "tools" ]; then
+    FIREBOTCTL_LAYOUT="FIREBOTCTL_LAYOUT_INVALID"
+  elif [ -z "${FIREBOT_EDGE_HOME:-}" ]; then
+    EDGE_HOME="$(cd "$TOOLS_ROOT/.." && pwd)"
+  fi
 else
   FIREBOTCTL_LAYOUT="SOURCE_TREE"
   FIREBOTCTL_ROOT="$SCRIPT_DIR"
@@ -165,6 +180,29 @@ require_vehicle_scope() {
     echo "原因：生产 tools 模式禁止 $1（服务器/舰队职责在 U-Dao 云服务器执行）。" >&2
     exit 1
   fi
+}
+
+# ---- 生产布局 fail-closed（B0-FIX2）----
+# 目录拓扑无效（basename(release root)!=source_sha / 父!=releases / 祖父!=tools）时，
+# 拒绝运行任何 vehicle 生命周期命令。
+require_valid_production_layout() {
+  if [ "$FIREBOTCTL_LAYOUT" = "FIREBOTCTL_LAYOUT_INVALID" ]; then
+    echo "FIREBOTCTL_LAYOUT_INVALID"
+    echo "原因：tools release 目录拓扑不符合 basename(release root)==manifest.source_sha / 父==releases / 祖父==tools。" >&2
+    exit 1
+  fi
+}
+
+# ---- 生产 vehicle allowlist（B0-FIX2）----
+# VEHICLE_TOOLS_RELEASE 模式仅允许以下 vehicle 管理平面命令；
+# 其余 vehicle 子命令（install/verify/status/start/stop/capability/location/
+# profile-sync/media-secret/support-bundle/rollback/upgrade）一律 COMMAND_SCOPE_REJECTED，
+# 且必须在任何 curl/systemctl/文件写入/rostopic/git 之前拒绝。
+vehicle_production_allowed() {
+  case "$1" in
+    enroll|edge-init|edge-backup-legacy|readonly-preflight|migration-stop-legacy|edge-install|edge-verify|readonly-start|edge-rollback|tooling-status) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
 # ---- firebotctl 自检（规格二十二）----
@@ -376,6 +414,17 @@ cmd_vehicle() {
     esac
     exit 0
   fi
+  # 生产布局无效 → 拒绝任何 vehicle 生命周期命令（fail-closed）。
+  require_valid_production_layout
+  # 生产 vehicle allowlist：白名单外的 vehicle 子命令一律 COMMAND_SCOPE_REJECTED。
+  # 拒绝发生在任何 curl/server PUT/systemctl mutation/文件写入/rostopic/git 之前。
+  if [ "$FIREBOTCTL_LAYOUT" = "VEHICLE_TOOLS_RELEASE" ] && ! vehicle_production_allowed "$sub"; then
+    echo "COMMAND_SCOPE_REJECTED"
+    echo "FIREBOTCTL_LAYOUT=VEHICLE_TOOLS_RELEASE"
+    echo "FORBIDDEN_VEHICLE_COMMAND=$sub"
+    echo "原因：生产 tools 模式仅允许 vehicle 管理平面命令（enroll/edge-*/readonly-*/migration-stop-legacy/tooling-status）。" >&2
+    exit 1
+  fi
   case "$sub" in
     enroll)
       # Vehicle Edge canonical：Enrollment 输出到 Edge Home（config/identity、secrets/mqtt.env 等）。
@@ -535,12 +584,8 @@ cmd_vehicle() {
       vehicle_support_bundle ;;
     rollback)
       # LEGACY / FULL VEHICLE INSTALL rollback（vehicle-install.sh rollback，回 previous 重编译）。
-      # 生产 Vehicle Edge tools 中禁用，避免操作员误用（通信迁移回滚唯一入口 = edge-rollback）。
-      if [ "$FIREBOTCTL_LAYOUT" = "VEHICLE_TOOLS_RELEASE" ]; then
-        echo "LEGACY_FULL_INSTALL_COMMAND_NOT_AVAILABLE_IN_EDGE_TOOLS"
-        echo "原因：firebotctl vehicle rollback 属于旧整车安装回滚；通信迁移回滚请用 firebotctl vehicle edge-rollback。" >&2
-        exit 1
-      fi
+      # 生产 Vehicle Edge tools 模式在进入 case 前已被 allowlist 拒绝（COMMAND_SCOPE_REJECTED）；
+      # 此处仅 SOURCE_TREE 模式可达。通信迁移回滚唯一入口 = edge-rollback。
       bash "$ROS1_DIR/vehicle-install.sh" rollback ;;
     edge-rollback)
       # 通信迁移唯一回滚入口（规格二十四/二十五）：恢复 legacy 通信 owner。
@@ -797,25 +842,46 @@ cmd_fleet() {
 print_help() {
   echo "Firebot 现场统一入口（firebotctl）"
   echo ""
-  echo "用法："
-  echo "  firebotctl vehicle enroll <设备编号> --token <令牌>     车辆注册"
-  echo "  firebotctl vehicle install --sha <SHA>                车辆安装"
-  echo "  firebotctl vehicle verify                              车辆验收（含只读安全门）"
-  echo "  firebotctl vehicle readonly-preflight --phase bootstrap|enrolled  只读前置检查"
-  echo "  firebotctl vehicle readonly-start                      只读启动 Bridge（唯一正式入口）"
-  echo "  firebotctl vehicle migration-stop-legacy                迁移 cutover：停 legacy Bridge"
-  echo "  firebotctl vehicle start base|navigation|control       模块化启动"
-  echo "  firebotctl vehicle capability stop-only|patrol         能力提升"
-  echo "  firebotctl vehicle location enable                     定位开启"
-  echo "  firebotctl vehicle media-secret check                  媒体 secret 落盘规范检查"
-  echo "  firebotctl vehicle rollback / support-bundle           回滚 / 诊断包"
-  echo "  firebotctl vehicle edge-rollback                       通信迁移回滚（恢复 legacy）"
-  echo "  firebotctl vehicle tooling-status                      管理平面 tools release 只读状态"
-  echo "  firebotctl version / --version                         只读自检（布局/SHA）"
-  echo "  firebotctl server deploy --sha <SHA> / verify / rollback  服务器部署/验收/回滚"
-  echo "  firebotctl fleet sites                                 只读列出 Site"
-  echo "  firebotctl fleet preregister <设备编号> --name <名> --site-code <站点>  预登记"
-  echo "  firebotctl fleet register <设备编号>                    设备签发（需已预登记）"
+  if [ "$FIREBOTCTL_LAYOUT" = "VEHICLE_TOOLS_RELEASE" ]; then
+    # 生产模式：只展示生产允许命令，不向现场操作员展示 start control / patrol / location / legacy install 等。
+    echo "生产模式（管理平面 tools release）——仅允许以下命令："
+    echo ""
+    echo "  firebotctl vehicle enroll <设备编号> --token <令牌>      车辆注册"
+    echo "  firebotctl vehicle edge-init --runtime-user <用户>      初始化 Edge Home 目录/权限/tools"
+    echo "  firebotctl vehicle edge-install --sha <SHA>             安装通信 release（不启动）"
+    echo "  firebotctl vehicle edge-verify --sha <SHA>              验收 release/manifest/权限"
+    echo "  firebotctl vehicle edge-backup-legacy                   legacy 备份（零运行影响）"
+    echo "  firebotctl vehicle readonly-preflight --phase bootstrap|enrolled  只读前置检查"
+    echo "  firebotctl vehicle readonly-start                       只读启动 firebot-vehicle-edge（唯一入口）"
+    echo "  firebotctl vehicle migration-stop-legacy                迁移 cutover：停 legacy Bridge"
+    echo "  firebotctl vehicle edge-rollback                        通信迁移回滚（恢复 legacy 通信 owner）"
+    echo "  firebotctl vehicle tooling-status                       管理平面 tools release 只读状态"
+    echo "  firebotctl version / --version                          只读自检（布局/SHA）"
+    echo ""
+    echo "  其余 vehicle 子命令（install/verify/status/start/stop/capability/location/"
+    echo "  media-secret/profile-sync/support-bundle/rollback/upgrade）一律 COMMAND_SCOPE_REJECTED。"
+    echo "  server / fleet 职责在 U-Dao 云服务器执行，本入口拒绝。"
+  else
+    echo "用法："
+    echo "  firebotctl vehicle enroll <设备编号> --token <令牌>     车辆注册"
+    echo "  firebotctl vehicle install --sha <SHA>                车辆安装"
+    echo "  firebotctl vehicle verify                              车辆验收（含只读安全门）"
+    echo "  firebotctl vehicle readonly-preflight --phase bootstrap|enrolled  只读前置检查"
+    echo "  firebotctl vehicle readonly-start                      只读启动 Bridge（唯一正式入口）"
+    echo "  firebotctl vehicle migration-stop-legacy                迁移 cutover：停 legacy Bridge"
+    echo "  firebotctl vehicle start base|navigation|control       模块化启动"
+    echo "  firebotctl vehicle capability stop-only|patrol         能力提升"
+    echo "  firebotctl vehicle location enable                     定位开启"
+    echo "  firebotctl vehicle media-secret check                  媒体 secret 落盘规范检查"
+    echo "  firebotctl vehicle rollback / support-bundle           回滚 / 诊断包"
+    echo "  firebotctl vehicle edge-rollback                       通信迁移回滚（恢复 legacy）"
+    echo "  firebotctl vehicle tooling-status                      管理平面 tools release 只读状态"
+    echo "  firebotctl version / --version                         只读自检（布局/SHA）"
+    echo "  firebotctl server deploy --sha <SHA> / verify / rollback  服务器部署/验收/回滚"
+    echo "  firebotctl fleet sites                                 只读列出 Site"
+    echo "  firebotctl fleet preregister <设备编号> --name <名> --site-code <站点>  预登记"
+    echo "  firebotctl fleet register <设备编号>                    设备签发（需已预登记）"
+  fi
   echo ""
   echo "详细见 docs/部署运维/车端部署与实车接口.md"
 }

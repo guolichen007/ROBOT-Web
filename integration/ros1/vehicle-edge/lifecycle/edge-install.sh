@@ -156,6 +156,41 @@ done
 # ---- 原子 current/previous 切换（失败 current 不变）----
 bash "$VEHICLE_EDGE_SRC/install/release-manager.sh" switch "$REQUIRE_SHA" "$EDGE_HOME"
 
+# ---- 稳定 Edge Runtime 入口（B0-FIX2 / EDGE_STABLE_BIN）----
+# bin/firebot-edge -> ../current/bin/firebot-edge（root:root，原子创建）。
+# systemd ExecStart 与 /usr/local/bin wrappers 均使用该稳定入口，不直接引用 releases/<SHA>。
+STABLE_BIN="$EDGE_HOME/bin/firebot-edge"
+STABLE_TARGET="$EDGE_HOME/current/bin/firebot-edge"
+if [ ! -x "$STABLE_TARGET" ]; then
+  echo "EDGE_INSTALL=FAIL（current/bin/firebot-edge 不存在或不可执行，无法建立稳定入口）" >&2
+  exit 1
+fi
+if [ -e "$STABLE_BIN" ] && [ ! -L "$STABLE_BIN" ]; then
+  echo "EDGE_INSTALL=FAIL"
+  echo "EDGE_BIN_CONFLICT"
+  echo "原因：$STABLE_BIN 已存在且是未知普通文件，禁止静默覆盖。" >&2
+  exit 1
+fi
+if [ -L "$STABLE_BIN" ] && [ "$(readlink "$STABLE_BIN")" = "../current/bin/firebot-edge" ]; then
+  echo "EDGE_STABLE_BIN=ALREADY_PRESENT（幂等 PASS）"
+else
+  mkdir -p "$EDGE_HOME/bin"
+  STABLE_TMP="$EDGE_HOME/bin/.firebot-edge.tmp.$$"
+  ln -s "../current/bin/firebot-edge" "$STABLE_TMP"
+  mv -Tf "$STABLE_TMP" "$STABLE_BIN"
+  if [ "${FIREBOT_TEST_SKIP_CHOWN:-0}" != "1" ]; then
+    chown -h root:root "$STABLE_BIN" 2>/dev/null || true
+  fi
+  echo "EDGE_STABLE_BIN=PASS"
+fi
+STABLE_REALPATH="$(readlink -f "$STABLE_BIN" 2>/dev/null || echo UNKNOWN)"
+EXPECT_STABLE="$EDGE_HOME/releases/$REQUIRE_SHA/bin/firebot-edge"
+if [ "$STABLE_REALPATH" != "$EXPECT_STABLE" ]; then
+  echo "EDGE_INSTALL=FAIL（bin/firebot-edge realpath=$STABLE_REALPATH 期望=$EXPECT_STABLE）" >&2
+  exit 1
+fi
+echo "EDGE_STABLE_BIN_RELEASE_SHA=$REQUIRE_SHA"
+
 # ---- 安装后确认：inactive + disabled ----
 edge_now="$("$SYSTEMCTL" is-active firebot-vehicle-edge 2>/dev/null || echo inactive)"
 edge_enabled="$("$SYSTEMCTL" is-enabled firebot-vehicle-edge 2>/dev/null || echo disabled)"

@@ -50,6 +50,40 @@ for f in VERSION bin/firebot-edge bridge/run_bridge.sh bridge/firebot_bridge/__i
   [ -e "$EDGE_HOME/current/$f" ] && pass "EDGE_FILE_$f=yes" || fail "EDGE_FILE_$f=no"
 done
 
+# 稳定 Edge Runtime 入口（B0-FIX2 / EDGE_STABLE_BIN）：
+# bin/firebot-edge 必须存在、是 symlink、且 readlink -f 解析到 releases/<REQUIRE_SHA>/bin/firebot-edge。
+STABLE_BIN="$EDGE_HOME/bin/firebot-edge"
+if [ -e "$STABLE_BIN" ]; then
+  pass "EDGE_STABLE_BIN_PRESENT=YES"
+else
+  fail "EDGE_STABLE_BIN_PRESENT=NO（$STABLE_BIN 不存在）"
+fi
+if [ -L "$STABLE_BIN" ]; then
+  pass "EDGE_STABLE_BIN_SYMLINK=YES"
+else
+  fail "EDGE_STABLE_BIN_SYMLINK=NO（不是 symlink）"
+fi
+STABLE_REALPATH="$(readlink -f "$STABLE_BIN" 2>/dev/null || echo UNKNOWN)"
+EXPECT_STABLE="$EDGE_HOME/releases/$REQUIRE_SHA/bin/firebot-edge"
+if [ "$STABLE_REALPATH" = "$EXPECT_STABLE" ] && [ -x "$EXPECT_STABLE" ]; then
+  pass "EDGE_STABLE_BIN_RELEASE_SHA=$REQUIRE_SHA"
+else
+  fail "EDGE_STABLE_BIN_RELEASE_SHA=no（realpath=$STABLE_REALPATH 期望=$EXPECT_STABLE）"
+fi
+
+# systemd ExecStart 目标真实存在且可执行（B0-FIX2：不是只查字符串）。
+SYSTEMD_UNIT="${FIREBOT_TEST_SYSTEMD_DIR:-/etc/systemd/system}/firebot-vehicle-edge.service"
+if grep -q "ExecStart=$EDGE_HOME/bin/firebot-edge run" "$SYSTEMD_UNIT" 2>/dev/null; then
+  pass "SYSTEMD_EXEC_START_MATCHES_STABLE_BIN=YES"
+else
+  fail "SYSTEMD_EXEC_START_MATCHES_STABLE_BIN=NO（unit 未指向 $EDGE_HOME/bin/firebot-edge run）"
+fi
+if [ -x "$STABLE_REALPATH" ] && [ -f "$STABLE_REALPATH" ]; then
+  pass "SYSTEMD_EXEC_TARGET_VALID=YES"
+else
+  fail "SYSTEMD_EXEC_TARGET_VALID=NO（$STABLE_REALPATH 不存在或不可执行）"
+fi
+
 # 权限模型（fail-closed；P1-2 ownership 强校验——runtime user 来自 install.env，禁止硬编码）
 owner_is() {
   local path="$1" expect_user="$2" expect_group="${3:-$2}"

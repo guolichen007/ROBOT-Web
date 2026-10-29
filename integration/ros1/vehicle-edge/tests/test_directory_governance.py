@@ -87,7 +87,10 @@ def test_firebotctl_git_guarded_by_layout() -> None:
     ctl = read(ROS1_SRC / "firebotctl")
     check("firebotctl 识别 VEHICLE_TOOLS_RELEASE 布局", "VEHICLE_TOOLS_RELEASE" in ctl)
     check("firebotctl 生产拒绝 server scope", "require_vehicle_scope" in ctl and "AVAILABLE_SCOPE=vehicle" in ctl)
-    check("firebotctl 生产拒绝 legacy rollback", "LEGACY_FULL_INSTALL_COMMAND_NOT_AVAILABLE_IN_EDGE_TOOLS" in ctl)
+    check("firebotctl 生产 vehicle allowlist 拒绝非管理平面命令",
+          "vehicle_production_allowed" in ctl and "COMMAND_SCOPE_REJECTED" in ctl)
+    check("firebotctl 生产布局 fail-closed 目录拓扑", "FIREBOTCTL_LAYOUT_INVALID" in ctl
+          and "require_valid_production_layout" in ctl)
 
 
 if __name__ == "__main__":

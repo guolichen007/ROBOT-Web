@@ -103,6 +103,21 @@ cmd_switch() {
   }
   [ -x "$release/bin/firebot-edge" ] || { echo "RELEASE_SWITCH=FAIL（bin/firebot-edge 不可执行）" >&2; exit 1; }
 
+  # 同 SHA 幂等重试（B0-FIX2）：current 已指向本 SHA → ALREADY_CURRENT，
+  # 绝不把 previous 改成本 SHA（必须保留真正回滚指针）。
+  local cur=""
+  if [ -L "$EDGE_HOME/current" ]; then
+    cur="$(readlink "$EDGE_HOME/current")"
+  fi
+  if [ -n "$cur" ] && [ "$(basename "$cur")" = "$SHA" ]; then
+    local prev_name="none"
+    if [ -L "$EDGE_HOME/previous" ]; then
+      prev_name="$(basename "$(readlink "$EDGE_HOME/previous")")"
+    fi
+    echo "RELEASE_SWITCH=ALREADY_CURRENT sha=$SHA previous=${prev_name}"
+    return 0
+  fi
+
   # 原子 current/previous 切换：临时 symlink + mv（POSIX rename 语义）
   local old=""
   if [ -L "$EDGE_HOME/current" ]; then
@@ -110,10 +125,8 @@ cmd_switch() {
   fi
   local tmp_current="$EDGE_HOME/.current.tmp.$$"
   ln -s "releases/$SHA" "$tmp_current"
-  if [ -n "$old" ] && [ -e "$EDGE_HOME/previous" ] || [ -L "$EDGE_HOME/previous" ]; then
-    rm -f "$EDGE_HOME/previous"
-  fi
   if [ -n "$old" ]; then
+    rm -f "$EDGE_HOME/previous"
     ln -s "$old" "$EDGE_HOME/previous"
   fi
   mv -Tf "$tmp_current" "$EDGE_HOME/current"

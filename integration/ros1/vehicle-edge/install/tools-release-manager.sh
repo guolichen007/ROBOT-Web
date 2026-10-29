@@ -157,6 +157,23 @@ cmd_switch() {
     exit 1
   }
 
+  # 同 SHA 幂等重试（B0-FIX2）：current 已指向本 SHA → ALREADY_CURRENT，
+  # 绝不把 tools/previous 改成本 SHA（必须保留真正回滚指针）。
+  local cur=""
+  if [ -L "$EDGE_HOME/tools/current" ]; then
+    cur="$(readlink "$EDGE_HOME/tools/current")"
+  fi
+  if [ -n "$cur" ] && [ "$(basename "$cur")" = "$SHA" ]; then
+    local prev_name="none"
+    if [ -L "$EDGE_HOME/tools/previous" ]; then
+      prev_name="$(basename "$(readlink "$EDGE_HOME/tools/previous")")"
+    fi
+    echo "TOOLS_RELEASE_SWITCH=ALREADY_CURRENT"
+    echo "TOOLS_CURRENT_SHA=$SHA"
+    echo "TOOLS_PREVIOUS_SHA=$prev_name"
+    return 0
+  fi
+
   # 原子 current/previous 切换：临时 symlink + mv（POSIX rename 语义）。
   local old=""
   if [ -L "$EDGE_HOME/tools/current" ]; then

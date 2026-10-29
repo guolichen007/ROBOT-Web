@@ -127,6 +127,10 @@ def test_tools_deploy_zero_downtime() -> None:
         (state / "ctl_active").write_text("inactive")
         (state / "tailscaled_active").write_text("active")
 
+        # B0-FIX2：legacy active 时必须有健康的 MQTT 状态（host 非空 + mqtt_connected=true）。
+        status_file = tmp / "bridge-status.json"
+        status_file.write_text('{"mqtt_host": "100.110.31.112", "mqtt_connected": true, "boot_id": "b1"}\n')
+
         fakebin = tmp / "fakebin"
         fakebin.mkdir()
         (fakebin / "systemctl").write_text(textwrap.dedent(
@@ -150,6 +154,7 @@ def test_tools_deploy_zero_downtime() -> None:
             "PATH": f"{fakebin}:{os.environ.get('PATH', '')}",
             "FIREBOT_EDGE_HOME": str(edge_home),
             "FIREBOT_TEST_SYSTEMCTL": str(fakebin / "systemctl"),
+            "FIREBOT_TEST_BRIDGE_STATUS_FILE": str(status_file),
             "FIREBOT_TEST_SKIP_ROOT": "1",
             "FIREBOT_TEST_SKIP_CHOWN": "1",
             "FAKE_STATE": str(state),
@@ -158,9 +163,12 @@ def test_tools_deploy_zero_downtime() -> None:
                             "--edge-home", str(edge_home), "--bin-dir", str(bin_dir)],
                            env=env, capture_output=True, text=True, timeout=180)
         check("TOOLS_INSTALL=PASS", r.returncode == 0 and "TOOLS_INSTALL=PASS" in r.stdout, r.stdout[-400:])
-        check("LEGACY_LINK_STATE_UNCHANGED=YES", "LEGACY_LINK_STATE_UNCHANGED=YES" in r.stdout)
+        check("LEGACY_BRIDGE_STATE_UNCHANGED=YES", "LEGACY_BRIDGE_STATE_UNCHANGED=YES" in r.stdout)
+        check("LEGACY_MQTT_HOST_UNCHANGED=YES", "LEGACY_MQTT_HOST_UNCHANGED=YES" in r.stdout)
+        check("LEGACY_MQTT_CONNECTED_UNCHANGED=YES", "LEGACY_MQTT_CONNECTED_UNCHANGED=YES" in r.stdout)
         check("EDGE_STATE_UNCHANGED=YES", "EDGE_STATE_UNCHANGED=YES" in r.stdout)
-        check("CONTROL_STATE_UNCHANGED=YES", "CONTROL_STATE_UNCHANGED=YES" in r.stdout)
+        check("CONTROL_ENABLED_UNCHANGED=YES", "CONTROL_ENABLED_UNCHANGED=YES" in r.stdout)
+        check("CONTROL_ACTIVE_UNCHANGED=YES", "CONTROL_ACTIVE_UNCHANGED=YES" in r.stdout)
         check("TAILSCALE_STATE_UNCHANGED=YES", "TAILSCALE_STATE_UNCHANGED=YES" in r.stdout)
         # /usr/local/bin/firebotctl realpath → tools/current/firebotctl
         link = bin_dir / "firebotctl"

@@ -187,8 +187,29 @@ def test_firebotctl_production_layout() -> None:
         check("生产 server 拒绝 COMMAND_SCOPE_REJECTED", sv.returncode != 0
               and "COMMAND_SCOPE_REJECTED" in sv.stdout and "AVAILABLE_SCOPE=vehicle" in sv.stdout)
         rb = run([str(prod_ctl), "vehicle", "rollback"], env=env)
-        check("生产 vehicle rollback 拒绝", rb.returncode != 0
-              and "LEGACY_FULL_INSTALL_COMMAND_NOT_AVAILABLE_IN_EDGE_TOOLS" in rb.stdout)
+        check("生产 vehicle rollback 拒绝 COMMAND_SCOPE_REJECTED", rb.returncode != 0
+              and "COMMAND_SCOPE_REJECTED" in rb.stdout
+              and "FIREBOTCTL_LAYOUT=VEHICLE_TOOLS_RELEASE" in rb.stdout, rb.stdout[-300:])
+    finally:
+        shutil.rmtree(fx.tmp, ignore_errors=True)
+
+
+def test_tools_switch_same_sha_preserves_previous() -> None:
+    """B0-FIX2 / 规格：tools 同 SHA 幂等重试必须 ALREADY_CURRENT 且不破坏 previous 回滚指针。"""
+    fx = Fixture()
+    try:
+        fx.manager("build", str(fx.src), fx.sha, str(fx.edge_home))
+        fx.manager("switch", fx.sha, str(fx.edge_home))
+        sha2 = "b" * 40
+        fx.manager("build", str(fx.src), sha2, str(fx.edge_home))
+        fx.manager("switch", sha2, str(fx.edge_home))
+        # current=sha2 previous=sha1；再次 switch sha2
+        r = fx.manager("switch", sha2, str(fx.edge_home))
+        check("同 SHA 重试 → ALREADY_CURRENT", r.returncode == 0
+              and "TOOLS_RELEASE_SWITCH=ALREADY_CURRENT" in r.stdout, r.stdout[-300:])
+        check("TOOLS_CURRENT_SHA 仍 sha2", f"TOOLS_CURRENT_SHA={sha2}" in r.stdout)
+        check("TOOLS_PREVIOUS_SHA 仍 sha1（不破坏回滚指针）", f"TOOLS_PREVIOUS_SHA={fx.sha}" in r.stdout, r.stdout[-300:])
+        check("previous 仍指向 sha1", readlink(fx.edge_home / "tools" / "previous") == Path("releases") / fx.sha)
     finally:
         shutil.rmtree(fx.tmp, ignore_errors=True)
 
@@ -197,6 +218,7 @@ if __name__ == "__main__":
     test_tools_build_and_verify()
     test_tools_build_exists_verified_and_corrupt()
     test_tools_atomic_switch_and_rollback()
+    test_tools_switch_same_sha_preserves_previous()
     test_firebotctl_production_layout()
     print(f"\nTOOLS_RELEASE_TEST total={PASS + FAIL} pass={PASS} fail={FAIL}")
     if FAIL:
