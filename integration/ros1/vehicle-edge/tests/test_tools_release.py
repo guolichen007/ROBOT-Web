@@ -89,6 +89,11 @@ def test_tools_build_and_verify() -> None:
         manifest = json.loads((rel / "manifest.json").read_text())
         check("manifest product=firebot-edge-tools", manifest["product"] == "firebot-edge-tools")
         check("manifest source_sha", manifest["source_sha"] == fx.sha)
+        # B4：bundled vehicle-edge 必须自包含（含嵌套 VERSION）
+        check("tools root VERSION 存在", (rel / "VERSION").is_file())
+        check("release 含 vehicle-edge/VERSION", (rel / "vehicle-edge" / "VERSION").is_file())
+        check("bundled VERSION 与 source 一致",
+              (rel / "vehicle-edge" / "VERSION").read_bytes() == (VEHICLE_EDGE_SRC / "VERSION").read_bytes())
         # checksums 校验
         v = fx.manager("verify", fx.sha, str(fx.edge_home))
         check("TOOLS_RELEASE_VERIFY=PASS", v.returncode == 0 and "TOOLS_RELEASE_VERIFY=PASS" in v.stdout)
@@ -214,12 +219,66 @@ def test_tools_switch_same_sha_preserves_previous() -> None:
         shutil.rmtree(fx.tmp, ignore_errors=True)
 
 
+def test_bundled_vehicle_edge_can_build_data_release() -> None:
+    """B4：tools bundle 内的 vehicle-edge 必须能作为 SOURCE_DIR 独立组装 data release。"""
+    fx = Fixture()
+    try:
+        r = fx.manager("build", str(fx.src), fx.sha, str(fx.edge_home))
+        check("tools build", r.returncode == 0, r.stdout[-300:])
+
+        bundle_source = fx.edge_home / "tools" / "releases" / fx.sha / "vehicle-edge"
+        data_releases = fx.edge_home / "releases"
+        data_releases.mkdir(parents=True, exist_ok=True)
+        rm = bundle_source / "install" / "release-manager.sh"
+
+        r2 = run([str(rm), "build", str(bundle_source), fx.sha, str(fx.edge_home)])
+        check("TOOLS_BUNDLE_DATA_RELEASE_BUILD=PASS",
+              r2.returncode == 0 and "RELEASE_BUILD=PASS" in r2.stdout, r2.stdout[-300:])
+
+        rel = fx.edge_home / "releases" / fx.sha
+        check("data release 含 VERSION", (rel / "VERSION").is_file())
+        manifest = json.loads((rel / "manifest.json").read_text())
+        check("data release manifest source_sha", manifest["source_sha"] == fx.sha)
+        check("data release bin/firebot-edge 可执行", (rel / "bin" / "firebot-edge").exists()
+              and os.access(rel / "bin" / "firebot-edge", os.X_OK))
+        check("data release bridge/run_bridge.sh", (rel / "bridge" / "run_bridge.sh").exists())
+        check("data release lib 目录", (rel / "lib").is_dir())
+        check("data release monitor 目录", (rel / "monitor").is_dir())
+
+        # 再执行 data switch，打通 tools bundle → data build → data switch 完整链
+        r3 = run([str(rm), "switch", fx.sha, str(fx.edge_home)])
+        check("TOOLS_BUNDLE_DATA_RELEASE_SWITCH=PASS",
+              r3.returncode == 0 and "RELEASE_SWITCH=PASS" in r3.stdout, r3.stdout[-300:])
+        check("data current → releases/<sha>",
+              readlink(fx.edge_home / "current") == Path("releases") / fx.sha)
+    finally:
+        shutil.rmtree(fx.tmp, ignore_errors=True)
+
+
+def test_missing_source_version_rejected() -> None:
+    """B4 negative：SOURCE vehicle-edge/VERSION 缺失时 tools build 必须 REJECT，不得生成半成品。"""
+    fx = Fixture()
+    try:
+        # 移除交付源中的 VERSION（模拟不完整 source）
+        (fx.src / "vehicle-edge" / "VERSION").unlink()
+        r = fx.manager("build", str(fx.src), fx.sha, str(fx.edge_home))
+        check("MISSING_SOURCE_VERSION_REJECTED",
+              r.returncode != 0 and "TOOLS_RELEASE_BUILD=REJECTED" in r.stdout
+              and "BUNDLED_SOURCE_VERSION_MISSING" in r.stdout, r.stdout[-300:])
+        check("INCOMPLETE_TOOLS_RELEASE_REJECTED（不生成 releases/<SHA>）",
+              not (fx.edge_home / "tools" / "releases" / fx.sha).exists())
+    finally:
+        shutil.rmtree(fx.tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     test_tools_build_and_verify()
     test_tools_build_exists_verified_and_corrupt()
     test_tools_atomic_switch_and_rollback()
     test_tools_switch_same_sha_preserves_previous()
     test_firebotctl_production_layout()
+    test_bundled_vehicle_edge_can_build_data_release()
+    test_missing_source_version_rejected()
     print(f"\nTOOLS_RELEASE_TEST total={PASS + FAIL} pass={PASS} fail={FAIL}")
     if FAIL:
         sys.exit(1)

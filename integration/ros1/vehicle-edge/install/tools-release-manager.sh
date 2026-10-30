@@ -11,7 +11,14 @@
 # release 结构（规格九）：
 #   tools/releases/<SHA>/
 #     VERSION  manifest.json  checksums.sha256  firebotctl
-#     vehicle-edge/{lifecycle,install,systemd,config,lib,bin,bridge,monitor}
+#
+#     vehicle-edge/
+#       VERSION
+#       lifecycle/ install/ systemd/ config/ lib/ bin/ bridge/ monitor/
+#
+# 顶层 VERSION = management release metadata；
+# 嵌套 vehicle-edge/VERSION = bundled data-plane build source metadata。
+# 二者均为真实打包文件，禁止软链接。
 #
 # 不可变：同名 SHA 已存在 → 完整性完全一致 → EXISTS_VERIFIED；不一致 → RELEASE_CORRUPT_OR_MISMATCH。
 # 绝不 rm -rf 后重新生成掩盖 artifact 损坏。
@@ -47,7 +54,7 @@ write_checksums() {
     | sort -z | xargs -0 sha256sum > checksums.sha256)
 }
 
-# 校验 release 完整性（manifest + checksums + 关键文件）。
+# 校验 release 完整性（manifest + checksums + 关键文件 + bundled data source 完整）。
 verify_release() {
   local release="$1" expected="$2"
   grep -q "\"source_sha\": \"$expected\"" "$release/manifest.json" 2>/dev/null || return 1
@@ -56,6 +63,19 @@ verify_release() {
   [ -f "$release/vehicle-edge/lifecycle/edge-install.sh" ] || return 1
   [ -f "$release/vehicle-edge/lifecycle/rollback.sh" ] || return 1
   [ -f "$release/vehicle-edge/install/release-manager.sh" ] || return 1
+  # bundled data-plane build source 必须自包含（否则 edge-install 无法组装 data release）。
+  [ -f "$release/vehicle-edge/VERSION" ] || return 1
+  for required in \
+    vehicle-edge/VERSION \
+    vehicle-edge/bin/firebot-edge \
+    vehicle-edge/bridge/run_bridge.sh \
+    vehicle-edge/bridge/firebot_bridge/__init__.py \
+    vehicle-edge/install/release-manager.sh \
+    vehicle-edge/systemd/firebot-vehicle-edge.service.template; do
+    [ -e "$release/$required" ] || return 1
+  done
+  [ -d "$release/vehicle-edge/lib" ] || return 1
+  [ -d "$release/vehicle-edge/monitor" ] || return 1
   return 0
 }
 
@@ -68,6 +88,13 @@ cmd_build() {
   # 交付源必须含 firebotctl 与 vehicle-edge 源码。
   [ -f "$SOURCE_DIR/firebotctl" ] || { echo "ERROR: 交付源缺少 firebotctl（$SOURCE_DIR）" >&2; exit 1; }
   [ -d "$SOURCE_DIR/vehicle-edge" ] || { echo "ERROR: 交付源缺少 vehicle-edge（$SOURCE_DIR）" >&2; exit 1; }
+  # 硬门：bundled data-plane source 的 VERSION 缺失时禁止组装（否则生成先天无法 edge-install 的半成品）。
+  [ -f "$SOURCE_DIR/vehicle-edge/VERSION" ] || {
+    echo "TOOLS_RELEASE_BUILD=REJECTED"
+    echo "BUNDLED_SOURCE_VERSION_MISSING"
+    echo "原因：交付源 vehicle-edge/VERSION 缺失，无法生成自包含 data-plane source。" >&2
+    exit 1
+  }
 
   local release="$EDGE_HOME/tools/releases/$SHA"
   local staging
@@ -80,10 +107,12 @@ cmd_build() {
     exit 1
   fi
 
-  # 1) 组装：firebotctl + vehicle-edge 子集（管理平面运行时）。
+  # 1) 组装：firebotctl + vehicle-edge 子集（管理平面运行时 + 自包含 data-plane build source）。
   mkdir -p "$staging/vehicle-edge"
   cp -a "$SOURCE_DIR/firebotctl" "$staging/firebotctl"
-  cp -a "$SOURCE_DIR/vehicle-edge/VERSION" "$staging/VERSION" 2>/dev/null || true
+  # 顶层 VERSION = management release metadata；嵌套 vehicle-edge/VERSION = bundled data source metadata。
+  cp -a "$SOURCE_DIR/vehicle-edge/VERSION" "$staging/VERSION"
+  cp -a "$SOURCE_DIR/vehicle-edge/VERSION" "$staging/vehicle-edge/VERSION"
   for d in $BUNDLE_DIRS; do
     [ -e "$SOURCE_DIR/vehicle-edge/$d" ] && cp -a "$SOURCE_DIR/vehicle-edge/$d" "$staging/vehicle-edge/"
   done
