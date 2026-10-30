@@ -123,6 +123,9 @@ class Env:
         # bootstrap CA + runtime（enroll 用 certs；readonly-start 用 runtime/status.json）
         (self.edge_home / "certs").mkdir(parents=True, exist_ok=True)
         (self.edge_home / "certs" / "mqtt-ca.crt").write_text("ca\n")
+        (self.edge_home / "config").mkdir(parents=True, exist_ok=True)
+        (self.edge_home / "config" / "bootstrap.env").write_text(
+            "FIREBOT_SERVER_URL=https://firebot.youdaozd.com\n")
         (self.edge_home / "runtime").mkdir(parents=True, exist_ok=True)
 
     def _w(self, name: str, body: str) -> Path:
@@ -172,6 +175,13 @@ def test_golden_full_path() -> None:
         check("GOLDEN_S2_TO_S3=PASS（edge-install）", r.returncode == 0, r.stdout[-300:] + r.stderr[-300:])
         r = fx.run(lifecycle / "edge-verify.sh", "--edge-home", str(fx.edge_home), FIREBOT_REQUIRE_SHA=fx.sha)
         check("GOLDEN_S2_TO_S3=PASS（edge-verify）", r.returncode == 0, r.stdout[-300:] + r.stderr[-300:])
+
+        # S3 enrolled preflight（B6 全链：网络/TLS/NTP/Control/owner/data release 完整性）
+        r = fx.run(lifecycle / "readonly-preflight.sh", "--phase", "enrolled",
+                   "--device-id", "firebot-vehicle-02", "--expected-sha", fx.sha,
+                   "--repo-dir", str(fx.repo))
+        check("GOLDEN_S3_ENROLLED_PREFLIGHT=PASS", r.returncode == 0
+              and "READONLY_ENROLLED_PREFLIGHT=PASS" in r.stdout, r.stdout[-500:] + r.stderr[-500:])
 
         # S3 → S4（readonly-start）
         r = fx.run(lifecycle / "readonly-start.sh")

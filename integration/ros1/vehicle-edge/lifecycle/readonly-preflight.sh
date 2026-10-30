@@ -78,6 +78,25 @@ read_kv() {
   grep -E "^$2=" "$1" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"'[:space:]' || true
 }
 
+# data_release_exact_match：data/runtime release 完整性合同（与 tools release 严格分离）。
+# data release 无 checksums.sha256，其完整性由 current exact SHA + manifest exact SHA +
+# 关键运行文件 + bin 可执行 共同证明。
+data_release_exact_match() {
+  local expected="$1"
+  local current_target=""
+  [ -L "$EDGE_HOME/current" ] || return 1
+  current_target="$(readlink "$EDGE_HOME/current")"
+  [ "$current_target" = "releases/$expected" ] || return 1
+  grep -q '"product": "firebot-edge"' "$EDGE_HOME/current/manifest.json" 2>/dev/null || return 1
+  grep -q "\"source_sha\": \"$expected\"" "$EDGE_HOME/current/manifest.json" 2>/dev/null || return 1
+  for required in VERSION bin/firebot-edge bridge/run_bridge.sh \
+                  bridge/firebot_bridge/__init__.py lib/edge_paths.py monitor/health.py; do
+    [ -e "$EDGE_HOME/current/$required" ] || return 1
+  done
+  [ -x "$EDGE_HOME/current/bin/firebot-edge" ] || return 1
+  return 0
+}
+
 # ---- 基础环境 ----
 if grep -qE '^ID=ubuntu$' "$OS_RELEASE" 2>/dev/null; then
   v="$(grep -E '^VERSION_ID=' "$OS_RELEASE" | cut -d= -f2- | tr -d '"')"
@@ -272,14 +291,15 @@ fi
 if [ "$PHASE" = "enrolled" ]; then
   if [ -n "$EXPECTED_SHA" ] && echo "$EXPECTED_SHA" | grep -qE '^[0-9a-f]{40}$'; then
     if [ "${FIREBOT_EDGE_TOOLS_MODE:-0}" = "1" ]; then
-      # 生产：数据 release current → releases/<EXPECTED_SHA> + manifest + checksum（无 Git）。
+      # 生产：data/runtime release 完整性合同（current exact SHA + manifest exact SHA + 关键文件）。
+      # data release 无 checksums.sha256，绝不套用 tools release 的 checksum 规则。
       cur_target=""
       [ -L "$EDGE_HOME/current" ] && cur_target="$(readlink "$EDGE_HOME/current")"
-      if [ "$cur_target" = "releases/$EXPECTED_SHA" ] \
-         && grep -q "\"source_sha\": \"$EXPECTED_SHA\"" "$EDGE_HOME/current/manifest.json" 2>/dev/null \
-         && (cd "$EDGE_HOME/current" 2>/dev/null && sha256sum -c checksums.sha256 --quiet >/dev/null 2>&1); then
+      if data_release_exact_match "$EXPECTED_SHA"; then
+        pass "DATA_RELEASE_INTEGRITY=YES"
         pass "EXACT_SHA_MATCH=YES"
       else
+        fail "DATA_RELEASE_INTEGRITY=NO"
         fail "EXACT_SHA_MATCH=NO（data current=$cur_target 期望 releases/$EXPECTED_SHA）"
       fi
     else
