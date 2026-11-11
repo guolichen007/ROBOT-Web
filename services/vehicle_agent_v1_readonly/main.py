@@ -18,7 +18,14 @@ import threading
 from pathlib import Path
 
 from services.vehicle_agent_v1_readonly import AGENT_NAME, AGENT_ROLE, AGENT_VERSION
-from services.vehicle_agent_v1_readonly.agent import AgentConfig, ReadOnlyAgent
+from services.vehicle_agent_v1_readonly.agent import (
+    MIN_INTERVAL_SECONDS,
+    STATUS_INTERVAL_SECONDS,
+    TELEMETRY_INTERVAL_SECONDS,
+    AgentConfig,
+    ReadOnlyAgent,
+    validate_interval,
+)
 from services.vehicle_agent_v1_readonly.guard import OwnerConflictError, OwnerGuard
 from services.vehicle_agent_v1_readonly.identity import IdentityError, load_identity
 from services.vehicle_agent_v1_readonly.transport import MqttTransport, TransportConfig
@@ -53,9 +60,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--run-dir", type=Path, default=None, help="运行目录（lock 与主机指标日志）"
     )
-    parser.add_argument("--status-interval", type=float, default=10.0, help="status 周期（秒）")
     parser.add_argument(
-        "--telemetry-interval", type=float, default=30.0, help="telemetry 周期（秒）"
+        "--status-interval",
+        type=float,
+        default=STATUS_INTERVAL_SECONDS,
+        help=f"status 周期（秒，≥{MIN_INTERVAL_SECONDS}，默认 3s 适配云端 8s stale 门限）",
+    )
+    parser.add_argument(
+        "--telemetry-interval",
+        type=float,
+        default=TELEMETRY_INTERVAL_SECONDS,
+        help=f"telemetry 周期（秒，≥{MIN_INTERVAL_SECONDS}）",
     )
     parser.add_argument(
         "--connect-wait", type=float, default=15.0, help="等待 CONNACK 确认的最长秒数"
@@ -76,6 +91,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    # G1-R0 A1：间隔门禁——负数/0/NaN/Inf/低于下限一律拒绝（parser.error → 退出码 2）。
+    try:
+        validate_interval("--status-interval", args.status_interval)
+        validate_interval("--telemetry-interval", args.telemetry_interval)
+    except ValueError as exc:
+        build_parser().error(str(exc))
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     logger = logging.getLogger(AGENT_NAME)
     try:

@@ -1,0 +1,5 @@
+# vehicle-agent-v1-readonly 运行时依赖锁定（与仓库根 requirements.txt 同版本）
+# 安装：python3.11 -m venv /opt/firebot/vehicle-agent-v1-readonly/venv
+#       /opt/firebot/vehicle-agent-v1-readonly/venv/bin/pip install -r <本文件>
+paho-mqtt==2.1.0
+pydantic==2.11.7

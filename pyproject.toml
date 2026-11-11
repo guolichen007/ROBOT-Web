@@ -19,3 +19,8 @@ exclude = ["apps/api/alembic", "packages/generated-python"]
 testpaths = ["apps/api/tests", "services/protocol-tester/tests"]
 pythonpath = ["apps/api", "."]
 addopts = "-q --disable-warnings --maxfail=1"
+filterwarnings = [
+  # starlette 1.6 起 TestClient 依赖 httpx 被标记弃用（第三方迁移提示）；
+  # 仓库锁定 httpx==0.28.1/starlette==1.6.0 组合，仅过滤该弃用提示，不涉及门禁。
+  "ignore:Using `httpx` with `starlette.testclient` is deprecated.*:starlette.exceptions.StarletteDeprecationWarning",
+]

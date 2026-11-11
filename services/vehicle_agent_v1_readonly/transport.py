@@ -35,14 +35,20 @@ class TransportConfig:
     reconnect_max_seconds: float = 30.0
     keepalive_seconds: int = 30
     connect_wait_seconds: float = 15.0
+    publish_confirm_timeout_seconds: float = 2.0
     offline_publish_timeout_seconds: float = 2.0
     sleep_fn: Callable[[float], None] = time.sleep
     rng: random.Random = field(default_factory=random.Random)
 
     def backoff_delay(self, attempt: int) -> float:
-        """attempt 从 0 开始：min * 2^attempt，封顶 max，加 0~10% 抖动。"""
+        """attempt 从 0 开始：min * 2^attempt，封顶 max，加 0~10% 抖动（有界重试）。"""
         delay = min(self.reconnect_max_seconds, self.reconnect_min_seconds * (2**attempt))
         return delay + self.rng.uniform(0.0, delay * 0.1)
+
+
+# 在途/排队上限：断线期间 publish 不会无界堆积（paho 默认无上限，显式收紧）。
+MAX_QUEUED_MESSAGES = 64
+MAX_INFLIGHT_MESSAGES = 8
 
 
 class MqttTransport:
@@ -59,6 +65,9 @@ class MqttTransport:
         self._connected = False
         self._client.on_connect = self._on_connect
         self._client.on_disconnect = self._on_disconnect
+        # 有界队列/在途：防止断线重试期间消息与资源无界增长。
+        self._client.max_queued_messages_set(MAX_QUEUED_MESSAGES)
+        self._client.max_inflight_messages_set(MAX_INFLIGHT_MESSAGES)
         # Last Will：异常断线时由 broker 发布 retained offline（连接前固定 payload）。
         self._client.will_set(
             topic(identity.vehicle_id, "availability"), "offline", qos=1, retain=True
@@ -99,14 +108,17 @@ class MqttTransport:
             self.loop(0.05)
         return False
 
-    def publish_availability(self, state: str) -> None:
-        self._publish("availability", state, qos=1, retain=True)
+    def publish_availability(self, state: str) -> bool:
+        """QoS1 retained；返回 True 当且仅当 broker 已 PUBACK 确认。"""
+        return self._publish("availability", state, qos=1, retain=True)
 
-    def publish_status(self, data: dict[str, Any]) -> None:
-        self._publish("status", json.dumps(data), qos=1, retain=True)
+    def publish_status(self, data: dict[str, Any]) -> bool:
+        """QoS1 retained；返回 True 当且仅当 broker 已 PUBACK 确认。"""
+        return self._publish("status", json.dumps(data), qos=1, retain=True)
 
-    def publish_telemetry(self, data: dict[str, Any]) -> None:
-        self._publish("telemetry", json.dumps(data), qos=0, retain=False)
+    def publish_telemetry(self, data: dict[str, Any]) -> bool:
+        """QoS0 无确认语义；返回 True 表示已成功进入发送队列。"""
+        return self._publish("telemetry", json.dumps(data), qos=0, retain=False)
 
     def subscribe(self, *args: Any, **kwargs: Any) -> None:
         # 反证保证：本阶段 Agent 结构上不存在订阅路径，永不接收 cmd。
@@ -115,27 +127,47 @@ class MqttTransport:
     def disconnect(self) -> None:
         self._client.disconnect()
 
-    def graceful_offline(self) -> None:
-        """正常退出：发布 retained offline 后干净断开（broker 不触发 LWT）。"""
-        if self._connected:
-            info = self._client.publish(
-                topic(self.identity.vehicle_id, "availability"),
-                "offline",
-                qos=1,
-                retain=True,
-            )
-            info.wait_for_publish(self.config.offline_publish_timeout_seconds)
+    def graceful_offline(self) -> bool:
+        """正常退出：发布 retained offline 并等待 broker PUBACK；返回是否确认送达。
+
+        未连接时不发布（该会话没有在线状态可遗留）；已连接但未收到确认时返回
+        False，调用方不得宣称"已发布成功"。
+        """
+        if not self._connected:
+            return True
+        confirmed = self._publish(
+            "availability",
+            "offline",
+            qos=1,
+            retain=True,
+            timeout=self.config.offline_publish_timeout_seconds,
+        )
         self.disconnect()
         deadline = time.monotonic() + 1.0
         while time.monotonic() < deadline and self._connected:
             self.loop(0.05)
+        return confirmed
 
-    def _publish(self, kind: str, payload: str, *, qos: int, retain: bool) -> None:
+    def _publish(
+        self, kind: str, payload: str, *, qos: int, retain: bool, timeout: float | None = None
+    ) -> bool:
         info = self._client.publish(
             topic(self.identity.vehicle_id, kind), payload, qos=qos, retain=retain
         )
-        if info.rc != mqtt.MQTT_ERR_SUCCESS:
-            raise MqttConnectError(f"publish to {kind} failed: rc={info.rc}")
+        if qos == 0:
+            return info.rc == mqtt.MQTT_ERR_SUCCESS
+        return self._wait_confirmed(info, timeout or self.config.publish_confirm_timeout_seconds)
+
+    def _wait_confirmed(self, info, timeout: float) -> bool:
+        """驱动网络循环直至 PUBACK 或超时；绝不在未确认时返回 True。"""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if info.is_published():
+                return True
+            if info.rc > mqtt.MQTT_ERR_SUCCESS:
+                return False
+            self.loop(0.05)
+        return False
 
     def _on_connect(self, client, userdata, flags, reason_code, properties) -> None:
         self._connected = reason_code == 0

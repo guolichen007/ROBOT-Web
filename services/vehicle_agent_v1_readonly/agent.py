@@ -5,12 +5,18 @@
 - status: QoS1 retain=True，{online, programs, task, ts}；
 - telemetry: QoS0 retain=False，{pose, battery, smog, thermal, ts}（未接入硬件显式 null）。
 host 指标默认只写本地日志；"status-field" 为实验性扩展（默认关闭，见扩展方案文档）。
+
+时序（G1-R0 A1）：status 默认 3s（云端 stale 门限 8s，留 2.6 倍余量）；
+间隔门禁在 CLI 边界统一校验（``validate_interval``，拒绝负数/0/NaN/低于下限）。
+确认（G1-R0 A2）：QoS1 发布必须收到 broker PUBACK 才视为成功，未确认只记警告，
+绝不宣称已送达；在途/排队上限收紧，重连退避封顶，资源消耗有界。
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import math
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -29,11 +35,21 @@ from services.vehicle_agent_v1_readonly.transport import MqttConnectError, MqttT
 
 logger = logging.getLogger("vehicle_agent_v1_readonly")
 
-STATUS_INTERVAL_SECONDS = 10.0
+# G1-R0 A1：云端 vehicle_agent_v1_status_stale_seconds=8s；3s 周期留足重传/抖动余量。
+STATUS_INTERVAL_SECONDS = 3.0
 TELEMETRY_INTERVAL_SECONDS = 30.0
+# 周期类参数下限：低于 1s 的配置视为异常（拒绝门禁在 CLI 边界执行）。
+MIN_INTERVAL_SECONDS = 1.0
 
 EXIT_OK = 0
 EXIT_CONNECT_FAILED = 4
+
+
+def validate_interval(name: str, value: float) -> float:
+    """拒绝负数、0、NaN/Inf 与低于下限的间隔；合法则原样返回。"""
+    if not math.isfinite(value) or value < MIN_INTERVAL_SECONDS:
+        raise ValueError(f"{name} must be a finite number >= {MIN_INTERVAL_SECONDS}s; got {value}")
+    return value
 
 
 def idle_task() -> dict:
@@ -70,11 +86,11 @@ class AgentConfig:
     # host 指标模式：log-only（默认，只写本地日志）| status-field（实验性扩展）。
     host_metrics_mode: str = "log-only"
     host_metrics_path: Path | None = None
-    max_reconnect_attempts: int | None = None  # None = 无限重试
+    max_reconnect_attempts: int | None = None  # None = 无限重试（退避封顶，资源有界）
 
 
 class ReadOnlyAgent:
-    """G0-A2 只读 Agent：采集真实 OS/进程状态并按 v1 合同上行。"""
+    """G0-A2/G1-R0 只读 Agent：采集真实 OS/进程状态并按 v1 合同上行。"""
 
     def __init__(
         self,
@@ -123,11 +139,17 @@ class ReadOnlyAgent:
                 )
                 continue
             reconnect_attempts = 0
-            self._publish_safely(
-                "availability online", self._transport.publish_availability, "online"
-            )
+            online_confirmed = self._transport.publish_availability("online")
             last_status = last_telemetry = float("-inf")
-            logger.info("connected as %s; availability=online published", self._identity.vehicle_id)
+            if online_confirmed:
+                logger.info(
+                    "connected as %s; availability=online published", self._identity.vehicle_id
+                )
+            else:
+                logger.warning(
+                    "connected as %s but availability=online publish UNCONFIRMED",
+                    self._identity.vehicle_id,
+                )
             while not self._stop_event.is_set():
                 if not self._transport.connected:
                     logger.warning("connection lost; will reconnect")
@@ -140,8 +162,15 @@ class ReadOnlyAgent:
                     self._publish_cycle("telemetry")
                     last_telemetry = now
                 self._transport.loop(0.1)
-        self._transport.graceful_offline()
-        logger.info("graceful offline published; agent stopped")
+        was_connected = self._transport.connected
+        offline_confirmed = self._transport.graceful_offline()
+        if not was_connected:
+            logger.info("agent stopped; was not connected, no offline publish needed")
+        elif offline_confirmed:
+            logger.info("graceful offline published and broker-confirmed; agent stopped")
+        else:
+            # A2：未收到 broker PUBACK 确认时，绝不宣称发布成功。
+            logger.warning("graceful offline publish UNCONFIRMED by broker; agent stopped")
         return EXIT_OK
 
     def _publish_cycle(self, kind: str) -> None:
@@ -156,17 +185,18 @@ class ReadOnlyAgent:
         if kind == "status":
             host = snapshot.as_dict() if self._config.host_metrics_mode == "status-field" else None
             payload = build_status(snapshot.programs, snapshot.collected_at, host=host)
-            self._publish_safely("status", self._transport.publish_status, payload)
+            confirmed = self._publish_safely(self._transport.publish_status, payload)
+            if not confirmed:
+                logger.warning("status publish UNCONFIRMED by broker; next cycle will re-send")
         else:
             payload = build_telemetry(snapshot.collected_at)
-            self._publish_safely("telemetry", self._transport.publish_telemetry, payload)
+            self._publish_safely(self._transport.publish_telemetry, payload)
 
-    def _publish_safely(self, label: str, publish, *args) -> bool:
+    def _publish_safely(self, publish, *args) -> bool:
         try:
-            publish(*args)
-            return True
-        except (MqttConnectError, OSError):
-            logger.warning("%s publish failed; connection loop will handle", label)
+            return bool(publish(*args))
+        except (MqttConnectError, OSError, ValueError):
+            logger.warning("publish failed; connection loop will handle", exc_info=True)
             return False
 
     def _log_host_metrics(self, snapshot: HostSnapshot) -> None:

@@ -62,6 +62,52 @@ jobs:
       - working-directory: apps/api
         run: alembic downgrade base && alembic upgrade head && python -m app.db.seed
 
+  # G1-R0：真实组件离线 E2E（真实 Mosquitto + 真实 Agent + Adapter/Ingress + PG/Redis + API）。
+  # 只连 127.0.0.1 测试端口；测试资产/凭证测试专属；由本 job 真实收集执行，非 skip。
+  vehicle-agent-real-e2e:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18.4-alpine
+        env:
+          POSTGRES_DB: firebot_ci
+          POSTGRES_USER: firebot_ci
+          POSTGRES_PASSWORD: firebot_ci
+        options: >-
+          --health-cmd "pg_isready -U firebot_ci -d firebot_ci"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+        ports: ["5432:5432"]
+      redis:
+        image: redis:8.4.5-alpine
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+        ports: ["6379:6379"]
+    env:
+      APP_ENV: test
+      DATABASE_URL: postgresql+psycopg://firebot_ci:firebot_ci@localhost:5432/firebot_ci
+      REDIS_URL: redis://localhost:6379/15
+      JWT_SECRET: ci-jwt-secret-at-least-32-characters-long
+      REFRESH_SECRET: ci-refresh-secret-at-least-32-characters
+      CSRF_SECRET: ci-csrf-secret-at-least-32-characters-long
+      BOOTSTRAP_ADMIN_PASSWORD: Firebot-CI-Only-2026!
+      SEED_DEMO: "true"
+      ASSET_ROOT: /tmp/firebot-assets
+      REAL_E2E: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: sudo apt-get update && sudo apt-get install -y mosquitto mosquitto-clients
+      - working-directory: apps/api
+        run: alembic upgrade head && python -m app.db.seed
+      - run: pytest integration/vehicle-agent-real-e2e -v
+
   frontend:
     runs-on: ubuntu-24.04
     defaults:

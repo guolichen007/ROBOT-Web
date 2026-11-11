@@ -1,0 +1,31 @@
+# firebot-vehicle-agent-v1-readonly systemd 模板（G1 正式安装时由运维按 SOP 落位）
+# 安装路径：/etc/systemd/system/firebot-vehicle-agent-v1-readonly.service
+# 本轮（G1-R0）不执行安装/启停；模板与 SOP 保持一致，凭证路径指向受控文件。
+[Unit]
+Description=Firebot Vehicle Agent V1 (readonly telemetry, no control)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 专用低权限用户（安装时创建，无 shell、无 sudo）
+User=firebot
+Group=firebot
+# 工作目录：仓库按批准 SHA 检出后复制到 /opt/firebot/vehicle-agent-v1-readonly/repo
+WorkingDirectory=/opt/firebot/vehicle-agent-v1-readonly/repo
+# 显式使用虚拟环境 Python；PYTHONPATH 指向工作目录
+Environment=PYTHONPATH=/opt/firebot/vehicle-agent-v1-readonly/repo
+ExecStart=/opt/firebot/vehicle-agent-v1-readonly/venv/bin/python3 \
+  -m services.vehicle_agent_v1_readonly.main \
+  --config /etc/firebot/vehicle-agent-v1-readonly/device_identity.json \
+  --run-dir /var/lib/firebot/vehicle-agent-v1-readonly
+# 默认时序：status 3s（适配云端 8s stale 门限）、telemetry 30s
+Restart=on-failure
+RestartSec=5
+# 优雅退出：SIGTERM → 发布 retained offline 并等待 broker PUBACK → 退出 0
+KillSignal=SIGTERM
+TimeoutStopSec=15
+# 运行期防双开：systemd 单实例 + Agent 内 flock（run-dir/agent.lock）双重防护
+
+[Install]
+WantedBy=multi-user.target

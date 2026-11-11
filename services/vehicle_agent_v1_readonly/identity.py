@@ -61,10 +61,24 @@ def assert_no_legacy_identity_env() -> None:
             )
 
 
+def _check_file_permissions(config_path: Path) -> None:
+    """凭证文件权限受检：必须 0600（组/他无任何权限），否则拒绝读取。"""
+    try:
+        mode = config_path.stat().st_mode
+    except OSError as exc:
+        raise IdentityError(f"cannot stat identity config {config_path}: {exc}") from exc
+    if mode & 0o077:
+        raise IdentityError(
+            f"identity file {config_path} permissions too open: "
+            f"{oct(mode & 0o777)}; mode 0600 required (contains per-device credentials)"
+        )
+
+
 def load_identity(config_path: Path, *, allow_placeholder_password: bool = False) -> DeviceIdentity:
     assert_no_legacy_identity_env()
     if config_path.name == "bridge.env":
         raise IdentityError("bridge.env is a legacy identity source and must never be read")
+    _check_file_permissions(config_path)
     try:
         raw = json.loads(config_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:

@@ -28,6 +28,7 @@ from services.vehicle_agent_v1_readonly.agent import (
     ReadOnlyAgent,
     build_status,
     build_telemetry,
+    validate_interval,
 )
 from services.vehicle_agent_v1_readonly.collector import (
     collect,
@@ -98,9 +99,11 @@ class FakeBroker:
         *,
         expected_username: str,
         expected_password: str,
+        ack_publishes: bool = True,
     ) -> None:
         self.expected_username = expected_username
         self.expected_password = expected_password
+        self.ack_publishes = ack_publishes  # False = 只收不发 PUBACK（验证未确认语义）
         self.messages: list[dict] = []
         self.retained: dict[str, bytes] = {}
         self.subscriptions: list[str] = []
@@ -252,7 +255,7 @@ class FakeBroker:
             )
             if retain:
                 self.retained[name] = payload
-        if qos == 1 and packet_id is not None:
+        if qos == 1 and packet_id is not None and self.ack_publishes:
             sock.sendall(b"\x40\x02" + bytes([packet_id >> 8, packet_id & 0xFF]))
 
 
@@ -339,6 +342,7 @@ def identity_config(tmp_path: Path):
                 }
             )
         )
+        config.chmod(0o600)  # G1-R0 A3：身份凭证文件必须 0600（权限受检）
         return config
 
     return _write
@@ -354,12 +358,14 @@ def broker():
         *,
         expected_username: str = VEHICLE,
         expected_password: str = TEST_PASSWORD,
+        ack_publishes: bool = True,
     ) -> FakeBroker:
         instance = FakeBroker(
             CERTS / certfile,
             CERTS / keyfile,
             expected_username=expected_username,
             expected_password=expected_password,
+            ack_publishes=ack_publishes,
         )
         brokers.append(instance)
         return instance
@@ -433,6 +439,17 @@ def test_status_payload_validates_against_contract():
     assert status.programs["chassis"] is False
     assert status.task.state == "idle"
     assert normalize("status", payload)["online"] is True
+
+
+def test_status_semantics_no_chassis_ready_inference():
+    # G1-R0 C：task=idle 与进程名匹配绝不推断底盘就绪；
+    # 无进程观测时，机器人程序键恒为 false（观测语义，非就绪语义）。
+    payload = build_status({}, "2026-11-11T05:00:00+00:00")
+    status = Status.model_validate(payload)
+    assert status.task.state == "idle"
+    for name in ("chassis", "navigation", "patrol", "thermal", "battery", "smog", "camera"):
+        assert status.programs[name] is False, f"{name} must not imply readiness"
+    assert status.programs["agent"] is True
 
 
 def test_telemetry_null_semantics_for_unconnected_hardware():
@@ -566,12 +583,13 @@ def test_transport_publish_contract_and_duplicate_status(identity_config, broker
     transport = MqttTransport(identity, TransportConfig())
     transport.connect()
     assert transport.wait_for_connect(5.0) is True
-    transport.publish_availability("online")
+    # G1-R0 A2：QoS1 发布必须返回 broker PUBACK 确认结果。
+    assert transport.publish_availability("online") is True
     status_a = build_status({"chassis": False}, "2026-11-11T05:00:00+00:00")
     status_b = build_status({"chassis": False}, "2026-11-11T05:00:05+00:00")
-    transport.publish_status(status_a)
-    transport.publish_status(status_b)  # 重复状态：retained last-wins，幂等
-    transport.publish_telemetry(build_telemetry("2026-11-11T05:00:00+00:00"))
+    assert transport.publish_status(status_a) is True
+    assert transport.publish_status(status_b) is True  # 重复状态：retained last-wins，幂等
+    assert transport.publish_telemetry(build_telemetry("2026-11-11T05:00:00+00:00")) is True
     wait_until(lambda: len(local.messages) >= 4, 5.0, "all publishes delivered")
 
     def by_kind(kind: str):
@@ -590,7 +608,7 @@ def test_transport_publish_contract_and_duplicate_status(identity_config, broker
     assert telemetry["qos"] == 0 and telemetry["retain"] is False
     assert json.loads(telemetry["payload"])["pose"] is None
 
-    transport.graceful_offline()
+    assert transport.graceful_offline() is True  # A2：offline 已获 PUBACK 确认
     wait_until(lambda: not transport.connected, 3.0, "clean disconnect")
     assert local.lwt_emissions == []  # 正常退出：干净断开，不触发 LWT
     wait_until(lambda: local.retained.get(topic(VEHICLE, "availability")) == b"offline", 3.0)
@@ -668,6 +686,150 @@ def test_transport_structurally_cannot_subscribe(identity_config, tmp_path: Path
     assert context.verify_mode == ssl.CERT_REQUIRED
     assert context.check_hostname is True
     assert context.cert_store_stats()["x509_ca"] >= 1
+    # G1-R0 A2：队列/在途上限收紧，断线重试不会无界堆积。
+    assert transport._client._max_queued_messages == 64  # noqa: SLF001
+    assert transport._client._max_inflight_messages == 8  # noqa: SLF001
+
+
+def test_backoff_delay_bounded():
+    # G1-R0 A2：重连退避封顶（max + 10% 抖动），长期断线重试资源消耗有界。
+    config = TransportConfig(
+        reconnect_min_seconds=1.0, reconnect_max_seconds=30.0, rng=random.Random(0)
+    )
+    for attempt in (0, 1, 5, 100):
+        delay = config.backoff_delay(attempt)
+        assert delay <= 30.0 * 1.1
+        assert delay >= 1.0
+
+
+def test_validate_interval_gate():
+    # G1-R0 A1：负数/0/NaN/Inf/低于下限一律拒绝。
+    for bad in (-1.0, 0.0, 0.5, float("nan"), float("inf"), -float("inf")):
+        with pytest.raises(ValueError):
+            validate_interval("--status-interval", bad)
+    assert validate_interval("--status-interval", 1.0) == 1.0
+    assert validate_interval("--status-interval", 3.0) == 3.0
+
+
+def test_cli_rejects_invalid_intervals(identity_config, tmp_path: Path, capsys):
+    # G1-R0 A1：CLI 边界门禁，退出码 2（argparse error）。
+    config = identity_config()
+    for bad in ("-1", "0", "nan", "0.1"):
+        with pytest.raises(SystemExit) as excinfo:
+            agent_main(["--config", str(config), "--status-interval", bad])
+        assert excinfo.value.code == 2
+        capsys.readouterr()  # 清理 argparse 错误输出
+
+
+def test_qos1_publish_unconfirmed_when_broker_never_acks(identity_config, broker, tmp_path: Path):
+    # G1-R0 A2：broker 收包但不回 PUBACK → 发布必须返回 False，不得宣称成功。
+    local = broker(ack_publishes=False)
+    identity = load_identity(identity_config(port=local.port), allow_placeholder_password=True)
+    transport = MqttTransport(identity, TransportConfig(publish_confirm_timeout_seconds=0.5))
+    transport.connect()
+    assert transport.wait_for_connect(5.0) is True
+    assert transport.publish_availability("online") is False
+    assert (
+        transport.publish_status(build_status({"chassis": False}, "2026-11-11T05:00:00+00:00"))
+        is False
+    )
+    assert transport.graceful_offline() is False  # offline 未确认 → 不得宣称已发布
+
+
+def test_agent_does_not_claim_unconfirmed_offline(identity_config, broker, tmp_path, caplog):
+    # G1-R0 A2：SIGTERM 语义下 retained offline 未被确认时，日志不得宣称成功。
+    local = broker(ack_publishes=False)
+    identity = load_identity(identity_config(port=local.port), allow_placeholder_password=True)
+    transport = MqttTransport(
+        identity,
+        TransportConfig(
+            reconnect_min_seconds=0.01,
+            rng=random.Random(0),
+            publish_confirm_timeout_seconds=0.3,
+            offline_publish_timeout_seconds=0.3,
+        ),
+    )
+    stop_event = threading.Event()
+    agent = ReadOnlyAgent(
+        identity,
+        transport,
+        AgentConfig(
+            status_interval_seconds=0.3,
+            telemetry_interval_seconds=1.0,
+            host_metrics_path=tmp_path / "host.jsonl",
+        ),
+        {"chassis": ("firebot_chassis",)},
+        stop_event,
+    )
+    result = []
+    thread = threading.Thread(target=lambda: result.append(agent.run()), daemon=True)
+    thread.start()
+    wait_until(lambda: transport.connected, 10.0, "connected")
+    time.sleep(0.5)  # 让未确认的 status 发布发生
+    stop_event.set()
+    thread.join(10.0)
+    assert result == [0]
+    log_text = caplog.text
+    assert "UNCONFIRMED" in log_text  # 只记未确认，不宣称成功
+    assert "graceful offline published and broker-confirmed" not in log_text
+
+
+def test_status_freshness_and_short_disconnect_recovery(identity_config, broker, tmp_path: Path):
+    # G1-R0 A1：默认 3s 周期下 status 时间戳必须满足云端 8s stale 门限；
+    # 短断连后恢复，新 status 依然新鲜（不遗留过期状态）。
+    local = broker()
+    identity = load_identity(identity_config(port=local.port), allow_placeholder_password=True)
+    transport = MqttTransport(
+        identity, TransportConfig(reconnect_min_seconds=0.01, rng=random.Random(0))
+    )
+    stop_event = threading.Event()
+    agent = ReadOnlyAgent(
+        identity,
+        transport,
+        AgentConfig(
+            status_interval_seconds=1.0,
+            telemetry_interval_seconds=3.0,
+            host_metrics_path=tmp_path / "host.jsonl",
+        ),
+        {"chassis": ("firebot_chassis",)},
+        stop_event,
+    )
+    result = []
+    thread = threading.Thread(target=lambda: result.append(agent.run()), daemon=True)
+    thread.start()
+
+    def statuses():
+        return [
+            json.loads(m["payload"])
+            for m in local.messages
+            if m["topic"] == topic(VEHICLE, "status")
+        ]
+
+    wait_until(lambda: len(statuses()) >= 2, 10.0, "two statuses")
+    for status in statuses():
+        ts = datetime.fromisoformat(status["ts"])
+        assert 0 <= (datetime.now(UTC) - ts).total_seconds() <= 8.0  # 云端 stale 门限内
+
+    sessions_before = local.accepted_sessions
+    local.abort_clients()  # 短断连
+    wait_until(lambda: local.accepted_sessions >= sessions_before + 1, 10.0, "reconnected")
+    before = len(statuses())
+    wait_until(lambda: len(statuses()) > before, 10.0, "status resumed after reconnect")
+    latest_ts = datetime.fromisoformat(statuses()[-1]["ts"])
+    assert 0 <= (datetime.now(UTC) - latest_ts).total_seconds() <= 8.0  # 恢复后依然新鲜
+    stop_event.set()
+    thread.join(10.0)
+    assert result == [0]
+
+
+def test_identity_rejects_open_permissions(identity_config, tmp_path: Path):
+    # G1-R0 A3：凭证文件权限受检——组/他任何权限位都必须拒绝。
+    config = identity_config()
+    config.chmod(0o644)
+    with pytest.raises(IdentityError, match="permissions too open"):
+        load_identity(config, allow_placeholder_password=True)
+    config.chmod(0o600)
+    assert load_identity(config, allow_placeholder_password=True).vehicle_id == VEHICLE
 
 
 def test_no_control_paths_in_source():
@@ -711,9 +873,9 @@ def _start_agent(config: Path, run_dir: Path) -> subprocess.Popen:
             "--run-dir",
             str(run_dir),
             "--status-interval",
-            "0.4",
+            "1.1",
             "--telemetry-interval",
-            "0.5",
+            "1.3",
             "--connect-wait",
             "2",
             "--allow-placeholder-credentials",
