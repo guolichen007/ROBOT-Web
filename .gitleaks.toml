@@ -16,6 +16,17 @@ regexes = [
   '''Bootstrap-Server-Secret-2026!''',
   '''strong-password''',
   '''mqtt-secret''',
+  # G1-R0：真实组件离线 E2E 与只读 Agent 隔离验收的测试专属凭证（仅 127.0.0.1 测试 broker）
+  '''e2e-platform-password''',
+  '''e2e-vehicle-01-password''',
+  '''e2e-ghost-password''',
+  '''e2e-jwt-secret-0123456789abcdef0123456789''',
+  '''e2e-refresh-secret-0123456789abcdef012345''',
+  '''e2e-csrf-secret-0123456789abcdef0123456789''',
+  '''E2e-Only-Admin-Password-2026!''',
+  '''firebot_e2e:firebot_e2e@localhost''',
+  '''local-acceptance-cred-CHANGE-ME''',
+  '''PLACEHOLDER-CHANGE-ME-G1''',
 ]
 paths = [
   '''apps/api/alembic/versions/migration-sha256\.json''',

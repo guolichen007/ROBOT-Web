@@ -41,6 +41,10 @@ PYTHONPATH=. python3 -m services.vehicle_agent_v1_readonly.main \
 - `programs`：`agent=true`（Agent 自身存活）+ 平台已知程序键（chassis/navigation/patrol/
   thermal/battery/smog/camera）；001 未接入时对应进程不存在 → `false`，绝不伪造。
 - `telemetry` 四个硬件字段显式 `null`：未接入硬件的空值语义，不生成模拟数值。
+- 时序（G1-R0 A1）：status 默认 **3s**（适配云端 8s stale 门限），telemetry 默认 30s；
+  CLI 对负数/0/NaN/低于 1s 的间隔直接拒绝（退出码 2）。
+- 确认（G1-R0 A2）：QoS1 发布等待 broker PUBACK，未确认只在日志记 `UNCONFIRMED`，
+  绝不宣称送达；在途/排队上限（8/64）与退避封顶（30s）保证重试资源有界。
 - 断线：paho 有界重连 + 指数退避（1s→30s，含抖动）；异常断线由 broker 发布 LWT
   `offline`（retained）；正常退出先发布 `offline` 再干净断开。
 - 重复 status：retained 语义下 broker 仅保留最新一条，重复发布幂等；平台侧按
