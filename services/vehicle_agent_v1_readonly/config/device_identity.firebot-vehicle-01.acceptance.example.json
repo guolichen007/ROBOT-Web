@@ -1,0 +1,9 @@
+{
+  "vehicle_id": "firebot-vehicle-01",
+  "display_name": "firebot-001",
+  "mqtt_host": "127.0.0.1",
+  "mqtt_port": 8883,
+  "mqtt_username": "firebot-vehicle-01",
+  "mqtt_password": "PLACEHOLDER-CHANGE-ME-G1",
+  "ca_cert_path": "services/protocol-tester/tests/certs/ca.crt"
+}

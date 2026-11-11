@@ -1,0 +1,852 @@
+"""G0-A2 只读 Agent 本地隔离验收测试。
+
+全部使用本地进程内 FakeBroker（TLS / CONNACK / LWT / retained / QoS 全实现），
+禁止连接任何真实生产 Broker。测试证书为 TEST ONLY（certs/，可审计重建）。
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import random
+import socket
+import ssl
+import subprocess
+import sys
+import threading
+import time
+from collections.abc import Callable
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+
+from services.vehicle_agent_v1 import Status, Telemetry, normalize, topic
+from services.vehicle_agent_v1_readonly import AGENT_VERSION
+from services.vehicle_agent_v1_readonly.agent import (
+    AgentConfig,
+    ReadOnlyAgent,
+    build_status,
+    build_telemetry,
+)
+from services.vehicle_agent_v1_readonly.collector import (
+    collect,
+    os_info,
+    uptime_seconds,
+)
+from services.vehicle_agent_v1_readonly.guard import (
+    OwnerConflictError,
+    OwnerGuard,
+    legacy_bridge_running,
+)
+from services.vehicle_agent_v1_readonly.identity import (
+    IdentityError,
+    load_identity,
+)
+from services.vehicle_agent_v1_readonly.main import EXIT_OWNER_CONFLICT
+from services.vehicle_agent_v1_readonly.main import main as agent_main
+from services.vehicle_agent_v1_readonly.transport import (
+    MqttTransport,
+    SubscribeForbiddenError,
+    TransportConfig,
+)
+
+CERTS = Path(__file__).parent / "certs"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+GENERATE_CERTS_SCRIPT = REPO_ROOT / "scripts" / "generate_readonly_test_certs.sh"
+VEHICLE = "firebot-vehicle-01"
+TEST_PASSWORD = "local-acceptance-cred-CHANGE-ME"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _test_certs():
+    """TEST-ONLY TLS 证书：仓库 .gitignore 排除 *.key/*.crt，测试会话开始时现场生成。"""
+    if not (CERTS / "ca.crt").is_file():
+        CERTS.mkdir(parents=True, exist_ok=True)
+        completed = subprocess.run(
+            ["bash", str(GENERATE_CERTS_SCRIPT)],
+            check=False,
+            capture_output=True,
+            text=True,
+            cwd=str(REPO_ROOT),
+        )
+        assert completed.returncode == 0, f"test cert generation failed: {completed.stderr}"
+    yield
+
+
+def wait_until(cond: Callable[[], bool], timeout: float = 20.0, message: str = "condition") -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if cond():
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"timed out waiting for {message}")
+
+
+# ---------------------------------------------------------------------------
+# 进程内最小 MQTTv311 FakeBroker（仅测试用）
+# ---------------------------------------------------------------------------
+
+
+class FakeBroker:
+    """最小 MQTTv311 broker：TLS 服务端证书、CONNACK、LWT、retained、QoS1 PUBACK。"""
+
+    def __init__(
+        self,
+        certfile: Path,
+        keyfile: Path,
+        *,
+        expected_username: str,
+        expected_password: str,
+    ) -> None:
+        self.expected_username = expected_username
+        self.expected_password = expected_password
+        self.messages: list[dict] = []
+        self.retained: dict[str, bytes] = {}
+        self.subscriptions: list[str] = []
+        self.connect_attempts: list[dict] = []
+        self.accepted_sessions = 0
+        self.lwt_emissions: list[tuple[str, str]] = []
+        self.handshake_failures = 0
+        self._ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        self._ctx.load_cert_chain(str(certfile), str(keyfile))
+        self._listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._listener.bind(("127.0.0.1", 0))
+        self._listener.listen(8)
+        self.port = self._listener.getsockname()[1]
+        self._lock = threading.Lock()
+        self._stopped = threading.Event()
+        self._sockets: list[socket.socket] = []
+        self._thread = threading.Thread(target=self._accept_loop, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stopped.set()
+        for sock in list(self._sockets):
+            try:
+                sock.close()
+            except OSError:
+                pass
+        try:
+            self._listener.close()
+        except OSError:
+            pass
+
+    def abort_clients(self) -> None:
+        """模拟网络中断：直接关闭全部客户端连接（触发客户端重连与 broker LWT）。"""
+        for sock in list(self._sockets):
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
+                sock.close()
+            except OSError:
+                pass
+
+    # -- broker 内部 -----------------------------------------------------
+
+    def _accept_loop(self) -> None:
+        while not self._stopped.is_set():
+            try:
+                raw, _ = self._listener.accept()
+            except OSError:
+                break
+            try:
+                tls = self._ctx.wrap_socket(raw, server_side=True)
+            except ssl.SSLError:
+                with self._lock:
+                    self.handshake_failures += 1
+                try:
+                    raw.close()
+                except OSError:
+                    pass
+                continue
+            # wrap_socket 后 raw 已 detach，必须跟踪持有 fd 的 TLS socket。
+            with self._lock:
+                self._sockets.append(tls)
+            threading.Thread(target=self._serve, args=(tls,), daemon=True).start()
+
+    def _serve(self, sock: socket.socket) -> None:
+        clean = True
+        will: tuple[str, str] | None = None
+        try:
+            header, body = _read_packet(sock)
+            if header != 0x10:
+                return
+            connect = _parse_connect(body)
+            with self._lock:
+                self.connect_attempts.append(
+                    {
+                        "client_id": connect["client_id"],
+                        "username": connect["username"],
+                        "password": connect["password"],
+                    }
+                )
+            if connect["will"]:
+                will = (connect["will"][0], connect["will"][1].decode("utf-8", errors="replace"))
+            authorized = (
+                connect["username"] == self.expected_username
+                and connect["password"] == self.expected_password
+            )
+            sock.sendall(b"\x20\x02\x00\x00" if authorized else b"\x20\x02\x00\x05")
+            if not authorized:
+                return  # 凭证错误：CONNACK rc=5 后关闭，不产生 LWT
+            with self._lock:
+                self.accepted_sessions += 1
+            while True:
+                packet = _read_packet(sock)
+                if packet is None:
+                    break  # 连接在未收到 DISCONNECT 时关闭 → 异常断线
+                header, body = packet
+                if header == 0xC0:  # PINGREQ
+                    sock.sendall(b"\xd0\x00")
+                elif header == 0xE0:  # DISCONNECT：正常退出，不触发 LWT
+                    return
+                elif header & 0xF0 == 0x30:  # PUBLISH
+                    self._handle_publish(sock, header, body, connect["client_id"])
+                elif header & 0xF0 == 0x80:  # SUBSCRIBE
+                    packet_id = int.from_bytes(body[:2], "big")
+                    topic_len = int.from_bytes(body[2:4], "big")
+                    name = body[4 : 4 + topic_len].decode()
+                    with self._lock:
+                        self.subscriptions.append(name)
+                    sock.sendall(b"\x90\x03" + bytes([packet_id >> 8, packet_id & 0xFF, 0x00]))
+            clean = False  # while 因 EOF 退出：异常断线
+        except (OSError, EOFError, ValueError):
+            clean = False
+        finally:
+            if not clean and will is not None:
+                with self._lock:
+                    self.lwt_emissions.append(will)
+            try:
+                sock.close()
+            except OSError:
+                pass
+
+    def _handle_publish(
+        self, sock: socket.socket, header: int, body: bytes, client_id: str
+    ) -> None:
+        qos = (header >> 1) & 0x03
+        retain = bool(header & 0x01)
+        offset = 0
+        topic_len = int.from_bytes(body[offset : offset + 2], "big")
+        offset += 2
+        name = body[offset : offset + topic_len].decode()
+        offset += topic_len
+        packet_id: int | None = None
+        if qos > 0:
+            packet_id = int.from_bytes(body[offset : offset + 2], "big")
+            offset += 2
+        payload = body[offset:]
+        with self._lock:
+            self.messages.append(
+                {
+                    "topic": name,
+                    "payload": payload,
+                    "qos": qos,
+                    "retain": retain,
+                    "client_id": client_id,
+                }
+            )
+            if retain:
+                self.retained[name] = payload
+        if qos == 1 and packet_id is not None:
+            sock.sendall(b"\x40\x02" + bytes([packet_id >> 8, packet_id & 0xFF]))
+
+
+def _read_packet(sock: socket.socket) -> tuple[int, bytes] | None:
+    first = sock.recv(1)
+    if not first:
+        return None
+    header = first[0]
+    length = 0
+    multiplier = 1
+    while True:
+        chunk = sock.recv(1)
+        if not chunk:
+            return None
+        value = chunk[0]
+        length += (value & 0x7F) * multiplier
+        if not value & 0x80:
+            break
+        multiplier *= 128
+    body = b""
+    while len(body) < length:
+        chunk = sock.recv(length - len(body))
+        if not chunk:
+            return None
+        body += chunk
+    return header, body
+
+
+def _parse_connect(body: bytes) -> dict:
+    offset = 0
+
+    def field() -> bytes:
+        nonlocal offset
+        size = int.from_bytes(body[offset : offset + 2], "big")
+        offset += 2
+        value = body[offset : offset + size]
+        offset += size
+        return value
+
+    field()  # protocol name "MQTT"
+    level = body[offset]
+    offset += 1
+    assert level == 4, "FakeBroker expects MQTTv311"
+    flags = body[offset]
+    offset += 1
+    offset += 2  # keepalive
+    client_id = field().decode()
+    will: tuple[str, bytes] | None = None
+    if flags & 0x04:
+        will_topic = field()
+        will_payload = field()
+        will = (will_topic.decode(), will_payload)
+    username = field().decode() if flags & 0x80 else None
+    password = field().decode() if flags & 0x40 else None
+    return {"client_id": client_id, "will": will, "username": username, "password": password}
+
+
+# ---------------------------------------------------------------------------
+# fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def identity_config(tmp_path: Path):
+    def _write(
+        port: int = 8883,
+        *,
+        password: str = TEST_PASSWORD,
+        ca_name: str = "ca.crt",
+        vehicle_id: str = VEHICLE,
+        username: str | None = None,
+    ) -> Path:
+        config = tmp_path / f"device-{vehicle_id}.json"
+        config.write_text(
+            json.dumps(
+                {
+                    "vehicle_id": vehicle_id,
+                    "display_name": "firebot-001",
+                    "mqtt_host": "127.0.0.1",
+                    "mqtt_port": port,
+                    "mqtt_username": username or vehicle_id,
+                    "mqtt_password": password,
+                    "ca_cert_path": str(CERTS / ca_name),
+                }
+            )
+        )
+        return config
+
+    return _write
+
+
+@pytest.fixture
+def broker():
+    brokers = []
+
+    def _make(
+        certfile: str = "server.crt",
+        keyfile: str = "server.key",
+        *,
+        expected_username: str = VEHICLE,
+        expected_password: str = TEST_PASSWORD,
+    ) -> FakeBroker:
+        instance = FakeBroker(
+            CERTS / certfile,
+            CERTS / keyfile,
+            expected_username=expected_username,
+            expected_password=expected_password,
+        )
+        brokers.append(instance)
+        return instance
+
+    yield _make
+    for instance in brokers:
+        instance.stop()
+
+
+# ---------------------------------------------------------------------------
+# A. 真实只读采集
+# ---------------------------------------------------------------------------
+
+
+def test_collector_reads_real_host_fields():
+    snapshot = collect(
+        AGENT_VERSION,
+        {"never_running": ("__definitely_not_a_real_process_xyz__",), "pytest": ("pytest",)},
+        now=datetime.now(UTC),
+    )
+    assert snapshot.agent_pid == os.getpid()
+    assert snapshot.agent_version == AGENT_VERSION
+    assert snapshot.os["kernel"]
+    assert snapshot.os["name"]
+    assert snapshot.uptime_seconds > 0
+    assert len(snapshot.load) == 3 and all(isinstance(v, float) for v in snapshot.load)
+    assert snapshot.memory["total"] > 0
+    assert snapshot.disk["total"] > 0
+    datetime.fromisoformat(snapshot.collected_at)
+    # 真实进程存活检测：测试进程自身 cmdline 含 pytest；虚构进程名绝不出现。
+    assert snapshot.programs["pytest"] is True
+    assert snapshot.programs["never_running"] is False
+
+
+def test_collector_no_fabrication_with_missing_sources(tmp_path: Path):
+    proc_root = tmp_path / "proc"
+    proc_root.mkdir()
+    markers = {"chassis": ("firebot_chassis",), "navigation": ("nav2",), "smog": ("firebot_smog",)}
+    # 没有任何进程目录：全部 False，不抛异常，不生成模拟值。
+    snapshot = collect(AGENT_VERSION, markers, now=datetime.now(UTC), proc_root=proc_root)
+    assert snapshot.programs == {"chassis": False, "navigation": False, "smog": False}
+
+    # 出现真实底盘进程 cmdline 时：仅该项为 True。
+    pid_dir = proc_root / "1234"
+    pid_dir.mkdir()
+    pid_dir.joinpath("cmdline").write_bytes(b"/usr/bin/firebot_chassis\x00--device\x00can0")
+    snapshot = collect(AGENT_VERSION, markers, now=datetime.now(UTC), proc_root=proc_root)
+    assert snapshot.programs == {"chassis": True, "navigation": False, "smog": False}
+
+
+def test_collector_injected_os_files(tmp_path: Path):
+    fake_uptime = tmp_path / "uptime"
+    fake_uptime.write_text("12345.67 890.12\n")
+    assert uptime_seconds(fake_uptime) == pytest.approx(12345.67)
+    fake_release = tmp_path / "os-release"
+    fake_release.write_text('NAME="Ubuntu"\nVERSION_ID="22.04"\nPRETTY_NAME="Ubuntu 22.04"\n')
+    info = os_info(fake_release)
+    assert info["name"] == "Ubuntu" and info["version_id"] == "22.04"
+
+
+# ---------------------------------------------------------------------------
+# B. 上行合同与 Schema 兼容
+# ---------------------------------------------------------------------------
+
+
+def test_status_payload_validates_against_contract():
+    payload = build_status({"chassis": False, "navigation": False}, "2026-11-11T05:00:00+00:00")
+    status = Status.model_validate(payload)
+    assert status.online is True
+    assert status.programs["agent"] is True
+    assert status.programs["chassis"] is False
+    assert status.task.state == "idle"
+    assert normalize("status", payload)["online"] is True
+
+
+def test_telemetry_null_semantics_for_unconnected_hardware():
+    payload = build_telemetry("2026-11-11T05:00:00+00:00")
+    telemetry = Telemetry.model_validate(payload)
+    assert telemetry.pose is None
+    assert telemetry.battery is None
+    assert telemetry.smog is None
+    assert telemetry.thermal is None
+    assert normalize("telemetry", payload)["pose"] is None
+
+
+def test_unknown_extra_fields_ignored_by_platform():
+    # 实验性扩展（默认关闭）进入 status 时，平台 UplinkModel extra=ignore 保证兼容。
+    payload = build_status({}, "2026-11-11T05:00:00+00:00", host={"uptime_seconds": 1.0})
+    normalized = normalize("status", payload)
+    assert "host" not in normalized  # 平台语义：未知字段不进入业务状态
+
+
+def test_availability_contract_forms():
+    assert normalize("availability", "online") == {"state": "online"}
+    assert normalize("availability", "offline") == {"state": "offline"}
+    assert normalize("availability", {"state": "offline"}) == {"state": "offline"}
+
+
+def test_topic_contract():
+    assert topic(VEHICLE, "availability") == f"v1/robot/{VEHICLE}/availability"
+    with pytest.raises(ValueError):
+        topic(VEHICLE, "cmd_vel")  # 不存在的上行类型
+    with pytest.raises(ValueError):
+        topic("bad id!", "status")
+
+
+# ---------------------------------------------------------------------------
+# C. 身份与安全
+# ---------------------------------------------------------------------------
+
+
+def test_identity_single_source(identity_config, tmp_path: Path):
+    config = identity_config()
+    identity = load_identity(config, allow_placeholder_password=True)
+    assert identity.vehicle_id == VEHICLE
+    assert identity.mqtt_username == VEHICLE
+    assert identity.client_id == f"{VEHICLE}-readonly-v1"
+
+
+def test_identity_forbidden_and_invalid(identity_config, tmp_path: Path):
+    for forbidden in ("R001", "R002", "firebot-vehicle-02"):
+        with pytest.raises(IdentityError):
+            load_identity(identity_config(vehicle_id=forbidden), allow_placeholder_password=True)
+    with pytest.raises(IdentityError):
+        load_identity(identity_config(username="someone-else"))
+    bad = identity_config().with_suffix(".json.bad")
+    bad.write_text("not json")
+    with pytest.raises(IdentityError):
+        load_identity(bad)
+    with pytest.raises(IdentityError):
+        load_identity(identity_config(vehicle_id="has space"))
+
+
+def test_identity_rejects_legacy_env(identity_config, monkeypatch, tmp_path: Path):
+    config = identity_config()
+    for name in ("FIREBOT_VEHICLE_ID", "BRIDGE_VEHICLE_ID"):
+        monkeypatch.setenv(name, "R001")
+        with pytest.raises(IdentityError, match="legacy identity env"):
+            load_identity(config, allow_placeholder_password=True)
+        monkeypatch.delenv(name)
+
+
+def test_identity_never_reads_bridge_env(tmp_path: Path):
+    # 即使 bridge.env 内容碰巧是合法 JSON，也必须是"从未读取"级别的拒绝。
+    bridge = tmp_path / "bridge.env"
+    bridge.write_text(json.dumps({"vehicle_id": VEHICLE, "mqtt_username": VEHICLE}))
+    with pytest.raises(IdentityError, match="legacy identity source"):
+        load_identity(bridge)
+
+
+def test_identity_placeholder_password_gate(identity_config, tmp_path: Path):
+    with pytest.raises(IdentityError, match="placeholder"):
+        load_identity(identity_config())
+    real = load_identity(identity_config(password="0p3r4t0r!device-01"))
+    assert real.vehicle_id == VEHICLE
+    acceptance = load_identity(identity_config(), allow_placeholder_password=True)
+    assert acceptance.vehicle_id == VEHICLE
+
+
+# ---------------------------------------------------------------------------
+# D. 本地隔离验收（进程内 FakeBroker）
+# ---------------------------------------------------------------------------
+
+
+def test_broker_rejects_wrong_credentials(identity_config, broker, tmp_path: Path):
+    local = broker(expected_username=VEHICLE, expected_password="right-password")
+    identity = load_identity(
+        identity_config(port=local.port, password="wrong-password"),
+    )
+    transport = MqttTransport(identity, TransportConfig())
+    transport.connect()
+    assert transport.wait_for_connect(2.0) is False
+    wait_until(lambda: local.connect_attempts, 5.0, "connect attempt recorded")
+    assert local.connect_attempts[0]["username"] == VEHICLE
+    assert local.connect_attempts[0]["password"] == "wrong-password"
+    assert local.messages == []  # 被拒绝后未发送任何数据
+    assert local.accepted_sessions == 0
+
+
+def test_agent_gives_up_after_failed_auth(identity_config, broker, tmp_path: Path):
+    local = broker(expected_password="right-password")
+    identity = load_identity(identity_config(port=local.port, password="wrong-password"))
+    transport = MqttTransport(
+        identity,
+        TransportConfig(reconnect_min_seconds=0.01, rng=random.Random(0)),
+    )
+    config = AgentConfig(
+        status_interval_seconds=0.2,
+        telemetry_interval_seconds=0.3,
+        host_metrics_path=tmp_path / "host.jsonl",
+        max_reconnect_attempts=2,
+    )
+    agent = ReadOnlyAgent(
+        identity, transport, config, {"chassis": ("firebot_chassis",)}, threading.Event()
+    )
+    assert agent.run() == 4
+    assert local.messages == []
+    assert len(local.connect_attempts) >= 3  # 初连 + 2 次重试
+
+
+def test_transport_publish_contract_and_duplicate_status(identity_config, broker, tmp_path: Path):
+    local = broker()
+    identity = load_identity(identity_config(port=local.port), allow_placeholder_password=True)
+    transport = MqttTransport(identity, TransportConfig())
+    transport.connect()
+    assert transport.wait_for_connect(5.0) is True
+    transport.publish_availability("online")
+    status_a = build_status({"chassis": False}, "2026-11-11T05:00:00+00:00")
+    status_b = build_status({"chassis": False}, "2026-11-11T05:00:05+00:00")
+    transport.publish_status(status_a)
+    transport.publish_status(status_b)  # 重复状态：retained last-wins，幂等
+    transport.publish_telemetry(build_telemetry("2026-11-11T05:00:00+00:00"))
+    wait_until(lambda: len(local.messages) >= 4, 5.0, "all publishes delivered")
+
+    def by_kind(kind: str):
+        return [m for m in local.messages if m["topic"] == topic(VEHICLE, kind)]
+
+    availability = by_kind("availability")[0]
+    assert availability["qos"] == 1 and availability["retain"] is True
+    assert availability["payload"] == b"online"
+    statuses = by_kind("status")
+    assert len(statuses) == 2
+    assert all(m["qos"] == 1 and m["retain"] is True for m in statuses)
+    assert all(Status.model_validate(json.loads(m["payload"])) for m in statuses)
+    retained_key = topic(VEHICLE, "status")
+    assert local.retained[retained_key] == json.dumps(status_b).encode()  # 最新一条生效
+    telemetry = by_kind("telemetry")[0]
+    assert telemetry["qos"] == 0 and telemetry["retain"] is False
+    assert json.loads(telemetry["payload"])["pose"] is None
+
+    transport.graceful_offline()
+    wait_until(lambda: not transport.connected, 3.0, "clean disconnect")
+    assert local.lwt_emissions == []  # 正常退出：干净断开，不触发 LWT
+    wait_until(lambda: local.retained.get(topic(VEHICLE, "availability")) == b"offline", 3.0)
+
+
+def test_agent_loop_in_process(identity_config, broker, tmp_path: Path):
+    local = broker()
+    identity = load_identity(identity_config(port=local.port), allow_placeholder_password=True)
+    transport = MqttTransport(
+        identity,
+        TransportConfig(reconnect_min_seconds=0.01, rng=random.Random(0)),
+    )
+    stop_event = threading.Event()
+    agent = ReadOnlyAgent(
+        identity,
+        transport,
+        AgentConfig(
+            status_interval_seconds=0.2,
+            telemetry_interval_seconds=0.3,
+            host_metrics_path=tmp_path / "host.jsonl",
+        ),
+        {"chassis": ("firebot_chassis",)},
+        stop_event,
+    )
+    result = []
+    thread = threading.Thread(target=lambda: result.append(agent.run()), daemon=True)
+    thread.start()
+    wait_until(
+        lambda: any(m["topic"] == topic(VEHICLE, "status") for m in local.messages),
+        10.0,
+        "status published",
+    )
+    stop_event.set()
+    thread.join(10.0)
+    assert result == [0]
+    assert (tmp_path / "host.jsonl").is_file()  # host 指标默认只写本地
+    with (tmp_path / "host.jsonl").open() as handle:
+        local_host = json.loads(handle.readline())
+    assert local_host["uptime_seconds"] >= 0 and local_host["os"]["kernel"]
+    assert local.lwt_emissions == []
+    assert local.subscriptions == []  # 从未订阅任何 topic
+
+
+def test_guard_refuses_when_legacy_bridge_running(tmp_path: Path):
+    proc_root = tmp_path / "proc"
+    pid_dir = proc_root / "777"
+    pid_dir.mkdir(parents=True)
+    pid_dir.joinpath("cmdline").write_bytes(
+        b"/opt/firebot/vehicle-bridge\x00--config\x00bridge.env"
+    )
+    assert legacy_bridge_running(proc_root) is True
+    with pytest.raises(OwnerConflictError, match="legacy vehicle-bridge"):
+        OwnerGuard(tmp_path / "run", proc_root=proc_root).acquire()
+
+
+def test_guard_second_instance_lock(tmp_path: Path):
+    first = OwnerGuard(tmp_path / "run")
+    first.acquire()
+    with pytest.raises(OwnerConflictError, match="another readonly agent instance"):
+        OwnerGuard(tmp_path / "run").acquire()
+    first.release()
+    second = OwnerGuard(tmp_path / "run")
+    second.acquire()  # 释放后可再次获取
+    second.release()
+
+
+def test_transport_structurally_cannot_subscribe(identity_config, tmp_path: Path):
+    identity = load_identity(identity_config(), allow_placeholder_password=True)
+    transport = MqttTransport(identity, TransportConfig())
+    with pytest.raises(SubscribeForbiddenError):
+        transport.subscribe(topic(VEHICLE, "cmd"))
+    # TLS 严格性：绝不 insecure，服务端证书必须可验证，且配置 CA 已装入信任库。
+    context = transport._client._ssl_context  # noqa: SLF001
+    assert transport._client._tls_insecure is False  # noqa: SLF001
+    assert context.verify_mode == ssl.CERT_REQUIRED
+    assert context.check_hostname is True
+    assert context.cert_store_stats()["x509_ca"] >= 1
+
+
+def test_no_control_paths_in_source():
+    package = REPO_ROOT / "services" / "vehicle_agent_v1_readonly"
+    sources = sorted(package.glob("*.py"))
+    assert sources, "agent package sources missing"
+    for source in sources:
+        text = source.read_text(encoding="utf-8").lower()
+        assert "/cmd_vel" not in text, f"control topic reference in {source.name}"
+        assert "modbus" not in text, f"modbus reference in {source.name}"
+        assert "import ros" not in text and "from ros" not in text, f"ros import in {source.name}"
+        assert "gpio" not in text, f"gpio reference in {source.name}"
+    combined = "\n".join(s.read_text(encoding="utf-8") for s in sources)
+    # 全包唯一订阅路径是禁止订阅的 stub（反证保证）。
+    assert combined.count("subscribe(") == 1, "subscribe must only exist as the forbidden stub"
+
+
+# ---------------------------------------------------------------------------
+# D. 本地隔离验收（真实子进程 + 进程内 FakeBroker，全生命周期）
+# ---------------------------------------------------------------------------
+
+
+def _agent_env() -> dict:
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in ("FIREBOT_VEHICLE_ID", "BRIDGE_VEHICLE_ID")
+    }
+    env["PYTHONPATH"] = str(REPO_ROOT)
+    return env
+
+
+def _start_agent(config: Path, run_dir: Path) -> subprocess.Popen:
+    return subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "services.vehicle_agent_v1_readonly.main",
+            "--config",
+            str(config),
+            "--run-dir",
+            str(run_dir),
+            "--status-interval",
+            "0.4",
+            "--telemetry-interval",
+            "0.5",
+            "--connect-wait",
+            "2",
+            "--allow-placeholder-credentials",
+        ],
+        cwd=str(REPO_ROOT),
+        env=_agent_env(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+
+def _stop_agent(proc: subprocess.Popen) -> tuple[str, str]:
+    proc.terminate()
+    proc.wait(timeout=10)
+    stdout, stderr = proc.communicate()
+    assert proc.returncode == 0, f"agent exit={proc.returncode}\n{stderr}"
+    return stdout, stderr
+
+
+def test_e2e_lifecycle_restart_and_owner_conflict(identity_config, broker, tmp_path: Path):
+    local = broker()
+    config = identity_config(port=local.port)
+    run_dir = tmp_path / "run"
+    first = _start_agent(config, run_dir)
+    try:
+        wait_until(
+            lambda: any(m["topic"] == topic(VEHICLE, "status") for m in local.messages),
+            20.0,
+            "first instance status",
+        )
+        topics = {m["topic"] for m in local.messages}
+        assert topics <= {
+            topic(VEHICLE, "availability"),
+            topic(VEHICLE, "status"),
+            topic(VEHICLE, "telemetry"),
+        }, f"unexpected topics: {topics}"
+        assert local.subscriptions == []  # 永不订阅（含 cmd）
+        status = json.loads(
+            [m for m in local.messages if m["topic"] == topic(VEHICLE, "status")][-1]["payload"]
+        )
+        assert status["online"] is True
+        assert status["programs"]["agent"] is True
+        assert status["programs"]["chassis"] is False  # 真实 001 未接入底盘
+        assert "host" not in status  # 扩展默认关闭
+        telemetry = json.loads(
+            [m for m in local.messages if m["topic"] == topic(VEHICLE, "telemetry")][0]["payload"]
+        )
+        assert telemetry["pose"] is None and telemetry["battery"] is None
+
+        # 第二个实例：同一 run-dir，必须拒绝成为第二个通信 owner。
+        assert (
+            agent_main(
+                [
+                    "--config",
+                    str(config),
+                    "--run-dir",
+                    str(run_dir),
+                    "--allow-placeholder-credentials",
+                ]
+            )
+            == EXIT_OWNER_CONFLICT
+        )
+        assert local.accepted_sessions == 1
+    finally:
+        stdout, stderr = _stop_agent(first)
+    assert "graceful offline published" in stderr
+    wait_until(lambda: local.retained.get(topic(VEHICLE, "availability")) == b"offline", 5.0)
+    assert local.lwt_emissions == []  # 正常退出无 LWT
+
+    # 重启行为：再次启动 → 重新上线（lock 已释放）。
+    second = _start_agent(config, run_dir)
+    try:
+        wait_until(
+            lambda: local.retained.get(topic(VEHICLE, "availability")) == b"online",
+            10.0,
+            "restart online",
+        )
+        assert local.accepted_sessions == 2
+    finally:
+        _stop_agent(second)
+
+
+def test_e2e_disconnect_recovery_and_lwt(identity_config, broker, tmp_path: Path):
+    local = broker()
+    config = identity_config(port=local.port)
+    proc = _start_agent(config, tmp_path / "run")
+    try:
+        wait_until(
+            lambda: any(m["topic"] == topic(VEHICLE, "status") for m in local.messages),
+            20.0,
+            "initial status",
+        )
+        sessions_before = local.accepted_sessions
+        local.abort_clients()  # 模拟网络中断：异常断线必须触发 LWT 并由 Agent 重连
+        wait_until(lambda: len(local.lwt_emissions) >= 1, 10.0, "LWT emitted")
+        assert local.lwt_emissions[0] == (topic(VEHICLE, "availability"), "offline")
+        wait_until(lambda: local.accepted_sessions >= sessions_before + 1, 20.0, "reconnected")
+        wait_until(
+            lambda: local.retained.get(topic(VEHICLE, "availability")) == b"online",
+            10.0,
+            "availability online after reconnect",
+        )
+    finally:
+        stdout, stderr = _stop_agent(proc)
+    assert "connection lost" in stderr
+    assert local.retained[topic(VEHICLE, "availability")] == b"offline"  # 最终优雅退出
+
+
+def test_e2e_wrong_credentials_rejected(identity_config, broker, tmp_path: Path):
+    local = broker(expected_password="right-password")
+    config = identity_config(port=local.port, password="wrong-password")
+    proc = _start_agent(config, tmp_path / "run")
+    try:
+        wait_until(lambda: len(local.connect_attempts) >= 2, 20.0, "repeated rejected attempts")
+        assert local.messages == []  # 从未发送任何数据
+        assert local.accepted_sessions == 0
+        assert all(attempt["password"] == "wrong-password" for attempt in local.connect_attempts)
+    finally:
+        stdout, stderr = _stop_agent(proc)
+    assert "connect failed" in stderr
+
+
+def test_e2e_wrong_ca_rejected(identity_config, broker, tmp_path: Path):
+    # broker 提供 other_ca 签发的证书；Agent 信任 test ca → 握手必须失败且不发送数据。
+    local = broker(certfile="other_server.crt", keyfile="other_server.key")
+    config = identity_config(port=local.port)
+    proc = _start_agent(config, tmp_path / "run")
+    try:
+        wait_until(lambda: local.handshake_failures >= 1, 20.0, "TLS handshake rejected")
+        time.sleep(0.5)
+        assert local.messages == []
+        assert local.accepted_sessions == 0
+    finally:
+        stdout, stderr = _stop_agent(proc)
+    assert "connect failed" in stderr
