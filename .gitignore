@@ -27,3 +27,6 @@ secrets/
 *.crt
 *.p12
 *.log
+
+# G1-R1 隔离 systemd 验收测试树（测试凭证不入库）
+sysd-acceptance/

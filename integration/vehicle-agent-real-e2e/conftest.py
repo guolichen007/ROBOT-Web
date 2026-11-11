@@ -32,6 +32,7 @@ E2E_DIR = Path(__file__).parent
 VEHICLE = "firebot-vehicle-01"
 VEHICLE_PASSWORD = "e2e-vehicle-01-password"
 GHOST_VEHICLE = "firebot-vehicle-99"  # 有凭证、无云端资产（未知设备反证用）
+NOACL_VEHICLE = "firebot-vehicle-88"  # passwd 有账号但 ACL 无 user 段（默认全拒验证用）
 PLATFORM_USER = "platform"
 PLATFORM_PASSWORD = "e2e-platform-password"
 
@@ -134,6 +135,7 @@ def e2e_stack(tmp_path_factory):
         (PLATFORM_USER, PLATFORM_PASSWORD),
         (VEHICLE, VEHICLE_PASSWORD),
         (GHOST_VEHICLE, "e2e-ghost-password"),
+        (NOACL_VEHICLE, "e2e-noacl-password"),  # 仅 passwd；ACL 无 user 段
     ):
         subprocess.run(
             ["mosquitto_passwd", "-b", str(passwd), user, password],
@@ -234,6 +236,7 @@ def e2e_stack(tmp_path_factory):
             "vehicle_password": VEHICLE_PASSWORD,
             "platform_password": PLATFORM_PASSWORD,
             "ghost_password": "e2e-ghost-password",
+            "noacl_password": "e2e-noacl-password",
             "redis": redis_client,
         }
     finally:

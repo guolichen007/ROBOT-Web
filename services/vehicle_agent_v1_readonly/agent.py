@@ -30,6 +30,7 @@ from services.vehicle_agent_v1_readonly.collector import (
     HostSnapshot,
     collect,
 )
+from services.vehicle_agent_v1_readonly.guard import legacy_bridge_running
 from services.vehicle_agent_v1_readonly.identity import DeviceIdentity
 from services.vehicle_agent_v1_readonly.transport import MqttConnectError, MqttTransport
 
@@ -40,8 +41,11 @@ STATUS_INTERVAL_SECONDS = 3.0
 TELEMETRY_INTERVAL_SECONDS = 30.0
 # 周期类参数下限：低于 1s 的配置视为异常（拒绝门禁在 CLI 边界执行）。
 MIN_INTERVAL_SECONDS = 1.0
+# G1-R1：运行期旧 Bridge 冲突检测周期（启动时由 OwnerGuard 同步检查一次）。
+OWNER_CHECK_INTERVAL_SECONDS = 5.0
 
 EXIT_OK = 0
+EXIT_OWNER_CONFLICT = 3
 EXIT_CONNECT_FAILED = 4
 
 
@@ -114,6 +118,7 @@ class ReadOnlyAgent:
     def run(self) -> int:
         reconnect_attempts = 0
         last_status = last_telemetry = float("-inf")
+        last_owner_check = float("-inf")
         while not self._stop_event.is_set():
             try:
                 self._transport.connect()
@@ -155,6 +160,18 @@ class ReadOnlyAgent:
                     logger.warning("connection lost; will reconnect")
                     break
                 now = time.monotonic()
+                # G1-R1：运行期通信 owner 冲突检测——旧 Bridge 在 Agent 运行期间被
+                # 重新启动时，安全处置：发布 offline 并退出（fail-closed），
+                # systemd Restart=on-failure 重启后会被启动守卫持续拒绝，直到冲突解除。
+                if now - last_owner_check >= OWNER_CHECK_INTERVAL_SECONDS:
+                    last_owner_check = now
+                    if legacy_bridge_running(self._proc_root):
+                        logger.critical(
+                            "legacy vehicle-bridge appeared while agent running; "
+                            "yielding communication ownership and shutting down"
+                        )
+                        self._transport.graceful_offline()
+                        return EXIT_OWNER_CONFLICT
                 if now - last_status >= self._config.status_interval_seconds:
                     self._publish_cycle("status")
                     last_status = now

@@ -823,13 +823,90 @@ def test_status_freshness_and_short_disconnect_recovery(identity_config, broker,
 
 
 def test_identity_rejects_open_permissions(identity_config, tmp_path: Path):
-    # G1-R0 A3：凭证文件权限受检——组/他任何权限位都必须拒绝。
+    # G1-R1：凭证权限受检——禁止组写与"其他"任意位。
+    # 允许 root:服务组 0640（非 root 服务用户组内可读、Agent 不可写、他人不可读）
+    # 与 0600；拒绝 0644（其他可读）与 0660（组可写）。
     config = identity_config()
-    config.chmod(0o644)
-    with pytest.raises(IdentityError, match="permissions too open"):
-        load_identity(config, allow_placeholder_password=True)
-    config.chmod(0o600)
-    assert load_identity(config, allow_placeholder_password=True).vehicle_id == VEHICLE
+    for bad_mode in (0o644, 0o666, 0o660):
+        config.chmod(bad_mode)
+        with pytest.raises(IdentityError, match="permissions too open"):
+            load_identity(config, allow_placeholder_password=True)
+    for good_mode in (0o600, 0o640):
+        config.chmod(good_mode)
+        assert load_identity(config, allow_placeholder_password=True).vehicle_id == VEHICLE
+
+
+def test_guard_sigkill_releases_lock(tmp_path: Path):
+    # G1-R1：SIGKILL 后 flock 由内核自动释放——进程消失即可再次启动，
+    # lock 文件存在不等于锁被持有（真实锁获取验证）。
+    lock_code = (
+        "import fcntl,time,os\n"
+        "fd=os.open({!r}, os.O_RDWR|os.O_CREAT, 0o600)\n"
+        "fcntl.flock(fd, fcntl.LOCK_EX)\n"
+        "time.sleep(30)"
+    ).format(str(tmp_path / "agent.lock"))
+    lock_holder = subprocess.Popen([sys.executable, "-c", lock_code])
+    time.sleep(0.5)
+    guard = OwnerGuard(tmp_path)
+    with pytest.raises(OwnerConflictError):
+        guard.acquire()
+    lock_holder.kill()  # SIGKILL：不经过任何释放逻辑
+    lock_holder.wait(timeout=5)
+    assert (tmp_path / "agent.lock").exists()  # 文件仍在……
+    guard.acquire()  # ……但真实 flock 已随进程消亡释放
+    guard.release()
+
+
+def test_agent_detects_legacy_bridge_at_runtime(identity_config, broker, tmp_path: Path):
+    # G1-R1：旧 Bridge 在 Agent 运行期间被重新启动 → 运行期 owner 冲突检测，
+    # 安全处置：发布 offline、退出码 3，systemd Restart=on-failure 接手后由启动守卫持续拒绝。
+    from services.vehicle_agent_v1_readonly.agent import OWNER_CHECK_INTERVAL_SECONDS
+
+    local = broker()
+    identity = load_identity(identity_config(port=local.port), allow_placeholder_password=True)
+    transport = MqttTransport(
+        identity, TransportConfig(reconnect_min_seconds=0.01, rng=random.Random(0))
+    )
+    proc_root = tmp_path / "proc"
+    proc_root.mkdir()
+    stop_event = threading.Event()
+    agent = ReadOnlyAgent(
+        identity,
+        transport,
+        AgentConfig(
+            status_interval_seconds=1.0,
+            telemetry_interval_seconds=2.0,
+            host_metrics_path=tmp_path / "host.jsonl",
+        ),
+        {"chassis": ("firebot_chassis",)},
+        stop_event,
+        proc_root=proc_root,
+    )
+    result = []
+    thread = threading.Thread(target=lambda: result.append(agent.run()), daemon=True)
+    thread.start()
+    wait_until(
+        lambda: any(m["topic"] == topic(VEHICLE, "status") for m in local.messages),
+        10.0,
+        "status before conflict",
+    )
+    # 旧 Bridge 在运行期"重启"：伪造其进程 cmdline 出现在 /proc
+    pid_dir = proc_root / "4242"
+    pid_dir.mkdir()
+    pid_dir.joinpath("cmdline").write_bytes(b"/opt/firebot/vehicle-bridge\x00--restart")
+    thread.join(timeout=OWNER_CHECK_INTERVAL_SECONDS + 10.0)
+    assert not thread.is_alive()
+    assert result == [3]  # 安全处置：退出码 3
+    statuses = [m for m in local.messages if m["topic"] == topic(VEHICLE, "status")]
+    wait_until(
+        lambda: local.retained.get(topic(VEHICLE, "availability")) == b"offline",
+        5.0,
+        "offline published on conflict",
+    )
+    # 冲突后不再有新的 status 上行（离线让位）
+    last_ts = statuses[-1]
+    time.sleep(1.2)
+    assert statuses[-1] == last_ts
 
 
 def test_no_control_paths_in_source():

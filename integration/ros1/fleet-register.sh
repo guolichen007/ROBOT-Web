@@ -117,36 +117,58 @@ MAP_CHECKSUM="${FIREBOT_MAP_CHECKSUM:-}"
 
 TOKEN_TMP="$(mktemp /tmp/firebot-enroll-token.XXXXXX)"
 chmod 600 "$TOKEN_TMP"
-"${COMPOSE[@]}" exec -T api python -c "
+# G1-R1：生产凭证不得嵌入 python -c 或任何可被进程参数查看的命令。
+# 凭证 payload 经 stdin（heredoc 管道）注入容器内 python：
+# 容器进程 argv 只有 python -c 的静态代码，不含任何凭证值。
+"${COMPOSE[@]}" exec -T api python -c '
+import hashlib
+import json
+import sys
+
+from sqlalchemy import select
+
+from app.db.models import Robot, RobotFleetAssignment
 from app.db.session import SessionLocal
 from app.modules.enrollment.token_store import issue_token
-from app.db.models import RobotFleetAssignment, Robot
-from sqlalchemy import select
-import hashlib
+
+payload = json.load(sys.stdin)
 db = SessionLocal()
 cred = {
-    'profile_id': '$PROFILE_ID',
-    'mqtt_host': '$MQTT_HOST',
-    'mqtt_port': $MQTT_PORT,
-    'mqtt_password': '$PASSWORD',
-    'device_token': '$DEVICE_TOKEN',
-    'ca_cert': '/etc/firebot/mqtt-ca.crt',
-    'site_code': '$SITE_CODE',
-    'map_code': '$MAP_CODE',
-    'map_version': '$MAP_VERSION',
-    'map_checksum': '$MAP_CHECKSUM',
+    "profile_id": payload["profile_id"],
+    "mqtt_host": payload["mqtt_host"],
+    "mqtt_port": int(payload["mqtt_port"]),
+    "mqtt_password": payload["mqtt_password"],
+    "device_token": payload["device_token"],
+    "ca_cert": "/etc/firebot/mqtt-ca.crt",
+    "site_code": payload.get("site_code"),
+    "map_code": payload.get("map_code"),
+    "map_version": payload.get("map_version"),
+    "map_checksum": payload.get("map_checksum"),
 }
-token = issue_token(db, '$DEVICE_ID', cred)
-robot = db.scalar(select(Robot).where(Robot.vehicle_id == '$DEVICE_ID'))
+token = issue_token(db, payload["device_id"], cred)
+robot = db.scalar(select(Robot).where(Robot.vehicle_id == payload["device_id"]))
 if robot:
     a = db.get(RobotFleetAssignment, robot.id)
     if not a:
         a = RobotFleetAssignment(robot_id=robot.id)
         db.add(a)
-    a.device_token_hash = hashlib.sha256('$DEVICE_TOKEN'.encode()).hexdigest()
+    a.device_token_hash = hashlib.sha256(payload["device_token"].encode()).hexdigest()
 db.commit()
 print(token)
-" > "$TOKEN_TMP"
+' > "$TOKEN_TMP" <<PAYLOAD
+{
+  "device_id": "$DEVICE_ID",
+  "profile_id": "$PROFILE_ID",
+  "mqtt_host": "$MQTT_HOST",
+  "mqtt_port": $MQTT_PORT,
+  "mqtt_password": "$PASSWORD",
+  "device_token": "$DEVICE_TOKEN",
+  "site_code": "$SITE_CODE",
+  "map_code": "$MAP_CODE",
+  "map_version": "$MAP_VERSION",
+  "map_checksum": "$MAP_CHECKSUM"
+}
+PAYLOAD
 ENROLL_TOKEN="$(cat "$TOKEN_TMP")"
 rm -f "$TOKEN_TMP"
 

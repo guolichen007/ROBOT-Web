@@ -57,8 +57,10 @@ sudo cp /etc/systemd/system/firebot-bridge.service \
 ## 4. 新 Agent 安装步骤（G1 获批后执行，本轮不执行）
 
 ```bash
-# 4.0 只读 preflight（fail-closed，任何 FAIL 即停止，禁止继续安装）
-sudo bash scripts/preflight_vehicle_agent_v1_readonly.sh
+# 4.0 只读 preflight 第一阶段（fail-closed，任何 FAIL 即停止，禁止继续安装）
+sudo bash scripts/preflight_vehicle_agent_v1_readonly.sh preinstall
+# PREINSTALL=环境预检：旧桥 unit 状态/进程、磁盘空间、Python3.11、身份冲突、
+# 网络与 CA 预检（交付物缺失只 WARN，真实冲突才 FAIL）
 
 # 4.1 部署目录：/opt/firebot/vehicle-agent-v1-readonly（独立于旧目录）
 sudo mkdir -p /opt/firebot/vehicle-agent-v1-readonly
@@ -68,33 +70,53 @@ sudo /usr/bin/python3.11 -m venv /opt/firebot/vehicle-agent-v1-readonly/venv
 sudo /opt/firebot/vehicle-agent-v1-readonly/venv/bin/pip install \
   -r /opt/firebot/vehicle-agent-v1-readonly/repo/services/vehicle_agent_v1_readonly/requirements.txt
 
-# 4.3 受控凭证注入：/etc/firebot/vehicle-agent-v1-readonly/（与旧 /etc/firebot 分开）
+# 4.3 先建服务用户/组，再执行需要该身份的权限设置（顺序不可颠倒）
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin firebot
+
+# 4.4 受控凭证注入：/etc/firebot/vehicle-agent-v1-readonly/（与旧 /etc/firebot 分开）
 sudo mkdir -p /etc/firebot/vehicle-agent-v1-readonly
-sudo install -m 600 device_identity.firebot-vehicle-01.json \
+sudo install -m 640 device_identity.firebot-vehicle-01.json \
   /etc/firebot/vehicle-agent-v1-readonly/device_identity.json   # 生产密码只在此文件
 sudo chown root:firebot /etc/firebot/vehicle-agent-v1-readonly/device_identity.json
 sudo install -m 644 <运维发放的生产CA> \
   /etc/firebot/vehicle-agent-v1-readonly/ca.crt
-# 权限受检：Agent 启动时拒绝任何组/他可读的凭证文件（mode 0600 强校验）
+# 权限方案（G1-R1 修正）：root:firebot + 0640 —— 服务用户组内可读（非 root 可读取）、
+# Agent 自身不可写、其他普通用户不可读。Agent 启动时强校验"禁止组写 + 禁止其他任意位"
+# （0640/0600 允许，0644/0660 拒绝）。systemd LoadCredential（≥247）仅在预检确认
+# 目标机 systemd 版本后作为可选替代，不照搬新功能。
 
-# 4.4 专用低权限用户与运行目录
-sudo useradd --system --no-create-home --shell /usr/sbin/nologin firebot
+# 4.5 运行目录
 sudo mkdir -p /var/lib/firebot/vehicle-agent-v1-readonly
 sudo chown firebot:firebot /var/lib/firebot/vehicle-agent-v1-readonly
 sudo chmod 700 /var/lib/firebot/vehicle-agent-v1-readonly
 
-# 4.5 systemd unit（模板：services/vehicle_agent_v1_readonly/deploy/...service）
+# 4.6 systemd unit（模板：services/vehicle_agent_v1_readonly/deploy/...service）
 sudo install -m 644 \
   services/vehicle_agent_v1_readonly/deploy/firebot-vehicle-agent-v1-readonly.service \
   /etc/systemd/system/firebot-vehicle-agent-v1-readonly.service
 sudo systemctl daemon-reload
+
+# 4.7 只读 preflight 第二阶段（产物与运行态预检，全部通过才允许启动）
+sudo bash scripts/preflight_vehicle_agent_v1_readonly.sh prestart
+# PRESTART=服务用户/组、venv+依赖锁定、凭证权限+服务用户实际可读性、运行目录、
+# unit 语法（systemd-analyze verify）、单 owner 实际 flock 获取验证、旧桥复查
+
 systemctl status firebot-bridge.service   # 现场证据复核：必须仍为 inactive
 sudo systemctl start firebot-vehicle-agent-v1-readonly
 ```
 
 凭证铁律：生产密码只允许出现在 `/etc/firebot/vehicle-agent-v1-readonly/device_identity.json`
-（0600，root:firebot）；禁止写进普通配置、源码、仓库、systemd unit 或环境文件。
-Agent 对身份文件做权限强校验（组/他任何权限位 → 拒绝启动）。
+（0640，root:firebot）；禁止写进普通配置、源码、仓库、systemd unit、命令行参数或环境文件。
+Agent 对身份文件做权限强校验（组写/其他任意位 → 拒绝启动）。
+
+### 4.8 隔离 systemd 验收（G1-R1 已执行证据）
+
+`scripts/systemd_readonly_acceptance.sh` 在隔离环境（systemd 245、真实低权限 UID/GID、
+systemd-run 瞬态单元、不写 /etc/systemd/system）**14/14 通过**：非 root 服务用户可读 0640
+凭证、nobody 不可读、Agent 不可写；WorkingDirectory（主进程 cwd 校验）与 PYTHONPATH/venv/
+依赖锁定生效；首次启动真实 broker 收到 status；第二实例退出码 3；stop→start 重启语义；
+Restart=on-failure（冲突退出 3 自动重启）；SIGTERM 正常退出码 0。验收不连接生产 Broker、
+不触碰生产 unit。
 
 单 owner 三重防护（运行期）：systemd 单实例 → Agent 内 flock（run-dir/agent.lock）
 → 旧 `vehicle-bridge` 进程存在即拒绝启动。

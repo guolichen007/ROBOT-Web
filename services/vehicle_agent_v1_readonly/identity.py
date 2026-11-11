@@ -62,15 +62,20 @@ def assert_no_legacy_identity_env() -> None:
 
 
 def _check_file_permissions(config_path: Path) -> None:
-    """凭证文件权限受检：必须 0600（组/他无任何权限），否则拒绝读取。"""
+    """凭证文件权限受检（G1-R1）：禁止组写与"其他"任意位。
+
+    正式安装方案为 root:firebot + 0640：服务用户（组内）可读、Agent 自身（非属主）
+    不可写、其他普通用户不可读；兼容纯 0600。禁止 0660/0644 等更开放的组合。
+    """
     try:
         mode = config_path.stat().st_mode
     except OSError as exc:
         raise IdentityError(f"cannot stat identity config {config_path}: {exc}") from exc
-    if mode & 0o077:
+    if mode & 0o027:
         raise IdentityError(
             f"identity file {config_path} permissions too open: "
-            f"{oct(mode & 0o777)}; mode 0600 required (contains per-device credentials)"
+            f"{oct(mode & 0o777)}; required: no group-write, no other-any "
+            f"(root:service-group 0640 or root-only 0600; contains per-device credentials)"
         )
 
 

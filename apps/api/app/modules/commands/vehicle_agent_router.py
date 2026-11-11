@@ -4,6 +4,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, Request
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import null as sql_null
 from sqlalchemy import select
 
 from app.core.audit import write_audit
@@ -85,6 +86,9 @@ def bind_protocol(
     previous = robot.agent_protocol
     robot.agent_protocol = payload.protocol
     robot.agent_state_json, robot.boot_id, robot.last_seen_at = {}, None, None
+    # G1-R1：协议切换后旧急停数据来源失效 → 急停状态回到"未验证"（SQL NULL），
+    # 不得把历史 False 当"未触发"继续展示（ORM 更新会跳过 None，须显式 null()）。
+    robot.estop_active = sql_null()
     integration = db.get(RobotIntegrationProfile, robot.id)
     if not integration:
         integration = RobotIntegrationProfile(robot_id=robot.id)
@@ -113,7 +117,12 @@ def bind_protocol(
         capability = RobotCapability(robot_id=robot.id)
         db.add(capability)
     capability.protocol_version = "vehicle-agent-v1" if payload.protocol == PROTOCOL else "unknown"
-    capability.supported_commands_json = list(COMMANDS) if payload.protocol == PROTOCOL else []
+    # G1-R1：能力列表必须诚实——下行总开关关闭或该车不在 allowlist 时，
+    # 不得宣称任何控制命令可用（只读 V1 设备能力为空）。
+    if payload.protocol == PROTOCOL and settings.vehicle_agent_v1_downlink_enabled:
+        capability.supported_commands_json = list(COMMANDS)
+    else:
+        capability.supported_commands_json = []
     capability.sensors_json, capability.media_json = [], []
     queue_redis_delete(db, f"robot:{robot.vehicle_id}:latest")
     queue_redis_delete(db, f"vehicle-agent:binding:{robot.vehicle_id}")

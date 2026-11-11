@@ -10,11 +10,18 @@ const freshnessClass = computed(() => {
   return 'danger'
 })
 
+// G1-R1：V1 只读设备（未接入底盘）在线时不得显示"待命"——只读监测语义。
+const v1ReadonlyMonitoring = computed(
+  () =>
+    props.robot?.agent_protocol === 'VEHICLE_AGENT_V1' &&
+    props.robot?.agent_state?.status?.programs?.chassis !== true,
+)
 const mode = computed(() => {
   if (props.robot?.estop_active) return robotModeLabel('ESTOP')
   if (props.task?.type === 'EXTINGUISH') return robotModeLabel('EXTINGUISHING')
   if (props.task?.type === 'RETURN_DOCK') return robotModeLabel('RETURNING')
   if (props.task) return robotModeLabel('PATROLLING')
+  if (props.robot?.online_state === 'ONLINE' && v1ReadonlyMonitoring.value) return '只读监测'
   return robotModeLabel(props.robot?.online_state === 'ONLINE' ? 'IDLE' : undefined)
 })
 const rightDetection = computed(() => {

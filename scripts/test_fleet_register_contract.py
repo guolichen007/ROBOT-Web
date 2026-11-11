@@ -101,9 +101,13 @@ def test_fleet_register_secret_output_scan() -> None:
         "; ".join(leaked),
     )
     check("只输出 ENROLL_TOKEN 一次性交付", "ENROLL_TOKEN=$ENROLL_TOKEN" in script)
+    # G1-R1：凭证必须经 stdin 注入（heredoc PAYLOAD → json.load(sys.stdin)），
+    # python -c 的代码字符串不得含任何 '$VAR' 凭证插值（进程 argv 零凭证）。
+    check("凭证经 stdin 注入（json.load(sys.stdin) + PAYLOAD heredoc）",
+          "json.load(sys.stdin)" in script and "<<PAYLOAD" in script)
     check(
-        "MQTT credential 只进 token payload（不回显）",
-        "\"'$PASSWORD'\"" in script or "'$PASSWORD'" in script,
+        "NO_CREDENTIAL_IN_ARGV（python -c 代码不含 PASSWORD/DEVICE_TOKEN 插值）",
+        "'$PASSWORD'" not in script and "'$DEVICE_TOKEN'" not in script,
     )
 
 
@@ -148,7 +152,7 @@ def test_mqtt_private_ca_path() -> None:
     )
     check(
         "MQTT_PRIVATE_CA_PATH（fleet-register 签发 ca_cert=mqtt-ca.crt）",
-        "'/etc/firebot/mqtt-ca.crt'" in read("integration/ros1/fleet-register.sh"),
+        "/etc/firebot/mqtt-ca.crt" in read("integration/ros1/fleet-register.sh"),
     )
     cfg = read("integration/ros1/vehicle-bridge/firebot_bridge/config.py")
     check(

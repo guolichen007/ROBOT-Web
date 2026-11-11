@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import socket
 import ssl
 import subprocess
 import sys
@@ -18,7 +19,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import paho.mqtt.client as mqtt
-from conftest import GHOST_VEHICLE, REPO_ROOT, VEHICLE, VEHICLE_PASSWORD
+from conftest import (
+    GHOST_VEHICLE,
+    NOACL_VEHICLE,
+    REPO_ROOT,
+    VEHICLE,
+    VEHICLE_PASSWORD,
+    _port_open,
+)
 
 from services.vehicle_agent_v1 import topic
 
@@ -390,3 +398,197 @@ def test_no_fake_hardware_and_control_gate(e2e_stack, vehicle_asset, api_client,
     for line in log.splitlines():
         if "SUBSCRIBE" in line:
             assert f"{VEHICLE}-readonly-v1" not in line, f"agent subscribed: {line}"
+
+
+def test_acl_user_without_section_denied_by_default(e2e_stack, vehicle_asset):
+    """Mosquitto %u pattern 语义：pattern 规则仅作用于其所在 user 段；
+    passwd 有账号但 ACL 无 user 段的认证用户默认全拒（deny-all），
+    绝不落入其他 user 段的 pattern。用"会真实改变状态"的合法载荷验证被丢弃。"""
+    from app.db.models import Robot
+    from app.db.session import SessionLocal
+    from sqlalchemy import select
+
+    stack = e2e_stack
+    with SessionLocal() as db:
+        before = db.scalar(select(Robot).where(Robot.vehicle_id == VEHICLE)).online_state
+    client = mqtt.Client(
+        mqtt.CallbackAPIVersion.VERSION2,
+        client_id=f"{NOACL_VEHICLE}-probe",
+        protocol=mqtt.MQTTv311,
+    )
+    client.tls_set(
+        ca_certs=str(stack["certs"] / "ca.crt"),
+        cert_reqs=ssl.CERT_REQUIRED,
+        tls_version=ssl.PROTOCOL_TLS_CLIENT,
+    )
+    client.username_pw_set(NOACL_VEHICLE, stack["noacl_password"])
+    client.connect("127.0.0.1", stack["mqtt_port"], keepalive=10)
+    client.loop_start()
+    try:
+        wait_until(lambda: client.is_connected(), 10.0, "noacl user connected (auth ok)")
+        hostile = json.dumps(
+            {
+                "online": True,
+                "programs": {"agent": True},
+                "task": {
+                    "state": "idle",
+                    "patrol_next": None,
+                    "patrol_count": 0,
+                    "patrol_paused": False,
+                },
+                "ts": datetime.now(UTC).isoformat(),
+            }
+        )
+        info = client.publish(topic(VEHICLE, "status"), hostile, qos=1)
+        try:
+            info.wait_for_publish(2.0)
+        except RuntimeError:
+            pass
+        time.sleep(2.0)  # 若被转发将改变 VEHICLE 状态；断言保持原状=ACL 丢弃
+    finally:
+        client.disconnect()
+        client.loop_stop()
+    with SessionLocal() as db:
+        after = db.scalar(select(Robot).where(Robot.vehicle_id == VEHICLE)).online_state
+    assert after == before
+
+
+def test_ca_rotation_isolated_old_trust_rejected(e2e_stack):
+    """CA 轮换隔离验证：新 CA 信任的客户端可连新 broker；只信旧 CA 的客户端被拒；
+    旧 CA 链（R002 式既有信任）不受影响——轮换方案不替换全局 CA。"""
+    import subprocess
+
+    stack = e2e_stack
+    workdir = stack["workdir"]
+    new_ca_dir = workdir / "ca2"
+    new_ca_dir.mkdir(exist_ok=True)
+    # 新 CA + 新服务器证书（TEST ONLY）
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            str(new_ca_dir / "ca.key"),
+            "-out",
+            str(new_ca_dir / "ca.crt"),
+            "-days",
+            "3650",
+            "-subj",
+            "/CN=Firebot Rotation Test CA (TEST ONLY)",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        [
+            "openssl",
+            "req",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            str(new_ca_dir / "server.key"),
+            "-out",
+            str(new_ca_dir / "server.csr"),
+            "-subj",
+            "/CN=localhost",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    (new_ca_dir / "san.cnf").write_text("subjectAltName=DNS:localhost,IP:127.0.0.1\n")
+    subprocess.run(
+        [
+            "openssl",
+            "x509",
+            "-req",
+            "-in",
+            str(new_ca_dir / "server.csr"),
+            "-CA",
+            str(new_ca_dir / "ca.crt"),
+            "-CAkey",
+            str(new_ca_dir / "ca.key"),
+            "-CAcreateserial",
+            "-out",
+            str(new_ca_dir / "server.crt"),
+            "-days",
+            "3650",
+            "-extfile",
+            str(new_ca_dir / "san.cnf"),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    # 第二 broker（新 CA 签名），端口随机
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port2 = probe.getsockname()[1]
+    conf2 = workdir / "mosquitto.ca2.conf"
+    conf2.write_text(
+        "\n".join(
+            [
+                f"listener {port2} 127.0.0.1",
+                "allow_anonymous false",
+                f"password_file {workdir / 'passwd'}",
+                f"cafile {new_ca_dir / 'ca.crt'}",
+                f"certfile {new_ca_dir / 'server.crt'}",
+                f"keyfile {new_ca_dir / 'server.key'}",
+                "require_certificate false",
+                "persistence false",
+            ]
+        )
+        + "\n"
+    )
+    broker2 = subprocess.Popen(
+        ["mosquitto", "-c", str(conf2)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        time.sleep(1)
+        assert _port_open("127.0.0.1", port2, 10.0), "rotation broker did not start"
+
+        def try_connect(ca: Path, port: int) -> bool:
+            probe_client = mqtt.Client(
+                mqtt.CallbackAPIVersion.VERSION2,
+                client_id="rotation-probe",
+                protocol=mqtt.MQTTv311,
+            )
+            probe_client.tls_set(
+                ca_certs=str(ca),
+                cert_reqs=ssl.CERT_REQUIRED,
+                tls_version=ssl.PROTOCOL_TLS_CLIENT,
+            )
+            probe_client.username_pw_set(VEHICLE, stack["vehicle_password"])
+            try:
+                probe_client.connect("127.0.0.1", port, keepalive=5)
+            except (OSError, ssl.SSLError):
+                return False  # TLS 验证失败即拒绝（绝不降级）
+            probe_client.loop_start()
+            try:
+                deadline = time.monotonic() + 5.0
+                while time.monotonic() < deadline and not probe_client.is_connected():
+                    time.sleep(0.1)
+                connected = probe_client.is_connected()
+            finally:
+                probe_client.disconnect()
+                probe_client.loop_stop()
+            return connected
+
+        # 新 CA 信任 → 新 broker 连接成功
+        assert try_connect(new_ca_dir / "ca.crt", port2) is True
+        # 旧 CA 信任 → 新 broker 被拒（旧信任路径关闭，不静默降级）
+        assert try_connect(stack["certs"] / "ca.crt", port2) is False
+        # 旧 CA 信任 → 旧 broker 依旧可用（R002 式既有信任链不受影响）
+        assert try_connect(stack["certs"] / "ca.crt", stack["mqtt_port"]) is True
+    finally:
+        broker2.terminate()
+        try:
+            broker2.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            broker2.kill()
+            broker2.wait(timeout=10)

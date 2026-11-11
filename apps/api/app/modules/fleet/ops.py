@@ -16,6 +16,7 @@ import sys
 from dataclasses import dataclass
 
 from sqlalchemy import func, select
+from sqlalchemy import null as sql_null
 from sqlalchemy.orm import Session
 
 from app.db.models import Robot, RobotFleetAssignment, Site
@@ -81,6 +82,9 @@ def preregister(db: Session, device_id: str, name: str, site_code: str) -> Prere
         current_mode="IDLE",
         enabled=False,
     )
+    # G1-R1：急停未验证（无真实急停数据源）。模型列 Python 端 default=False 会兜底
+    # None，必须显式写入 SQL NULL，绝不落默认 False（"未触发"）。
+    robot.estop_active = sql_null()
     db.add(robot)
     db.flush()  # 生成 robot.id 供 assignment 外键使用
     db.add(

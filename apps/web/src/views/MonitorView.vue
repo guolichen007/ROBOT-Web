@@ -86,7 +86,10 @@ const trajectory = computed(() => {
     []
   )
 })
-const readOnly = computed(() => robot.value?.integration?.source_kind === 'ROS_COMPAT')
+const readOnly = computed(
+  () =>
+    robot.value?.integration?.source_kind === 'ROS_COMPAT' || robot.value?.enabled === false,
+)
 const patrolReady = computed(() => robot.value?.autonomous_task_ready?.patrol === true)
 const returnReady = computed(() => robot.value?.autonomous_task_ready?.return_dock === true)
 const stopReady = computed(() => robot.value?.safety_command_ready?.stop_motion === true)
@@ -161,9 +164,17 @@ const primaryAlarmLocation = computed(() => {
 })
 
 const patrolOnline = computed(() => robot.value?.online_state === 'ONLINE')
-const patrolStatus = computed(() =>
-  activeTask.value ? '巡检执行中' : patrolOnline.value ? '待命' : '未接入',
+// G1-R1：Agent 在线 ≠ 机器人控制就绪。V1 只读设备（未接入底盘）不得显示"待命"。
+const v1ReadonlyMonitoring = computed(
+  () =>
+    robot.value?.agent_protocol === 'VEHICLE_AGENT_V1' &&
+    robot.value?.agent_state?.status?.programs?.chassis !== true,
 )
+const patrolStatus = computed(() => {
+  if (activeTask.value) return '巡检执行中'
+  if (!patrolOnline.value) return '未接入'
+  return v1ReadonlyMonitoring.value ? '只读监测' : '待命'
+})
 const patrolProgress = computed(() => activeTask.value?.progress ?? 0)
 const patrolCode = computed(() => activeTask.value?.task_code || '—')
 const roofStream = computed(() => monitor.activeRobotStreams.find((item) => item.camera_type === 'roof_rgb'))
