@@ -294,7 +294,8 @@ def main() -> None:
             adapter.expire()
             if client.is_connected():
                 redis.setex(
-                    heartbeat_key("vehicle-agent-adapter", instance_id()), 5,
+                    heartbeat_key("vehicle-agent-adapter", instance_id()),
+                    5,
                     datetime.now(UTC).isoformat(),
                 )
                 # 兼容键（"任一实例存活"语义）：api 侧命令门/系统健康与既有脚本读取；

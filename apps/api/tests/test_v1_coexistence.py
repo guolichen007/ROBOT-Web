@@ -19,9 +19,8 @@ def test_heartbeat_key_namespaced_per_instance(monkeypatch):
     monkeypatch.setenv("FIREBOT_SERVICE_INSTANCE_ID", "mqtt-ingress-r001")
     assert heartbeat_key("mqtt-ingress") == "service:mqtt-ingress:heartbeat:mqtt-ingress-r001"
     # 两实例键不同 → 不会互相覆盖
-    assert (
-        heartbeat_key("mqtt-ingress", "mqtt-ingress-prod")
-        != heartbeat_key("mqtt-ingress", "mqtt-ingress-r001")
+    assert heartbeat_key("mqtt-ingress", "mqtt-ingress-prod") != heartbeat_key(
+        "mqtt-ingress", "mqtt-ingress-r001"
     )
 
 

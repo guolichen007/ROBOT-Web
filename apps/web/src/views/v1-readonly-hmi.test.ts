@@ -293,9 +293,7 @@ describe('RobotsView 只读设备可监控（G1-P2）', () => {
     await nextTick()
     await nextTick()
 
-    const switchButtons = wrapper
-      .findAll('button')
-      .filter((b) => b.text().includes('切换监控'))
+    const switchButtons = wrapper.findAll('button').filter((b) => b.text().includes('切换监控'))
     expect(switchButtons.length).toBeGreaterThan(0)
     expect(wrapper.text()).toContain('平台已停用') // 停用徽标保留，如实展示
     wrapper.unmount()
@@ -331,9 +329,7 @@ describe('RobotsView 只读设备可监控（G1-P2）', () => {
     await nextTick()
     await nextTick()
 
-    const switchButtons = wrapper
-      .findAll('button')
-      .filter((b) => b.text().includes('切换监控'))
+    const switchButtons = wrapper.findAll('button').filter((b) => b.text().includes('切换监控'))
     expect(switchButtons.length).toBe(0)
     wrapper.unmount()
   })
@@ -344,7 +340,7 @@ describe('V1 链路与硬件新鲜度分离（G1-P2）', () => {
     setActivePinia(createPinia())
     const store = useMonitorStore()
     store.snapshot = { ...emptySnapshot(), robots: [robot] }
-    store.activeRobotId = robot.id
+    store.activeRobotId = robot.id ?? null
     store.connected = true
     const wrapper = mount(ShellHarness, {
       attachTo: document.body,
