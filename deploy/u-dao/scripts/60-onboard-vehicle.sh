@@ -60,9 +60,17 @@ generate_credentials() {
   chmod 700 "$VEHICLE_DIR"
   MQTT_PW="$(openssl rand -base64 32)"
   printf '%s' "$MQTT_PW" > "$VEHICLE_DIR/mqtt_password"
-  MASTER_TOKEN="$(cat "$RUNTIME_ROOT/secrets/app/media_publish_token")"
-  SRT_TOKEN="$(printf 'vehicle-srt:%s' "$VEHICLE_ID" | \
-    openssl dgst -sha256 -hmac "$MASTER_TOKEN" | awk '{print $2}')"
+  # G1-GO0 A：master token 绝不经 argv（openssl -hmac "$KEY" 会把密钥暴露在进程
+  # 参数中）。改由 python 进程内读取密钥文件计算 HMAC——argv 只有代码与文件路径。
+  SRT_TOKEN="$(printf 'vehicle-srt:%s' "$VEHICLE_ID" | python3 -c '
+import hashlib
+import hmac
+import sys
+
+key = open(sys.argv[1], "rb").read()
+digest = hmac.new(key, sys.stdin.buffer.read(), hashlib.sha256).hexdigest()
+print(digest)
+' "$RUNTIME_ROOT/secrets/app/media_publish_token")"
   printf '%s' "$SRT_TOKEN" > "$VEHICLE_DIR/srt_publish_token"
   cp "$RUNTIME_ROOT/secrets/app/srt_publish_passphrase" "$VEHICLE_DIR/srt_publish_passphrase"
   chmod 600 "$VEHICLE_DIR/mqtt_password" "$VEHICLE_DIR/srt_publish_token" "$VEHICLE_DIR/srt_publish_passphrase"
@@ -75,11 +83,22 @@ generate_credentials() {
   chmod 600 "$VEHICLE_DIR/README.txt"
 }
 
-# ---- 更新 password_file（mosquitto_passwd；容器内 root 产物 chown 回 ubuntu）----
+# ---- 更新 password_file（G1-GO0 A：密码经 stdin 交互式输入，绝不经 argv）----
+# 旧实现 `mosquitto_passwd -b ... "$(cat ...)"` 会把明文密码暴露在 docker run 参数、
+# 容器 COMMAND 与 docker inspect 记录中。新实现：密码文件内容经管道两次送入
+# mosquitto_passwd 的交互式 stdin（Password:/Reenter password:），进程 argv 全程
+# 无密码；stderr 落盘（仅提示语，不含密码）供排障，失败即 fail 不回显。
 update_password_file() {
   detect_docker
-  "${DOCKER[@]}" run --rm -v "$RUNTIME_ROOT/secrets/mosquitto:/work:rw" "$MOSQ_IMG" \
-    mosquitto_passwd -b /work/passwords "$VEHICLE_ID" "$(cat "$VEHICLE_DIR/mqtt_password")" 2>/dev/null
+  local errfile
+  errfile="$(mktemp /tmp/firebot-onboard-passwd.XXXXXX)"
+  chmod 600 "$errfile"
+  if ! { cat "$VEHICLE_DIR/mqtt_password"; echo; cat "$VEHICLE_DIR/mqtt_password"; echo; } \
+    | "${DOCKER[@]}" run --rm -i -v "$RUNTIME_ROOT/secrets/mosquitto:/work:rw" "$MOSQ_IMG" \
+      mosquitto_passwd /work/passwords "$VEHICLE_ID" 2>"$errfile"; then
+    fail "mosquitto_passwd 更新失败（诊断见 ${errfile}，不含密码）"
+  fi
+  rm -f "$errfile"
   sudo -n chown ubuntu:ubuntu "$RUNTIME_ROOT/secrets/mosquitto/passwords" || fail "chown passwords 失败"
   chmod 640 "$RUNTIME_ROOT/secrets/mosquitto/passwords"
 }

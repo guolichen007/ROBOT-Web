@@ -113,6 +113,49 @@ def test_fleet_register_secret_output_scan() -> None:
     )
 
 
+def test_onboard_credential_no_argv() -> None:
+    """G1-GO0 A：onboard 凭证链路零 argv 泄露（mosquitto_passwd 改 stdin；HMAC 改进程内）。"""
+    script = read("deploy/u-dao/scripts/60-onboard-vehicle.sh")
+    lines = active_lines(script)
+    check(
+        "NO_MOSQUITTO_PASSWD_B_FLAG（-b 批量模式已移除）",
+        not any("mosquitto_passwd -b" in ln for ln in lines),
+    )
+    check(
+        "MOSQUITTO_PASSWD_STDIN_MODE（交互式 stdin 输入，无密码参数）",
+        any("mosquitto_passwd /work/passwords" in ln for ln in lines)
+        and not any("mosquitto_passwd" in ln and "$(" in ln for ln in lines),
+    )
+    check(
+        "NO_PASSWORD_COMMAND_SUBSTITUTION（可执行行不含 $(cat ...password...) 进 argv）",
+        not any("$(cat" in ln and "password" in ln for ln in lines),
+    )
+    check(
+        "NO_OPENSSL_HMAC_ARGV（master token 不经 -hmac 参数）",
+        not any("-hmac $" in ln for ln in lines),
+    )
+    check(
+        "HMAC_IN_PROCESS（python 进程内读取密钥文件计算 HMAC）",
+        "hmac.new(key, sys.stdin.buffer.read(), hashlib.sha256)" in script,
+    )
+    check(
+        "DOCKER_RUN_INTERACTIVE_STDIN（mosquitto_passwd 经 -i 转发 stdin + 双行管道）",
+        any("run --rm -i" in ln for ln in lines)
+        and "{ cat" in script
+        and "mosquitto_passwd /work/passwords" in script,
+    )
+
+
+def test_fleet_register_token_cleanup_trap() -> None:
+    """G1-GO0 A：enrollment token 临时文件异常退出必须清理（trap EXIT）。"""
+    script = read("integration/ros1/fleet-register.sh")
+    check(
+        "TOKEN_TMP_TRAP_CLEANUP（trap 覆盖失败/中断路径）",
+        "trap" in script and 'rm -f "$TOKEN_TMP"' in script and " EXIT" in script,
+    )
+    check("TOKEN_TMP 0600", 'chmod 600 "$TOKEN_TMP"' in script)
+
+
 def test_https_system_ca() -> None:
     # enroll 实现唯一 source of truth = vehicle-edge/lifecycle/enroll.sh（firebotctl 转发）
     firebotctl = (
@@ -260,6 +303,8 @@ def main() -> int:
     test_fleet_register_host_source()
     test_fleet_register_canonical_onboarding()
     test_fleet_register_secret_output_scan()
+    test_onboard_credential_no_argv()
+    test_fleet_register_token_cleanup_trap()
     test_https_system_ca()
     test_mqtt_private_ca_path()
     test_no_tailscale_production_reference()

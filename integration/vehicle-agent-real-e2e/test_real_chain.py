@@ -21,6 +21,7 @@ from pathlib import Path
 import paho.mqtt.client as mqtt
 from conftest import (
     GHOST_VEHICLE,
+    LEGACY_VEHICLE,
     NOACL_VEHICLE,
     REPO_ROOT,
     VEHICLE,
@@ -592,3 +593,192 @@ def test_ca_rotation_isolated_old_trust_rejected(e2e_stack):
         except subprocess.TimeoutExpired:
             broker2.kill()
             broker2.wait(timeout=10)
+
+
+# ---------------------------------------------------------------------------
+# G1-GO0 B：Mosquitto %u pattern 八场景 broker 行为断言
+# ---------------------------------------------------------------------------
+
+
+class BrokerProbe:
+    """真实 Mosquitto 授权行为探针：记录 CONNACK rc / SUBACK granted / 订阅投递。"""
+
+    def __init__(self, stack, client_id: str):
+        self.stack = stack
+        self.connack_rc: int | None = None
+        self.suback: list[list[int]] = []
+        self.received: list[str] = []
+        self.client = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2,
+            client_id=client_id,
+            protocol=mqtt.MQTTv311,
+            userdata=self,
+        )
+        self.client.tls_set(
+            ca_certs=str(stack["certs"] / "ca.crt"),
+            cert_reqs=ssl.CERT_REQUIRED,
+            tls_version=ssl.PROTOCOL_TLS_CLIENT,
+        )
+        self.client.on_connect = self._on_connect
+        self.client.on_subscribe = self._on_subscribe
+        self.client.on_message = self._on_message
+
+    def connect(self, username: str | None, password: str | None, *, wait: float = 8.0):
+        if username is not None:
+            self.client.username_pw_set(username, password or "")
+        else:
+            self.client.username_pw_set("", "")  # 无凭证：认证匿名尝试
+        self.client.connect("127.0.0.1", self.stack["mqtt_port"], keepalive=10)
+        self.client.loop_start()
+        deadline = time.monotonic() + wait
+        while time.monotonic() < deadline and self.connack_rc is None:
+            time.sleep(0.05)
+        return self
+
+    def subscribe(self, topic_name: str):
+        (result, _mid) = self.client.subscribe(topic_name, qos=1)
+        assert result == mqtt.MQTT_ERR_SUCCESS
+        deadline = time.monotonic() + 8.0
+        while time.monotonic() < deadline and not self.suback:
+            time.sleep(0.05)
+        return self
+
+    def publish_ack(self, topic_name: str, payload: str) -> bool:
+        info = self.client.publish(topic_name, payload, qos=1)
+        try:
+            info.wait_for_publish(3.0)
+        except RuntimeError:
+            return False
+        return info.is_published()
+
+    def disconnect(self):
+        try:
+            self.client.disconnect()
+        finally:
+            self.client.loop_stop()
+
+    # -- paho 回调 ---------------------------------------------------------
+    def _on_connect(self, client, userdata, flags, reason_code, properties):
+        self.connack_rc = reason_code
+
+    def _on_subscribe(self, client, userdata, mid, reason_code_list, properties):
+        self.suback.append(list(reason_code_list))
+
+    def _on_message(self, client, userdata, message):
+        self.received.append(message.topic)
+
+
+def test_acl_eight_scenarios_broker_behavior(e2e_stack, vehicle_asset):
+    """G1-GO0 B：按官方语义断言真实 broker 的授权行为（非仅 DB 状态）。
+
+    1) 已认证账号写自己 topic → PUBACK；
+    2) 已认证账号写他人 topic → 订阅方不投递（ACL 拒绝）；
+    3) 已认证账号订阅自己 cmd → SUBACK granted；
+    4) 已认证账号订阅他人 cmd → SUBACK 0x80 拒绝；
+    5) passwd 存在但无 user 段账号写自己 topic → 订阅方不投递（默认全拒）；
+    6) 同一账号写不存在于云端 DB 的设备 topic → broker 授权（投递到订阅方），
+       DB 不建行（ingress 丢弃，另测）；
+    7) 未认证用户 → CONNACK rc=5；
+    8) legacy（R002 式 robot/%u）用户授权面不退化 → 订阅方收到其合法上行。
+    """
+    stack = e2e_stack
+
+    def make_observer() -> BrokerProbe:
+        probe = BrokerProbe(stack, f"acl-observer-{os.getpid()}-{time.monotonic():.0f}")
+        probe.connect("platform", stack["platform_password"])
+        assert probe.connack_rc == 0
+        return probe
+
+    # --- 7) 未认证用户 → CONNACK rc=5 -----------------------------------
+    anon = BrokerProbe(stack, "acl-anon-probe")
+    anon.connect(None, None)
+    assert str(anon.connack_rc) == "Not authorized", f"unauthenticated CONNACK={anon.connack_rc}"
+    anon.disconnect()
+
+    # --- 观察者：精确订阅目标 topic（跨设备攻击目标与 legacy 面） ----------
+    observer = make_observer()
+    observer.subscribe(topic("firebot-vehicle-02", "status"))  # 攻击目标精确订阅
+    observer.subscribe(topic(GHOST_VEHICLE, "status"))  # 场景6 观察 ghost 合法上行
+    observer.subscribe(f"robot/{LEGACY_VEHICLE}/status")
+    try:
+        # --- 1) 写自己 topic → PUBACK --------------------------------------
+        legit = BrokerProbe(stack, f"{VEHICLE}-readonly-v1")
+        legit.connect(VEHICLE, stack["vehicle_password"])
+        assert legit.connack_rc == 0
+        assert legit.publish_ack(topic(VEHICLE, "status"), "{}") is True
+
+        # --- 2) 写他人 topic → broker 拒绝（订阅方无投递） ------------------
+        hostile = json.dumps(
+            {
+                "online": True,
+                "programs": {"agent": True},
+                "task": {
+                    "state": "idle",
+                    "patrol_next": None,
+                    "patrol_count": 0,
+                    "patrol_paused": False,
+                },
+                "ts": datetime.now(UTC).isoformat(),
+            }
+        )
+        legit.publish_ack(topic("firebot-vehicle-02", "status"), hostile)
+        time.sleep(1.5)
+        assert topic("firebot-vehicle-02", "status") not in observer.received
+
+        # --- 3) 订阅自己 cmd → 授权真实生效（platform 发布 → 订阅方收到）----
+        # 注：mosquitto 1.6 对 ACL 拒绝的 SUBSCRIBE 仍回 SUBACK granted（拒绝延迟到
+        # 发布侧执行）；2.x 回 0x80。因此断言以「投递结果」为准，不依赖 SUBACK 码。
+        self_sub = BrokerProbe(stack, "acl-self-cmd-probe")
+        self_sub.connect(VEHICLE, stack["vehicle_password"])
+        self_sub.subscribe(topic(VEHICLE, "cmd"))
+        self_cmd_payload = json.dumps({"marker": "acl-self-cmd"})
+        assert observer.publish_ack(topic(VEHICLE, "cmd"), self_cmd_payload) is True
+        deadline = time.monotonic() + 8.0
+        while time.monotonic() < deadline and topic(VEHICLE, "cmd") not in self_sub.received:
+            time.sleep(0.1)
+        assert topic(VEHICLE, "cmd") in self_sub.received  # 自己的 cmd 订阅生效
+
+        # --- 4) 订阅他人 cmd → 绝不投递（SUBACK granted/0x80 皆可，投递必无）---
+        cross_sub = BrokerProbe(stack, "acl-cross-cmd-probe")
+        cross_sub.connect(VEHICLE, stack["vehicle_password"])
+        cross_sub.subscribe(topic("firebot-vehicle-02", "cmd"))
+        assert observer.publish_ack(topic("firebot-vehicle-02", "cmd"), "{}") is True
+        time.sleep(1.5)
+        assert topic("firebot-vehicle-02", "cmd") not in cross_sub.received
+
+        # --- 5) passwd 有账号但无 ACL 段 → 写自己 topic 不投递 ---------------
+        noacl = BrokerProbe(stack, "acl-noacl-probe")
+        noacl.connect(NOACL_VEHICLE, stack["noacl_password"])
+        assert noacl.connack_rc == 0  # 认证通过……
+        noacl.publish_ack(topic(NOACL_VEHICLE, "status"), hostile)
+        time.sleep(1.5)
+        assert not any(topic(NOACL_VEHICLE, "status") in tpc for tpc in observer.received)
+
+        # --- 6) 有凭证无 DB 行账号写自己 topic → broker 授权（订阅方收到）----
+        ghost_probe = BrokerProbe(stack, f"{GHOST_VEHICLE}-readonly-v1")
+        ghost_probe.connect(GHOST_VEHICLE, stack["ghost_password"])
+        assert ghost_probe.connack_rc == 0
+        assert ghost_probe.publish_ack(topic(GHOST_VEHICLE, "status"), hostile) is True
+        deadline = time.monotonic() + 8.0
+        while time.monotonic() < deadline and not any(
+            topic(GHOST_VEHICLE, "status") == tpc for tpc in observer.received
+        ):
+            time.sleep(0.2)
+        assert any(topic(GHOST_VEHICLE, "status") == tpc for tpc in observer.received)
+
+        # --- 8) legacy R002 式授权面不退化（robot/%u 合法上行被订阅方收到）--
+        legacy_probe = BrokerProbe(stack, "acl-legacy-probe")
+        legacy_probe.connect(LEGACY_VEHICLE, stack["legacy_password"])
+        assert legacy_probe.connack_rc == 0
+        assert legacy_probe.publish_ack(f"robot/{LEGACY_VEHICLE}/status", '{"mode":"IDLE"}') is True
+        deadline = time.monotonic() + 8.0
+        while time.monotonic() < deadline and not any(
+            f"robot/{LEGACY_VEHICLE}/status" == tpc for tpc in observer.received
+        ):
+            time.sleep(0.2)
+        assert any(f"robot/{LEGACY_VEHICLE}/status" == tpc for tpc in observer.received)
+
+        for probe in (legit, self_sub, cross_sub, noacl, ghost_probe, legacy_probe):
+            probe.disconnect()
+    finally:
+        observer.disconnect()

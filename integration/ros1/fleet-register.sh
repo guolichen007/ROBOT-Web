@@ -117,6 +117,8 @@ MAP_CHECKSUM="${FIREBOT_MAP_CHECKSUM:-}"
 
 TOKEN_TMP="$(mktemp /tmp/firebot-enroll-token.XXXXXX)"
 chmod 600 "$TOKEN_TMP"
+# G1-GO0 A：异常退出也必须清理 Token 临时文件（trap 覆盖失败/中断路径）
+trap 'rm -f "$TOKEN_TMP"' EXIT
 # G1-R1：生产凭证不得嵌入 python -c 或任何可被进程参数查看的命令。
 # 凭证 payload 经 stdin（heredoc 管道）注入容器内 python：
 # 容器进程 argv 只有 python -c 的静态代码，不含任何凭证值。

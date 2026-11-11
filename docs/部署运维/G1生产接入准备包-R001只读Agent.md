@@ -51,10 +51,20 @@ pattern write v1/robot/%u/availability
 pattern write v1/robot/%u/event
 ```
 
-- **%u pattern 语义（按真实 broker 行为）**：pattern 规则仅作用于其所在 `user` 段；
-  **passwd 有账号但 ACL 无 user 段的认证用户默认全拒**（deny-all），不会落入其他
-  user 段的 pattern。隔离实测：`test_acl_user_without_section_denied_by_default`
-  （E2E，敌意合法载荷被丢弃、目标状态零变化）。新增账号必须显式写自己的 user 段。
+- **%u pattern 语义（G1-GO0 修正，按真实 broker 行为实测）**：
+  1. pattern 规则仅作用于其所在 `user` 段；不同 user 段的 pattern 互不渗透；
+  2. **passwd 有账号但 ACL 无 user 段的认证用户默认全拒**（deny-all）；
+  3. 订阅 ACL 的拒绝语义依 broker 版本不同：mosquitto 1.6 对拒绝的 SUBSCRIBE
+     仍回 SUBACK granted、**拒绝延迟到发布侧执行**（订阅方收不到任何消息）；
+     mosquitto 2.x 回 SUBACK 0x80 显式拒绝。生产镜像 eclipse-mosquitto:2.1.2 为
+     2.x 语义；任何断言不得只依赖 SUBACK 码，须以「投递结果」为准；
+  4. 八场景实测（`test_acl_eight_scenarios_broker_behavior`，真实 broker 行为断言）：
+     写自己 topic=PUBACK+订阅方收到；写他人 topic=订阅方不投递；订阅自己 cmd=收到
+     platform 发布的命令；订阅他人 cmd=绝不投递；无 ACL 段账号=写不投递；有凭证无
+     DB 行=broker 授权（投递到订阅方，DB 不建行由 ingress 兜底）；未认证=CONNACK
+     Not authorized；legacy（robot/%u）授权面不退化。
+  **现有生产 ACL 策略无需变更**：生产模板本就按 user 段声明（每车一段），无跨段
+  pattern 使用；本次仅修正文档声明，不改生产 ACL。
 
 ### 2.2 CA 信任路径与轮换方案（BOOTSTRAP_LOCAL_ONLY 治理）
 

@@ -33,6 +33,7 @@ VEHICLE = "firebot-vehicle-01"
 VEHICLE_PASSWORD = "e2e-vehicle-01-password"
 GHOST_VEHICLE = "firebot-vehicle-99"  # 有凭证、无云端资产（未知设备反证用）
 NOACL_VEHICLE = "firebot-vehicle-88"  # passwd 有账号但 ACL 无 user 段（默认全拒验证用）
+LEGACY_VEHICLE = "r002-e2e"  # legacy schema（robot/%u 模式）用户，模拟 R002 授权面
 PLATFORM_USER = "platform"
 PLATFORM_PASSWORD = "e2e-platform-password"
 
@@ -80,6 +81,19 @@ pattern write v1/robot/%u/status
 pattern write v1/robot/%u/telemetry
 pattern write v1/robot/%u/availability
 pattern write v1/robot/%u/event
+
+# legacy schema 用户（R002 式授权面：robot/%u 模式，与 v1 段互不渗透）
+user {legacy}
+pattern read robot/%u/command
+pattern write robot/%u/availability
+pattern write robot/%u/heartbeat
+pattern write robot/%u/capabilities
+pattern write robot/%u/status
+pattern write robot/%u/sensor
+pattern write robot/%u/location
+pattern write robot/%u/alarm
+pattern write robot/%u/task_status
+pattern write robot/%u/command_ack
 """
 
 
@@ -129,13 +143,16 @@ def e2e_stack(tmp_path_factory):
     passwd.touch()  # mosquitto_passwd -b 要求文件已存在（兼容 1.6/2.x，-c 与 -b 不共存）
     acl = workdir / "acl"
     acl.write_text(
-        ACL_TEMPLATE.format(platform=PLATFORM_USER, vehicle=VEHICLE, ghost=GHOST_VEHICLE)
+        ACL_TEMPLATE.format(
+            platform=PLATFORM_USER, vehicle=VEHICLE, ghost=GHOST_VEHICLE, legacy=LEGACY_VEHICLE
+        )
     )
     for user, password in (
         (PLATFORM_USER, PLATFORM_PASSWORD),
         (VEHICLE, VEHICLE_PASSWORD),
         (GHOST_VEHICLE, "e2e-ghost-password"),
         (NOACL_VEHICLE, "e2e-noacl-password"),  # 仅 passwd；ACL 无 user 段
+        (LEGACY_VEHICLE, "e2e-legacy-password"),
     ):
         subprocess.run(
             ["mosquitto_passwd", "-b", str(passwd), user, password],
@@ -237,6 +254,7 @@ def e2e_stack(tmp_path_factory):
             "platform_password": PLATFORM_PASSWORD,
             "ghost_password": "e2e-ghost-password",
             "noacl_password": "e2e-noacl-password",
+            "legacy_password": "e2e-legacy-password",
             "redis": redis_client,
         }
     finally:
