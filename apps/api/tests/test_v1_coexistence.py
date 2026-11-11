@@ -84,5 +84,5 @@ def test_dual_instance_heartbeat_keys_live(monkeypatch):
     key_b = heartbeat_key("mqtt-ingress", "instance-b")
     redis.set(key_a, "ts-a", ex=30)
     redis.set(key_b, "ts-b", ex=30)
-    assert redis.get(key_a).decode() == "ts-a"
-    assert redis.get(key_b).decode() == "ts-b"
+    assert redis.get(key_a) == "ts-a"
+    assert redis.get(key_b) == "ts-b"
