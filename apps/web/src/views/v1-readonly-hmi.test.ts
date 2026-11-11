@@ -77,7 +77,7 @@ function baseRobot(overrides: Partial<RobotState> = {}): RobotState {
         programs: { agent: true, chassis: false, navigation: false },
         task: { state: 'idle', patrol_paused: false },
       },
-      telemetry: { battery: { percentage: null }, pose: null },
+      telemetry: { battery: { percentage: null } },
     },
     data_channels: {},
     sensor_profiles: [],

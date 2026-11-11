@@ -87,8 +87,7 @@ const trajectory = computed(() => {
   )
 })
 const readOnly = computed(
-  () =>
-    robot.value?.integration?.source_kind === 'ROS_COMPAT' || robot.value?.enabled === false,
+  () => robot.value?.integration?.source_kind === 'ROS_COMPAT' || robot.value?.enabled === false,
 )
 const patrolReady = computed(() => robot.value?.autonomous_task_ready?.patrol === true)
 const returnReady = computed(() => robot.value?.autonomous_task_ready?.return_dock === true)

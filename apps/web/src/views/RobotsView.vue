@@ -230,13 +230,7 @@ function toast(value: string): void {
                 <dt>软件急停</dt>
                 <!-- G1-R1：null=未验证（无急停数据源），不得显示"未触发" -->
                 <dd>
-                  {{
-                    robot.estop_active == null
-                      ? '未验证'
-                      : robot.estop_active
-                        ? '已触发'
-                        : '未触发'
-                  }}
+                  {{ robot.estop_active == null ? '未验证' : robot.estop_active ? '已触发' : '未触发' }}
                 </dd>
               </div>
               <div>

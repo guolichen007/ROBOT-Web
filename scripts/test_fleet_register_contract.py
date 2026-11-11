@@ -103,8 +103,10 @@ def test_fleet_register_secret_output_scan() -> None:
     check("只输出 ENROLL_TOKEN 一次性交付", "ENROLL_TOKEN=$ENROLL_TOKEN" in script)
     # G1-R1：凭证必须经 stdin 注入（heredoc PAYLOAD → json.load(sys.stdin)），
     # python -c 的代码字符串不得含任何 '$VAR' 凭证插值（进程 argv 零凭证）。
-    check("凭证经 stdin 注入（json.load(sys.stdin) + PAYLOAD heredoc）",
-          "json.load(sys.stdin)" in script and "<<PAYLOAD" in script)
+    check(
+        "凭证经 stdin 注入（json.load(sys.stdin) + PAYLOAD heredoc）",
+        "json.load(sys.stdin)" in script and "<<PAYLOAD" in script,
+    )
     check(
         "NO_CREDENTIAL_IN_ARGV（python -c 代码不含 PASSWORD/DEVICE_TOKEN 插值）",
         "'$PASSWORD'" not in script and "'$DEVICE_TOKEN'" not in script,
