@@ -24,6 +24,7 @@ from app.core.metrics import (
     robot_boot_rejected_total,
 )
 from app.core.serialization import serialize_model
+from app.core.service_identity import heartbeat_key, in_v1_scope, instance_id
 from app.db.models import (
     Command,
     FireEvent,
@@ -916,6 +917,9 @@ def process(topic: str, payload: bytes) -> None:
         increment_mqtt_metric(f"invalid:{type(exc).__name__}")
         logger.warning("invalid MQTT payload")
         return
+    if not in_v1_scope(msg["vehicle_id"]):
+        increment_mqtt_metric("invalid:out_of_scope")
+        return
     expected = topic.rsplit("/", 1)[-1]
     source_kind = "ROS_COMPAT" if topic.startswith("_platform/compat/") else "CANONICAL_MQTT"
     if msg["type"] != expected:
@@ -1080,7 +1084,10 @@ def service_heartbeat(realtime_client, durable_client) -> None:
         try:
             # 心跳绑定连接（R2-7）：healthcheck 暴露 unhealthy，恢复靠 paho 有界重连
             if realtime_client.is_connected() and durable_client.is_connected():
-                redis.setex("service:mqtt-ingress:heartbeat", 5, datetime.now(UTC).isoformat())
+                stamp = datetime.now(UTC).isoformat()
+                redis.setex(heartbeat_key("mqtt-ingress", instance_id()), 5, stamp)
+                # 兼容键："任一实例存活"语义（系统健康/既有脚本读取）
+                redis.setex("service:mqtt-ingress:heartbeat", 5, stamp)
         except Exception:
             logger.warning("MQTT ingress heartbeat store unavailable", exc_info=True)
         time.sleep(1)
@@ -1162,8 +1169,9 @@ def main() -> None:
     # 双 client（R2-6）：realtime 高频遥测 clean session（断线不 backlog、恢复不先回放历史位置）；
     # durable 固定 client id + persistent session（600s）短时恢复
     # command_ack/task_status/alarm/event。
-    realtime = make_client("firebot-mqtt-ingress-realtime", durable=False)
-    durable_client = make_client("firebot-mqtt-ingress-durable", durable=True)
+    iid = instance_id()
+    realtime = make_client(f"firebot-mqtt-ingress-{iid}-realtime", durable=False)
+    durable_client = make_client(f"firebot-mqtt-ingress-{iid}-durable", durable=True)
     threading.Thread(target=service_heartbeat, args=(realtime, durable_client), daemon=True).start()
     threading.Thread(
         target=client_main,

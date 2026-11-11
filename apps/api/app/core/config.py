@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     # 二级下行安全门：即使 global downlink=true，也仅 allowlist 内车辆具备下行资格
     # （禁止一开总开关所有车辆同时获得下行）。默认空 = 无车可下行。
     vehicle_agent_v1_downlink_allowlist: str = ""
+    # G1-P2 专属 Adapter/Ingress 的 vehicle_id 白名单（逗号分隔；空=不限）。
+    # 独立 Broker 专属实例只处理白名单车辆，非目标车辆消息直接丢弃，不落入共享 PG/Redis。
+    vehicle_agent_scope_vehicle_ids: str = ""
     vehicle_agent_v1_ack_timeout_seconds: int = Field(default=90, ge=1, le=240)
     vehicle_agent_v1_status_stale_seconds: int = Field(default=8, ge=6)
     vehicle_agent_v1_offline_seconds: int = Field(default=15, ge=10)

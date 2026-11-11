@@ -7,7 +7,6 @@ import json
 import logging
 import math
 import os
-import socket
 import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -17,6 +16,7 @@ import paho.mqtt.client as mqtt
 from app.core.config import get_settings, mqtt_message_expiry_properties
 from app.core.events import get_redis
 from app.core.logging import configure_logging
+from app.core.service_identity import heartbeat_key, in_v1_scope, instance_id
 from redis.exceptions import WatchError
 
 from services.vehicle_agent_v1 import (
@@ -205,9 +205,13 @@ class Adapter:
             parts = name.split("/")
             if len(parts) != 4 or parts[3] != "command":
                 return
+            if not in_v1_scope(parts[2]):
+                return
             self.down(parts[2], data)
             return
         vehicle, kind = parse_topic(name)
+        if not in_v1_scope(vehicle):
+            return
         if kind == "cmd":
             return
         bucket = f"vehicle-agent:rate:{vehicle}:{kind}:{int(time.time())}"
@@ -236,7 +240,7 @@ def main() -> None:
         mqtt.CallbackAPIVersion.VERSION2,
         # 稳定 client id（R2-6）：随机后缀每次重启成为全新会话，丢失持久会话的 ACK 恢复能力
         client_id=os.environ.get(
-            "FIREBOT_SERVICE_INSTANCE_ID", f"vehicle-agent-adapter-{socket.gethostname()}"
+            "FIREBOT_SERVICE_INSTANCE_ID", f"vehicle-agent-adapter-{instance_id()}"
         ),
         protocol=mqtt.MQTTv5,
     )
@@ -289,6 +293,12 @@ def main() -> None:
         try:
             adapter.expire()
             if client.is_connected():
+                redis.setex(
+                    heartbeat_key("vehicle-agent-adapter", instance_id()), 5,
+                    datetime.now(UTC).isoformat(),
+                )
+                # 兼容键（"任一实例存活"语义）：api 侧命令门/系统健康与既有脚本读取；
+                # 命名空间键才是实例级 healthcheck 的唯一事实源。
                 redis.setex(
                     "service:vehicle-agent-adapter:heartbeat", 5, datetime.now(UTC).isoformat()
                 )

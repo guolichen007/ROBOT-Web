@@ -270,3 +270,135 @@ describe('RobotsView 急停文案语义（G1-R1）', () => {
     wrapper.unmount()
   })
 })
+
+describe('RobotsView 只读设备可监控（G1-P2）', () => {
+  it('enabled=false 的 V1 只读设备显示"切换监控"按钮', async () => {
+    setActivePinia(createPinia())
+    const store = useMonitorStore()
+    store.snapshot = {
+      ...emptySnapshot(),
+      robots: [baseRobot({ enabled: false })],
+    }
+
+    const wrapper = mount(RobotsView, {
+      attachTo: document.body,
+      global: {
+        stubs: {
+          PageHeader: { template: '<header><slot /></header>' },
+          RouterLink: true,
+        },
+        mocks: { $router: { push: vi.fn() } },
+      },
+    })
+    await nextTick()
+    await nextTick()
+
+    const switchButtons = wrapper
+      .findAll('button')
+      .filter((b) => b.text().includes('切换监控'))
+    expect(switchButtons.length).toBeGreaterThan(0)
+    expect(wrapper.text()).toContain('平台已停用') // 停用徽标保留，如实展示
+    wrapper.unmount()
+  })
+
+  it('enabled=false 的 CANONICAL_MQTT 设备不显示"切换监控"按钮', async () => {
+    setActivePinia(createPinia())
+    const store = useMonitorStore()
+    store.snapshot = {
+      ...emptySnapshot(),
+      robots: [
+        baseRobot({
+          id: 'r002',
+          vehicle_id: 'R002',
+          name: 'R002',
+          enabled: false,
+          agent_protocol: 'CANONICAL_MQTT',
+          agent_state: undefined,
+        }),
+      ],
+    }
+
+    const wrapper = mount(RobotsView, {
+      attachTo: document.body,
+      global: {
+        stubs: {
+          PageHeader: { template: '<header><slot /></header>' },
+          RouterLink: true,
+        },
+        mocks: { $router: { push: vi.fn() } },
+      },
+    })
+    await nextTick()
+    await nextTick()
+
+    const switchButtons = wrapper
+      .findAll('button')
+      .filter((b) => b.text().includes('切换监控'))
+    expect(switchButtons.length).toBe(0)
+    wrapper.unmount()
+  })
+})
+
+describe('V1 链路与硬件新鲜度分离（G1-P2）', () => {
+  const mountWith = (robot: RobotState) => {
+    setActivePinia(createPinia())
+    const store = useMonitorStore()
+    store.snapshot = { ...emptySnapshot(), robots: [robot] }
+    store.activeRobotId = robot.id
+    store.connected = true
+    const wrapper = mount(ShellHarness, {
+      attachTo: document.body,
+      global: {
+        stubs: {
+          MapCanvas: true,
+          MapSelectionBar: true,
+          VideoSurveillancePanel: true,
+          PrimaryAlarmPanel: true,
+          ProgressRingGate4: true,
+          't-button': {
+            props: ['disabled', 'loading'],
+            template: '<button :disabled="disabled || loading"><slot /></button>',
+          },
+        },
+      },
+    })
+    return wrapper
+  }
+
+  it('链路新鲜（服务端确认时间）+ 遥测陈旧（30s）→ 显示"数据实时"，不误报数据离线', async () => {
+    const now = Date.now()
+    const robot = baseRobot({
+      server_received_at: new Date(now - 1000).toISOString(), // 通信确认 1s 前
+      agent_state: {
+        availability: 'online',
+        status: {
+          online: true,
+          programs: { agent: true, chassis: false, navigation: false },
+          task: { state: 'idle', patrol_paused: false },
+        },
+        telemetry_received_at: new Date(now - 30_000).toISOString(), // 遥测 30s 前
+        telemetry: { battery: { percentage: null } },
+      },
+    })
+    const wrapper = mountWith(robot)
+    await nextTick()
+    await nextTick()
+    const text = wrapper.text()
+    expect(text).toContain('数据实时') // 链路 freshness 用服务端确认时间
+    expect(text).not.toContain('数据离线')
+    wrapper.unmount()
+  })
+
+  it('链路停止确认（server_received_at 超过 offline 门限）→ 数据离线', async () => {
+    const now = Date.now()
+    const robot = baseRobot({
+      server_received_at: new Date(now - 20_000).toISOString(), // 超过 offline_seconds=15
+      online_state: 'ONLINE',
+    })
+    const wrapper = mountWith(robot)
+    await nextTick()
+    await nextTick()
+    expect(wrapper.text()).toContain('数据离线')
+    wrapper.unmount()
+  })
+})

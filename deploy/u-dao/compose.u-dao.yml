@@ -115,6 +115,9 @@ services:
     secrets: !reset []
     volumes:
       - app_secrets:/run/secrets:ro
+    environment:
+      # 实例身份（G1-P2）：心跳键/客户端标识命名空间；专属实例必须覆盖为独立值
+      FIREBOT_SERVICE_INSTANCE_ID: ${FIREBOT_INGRESS_INSTANCE_ID:-mqtt-ingress-prod}
     depends_on:
       app-secrets-init: { condition: service_completed_successfully }
 
@@ -143,6 +146,9 @@ services:
     secrets: !reset []
     volumes:
       - app_secrets:/run/secrets:ro
+    environment:
+      # 实例身份（G1-P2）：心跳键/客户端标识命名空间；专属实例必须覆盖为独立值
+      FIREBOT_SERVICE_INSTANCE_ID: ${FIREBOT_ADAPTER_INSTANCE_ID:-vehicle-agent-adapter-prod}
     depends_on:
       app-secrets-init: { condition: service_completed_successfully }
 

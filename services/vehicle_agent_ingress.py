@@ -10,6 +10,7 @@ from app.core.audit import write_audit
 from app.core.config import get_settings
 from app.core.events import get_redis, queue_event, queue_redis_set
 from app.core.serialization import serialize_model
+from app.core.service_identity import in_v1_scope
 from app.db.models import (
     Command,
     Map,
@@ -234,6 +235,8 @@ def process(name: str, payload: bytes, handle_ack) -> bool:
     envelope = json.loads(payload)
     UUID(envelope["event_id"])
     vehicle, kind = parts[2], parts[3]
+    if not in_v1_scope(vehicle):
+        return True
     if vehicle != envelope["vehicle_id"] or kind != envelope["kind"]:
         raise ValueError("internal vehicle/topic mismatch")
     if len(payload) > 262144:
@@ -341,6 +344,9 @@ def process(name: str, payload: bytes, handle_ack) -> bool:
                     "online_state": robot.online_state,
                     "boot_id": robot.boot_id,
                     "mode": robot.current_mode,
+                    # 链路 freshness 依据：任何一条被服务端确认的上行消息都刷新
+                    # （status 3s / telemetry 30s 解耦；硬件字段 freshness 见 data_channels）
+                    "server_received_at": received.isoformat(),
                 }
             )
             if kind == "telemetry":
@@ -349,7 +355,6 @@ def process(name: str, payload: bytes, handle_ack) -> bool:
                         "battery": robot.battery,
                         "smoke": (data.get("smog") or {}).get("percentage"),
                         "top_ir": (data.get("thermal") or {}).get("max_temp"),
-                        "server_received_at": received.isoformat(),
                         "source_timestamp": data.get("ts"),
                     }
                 )

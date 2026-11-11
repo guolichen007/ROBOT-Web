@@ -180,7 +180,7 @@ function toast(value: string): void {
         <div class="vehicle-actions" @click.stop>
           <button v-if="isCurrent(robot)" class="secondary-button compact" disabled>当前车辆</button>
           <button
-            v-else-if="robot.enabled !== false"
+            v-else-if="robot.enabled !== false || robot.agent_protocol === 'VEHICLE_AGENT_V1'"
             class="secondary-button compact"
             type="button"
             @click="switchMonitor(robot)"
