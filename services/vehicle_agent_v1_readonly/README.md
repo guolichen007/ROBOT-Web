@@ -63,7 +63,14 @@ PYTHONPATH=. python3 -m services.vehicle_agent_v1_readonly.main \
 - **TLS**：`cert_reqs=CERT_REQUIRED`，只信任配置 CA，绝不调用 `tls_insecure_set`。
 - **无控制**：不订阅 `cmd`；`MqttTransport.subscribe` 结构上抛错；不实现任何命令处理；
   不发布 `/cmd_vel`；不写 Modbus/CAN/GPIO/继电器；不导入 ROS。
-- **单 owner**：检测到旧 `vehicle-bridge` 进程 → 拒绝启动；本 Agent 双开 → flock 拒绝。
+- **单 owner**：检测到旧 `vehicle-bridge` 进程 → 拒绝启动；本 Agent 双开 → flock 拒绝
+  （SIGKILL 后内核自动释放锁，可再次启动）；**运行期**检测到旧 Bridge 被重启 →
+  发布 offline 并退出码 3（fail-closed），systemd Restart=on-failure 接手后由启动
+  守卫持续拒绝，直至冲突解除。
+- **凭证权限（G1-R1）**：正式方案 root:firebot + **0640**（服务用户组内可读、
+  Agent 自身不可写、其他普通用户不可读）；Agent 启动时强校验"禁止组写 + 禁止
+  其他任意位"。安装前执行两阶段 preflight（`preinstall` 环境预检 / `prestart`
+  产物与运行态预检，lock 以真实 flock 获取验证）。
 - **不触碰**：本轮不安装、不启动生产服务、不修改工控机系统文件（见 G1 方案文档）。
 
 ## 脱敏日志样例（本地验收 broker，身份为本地测试占位）
