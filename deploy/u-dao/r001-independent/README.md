@@ -61,3 +61,14 @@ docker compose -f compose.r001-independent.yml --env-file r001.env down
 - Web：G1-R1 只读监测/estop 未验证 HMI + G1-P2 车辆列表对 enabled=false 的
   VEHICLE_AGENT_V1 设备开放"切换监控"入口（后端控制门不变）。
 - 无 alembic 迁移；回滚边界 = 旧镜像标签（firebot-web/firebot-python @ 原 SHA）。
+
+## 附：G1-P2-RC 本地真实共存实测记录（staging，非生产）
+
+- 双实例共享同一 PG/Redis：原栈 Adapter/Ingress + 专属 Adapter/Ingress
+  （FIREBOT_SERVICE_INSTANCE_ID=r001-dedicated-*，scope=firebot-vehicle-01）同时运行：
+  6 个心跳键并存（兼容键 ×2 + 命名空间键 ×4），healthcheck 各自实例互不干扰。
+- 独立 Broker2（独立证书 SAN=r001-broker2，主机名验证生效）承载 R001 Agent 上行，
+  经专属实例落库 ONLINE。
+- 范围过滤实证：scope 外车辆（firebot-vehicle-77，有云端资产+ACL 段）在 Broker2 发布
+  v1 status → 专属 Adapter 丢弃 → 不落库（Redis latest 不存在）。
+- 原实例兼容心跳持续更新，原链路不受影响。
