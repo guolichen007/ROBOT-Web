@@ -1089,3 +1089,75 @@ def test_e2e_wrong_ca_rejected(identity_config, broker, tmp_path: Path):
     finally:
         stdout, stderr = _stop_agent(proc)
     assert "connect failed" in stderr
+
+
+def test_live_availability_online_non_retained_contract(identity_config, broker, tmp_path: Path):
+    """G1-P2-L0 A1：周期性 live availability online——QoS1、retain=False、PUBACK 确认。"""
+    local = broker()
+    identity = load_identity(identity_config(port=local.port), allow_placeholder_password=True)
+    transport = MqttTransport(identity, TransportConfig())
+    transport.connect()
+    assert transport.wait_for_connect(5.0) is True
+    assert transport.publish_availability_live() is True
+    wait_until(
+        lambda: any(m["topic"] == topic(VEHICLE, "availability") for m in local.messages), 5.0
+    )
+    live = [m for m in local.messages if m["topic"] == topic(VEHICLE, "availability")][0]
+    assert live["qos"] == 1 and live["retain"] is False
+    assert live["payload"] == b"online"
+    # 非 retained 不得污染 broker 存储的 retained 值（守卫语义保留）
+    assert local.retained.get(topic(VEHICLE, "availability")) is None
+
+
+def test_agent_loop_publishes_periodic_live_online(identity_config, broker, tmp_path: Path):
+    """G1-P2-L0 A1：运行循环周期性发布 live online（非 retained），约 5s 间隔。"""
+    local = broker()
+    identity = load_identity(identity_config(port=local.port), allow_placeholder_password=True)
+    transport = MqttTransport(
+        identity,
+        TransportConfig(reconnect_min_seconds=0.01, rng=random.Random(0)),
+    )
+    stop_event = threading.Event()
+    agent = ReadOnlyAgent(
+        identity,
+        transport,
+        AgentConfig(
+            status_interval_seconds=0.2,
+            telemetry_interval_seconds=0.3,
+            host_metrics_path=tmp_path / "host.jsonl",
+        ),
+        {"chassis": ("firebot_chassis",)},
+        stop_event,
+    )
+    result = []
+    thread = threading.Thread(target=lambda: result.append(agent.run()), daemon=True)
+    thread.start()
+    wait_until(
+        lambda: sum(
+            1
+            for m in local.messages
+            if m["topic"] == topic(VEHICLE, "availability") and m["retain"] is False
+        )
+        >= 2,
+        15.0,
+        "periodic live online published (>=2 条)",
+    )
+    stop_event.set()
+    thread.join(10.0)
+    assert result == [0]
+    live = [
+        m
+        for m in local.messages
+        if m["topic"] == topic(VEHICLE, "availability") and m["retain"] is False
+    ]
+    assert len(live) >= 2
+    assert all(m["payload"] == b"online" for m in live)
+    # retained online 仍只在建连时发布一次（优雅退出的 retained offline 不计）
+    retained_online = [
+        m
+        for m in local.messages
+        if m["topic"] == topic(VEHICLE, "availability")
+        and m["retain"] is True
+        and m["payload"] == b"online"
+    ]
+    assert len(retained_online) == 1

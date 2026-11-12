@@ -93,6 +93,9 @@ class AgentConfig:
     max_reconnect_attempts: int | None = None  # None = 无限重试（退避封顶，资源有界）
 
 
+LIVE_ONLINE_INTERVAL_SECONDS = 5.0
+
+
 class ReadOnlyAgent:
     """G0-A2/G1-R0 只读 Agent：采集真实 OS/进程状态并按 v1 合同上行。"""
 
@@ -119,6 +122,7 @@ class ReadOnlyAgent:
         reconnect_attempts = 0
         last_status = last_telemetry = float("-inf")
         last_owner_check = float("-inf")
+        last_live_online = float("-inf")
         while not self._stop_event.is_set():
             try:
                 self._transport.connect()
@@ -172,6 +176,13 @@ class ReadOnlyAgent:
                         )
                         self._transport.graceful_offline()
                         return EXIT_OWNER_CONFLICT
+                # G1-P2-L0 A1：周期性 live availability online（默认 5s，非 retained）。
+                # Adapter 中断恢复后无需车辆重连即可恢复 ONLINE（清扫器 offline 压制解除）。
+                if now - last_live_online >= LIVE_ONLINE_INTERVAL_SECONDS:
+                    if self._transport.publish_availability_live():
+                        last_live_online = now
+                    else:
+                        logger.warning("live availability online publish UNCONFIRMED")
                 if now - last_status >= self._config.status_interval_seconds:
                     self._publish_cycle("status")
                     last_status = now

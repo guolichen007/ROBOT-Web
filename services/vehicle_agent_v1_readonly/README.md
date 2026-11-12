@@ -34,7 +34,8 @@ PYTHONPATH=. python3 -m services.vehicle_agent_v1_readonly.main \
 
 | 消息 | topic | QoS | retained | payload |
 | --- | --- | --- | --- | --- |
-| availability | `v1/robot/{vehicle_id}/availability` | 1 | true | `"online"` / `"offline"`（字符串，同 mock 语义） |
+| availability | `v1/robot/{vehicle_id}/availability` | 1 | true | `"online"` / `"offline"`（字符串，同 mock 语义；建连时 retained 一次） |
+| availability(live) | 同上 | 1 | **false** | 周期性 `"online"`（默认 5s，非 retained）：云端 Adapter 中断恢复后无需车辆重连即可解除清扫器 offline 压制并恢复 ONLINE；不触发 retained 安全守卫、不污染 broker 存储的 retained 值 |
 | status | `v1/robot/{vehicle_id}/status` | 1 | true | `{"online": true, "programs": {...}, "task": {...}, "ts": ISO}` |
 | telemetry | `v1/robot/{vehicle_id}/telemetry` | 0 | false | `{"pose": null, "battery": null, "smog": null, "thermal": null, "ts": ISO}` |
 

@@ -112,6 +112,15 @@ class MqttTransport:
         """QoS1 retained；返回 True 当且仅当 broker 已 PUBACK 确认。"""
         return self._publish("availability", state, qos=1, retain=True)
 
+    def publish_availability_live(self) -> bool:
+        """G1-P2-L0 A1：周期性 live availability online（QoS1 非 retained）。
+
+        云端 Adapter 中断恢复后，清扫器写入的 availability=offline 会压制 live
+        status；周期性 live online 是恢复 ONLINE 的最小事实源。非 retained 保证
+        broker 存储的 retained 值不被高频刷新，且不触发 retained 安全守卫。
+        """
+        return self._publish("availability", "online", qos=1, retain=False)
+
     def publish_status(self, data: dict[str, Any]) -> bool:
         """QoS1 retained；返回 True 当且仅当 broker 已 PUBACK 确认。"""
         return self._publish("status", json.dumps(data), qos=1, retain=True)

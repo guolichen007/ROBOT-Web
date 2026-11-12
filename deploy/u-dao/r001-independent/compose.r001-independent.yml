@@ -34,11 +34,12 @@ services:
       - ${R001_BROKER_CONF_DIR}/acl:/mosquitto/config/acl:ro
       - ${R001_BROKER_CONF_DIR}/passwords:/mosquitto/config/passwords:ro
       - ${R001_BROKER_CONF_DIR}/certs:/mosquitto/config/certs:ro
-      - ${R001_BROKER_CONF_DIR}/broker-platform-pw:/run/secrets/broker-platform-pw:ro
       - r001_mqtt_data:/mosquitto/data
     healthcheck:
-      # 口令从挂载的 secret 文件运行时读取，不进入容器配置元数据
-      test: ["CMD-SHELL", "mosquitto_pub -h 127.0.0.1 -p 8883 --cafile /mosquitto/config/certs/ca.crt -u platform -P \"$$(cat /run/secrets/broker-platform-pw)\" -t _platform/vehicle-agent-v1/r001/hc -m 1 -q 0"]
+      # G1-P2-L0 A2：零凭证健康检查（端口/TLS 存活）。认证与 TLS 全链路由专属
+      # Adapter/Ingress 的健康检查持续实测（连接失败即 unhealthy）；本检查不再将
+      # 口令置于任何进程 argv。
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 8883"]
       interval: 10s
       timeout: 5s
       retries: 12

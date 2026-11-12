@@ -21,6 +21,8 @@ async function safeDetail(response: APIResponse): Promise<unknown> {
 export async function workingPassword(
   request: APIRequestContext,
 ): Promise<{ value: string; mustChange: boolean }> {
+  // G1-P2-L0 A3：任何登录探针之前先做目标身份反证（无凭据 GET，零副作用）
+  await assertPreLoginTarget(request)
   const candidates = [
     ...new Set([changedPassword, adminPassword, devFallback].filter((v): v is string => Boolean(v))),
   ]

@@ -20,8 +20,11 @@ test -f /path/to/r001.env || exit 1
 # 2) 项目名隔离（默认 name: u-dao-firebot-r001），绝不与 u-dao-firebot 混用
 docker compose -f deploy/u-dao/r001-independent/compose.r001-independent.yml \
   --env-file /path/to/r001.env config --quiet || exit 1
-# 3) 端口核对：8884 与生产回环端口无重叠（生产占用 18080/18554/18883 等回环端口）
-ss -ltn | grep -E ':(8884|18080|18554|18883)' && exit 1 || true
+# 3) 端口核对（G1-P2-L0 A4 修正）：只核验本次新增的 8884 绑定未被其它进程占用；
+#    生产端口（18080/18554/18883 等）为生产正常占用，仅用于前后不变性对比，
+#    不得判为冲突。
+if ss -ltn | grep -qE ':(8884)\b'; then echo '8884 已被占用'; exit 1; fi
+ss -ltn | grep -E ':(18080|18554|18883)\b' > /root/g1p2-prod-ports-before.txt || true
 # 4) 生产服务身份快照（容器 ID/StartedAt）留存，验收时逐项比对
 docker ps --format '{{.Names}} {{.ID}} {{.Status}}' | grep '^u-dao-firebot' > /root/g1p2-prod-snapshot.txt
 ```
@@ -31,13 +34,15 @@ docker ps --format '{{.Names}} {{.ID}} {{.Status}}' | grep '^u-dao-firebot' > /r
 | 步骤 | 执行者 | 变更资源 | STOP 条件 | 回滚 |
 | --- | --- | --- | --- | --- |
 | 1 OWNER 授权 | OWNER | 无 | 未获 GO 即停 | - |
-| 2 生产 DB 备份+隔离恢复 | 云端 CC | 新增备份文件 | 恢复比对失败 | 备份仅追加 |
-| 3 SG 放行 8884 | OWNER/腾讯云 | 安全组规则 | 未放行不继续 | 移除规则 |
-| 4 R001 注册+绑定 | 云端 CC | robots 新行(enabled=false)+audit | 重复/绑定闸拒绝 | 行保持 disabled |
-| 5 API/Web 升级 | 云端 CC | api/web 镜像标签 | 健康检查失败 | 旧镜像标签 |
-| 6 独立栈部署（本模板） | 云端 CC | 新 compose 项目(3 容器) | 任一 unhealthy | `down`（生产零触碰） |
-| 7 物理 Agent 安装 | 车端 CC | 001 工控机 systemd | owner 冲突(退出码3) | 停 unit |
-| 8 全链路+零影响验收 | 双方 CC | 无 | R002/生产任何异常 | 停 Agent+`down` |
+| 2 生产 Firebot DB 备份+隔离恢复 | 云端 CC | 新增备份文件 | 恢复比对失败 | 备份仅追加 |
+| 3 生产镜像/环境备份 + 最小 API/Web 升级 | 云端 CC | api/web 镜像标签 + env 备份 | 健康检查失败 | 旧镜像标签 |
+| 4 独立 Broker、新 CA、账号及 TLS 准备 | 云端 CC | 新证书/账号（隔离目录） | 任何生成/校验失败 | 删除新件 |
+| 5 受控创建 firebot-vehicle-01 并绑定 V1 | 云端 CC | robots 新行(enabled=false)+audit | 重复/绑定闸拒绝 | 行保持 disabled |
+| 6 腾讯云 8884 访问控制 + 实际外部握手验证 | OWNER/云端 CC | 安全组规则 + 8884 公网 | 握手失败不继续 | 移除规则 |
+| 7 001 低权限安装只读 Agent | 车端 CC | 001 工控机 systemd | owner 冲突(退出码3) | 停 unit |
+| 8 实际 Web 上行与 R002 隔离验收 | 双方 CC | 无 | R002/生产任何异常 | 停 Agent+`down` |
+
+> 禁止运行旧 Fleet 脚本去同步或 HUP 原生产 Broker（生产 broker 零 SIGHUP/零 ACL 变更）。
 
 ## 3. 验收门禁
 
