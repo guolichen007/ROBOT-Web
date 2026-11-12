@@ -77,6 +77,32 @@ export async function getAccessToken(request: APIRequestContext): Promise<string
   return ensurePasswordReady(request)
 }
 
+// G1-P2-L0 A3 登录前目标守卫：任何登录/变更请求之前，以无凭据、零副作用的 GET 验证
+// 测试栈 nginx 注入的专有响应头（infra/nginx/nginx.conf：X-Firebot-E2E-Target: test）。
+// 生产 nginx 配置不注入该头 → 直接中止，绝不尝试任何 admin 密码。
+// 只验证头，不读取/打印响应体；请求不携带任何凭据或 cookie。
+export const E2E_TARGET_HEADER = 'x-firebot-e2e-target'
+export const E2E_TARGET_VALUE = 'test'
+
+export async function assertPreLoginTarget(request: APIRequestContext): Promise<void> {
+  let response: APIResponse
+  try {
+    response = await request.get('/health/live', {
+      headers: { Authorization: '', Cookie: '' },
+      failOnStatusCode: false,
+      maxRedirects: 0,
+    })
+  } catch {
+    throw new Error('E2E_TARGET_GUARD: 登录前目标探测失败（不可达），拒绝继续——不发送任何登录请求')
+  }
+  const marker = response.headers()[E2E_TARGET_HEADER]
+  if (marker !== E2E_TARGET_VALUE) {
+    throw new Error(
+      `E2E_TARGET_GUARD: 目标未声明为隔离测试实例（${E2E_TARGET_HEADER}=${marker === undefined ? '<absent>' : JSON.stringify(marker)}），拒绝继续——不得对疑似生产入口尝试任何登录`,
+    )
+  }
+}
+
 // G1-P2-L0 D 目标隔离检查：任何测试探针运行前必须确认目标不是生产入口。
 // 判定依据为测试种子数据特征（名称），绝不只凭端口判断（18080 与生产 nginx
 // 回环端口曾冲突，导致隔离登录探针误打生产 API 的事故）。
