@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -26,6 +27,8 @@ from app.modules.commands.readiness import robot_readiness
 from sqlalchemy import select
 
 from services.vehicle_agent_v1 import PROTOCOL, Ack, normalize, status_confirms
+
+logger = logging.getLogger("vehicle-agent-ingress")
 
 INTERNAL = "_platform/vehicle-agent-v1/"
 
@@ -265,8 +268,14 @@ def process(name: str, payload: bytes, handle_ack) -> bool:
                 # 仅 retained LWT offline（权威离线）继续生效。新鲜 live 消息恢复 ONLINE。
                 if envelope.get("retained"):
                     if kind == "status":
+                        logger.warning(
+                            "v1 retained status dropped (stale data, vehicle=%s)", vehicle
+                        )
                         return True
                     if data.get("state") == "online":
+                        logger.warning(
+                            "v1 retained online dropped (stale data, vehicle=%s)", vehicle
+                        )
                         return True
                 online = data.get("state") == "online" if kind == "availability" else data["online"]
                 # Explicit offline remains authoritative until availability online.

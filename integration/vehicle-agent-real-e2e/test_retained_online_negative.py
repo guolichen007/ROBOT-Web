@@ -57,6 +57,14 @@ def _db_state() -> tuple[str | None, str | None]:
 def test_old_retained_online_not_resurrected(e2e_stack, vehicle_asset):
     workdir: Path = e2e_stack["workdir"]
     redis = e2e_stack["redis"]
+    # 干净基线：清掉本车 latest（避免跨测试/跨运行的 Redis 残留污染断言）
+    redis.delete(f"robot:{VEHICLE}:latest")
+    # 若上一测试遗留 ONLINE，等待清扫器退化为 OFFLINE（真实基线）
+    deadline = time.monotonic() + 30.0
+    while time.monotonic() < deadline and _db_state()[0] == "ONLINE":
+        time.sleep(0.5)
+    before_state, before_seen = _db_state()
+    assert before_state != "ONLINE", "前置条件：车辆必须处于 OFFLINE 基线"
     port2 = _free_port()
     conf2 = workdir / "mosquitto.retained.conf"
     conf2.write_text(
@@ -174,8 +182,8 @@ def test_old_retained_online_not_resurrected(e2e_stack, vehicle_asset):
         )
         assert "online" in probe.stdout, f"旧 retained online 未恢复或不可投递: {probe.stdout}"
 
-        # 4) 新会话专属 Adapter 重订阅（收到旧 retained online，但不得复活）
-        before_state, before_seen = _db_state()
+        # 4) 专属 Ingress 先订阅内部桥，再启动新会话 Adapter——消除订阅时序竞态，
+        #    保证 retained 内部信封必然到达 ingress，由 G1-P2-L0 守卫丢弃。
         env2 = dict(os.environ)
         env2.pop("FIREBOT_LEGACY_HEARTBEAT", None)
         env2["PYTHONPATH"] = os.pathsep.join([str(REPO_ROOT), str(REPO_ROOT / "apps" / "api")])
@@ -183,17 +191,6 @@ def test_old_retained_online_not_resurrected(e2e_stack, vehicle_asset):
         env2["MQTT_CA_FILE"] = str(e2e_stack["certs"] / "ca.crt")
         env2["FIREBOT_SERVICE_INSTANCE_ID"] = DEDICATED_INSTANCE
         env2["VEHICLE_AGENT_SCOPE_VEHICLE_IDS"] = VEHICLE
-        adapter2_log = open(workdir / "adapter.retained.log", "ab")  # noqa: SIM115
-        adapter2 = subprocess.Popen(
-            [sys.executable, "services/vehicle-agent-adapter/main.py"],
-            cwd=str(REPO_ROOT),
-            env=env2,
-            stdout=adapter2_log,
-            stderr=subprocess.STDOUT,
-        )
-        procs.append(adapter2)
-        # 专属 Ingress 同接 Broker2：retained online 经内部桥到达 ingress，
-        # 由 G1-P2-L0 守卫丢弃（真实链路反证，非空跑）
         ingress2_log = open(workdir / "ingress.retained.log", "ab")  # noqa: SIM115
         ingress2 = subprocess.Popen(
             [sys.executable, "services/mqtt-ingress/main.py"],
@@ -203,18 +200,29 @@ def test_old_retained_online_not_resurrected(e2e_stack, vehicle_asset):
             stderr=subprocess.STDOUT,
         )
         procs.append(ingress2)
+        time.sleep(4)  # ingress 完成订阅
+        adapter2_log = open(workdir / "adapter.retained.log", "ab")  # noqa: SIM115
+        adapter2 = subprocess.Popen(
+            [sys.executable, "services/vehicle-agent-adapter/main.py"],
+            cwd=str(REPO_ROOT),
+            env=env2,
+            stdout=adapter2_log,
+            stderr=subprocess.STDOUT,
+        )
+        procs.append(adapter2)
         time.sleep(6)
 
-        # 5) 断言：不复活、不刷新 last_seen、不刷新 server_received_at
+        # 5) 断言：守卫丢弃日志存在 + 不复活、不刷新 last_seen、不刷新 server_received_at
+        drop_log = (workdir / "ingress.retained.log").read_text()
+        assert "retained online dropped" in drop_log, (
+            "专属 Ingress 未收到/未丢弃 retained online（订阅时序或守卫缺失）"
+        )
         after_state, after_seen = _db_state()
         assert after_state != "ONLINE", "旧 retained online 复活了 OFFLINE 设备"
         assert after_seen == before_seen, "旧 retained 数据刷新了 last_seen_at"
         raw = redis.get(f"robot:{VEHICLE}:latest")
         latest = json.loads(raw) if raw else {}
-        assert "server_received_at" not in latest or latest.get("server_received_at") in (
-            None,
-            "",
-        ), "旧 retained 数据刷新了 Web server_received_at"
+        assert not latest.get("server_received_at"), "旧 retained 数据刷新了 Web server_received_at"
         # 真实 LWT offline 逻辑不受影响：Agent 已死但无 LWT 场景下，最终由清扫器/权威
         # offline 事件接管；此处只反证 retained online 不能成为 ONLINE 事实源。
     finally:
