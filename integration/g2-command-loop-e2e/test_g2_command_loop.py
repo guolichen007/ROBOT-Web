@@ -21,11 +21,11 @@ def api(g2):
     from fastapi.testclient import TestClient
 
     with TestClient(app) as client:
-        from app.core.config import get_settings
+        from conftest import ensure_isolated_test_admin
 
+        username, password = ensure_isolated_test_admin()
         response = client.post(
-            "/api/v1/auth/login",
-            json={"username": "admin", "password": get_settings().effective_admin_password},
+            "/api/v1/auth/login", json={"username": username, "password": password}
         )
         assert response.status_code == 200, response.text
         client.headers["Authorization"] = "Bearer " + response.json()["access_token"]
@@ -276,49 +276,129 @@ def test_06_restart_new_session_rejects_previous_session_command(g2, api):
 
 
 # ---------------------------------------------------------------- G2-B ROS 软件闭环
-def _software(api, action: str, params: dict | None = None):
+def _post_software(api, action: str, params: dict | None = None) -> dict:
     response = post(api, action, params)
     assert response.status_code == 202, response.text
     created = response.json()
     assert created["payload_json"]["execution_mode"] == "SOFTWARE_TEST"
     assert created["task_id"] is None  # 软件测试不创建真实业务任务
-    row = wait_terminal(created["command_id"], {"SUCCEEDED", "FAILED", "ACK_REJECTED"}, 30)
+    return created
+
+
+def _software(api, action: str, params: dict | None = None):
+    created = _post_software(api, action, params)
+    row = wait_terminal(
+        created["command_id"], {"SUCCEEDED", "FAILED", "ACK_REJECTED", "CANCELLED"}, 40
+    )
     return created, row
 
 
-def test_07_ros_software_start_patrol_stop_close(g2, api):
+def _states(row) -> list[str]:
+    return [item["state"] for item in (row.ack_payload_json or {}).get("software_feedback", [])]
+
+
+def _ros_log(g2) -> str:
+    return (g2["workdir"] / "ros-001-command-node.log").read_text(errors="replace")
+
+
+def test_07_ros_001_custom_messages_start_patrol_close(g2, api):
+    """001 正式 command_node.py + firebot_001_software 自定义消息：完整软件闭环。"""
     if not g2["ros"]:
         pytest.skip("rospy 不可用：ROS 软件闭环 NOT_EXECUTED（不伪造通过）")
-    expected = [
-        ("start", {"with_navigation": True}, None),
-        ("patrol", {}, None),
-        ("stop_patrol", {}, None),
-        ("close", {}, None),
-        ("close", {}, "ALREADY_CLOSED"),
-    ]
-    for action, params, reason in expected:
-        created, row = _software(api, action, params)
-        assert row.lifecycle_status == "SUCCEEDED", (action, row.ack_reason, row.ack_payload_json)
-        ack = row.ack_payload_json
-        # ACK = 车端接收（RECEIVED）；软件完成以 ROS COMPLETED 反馈为准（两个不同状态）
-        assert ack["ack_source"] == "vehicle" and ack["data"]["stage"] == "RECEIVED"
-        assert ack["data"]["hardware"] == "NO_HARDWARE"
-        states = [item["state"] for item in ack["software_feedback"]]
-        assert states[-1] == "COMPLETED" and "ACCEPTED" in states, states
-        assert ack["software_feedback"][-1].get("reason_code") == reason
-    # ROS 节点状态经 status.software 回传云端（SOFTWARE_TEST / NO_HARDWARE）
+    created, row = _software(api, "start", {"with_navigation": True})
+    assert row.lifecycle_status == "SUCCEEDED", (row.ack_reason, row.ack_payload_json)
+    ack = row.ack_payload_json
+    assert ack["ack_source"] == "vehicle" and ack["data"]["stage"] == "RECEIVED"
+    assert _states(row)[-1] == "COMPLETED" and "ACCEPTED" in _states(row)
+    msg_id = created["payload_json"]["message_id"]
+    # SoftwareCommand.command_id = V1 msg_id（非云端业务 command_id），节点日志可逐条对应
+    assert f"command_id={msg_id}" in _ros_log(g2)
+    assert created["command_id"] not in _ros_log(g2)
+    # 自然完成的巡检（rounds=2）：RUNNING→EXECUTING，最终 COMPLETED
+    created, row = _software(api, "patrol", {"rounds": 2})
+    assert row.lifecycle_status == "SUCCEEDED", (row.ack_reason, row.ack_payload_json)
+    feedback = row.ack_payload_json["software_feedback"]
+    assert [f["ros_status"] for f in feedback] == ["ACCEPTED", "RUNNING", "RUNNING", "COMPLETED"]
+    assert _states(row) == ["ACCEPTED", "EXECUTING", "EXECUTING", "COMPLETED"]
+    created, row = _software(api, "close")
+    assert row.lifecycle_status == "SUCCEEDED"
+    # SoftwareStatus 自定义消息 → 可序列化状态（经 status.software 回传云端）
     software = wait_for(
-        lambda: (robot_row().agent_state_json or {}).get("status", {}).get("software"), 10
+        lambda: (s := (robot_row().agent_state_json or {}).get("status", {}).get("software"))
+        and s.get("state") == "idle"
+        and s,
+        15,
     )
-    assert software and software["hardware"] == "NO_HARDWARE" and software["state"] == "STOPPED"
+    assert software and software["hardware"] == "NO_HARDWARE" and software["pid"] > 0
+    assert "hardware_executors=NONE" in software["diagnostics"]
 
 
-def test_08_ros_software_rejection_is_failure_not_success(g2, api):
+def test_08_stop_patrol_while_running(g2, api):
+    """巡检运行中停止：stop 在巡检自然完成之前收到反馈；patrol 记录为 STOPPED（非 FAILED）。"""
     if not g2["ros"]:
         pytest.skip("rospy 不可用：NOT_EXECUTED")
-    # 软件已关闭时巡检 → ROS 节点 REJECTED(NOT_READY) → FAILED（不得显示成功）
-    created, row = _software(api, "patrol")
+    _, row = _software(api, "start", {"with_navigation": True})
+    assert row.lifecycle_status == "SUCCEEDED"
+    rounds = 20  # 自然完成需 ~20s
+    patrol = _post_software(api, "patrol", {"rounds": rounds})
+    started = time.monotonic()
+    wait_for(lambda: "EXECUTING" in _states(command_row(patrol["command_id"])), 15)
+    # 巡检进行中：诊断仍可即时执行（工作线程未被长任务阻塞）
+    ping = post(api, "ping").json()
+    ping_row = wait_terminal(ping["command_id"], {"SUCCEEDED", "ACK_REJECTED"}, 10)
+    assert ping_row.lifecycle_status == "SUCCEEDED"
+    stop = _post_software(api, "stop_patrol")
+    stop_row = wait_terminal(stop["command_id"], {"SUCCEEDED", "FAILED", "ACK_REJECTED"}, 15)
+    elapsed = time.monotonic() - started
+    assert elapsed < rounds - 5, f"stop took {elapsed:.1f}s — not before natural completion"
+    assert stop_row.lifecycle_status == "SUCCEEDED", stop_row.ack_payload_json
+    stop_feedback = stop_row.ack_payload_json["software_feedback"]
+    # stop 的 ACK 与终态反馈关联 stop 自己的 msg_id；终态来自真实 STOPPED 事件
+    assert stop_row.ack_payload_json["msg_id"] == stop["payload_json"]["message_id"]
+    assert (
+        stop_feedback[-1]["state"] == "COMPLETED" and stop_feedback[-1]["ros_status"] == "STOPPED"
+    )
+    assert stop_feedback[-1]["stopped_cloud_command_id"] == patrol["command_id"]
+    patrol_row = wait_terminal(patrol["command_id"], {"CANCELLED", "SUCCEEDED", "FAILED"}, 10)
+    assert patrol_row.lifecycle_status == "CANCELLED" and patrol_row.ack_reason == "STOPPED"
+    assert _states(patrol_row)[-1] == "STOPPED"
+    assert "COMPLETED" not in _states(patrol_row)
+    log = _ros_log(g2)
+    assert f"command_id={patrol['payload_json']['message_id']} STOPPED" in log
+    g2["evidence"]["stop_while_running_s"] = round(elapsed, 2)
+    print(
+        "G2_STOP_EVIDENCE "
+        + json.dumps(
+            {
+                "patrol_rounds": rounds,
+                "stop_terminal_after_s": round(elapsed, 2),
+                "patrol": {
+                    "command_id": patrol["command_id"],
+                    "msg_id": patrol["payload_json"]["message_id"],
+                    "status": patrol_row.lifecycle_status,
+                    "states": _states(patrol_row),
+                },
+                "stop": {
+                    "command_id": stop["command_id"],
+                    "msg_id": stop["payload_json"]["message_id"],
+                    "status": stop_row.lifecycle_status,
+                    "final": stop_feedback[-1],
+                },
+            },
+            ensure_ascii=False,
+        )
+    )
+    _, row = _software(api, "close")
+    assert row.lifecycle_status == "SUCCEEDED"
+
+
+def test_08b_ros_rejection_is_failure_not_success(g2, api):
+    if not g2["ros"]:
+        pytest.skip("rospy 不可用：NOT_EXECUTED")
+    # 软件已关闭（idle）时巡检 → 001 节点 REJECTED(not ready) → FAILED（不得显示成功）
+    _, row = _software(api, "patrol")
     assert row.lifecycle_status == "FAILED" and row.ack_reason == "NOT_READY"
+    assert row.ack_payload_json["software_feedback"][-1]["ros_status"] == "REJECTED"
 
 
 # ---------------------------------------------------------------- 隔离与异常

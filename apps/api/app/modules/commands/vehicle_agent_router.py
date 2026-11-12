@@ -191,8 +191,20 @@ def command(
     from datetime import UTC, datetime
     from uuid import uuid4
 
+    from app.core.vehicle_routing import RoutingError, execution_mode
+
     try:
-        WireCommand(msg_id=uuid4(), command=action, params=payload.params, ts=datetime.now(UTC))
+        mode = execution_mode(robot.vehicle_id, action)
+    except RoutingError as exc:
+        raise PlatformError("EXECUTION_PROFILE_DENIED", "车辆执行档不允许此命令") from exc
+    try:
+        WireCommand(
+            msg_id=uuid4(),
+            command=action,
+            params=payload.params,
+            ts=datetime.now(UTC),
+            mode=mode,
+        )
     except ValueError as exc:
         raise PlatformError("INVALID_PARAM", "v1 命令参数不符合合同") from exc
     if robot.agent_protocol != PROTOCOL:
@@ -231,12 +243,6 @@ def command(
         )
     )
     task_id = None
-    from app.core.vehicle_routing import RoutingError, execution_mode
-
-    try:
-        mode = execution_mode(robot.vehicle_id, action)
-    except RoutingError as exc:
-        raise PlatformError("EXECUTION_PROFILE_DENIED", "车辆执行档不允许此命令") from exc
     if mode == "SOFTWARE_TEST":
         # G2 软件测试：只驱动车端 ROS 软件状态机，不创建业务巡检任务、不要求地图合同，
         # 不得冒充真实巡检（Web 标注 SOFTWARE_TEST）。

@@ -1,19 +1,26 @@
-"""本地 ROS 软件桥：执行器 ⇄ Unix socket ⇄ ROS topic。
+"""本地 ROS1 软件桥（G2-R1）：执行器 ⇄ Unix socket ⇄ 001 正式 ROS 接口。
 
-执行器（Python 3.11 venv，无 rospy）通过本地 Unix socket 提交 SOFTWARE_TEST 命令；本桥
-（系统 Python + rospy）发布到 <ns>/command，订阅 <ns>/feedback 与 <ns>/status，按
-request_id 精确关联后把反馈逐行回传。只做转发，不执行任何本地动作、不触碰硬件。
+直接使用 001 现场节点的自定义消息（默认 firebot_001_software/{SoftwareCommand,
+SoftwareFeedback,SoftwareStatus}；--message-package 可配置），不要求 001 更换软件节点。
+只做转发与关联，不执行任何本地动作、不触碰硬件。
+
+关联规则：
+- SoftwareCommand.command_id = V1 msg_id（UUID）。反馈按 command_id 精确关联到请求。
+- 停止语义：001 节点对 stop_patrol 只回 ACCEPTED（stop 自己的 command_id），随后巡检线程以
+  **patrol 的 command_id** 发布 STOPPED。桥把该 STOPPED 原样交给 patrol 请求（patrol 终态
+  STOPPED，记录保留），并为已被接受的 stop_patrol 请求生成以 **stop 自己 msg_id** 关联的
+  COMPLETED（ros_status=STOPPED，stopped_command_id=patrol msg_id）。若巡检先自然完成，
+  stop 以 COMPLETED/ALREADY_STOPPED 收敛；不以超时代替已停止的事实。
 
 socket 协议（每连接一请求，行分隔 JSON）：
-  → {"op":"command", ...ROS command 字段...}   ← 反馈行……直至终态或超时
-  → {"op":"status"}                            ← {"status": <最近一次 status|null>, "age_s"}
-无 ROS 订阅者（软件节点未运行）→ 立即回 {"state":"REJECTED","reason_code":"ROS_UNAVAILABLE"}，
-绝不假装已投递。
+  → {"op":"command","command_id":<msg_id>,"command":...,"params":{...}}  ← 反馈行……直至终态
+  → {"op":"status"}  ← {"status": <SoftwareStatus 转换结果|null>, "age_s": float|null}
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import logging
 import os
@@ -25,63 +32,107 @@ import time
 from datetime import datetime, timezone
 
 try:
-    from .contract import INTERFACE_VERSION, SOFTWARE_COMMANDS, TERMINAL_STATES, topics
-except ImportError:  # 以脚本方式运行（rosrun / systemd 直接执行）
-    from contract import (  # type: ignore
-        INTERFACE_VERSION,
+    from .contract import (
+        DEFAULT_MESSAGE_PACKAGE,
         SOFTWARE_COMMANDS,
         TERMINAL_STATES,
+        build_command,
+        feedback_to_dict,
+        status_to_dict,
+        topics,
+    )
+except ImportError:  # 以脚本方式运行
+    from contract import (  # type: ignore
+        DEFAULT_MESSAGE_PACKAGE,
+        SOFTWARE_COMMANDS,
+        TERMINAL_STATES,
+        build_command,
+        feedback_to_dict,
+        status_to_dict,
         topics,
     )
 
 LOG = logging.getLogger("firebot-ros-software-bridge")
 SUBSCRIBER_WAIT_SECONDS = 3.0
 ACCEPT_TIMEOUT_SECONDS = 5.0
-FEEDBACK_TIMEOUT_SECONDS = 60.0
+# 无反馈空闲上限（巡检每轮都有 RUNNING，按“最后一次反馈后”计时，而非总时长）
+FEEDBACK_IDLE_TIMEOUT_SECONDS = 30.0
+MAX_CONCURRENT_REQUESTS = 8
 
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def load_message_types(package: str):
+    module = importlib.import_module(package + ".msg")
+    return module.SoftwareCommand, module.SoftwareFeedback, module.SoftwareStatus
+
+
+class Pending:
+    def __init__(self, command_id: str, action: str) -> None:
+        self.command_id = command_id
+        self.action = action
+        self.inbox: queue.Queue = queue.Queue()
+        self.accepted = False
+
+
 class RosSoftwareBridge:
-    def __init__(self, rospy, string_type, namespace: str) -> None:
+    def __init__(self, rospy, types, namespace: str) -> None:
         self.rospy = rospy
-        self.String = string_type
+        self.Command, self.Feedback, self.Status = types
         self.topics = topics(namespace)
-        self.waiters = {}
-        self.by_command = {}
+        self.pending: dict[str, Pending] = {}
         self.lock = threading.Lock()
         self.last_status = None
         self.last_status_at = 0.0
-        self.publisher = rospy.Publisher(self.topics["command"], string_type, queue_size=10)
+        self.publisher = rospy.Publisher(self.topics["command"], self.Command, queue_size=10)
         self.feedback_sub = rospy.Subscriber(
-            self.topics["feedback"], string_type, self._on_feedback, queue_size=50
+            self.topics["feedback"], self.Feedback, self._on_feedback, queue_size=100
         )
-        rospy.Subscriber(self.topics["status"], string_type, self._on_status, queue_size=5)
+        rospy.Subscriber(self.topics["status"], self.Status, self._on_status, queue_size=5)
 
+    # ---------------- ROS 回调 ----------------
     def _on_feedback(self, message) -> None:
-        try:
-            data = json.loads(message.data)
-        except ValueError:
-            LOG.warning("feedback is not JSON; dropped")
-            return
+        data = feedback_to_dict(message)
         with self.lock:
-            target = self.waiters.get(data.get("request_id"))
-            if target is None and data.get("command_id"):
-                # 现场节点若只回显 command_id（= V1 msg_id，全局唯一）也可精确关联
-                target = self.by_command.get(data.get("command_id"))
-        if target is None:
-            LOG.info("feedback for unknown request_id %s dropped", data.get("request_id"))
-            return
-        target.put(data)
+            target = self.pending.get(data["command_id"])
+            stops = []
+            if data["ros_status"] == "STOPPED" or (
+                data["action"] == "patrol" and data["state"] in TERMINAL_STATES
+            ):
+                stops = [
+                    p
+                    for p in self.pending.values()
+                    if p.action == "stop_patrol" and p.accepted and p is not target
+                ]
+        if target is not None:
+            if data["state"] == "ACCEPTED":
+                target.accepted = True
+            target.inbox.put(data)
+        else:
+            LOG.info("feedback for unknown command_id %s (%s)", data["command_id"], data["state"])
+        for stop in stops:
+            stopped = data["ros_status"] == "STOPPED"
+            stop.inbox.put(
+                {
+                    "command_id": stop.command_id,
+                    "action": "stop_patrol",
+                    "state": "COMPLETED",
+                    "ros_status": data["ros_status"],
+                    "reason_code": None if stopped else "ALREADY_STOPPED",
+                    "message": data["message"]
+                    if stopped
+                    else "patrol finished before stop took effect: " + data["message"],
+                    "software_test": data["software_test"],
+                    "stopped_command_id": data["command_id"],
+                    "ts": data["ts"],
+                }
+            )
 
     def _on_status(self, message) -> None:
-        try:
-            self.last_status = json.loads(message.data)
-            self.last_status_at = time.monotonic()
-        except ValueError:
-            LOG.warning("status is not JSON; dropped")
+        self.last_status = status_to_dict(message)
+        self.last_status_at = time.monotonic()
 
     def status(self) -> dict:
         age = time.monotonic() - self.last_status_at if self.last_status_at else None
@@ -92,95 +143,104 @@ class RosSoftwareBridge:
             self.publisher.get_num_connections() > 0 and self.feedback_sub.get_num_connections() > 0
         )
 
+    # ---------------- 请求处理 ----------------
     def run_command(self, request: dict, emit) -> None:
-        request_id = request.get("request_id")
-        if not request_id or request.get("command") not in SOFTWARE_COMMANDS:
-            emit({"request_id": request_id, "state": "REJECTED", "reason_code": "INVALID_PARAM"})
+        command_id = str(request.get("command_id") or "")
+        action = request.get("command")
+        if not command_id or action not in SOFTWARE_COMMANDS:
+            emit(self._local(command_id, action, "REJECTED", "INVALID_PARAM", "bad request"))
             return
-        # 双向链路都须建立：软件节点已订阅 command，且本桥已连上节点的 feedback 发布者；
-        # 否则早到的 ACCEPTED/COMPLETED 反馈会在 ROS 层丢失。
         deadline = time.monotonic() + SUBSCRIBER_WAIT_SECONDS
         while time.monotonic() < deadline and not self._linked():
             time.sleep(0.05)
         if not self._linked():
             emit(
-                {
-                    "request_id": request_id,
-                    "state": "REJECTED",
-                    "reason_code": "ROS_UNAVAILABLE",
-                    "message": "ROS 软件节点未连接 "
-                    + self.topics["command"]
-                    + " / "
-                    + self.topics["feedback"],
-                    "ts": now_iso(),
-                }
+                self._local(
+                    command_id,
+                    action,
+                    "REJECTED",
+                    "ROS_UNAVAILABLE",
+                    f"ROS 软件节点未连接 {self.topics['command']} / {self.topics['feedback']}",
+                )
             )
             return
-        inbox = queue.Queue()
+        pending = Pending(command_id, action)
         with self.lock:
-            self.waiters[request_id] = inbox
-            if request.get("command_id"):
-                self.by_command[request["command_id"]] = inbox
+            if command_id in self.pending:
+                emit(self._local(command_id, action, "REJECTED", "BUSY", "duplicate in-flight"))
+                return
+            self.pending[command_id] = pending
         try:
-            payload = {
-                "interface_version": INTERFACE_VERSION,
-                "request_id": request_id,
-                "command_id": request.get("command_id"),
-                "command": request["command"],
-                "params": request.get("params") or {},
-                "mode": "SOFTWARE_TEST",
-                "issued_at": request.get("issued_at"),
-                "expires_at": request.get("expires_at"),
-            }
-            self.publisher.publish(self.String(data=json.dumps(payload)))
-            accepted = False
+            self.publisher.publish(
+                build_command(self.Command, command_id, action, request.get("params") or {})
+            )
+            LOG.info("forwarded %s command_id=%s", action, command_id)
             timeout_at = time.monotonic() + ACCEPT_TIMEOUT_SECONDS
             while True:
                 remaining = timeout_at - time.monotonic()
                 if remaining <= 0:
                     emit(
-                        {
-                            "request_id": request_id,
-                            "state": "FAILED",
-                            "reason_code": "FEEDBACK_TIMEOUT" if accepted else "ROS_UNAVAILABLE",
-                            "message": "ROS 软件节点反馈超时",
-                            "ts": now_iso(),
-                        }
+                        self._local(
+                            command_id,
+                            action,
+                            "FAILED",
+                            "FEEDBACK_TIMEOUT" if pending.accepted else "ROS_UNAVAILABLE",
+                            "ROS 软件节点反馈超时（结果未确认）",
+                        )
                     )
                     return
                 try:
-                    feedback = inbox.get(timeout=min(remaining, 0.5))
+                    feedback = pending.inbox.get(timeout=min(remaining, 0.5))
                 except queue.Empty:
                     continue
                 emit(feedback)
-                if feedback.get("state") in TERMINAL_STATES:
+                if feedback["state"] in TERMINAL_STATES:
                     return
-                if not accepted:
-                    accepted = True
-                    timeout_at = time.monotonic() + FEEDBACK_TIMEOUT_SECONDS
+                timeout_at = time.monotonic() + FEEDBACK_IDLE_TIMEOUT_SECONDS
         finally:
             with self.lock:
-                self.waiters.pop(request_id, None)
-                self.by_command.pop(request.get("command_id"), None)
+                self.pending.pop(command_id, None)
+
+    @staticmethod
+    def _local(command_id, action, state, reason, message) -> dict:
+        return {
+            "command_id": command_id,
+            "action": action,
+            "state": state,
+            "ros_status": None,
+            "reason_code": reason,
+            "message": message,
+            "software_test": True,
+            "source": "bridge",
+            "ts": now_iso(),
+        }
 
 
-def serve(bridge: RosSoftwareBridge, socket_path: str, group_gid=None) -> socketserver.BaseServer:
+def serve(bridge: RosSoftwareBridge, socket_path: str) -> socketserver.BaseServer:
+    slots = threading.BoundedSemaphore(MAX_CONCURRENT_REQUESTS)
+
     class Handler(socketserver.StreamRequestHandler):
         def handle(self) -> None:
-            line = self.rfile.readline(65536)
-            try:
-                request = json.loads(line)
-            except ValueError:
+            if not slots.acquire(blocking=False):
+                self.wfile.write(b'{"state":"REJECTED","reason_code":"BUSY"}\n')
                 return
+            try:
+                line = self.rfile.readline(65536)
+                try:
+                    request = json.loads(line)
+                except ValueError:
+                    return
 
-            def emit(item: dict) -> None:
-                self.wfile.write((json.dumps(item) + "\n").encode())
-                self.wfile.flush()
+                def emit(item: dict) -> None:
+                    self.wfile.write((json.dumps(item) + "\n").encode())
+                    self.wfile.flush()
 
-            if request.get("op") == "status":
-                emit(bridge.status())
-            elif request.get("op") == "command":
-                bridge.run_command(request, emit)
+                if request.get("op") == "status":
+                    emit(bridge.status())
+                elif request.get("op") == "command":
+                    bridge.run_command(request, emit)
+            finally:
+                slots.release()
 
     class Server(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
         daemon_threads = True
@@ -189,8 +249,6 @@ def serve(bridge: RosSoftwareBridge, socket_path: str, group_gid=None) -> socket
         os.unlink(socket_path)
     server = Server(socket_path, Handler)
     os.chmod(socket_path, 0o660)
-    if group_gid is not None:
-        os.chown(socket_path, -1, group_gid)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server
 
@@ -199,15 +257,20 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="firebot-ros-software-bridge")
     parser.add_argument("--namespace", required=True, help="如 /firebot_001/software")
     parser.add_argument("--socket", required=True, help="如 /run/firebot-ros-bridge/bridge.sock")
+    parser.add_argument(
+        "--message-package",
+        default=DEFAULT_MESSAGE_PACKAGE,
+        help="ROS 消息包（含 SoftwareCommand/SoftwareFeedback/SoftwareStatus）",
+    )
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     import rospy
-    from std_msgs.msg import String
 
+    types = load_message_types(args.message_package)
     rospy.init_node("firebot_software_bridge", anonymous=False, disable_signals=True)
-    bridge = RosSoftwareBridge(rospy, String, args.namespace)
+    bridge = RosSoftwareBridge(rospy, types, args.namespace)
     server = serve(bridge, args.socket)
-    LOG.info("bridge ready: %s <-> %s", args.socket, bridge.topics)
+    LOG.info("bridge ready: %s <-> %s (%s)", args.socket, bridge.topics, args.message_package)
     try:
         while not rospy.is_shutdown():
             time.sleep(0.5)

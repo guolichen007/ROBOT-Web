@@ -12,11 +12,14 @@ Group=firebot
 RuntimeDirectory=firebot-ros-bridge
 RuntimeDirectoryMode=0750
 WorkingDirectory=/opt/firebot/vehicle-agent-v1-readonly/repo
-Environment=PYTHONPATH=/opt/firebot/vehicle-agent-v1-readonly/repo
 EnvironmentFile=-/etc/firebot/vehicle-agent-v1-exec/ros.env
-ExecStart=/bin/bash -c 'source /opt/ros/noetic/setup.bash && exec /usr/bin/python3 \
-  -m services.vehicle_agent_v1_exec.ros.software_bridge \
+# 001 正式消息包 firebot_001_software 来自现场工作空间（devel/setup.bash），不重装不改动现有节点
+ExecStart=/bin/bash -c 'source /opt/ros/noetic/setup.bash && \
+  source ${FIREBOT_ROS_WS_SETUP:-/home/tl/firebot_001_ws/devel/setup.bash} && \
+  export PYTHONPATH=/opt/firebot/vehicle-agent-v1-readonly/repo:$PYTHONPATH && \
+  exec /usr/bin/python3 -m services.vehicle_agent_v1_exec.ros.software_bridge \
   --namespace ${FIREBOT_ROS_SOFTWARE_NS:-/firebot_001/software} \
+  --message-package ${FIREBOT_ROS_MSG_PACKAGE:-firebot_001_software} \
   --socket /run/firebot-ros-bridge/bridge.sock'
 Restart=on-failure
 RestartSec=5

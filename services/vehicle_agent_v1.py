@@ -63,7 +63,7 @@ EXECUTION_PROFILES: dict[str, dict[str, str]] = {
     },
 }
 # 车端软件执行反馈（沿用 FIREBOT_BRIDGE_CONTRACT §3.2 枚举）
-SOFTWARE_FEEDBACK_STATES = ("ACCEPTED", "EXECUTING", "COMPLETED", "REJECTED", "FAILED")
+SOFTWARE_FEEDBACK_STATES = ("ACCEPTED", "EXECUTING", "COMPLETED", "REJECTED", "FAILED", "STOPPED")
 TOPIC_CONTRACT = {
     "cmd": (1, False),
     "ack": (1, False),
@@ -132,6 +132,16 @@ class WireCommand(WireModel):
                 raise ValueError("navigate requires a spot name")
             if not self.params["spot"].strip() or len(self.params["spot"]) > 128:
                 raise ValueError("invalid spot")
+        elif self.command == "patrol" and self.mode == "SOFTWARE_TEST" and self.params:
+            # G2-R1：001 软件巡检契约支持 {"rounds": N}（仅 SOFTWARE_TEST；真实巡检仍要求空参数）
+            rounds = self.params.get("rounds")
+            if (
+                set(self.params) != {"rounds"}
+                or isinstance(rounds, bool)
+                or not isinstance(rounds, int)
+                or not 1 <= rounds <= 1000
+            ):
+                raise ValueError("software patrol accepts only rounds (1..1000)")
         elif self.params:
             raise ValueError("command requires empty params")
         return self

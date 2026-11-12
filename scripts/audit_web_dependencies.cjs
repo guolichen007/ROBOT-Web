@@ -7,8 +7,13 @@ const root = path.resolve(__dirname, '../apps/web')
 const directory = path.resolve(root, '../../artifacts')
 fs.mkdirSync(directory, { recursive: true })
 
+// apps/web/.npmrc 指向国内镜像（npmmirror）以加速安装，但该镜像未实现
+// /-/npm/v1/security/* 审计接口（404 NOT_IMPLEMENTED）。审计必须查询官方公告库：
+// 仅对 audit 子命令显式指定官方 registry（可经 NPM_AUDIT_REGISTRY 覆盖），门禁判定不变。
+const auditRegistry = process.env.NPM_AUDIT_REGISTRY || 'https://registry.npmjs.org/'
+
 function audit(name, args) {
-  const npmArgs = ['audit', ...args, '--json']
+  const npmArgs = ['audit', ...args, '--json', `--registry=${auditRegistry}`]
   // Arguments are fixed internally; invoke cmd explicitly on Windows without shell:true.
   const windows = process.platform === 'win32'
   const commandArgs = windows ? ['/d', '/s', '/c', `npm.cmd ${npmArgs.join(' ')}`] : npmArgs

@@ -290,7 +290,9 @@ export interface VehicleAgentExecution {
 }
 
 export interface SoftwareFeedback {
-  state: 'ACCEPTED' | 'EXECUTING' | 'COMPLETED' | 'REJECTED' | 'FAILED' | string
+  state: 'ACCEPTED' | 'EXECUTING' | 'COMPLETED' | 'REJECTED' | 'FAILED' | 'STOPPED' | string
+  ros_status?: string | null
+  stopped_cloud_command_id?: string | null
   reason_code?: string | null
   message?: string | null
   phase?: string | null

@@ -1,0 +1,9 @@
+<!-- firebot-001 软件测试闭环（SOFTWARE_TEST，无硬件执行器）
+     ROS Master 仅经 http://localhost:11311 访问（本机/受控测试网络），
+     不发布任何命令到其他真实车辆。 -->
+<launch>
+  <node name="firebot_001_command" pkg="firebot_001_software" type="command_node.py"
+        output="screen" required="true" />
+  <node name="firebot_001_diagnostics" pkg="firebot_001_software" type="diagnostics_node.py"
+        output="screen" required="true" />
+</launch>

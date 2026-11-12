@@ -71,9 +71,13 @@ def converge_commands(db, robot: Robot, received: datetime) -> None:
         if software:
             # 软件测试命令只由车端 ROS 软件反馈收敛（不得用底盘 programs 状态冒充）；
             # 车端在 ACK 后未给出终态反馈 → 超时失败（结果未确认，不宣称成功）。
-            deadline = command.expires_at + timedelta(
-                seconds=get_settings().vehicle_agent_v1_ack_timeout_seconds
+            # 截止从最后一次真实软件反馈起算：长巡检持续有 RUNNING 反馈时不得被判超时失败
+            history = (command.ack_payload_json or {}).get("software_feedback") or []
+            last = max(
+                [command.expires_at]
+                + [datetime.fromisoformat(item["received_at"]) for item in history],
             )
+            deadline = last + timedelta(seconds=get_settings().vehicle_agent_v1_ack_timeout_seconds)
             if received > deadline:
                 command.lifecycle_status = "FAILED"
                 command.ack_reason = "SOFTWARE_FEEDBACK_TIMEOUT"
@@ -264,7 +268,13 @@ def handle_v1_ack(db, robot: Robot, data: dict, received: datetime, handle_ack) 
     converge_commands(db, robot, received)
 
 
-SOFTWARE_TERMINAL = {"COMPLETED": "SUCCEEDED", "FAILED": "FAILED", "REJECTED": "FAILED"}
+# STOPPED：被停止命令的真实终态（不是失败，不以超时代替）
+SOFTWARE_TERMINAL = {
+    "COMPLETED": "SUCCEEDED",
+    "FAILED": "FAILED",
+    "REJECTED": "FAILED",
+    "STOPPED": "CANCELLED",
+}
 
 
 def apply_software_feedback(db, command: Command, feedback: dict, received: datetime) -> None:
@@ -276,6 +286,8 @@ def apply_software_feedback(db, command: Command, feedback: dict, received: date
         command.terminal_at = received
         if terminal == "FAILED":
             command.ack_reason = feedback.get("reason_code") or "SOFTWARE_FAILED"
+        elif terminal == "CANCELLED":
+            command.ack_reason = "STOPPED"
     else:
         command.lifecycle_status = "EXECUTING"
     queue_event(db, "command.updated", serialize_model(command))
@@ -299,8 +311,30 @@ def handle_software_feedback(db, robot: Robot, data: dict, received: datetime) -
         return
     entry = {
         key: data.get(key)
-        for key in ("state", "reason_code", "message", "phase", "ros_ts", "duration_ms")
+        for key in (
+            "state",
+            "ros_status",
+            "reason_code",
+            "message",
+            "phase",
+            "ros_ts",
+            "duration_ms",
+            "stopped_command_id",
+        )
     }
+    if entry.get("stopped_command_id"):
+        # 车端以 V1 msg_id 关联被停止的命令；云端追溯到业务 command_id
+        stopped = next(
+            (
+                row
+                for row in db.scalars(
+                    select(Command).where(Command.robot_id == robot.id, Command.cmd == "patrol")
+                ).all()
+                if row.payload_json.get("message_id") == entry["stopped_command_id"]
+            ),
+            None,
+        )
+        entry["stopped_cloud_command_id"] = stopped.command_id if stopped else None
     entry["received_at"] = received.isoformat()
     ack_payload = dict(command.ack_payload_json or {})
     history = ack_payload.get("software_feedback", [])

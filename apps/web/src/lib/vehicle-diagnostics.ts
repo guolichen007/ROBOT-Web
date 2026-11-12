@@ -47,7 +47,10 @@ export function commandStages(row: AgentCommand): CommandStages {
   const failed = ['ACK_REJECTED', 'ACK_UNSUPPORTED', 'FAILED', 'EXPIRED'].includes(status)
   let outcome: CommandStages['outcome'] = 'running'
   let outcomeLabel = '执行中'
-  if (status === 'SUCCEEDED') {
+  if (status === 'CANCELLED' && software) {
+    outcome = 'succeeded'
+    outcomeLabel = '软件巡检已停止（STOPPED，SOFTWARE_TEST）'
+  } else if (status === 'SUCCEEDED') {
     outcome = 'succeeded'
     outcomeLabel = software ? '软件执行完成（SOFTWARE_TEST，非真实底盘）' : '车端执行完成'
   } else if (status === 'PUBLISHED_UNCONFIRMED') {
@@ -91,7 +94,7 @@ export function commandStages(row: AgentCommand): CommandStages {
           : 'idle',
     software: !software
       ? 'na'
-      : lastFeedback?.state === 'COMPLETED'
+      : lastFeedback?.state === 'COMPLETED' || lastFeedback?.state === 'STOPPED'
         ? 'done'
         : lastFeedback && ['FAILED', 'REJECTED'].includes(lastFeedback.state)
           ? 'failed'

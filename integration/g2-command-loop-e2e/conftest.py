@@ -7,7 +7,7 @@ Ingress → PostgreSQL → API。
   Broker B（r001 独立 Broker，platform 口令 B ≠ A）：专属 Adapter + 专属 Ingress
   Dispatcher（唯一 Outbox 认领者）：default→A，r001-independent-v1→B（口令 B 文件）
   firebot-vehicle-01：V1 执行器（execution_grant=ros-software-test）连 Broker B
-  ROS1：rosmaster + software_bridge + software_test_node（系统 python3 + rospy）
+  ROS1：rosmaster + software_bridge + 001 正式 command_node.py（firebot_001_software 自定义消息）
 
 需要 REAL_E2E=1 + 已迁移/seed 的 PG + Redis + mosquitto；ROS 段需要系统 python3 可导入
 rospy（G2_ROSPY_PYTHONPATH 可指定），否则 ROS 用例显式 skip（不伪造通过）。
@@ -53,7 +53,6 @@ G2_ENV = {
     "JWT_SECRET": "e2e-jwt-secret-0123456789abcdef0123456789",
     "REFRESH_SECRET": "e2e-refresh-secret-0123456789abcdef012345",
     "CSRF_SECRET": "e2e-csrf-secret-0123456789abcdef0123456789",
-    "BOOTSTRAP_ADMIN_PASSWORD": "E2e-Only-Admin-Password-2026!",
     "SEED_DEMO": "true",
     "ASSET_ROOT": "/tmp/firebot-g2-e2e-assets",
     # 三侧一致的 G2 配置（API / Dispatcher / Adapter 读取同一组键）
@@ -170,6 +169,42 @@ def rospy_python() -> tuple[str, dict] | None:
     return (python, env) if probe.returncode == 0 else None
 
 
+FIREBOT_001_PKG = REPO_ROOT / "integration" / "ros1" / "firebot-001-software"
+
+
+def generate_001_messages(python3: str, env: dict, workdir: Path) -> Path:
+    """用 genpy 为 firebot_001_software 生成 Python 消息类（与 catkin generate_messages 同源）。"""
+    root = workdir / "rosmsg"
+    out = root / "firebot_001_software" / "msg"
+    out.mkdir(parents=True, exist_ok=True)
+    (root / "firebot_001_software" / "__init__.py").write_text("")
+    genmsg = os.environ.get("G2_GENMSG_PY") or shutil.which("genmsg_py.py") or "genmsg_py.py"
+    for name in ("SoftwareCommand", "SoftwareFeedback", "SoftwareStatus"):
+        subprocess.run(
+            [
+                python3,
+                genmsg,
+                "-p",
+                "firebot_001_software",
+                "-o",
+                str(out),
+                "-I",
+                f"firebot_001_software:{FIREBOT_001_PKG / 'msg'}",
+                str(FIREBOT_001_PKG / "msg" / f"{name}.msg"),
+            ],
+            check=True,
+            env=env,
+            capture_output=True,
+        )
+    subprocess.run(
+        [python3, genmsg, "--initpy", "-p", "firebot_001_software", "-o", str(out)],
+        check=True,
+        env=env,
+        capture_output=True,
+    )
+    return root
+
+
 class Sniffer:
     """以 platform 身份旁听 Broker 上的命令 topic（证据：哪个 Broker 出现了哪条命令）。"""
 
@@ -226,8 +261,10 @@ def wait_for(predicate, timeout: float = 20.0, interval: float = 0.2):
 def g2(tmp_path_factory):
     if os.environ.get("REAL_E2E") != "1":
         pytest.skip("REAL_E2E=1 required（真实组件 E2E 仅在显式开启时执行）")
+    # 连接串与密钥沿用外部（CI job）配置；只覆盖 G2 路由/MQTT 测试键。
+    # 不覆盖 BOOTSTRAP_ADMIN_PASSWORD（曾导致与 CI seed 的 admin 哈希不一致 → 401）。
     for key, value in G2_ENV.items():
-        if key in {"DATABASE_URL", "REDIS_URL"}:
+        if key in {"DATABASE_URL", "REDIS_URL", "JWT_SECRET", "REFRESH_SECRET", "CSRF_SECRET"}:
             os.environ.setdefault(key, value)
         else:
             os.environ[key] = value
@@ -347,8 +384,19 @@ def g2(tmp_path_factory):
     if ros:
         python3, ros_env = ros
         ros_port = free_port()
+        log_conf = workdir / "ros_python_logging.conf"
+        log_conf.write_text(
+            "[loggers]\nkeys=root,rosout\n[handlers]\nkeys=stdout\n[formatters]\nkeys=plain\n"
+            "[logger_root]\nlevel=INFO\nhandlers=stdout\n"
+            "[logger_rosout]\nlevel=INFO\nhandlers=stdout\npropagate=0\nqualname=rosout\n"
+            "[handler_stdout]\nclass=StreamHandler\nlevel=INFO\nformatter=plain\n"
+            "args=(sys.stdout,)\n[formatter_plain]\nformat=%(asctime)s %(name)s %(message)s\n"
+        )
         ros_env = {
             **ros_env,
+            # 与 Noetic output=screen 等价：节点 [SOFTWARE_TEST] 日志落到进程 stdout 作证据
+            "ROS_PYTHON_LOG_CONFIG_FILE": str(log_conf),
+            "PYTHONUNBUFFERED": "1",
             "ROS_MASTER_URI": f"http://127.0.0.1:{ros_port}",
             "ROS_HOME": str(workdir / "roshome"),
             "ROS_LOG_DIR": str(workdir / "roslog"),
@@ -358,19 +406,18 @@ def g2(tmp_path_factory):
             spawn(workdir, "rosmaster", [python3, master, "--core", "-p", str(ros_port)], ros_env)
         )
         assert wait_port(ros_port), "rosmaster did not listen"
+        # 001 正式软件节点（integration/ros1/firebot-001-software/src/command_node.py）
+        # 与其自定义消息（genpy 生成，等价 catkin generate_messages）——不使用模拟节点
+        msg_root = generate_001_messages(python3, ros_env, workdir)
+        ros_env = {
+            **ros_env,
+            "PYTHONPATH": os.pathsep.join([str(msg_root), ros_env["PYTHONPATH"]]),
+        }
         ros_procs.append(
             spawn(
                 workdir,
-                "ros-software-node",
-                [
-                    python3,
-                    "-m",
-                    "services.vehicle_agent_v1_exec.ros.software_test_node",
-                    "--namespace",
-                    ROS_NAMESPACE,
-                    "--step-seconds",
-                    "0.2",
-                ],
+                "ros-001-command-node",
+                [python3, str(FIREBOT_001_PKG / "src" / "command_node.py")],
                 ros_env,
             )
         )
@@ -422,6 +469,7 @@ def g2(tmp_path_factory):
         "ros": bool(ros),
         "bridge_socket": bridge_socket,
         "agent": None,
+        "evidence": {},
     }
     try:
         yield context
@@ -499,15 +547,55 @@ def _restore_vehicle_asset(original: dict | None) -> None:
         db.commit()
 
 
+TEST_ADMIN = "g2-e2e-admin"
+TEST_ADMIN_PASSWORD = "G2-E2E-Isolated-Only-2026!"
+
+
+def ensure_isolated_test_admin() -> tuple[str, str]:
+    """只在隔离测试库创建/重置专用测试管理员（不触碰 bootstrap admin，不猜密码）。"""
+    from app.core.config import get_settings
+    from app.core.security import hash_password, verify_password
+    from app.db.models import Role, User, user_roles
+    from app.db.session import SessionLocal
+    from sqlalchemy import insert, select
+
+    settings = get_settings()
+    if settings.app_env != "test" or os.environ.get("REAL_E2E") != "1":
+        raise RuntimeError("isolated test admin may only be created in APP_ENV=test REAL_E2E=1")
+    with SessionLocal() as db:
+        user = db.scalar(select(User).where(User.username == TEST_ADMIN))
+        if user is None:
+            user = User(
+                username=TEST_ADMIN,
+                password_hash=hash_password(TEST_ADMIN_PASSWORD),
+                display_name="G2 isolated E2E admin",
+            )
+            db.add(user)
+            db.flush()
+        elif not verify_password(TEST_ADMIN_PASSWORD, user.password_hash):
+            user.password_hash = hash_password(TEST_ADMIN_PASSWORD)
+        user.must_change_password = False
+        user.failed_attempts = 0
+        user.locked_until = None
+        user.status = "ACTIVE"
+        role = db.scalar(select(Role).where(Role.code == "super_admin"))
+        if not db.execute(
+            select(user_roles).where(
+                user_roles.c.user_id == user.id, user_roles.c.role_id == role.id
+            )
+        ).first():
+            db.execute(insert(user_roles).values(user_id=user.id, role_id=role.id))
+        db.commit()
+    return TEST_ADMIN, TEST_ADMIN_PASSWORD
+
+
 def _prepare_vehicle_asset() -> None:
     """001 云端资产 = 生产同款基线：V1、enabled=false、capabilities=[]、estop NULL。"""
-    from app.db.models import Robot, RobotCapability, RobotIntegrationProfile, Site, User
+    from app.db.models import Robot, RobotCapability, RobotIntegrationProfile, Site
     from app.db.session import SessionLocal
     from sqlalchemy import null, select
 
     with SessionLocal() as db:
-        admin = db.scalar(select(User).where(User.username == "admin"))
-        admin.must_change_password = False
         site = db.scalar(select(Site).order_by(Site.id).limit(1))
         robot = db.scalar(select(Robot).where(Robot.vehicle_id == VEHICLE))
         if robot is None:

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -12,7 +15,7 @@ import pytest
 from services.vehicle_agent_v1 import EXECUTION_PROFILES, command_from_canonical
 from services.vehicle_agent_v1_exec.executor import CommandExecutor
 from services.vehicle_agent_v1_exec.grant import GrantError, load_grant
-from services.vehicle_agent_v1_exec.ros.software_test_node import SoftwareStateMachine
+from services.vehicle_agent_v1_exec.ros import contract
 from services.vehicle_agent_v1_exec.session import DedupStore, SessionValidator
 
 VEHICLE = "firebot-vehicle-01"
@@ -105,6 +108,27 @@ def acks(published):
     return [data for kind, data in published if kind == "ack"]
 
 
+def events(published, msg_id=None):
+    return [
+        data
+        for kind, data in published
+        if kind == "event" and (msg_id is None or data["msg_id"] == msg_id)
+    ]
+
+
+def wait_until(predicate, timeout=5.0):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def settled(executor, timeout=5.0):
+    return wait_until(lambda: not executor.active_software(), timeout)
+
+
 def test_diagnostic_real_execution_and_dedup(harness):
     validator, executor, published, _, _ = harness
     command = wire(validator, "get_telemetry")
@@ -179,6 +203,7 @@ def test_dedup_survives_process_restart(tmp_path, harness):
 def test_software_ack_is_receipt_feedback_is_completion(harness):
     validator, executor, published, bridge_calls, _ = harness
     executor.handle(json.dumps(wire(validator, "start")).encode())
+    assert settled(executor)
     (ack,) = acks(published)
     assert ack["code"] == "OK" and ack["data"]["stage"] == "RECEIVED"
     assert ack["data"]["hardware"] == "NO_HARDWARE"
@@ -189,6 +214,8 @@ def test_software_ack_is_receipt_feedback_is_completion(harness):
     # 重投：原 ACK + 原反馈重放，不再调用 ROS
     executor.handle(json.dumps({**wire(validator, "start"), "msg_id": ack["msg_id"]}).encode())
     assert len(bridge_calls) == 1
+    # SoftwareCommand.command_id = V1 msg_id
+    assert bridge_calls[0]["command_id"] == ack["msg_id"]
 
 
 def test_software_bridge_unavailable_reports_failure(harness):
@@ -200,27 +227,18 @@ def test_software_bridge_unavailable_reports_failure(harness):
 
     executor.bridge_request = broken
     executor.handle(json.dumps(wire(validator, "patrol")).encode())
-    events = [data for kind, data in published if kind == "event"]
-    assert events[-1]["state"] == "FAILED" and events[-1]["reason_code"] == "ROS_UNAVAILABLE"
+    assert settled(executor)
+    last = events(published)[-1]
+    assert last["state"] == "FAILED" and last["reason_code"] == "ROS_UNAVAILABLE"
 
 
 def test_software_missing_terminal_feedback_is_failure(harness):
     validator, executor, published, _, script = harness
     script[:] = [{"state": "ACCEPTED"}]
     executor.handle(json.dumps(wire(validator, "close")).encode())
-    events = [data for kind, data in published if kind == "event"]
-    assert events[-1]["state"] == "FAILED" and events[-1]["reason_code"] == "FEEDBACK_TIMEOUT"
-
-
-def test_software_state_machine():
-    machine = SoftwareStateMachine()
-    assert machine.apply("patrol")[:2] == ("REJECTED", "NOT_READY")
-    assert machine.apply("start")[0] == "COMPLETED" and machine.state == "IDLE"
-    assert machine.apply("patrol")[0] == "COMPLETED" and machine.state == "PATROLLING"
-    assert machine.apply("stop_patrol")[0] == "COMPLETED" and machine.state == "IDLE"
-    assert machine.apply("close")[0] == "COMPLETED" and machine.state == "STOPPED"
-    assert machine.apply("close")[1] == "ALREADY_CLOSED"
-    assert machine.snapshot()["hardware"] == "NO_HARDWARE"
+    assert settled(executor)
+    last = events(published)[-1]
+    assert last["state"] == "FAILED" and last["reason_code"] == "FEEDBACK_TIMEOUT"
 
 
 def test_wire_carries_session_contract():
@@ -271,3 +289,127 @@ def test_routing_configuration(monkeypatch):
     monkeypatch.setattr(settings, "vehicle_transport_profiles", "broken-entry")
     with pytest.raises(routing.RoutingError):
         routing.validate_configuration()
+
+
+# ---------------------------------------------------------------- G2-R1 P0-2：异步长任务
+def test_stop_and_diagnostics_not_blocked_by_running_patrol(tmp_path):
+    grant = load_grant(write_grant(tmp_path), VEHICLE)
+    validator = SessionValidator(VEHICLE, grant, DedupStore(tmp_path / "dedup.json"))
+    validator.new_session()
+    published: list[tuple[str, dict]] = []
+    stop_signal = threading.Event()
+    patrol_started = threading.Event()
+
+    def bridge(request):
+        if request["command"] == "patrol":
+            yield {"state": "ACCEPTED"}
+            patrol_started.set()
+            for _ in range(500):  # 长巡检：只能被 stop 结束
+                if stop_signal.wait(0.01):
+                    yield {"state": "STOPPED", "ros_status": "STOPPED"}
+                    return
+                yield {"state": "EXECUTING", "ros_status": "RUNNING"}
+            yield {"state": "COMPLETED"}
+        elif request["command"] == "stop_patrol":
+            yield {"state": "ACCEPTED"}
+            stop_signal.set()
+            yield {"state": "COMPLETED", "ros_status": "STOPPED", "stopped_command_id": "p"}
+
+    lock = threading.Lock()
+
+    def publish(kind, data, **kw):
+        with lock:
+            published.append((kind, data))
+        return True
+
+    executor = CommandExecutor(validator, publish, program_markers={}, bridge_request=bridge)
+    patrol = wire(validator, "patrol", params={"rounds": 5})
+    started = time.monotonic()
+    executor.handle(json.dumps(patrol).encode())  # 立即返回（异步）
+    assert time.monotonic() - started < 1.0
+    assert patrol_started.wait(2)
+    ping = wire(validator, "ping")
+    executor.handle(json.dumps(ping).encode())  # 诊断即时完成
+    assert [a for a in acks(published) if a["msg_id"] == ping["msg_id"]][0]["code"] == "OK"
+    # 任务锁：巡检进行中再发启动类命令 → BUSY（确定未执行）
+    second = wire(validator, "start")
+    executor.handle(json.dumps(second).encode())
+    assert [a for a in acks(published) if a["msg_id"] == second["msg_id"]][0]["code"] == "BUSY"
+    stop = wire(validator, "stop_patrol")
+    executor.handle(json.dumps(stop).encode())
+    assert settled(executor)
+    patrol_events = events(published, patrol["msg_id"])
+    stop_events = events(published, stop["msg_id"])
+    assert patrol_events[-1]["state"] == "STOPPED"  # 原巡检保留被停止记录
+    assert stop_events[-1]["state"] == "COMPLETED"  # stop 终态关联 stop 自己的 msg_id
+    assert stop_events[-1]["ros_status"] == "STOPPED"
+    assert not [e for e in patrol_events if e["state"] in {"FAILED", "COMPLETED"}]
+    # 重投：不再执行
+    executor.handle(json.dumps(stop).encode())
+    assert executor.executions["stop_patrol"] == 1
+    executor.shutdown()
+
+
+# ---------------------------------------------------------------- G2-R1 P0-1：001 消息适配
+class _Cmd(SimpleNamespace):
+    def __init__(self):
+        super().__init__(command_id="", action="", params="")
+
+
+def _fb(status, detail="", software_test=True):
+    return SimpleNamespace(
+        command_id="m-1",
+        action="patrol",
+        status=status,
+        detail=detail,
+        software_test=software_test,
+        ts="2026-11-12T00:00:00+00:00",
+    )
+
+
+def test_001_command_mapping_params_json():
+    message = contract.build_command(_Cmd, "m-uuid", "patrol", {"rounds": 3})
+    assert message.command_id == "m-uuid" and message.action == "patrol"
+    assert json.loads(message.params) == {"rounds": 3} and isinstance(message.params, str)
+    assert contract.build_command(_Cmd, "m", "close", {}).params == "{}"
+
+
+@pytest.mark.parametrize(
+    ("status", "state"),
+    [
+        ("ACCEPTED", "ACCEPTED"),
+        ("RUNNING", "EXECUTING"),
+        ("COMPLETED", "COMPLETED"),
+        ("REJECTED", "REJECTED"),
+        ("STOPPED", "STOPPED"),
+        ("WEIRD", "FAILED"),
+    ],
+)
+def test_001_feedback_status_mapping(status, state):
+    data = contract.feedback_to_dict(_fb(status, "detail text"))
+    assert data["state"] == state and data["ros_status"] == status
+    assert data["message"] == "detail text" and data["command_id"] == "m-1"
+
+
+def test_001_feedback_reject_reason_and_software_test_flag():
+    assert contract.feedback_to_dict(_fb("REJECTED", "not ready (state=idle)"))["reason_code"] == (
+        "NOT_READY"
+    )
+    untrusted = contract.feedback_to_dict(_fb("COMPLETED", software_test=False))
+    assert untrusted["state"] == "FAILED"
+    assert untrusted["reason_code"] == "SOFTWARE_TEST_FLAG_MISSING"
+
+
+def test_001_status_custom_message_serialized():
+    status = SimpleNamespace(
+        state="patrol",
+        uptime_seconds=12.5,
+        pid=42,
+        load_1m=0.3,
+        mem_available_bytes=1.0e9,
+        diagnostics="hardware_executors=NONE",
+        ts="t",
+    )
+    data = contract.status_to_dict(status)
+    assert json.loads(json.dumps(data))["state"] == "patrol"
+    assert data["patrol"] is True and data["hardware"] == "NO_HARDWARE"

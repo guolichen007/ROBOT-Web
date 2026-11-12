@@ -16,10 +16,10 @@ import logging
 import threading
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 from services.vehicle_agent_v1_exec import AGENT_VERSION
 from services.vehicle_agent_v1_exec.session import SessionValidator, Verdict, fingerprint
@@ -29,6 +29,11 @@ from services.vehicle_agent_v1_readonly.collector import collect
 logger = logging.getLogger("vehicle_agent_v1_exec")
 DIAGNOSTIC_TIMEOUT_SECONDS = 10.0
 BRIDGE_CONNECT_TIMEOUT_SECONDS = 3.0
+# G2-R1：ROS 软件长任务异步执行（有界并发）；诊断/停止命令不被长任务阻塞
+SOFTWARE_WORKERS = 4
+# 软件任务锁：同一时刻最多一个“启动类”任务；停止类命令不受此锁阻塞
+LONG_RUNNING = {"start", "close", "patrol"}
+STOP_COMMANDS = {"stop_patrol"}
 
 
 def now_iso() -> str:
@@ -56,6 +61,19 @@ class CommandExecutor:
         self.execution_log = execution_log
         self.executions: dict[str, int] = {}
         self._log_lock = threading.Lock()
+        self._pool = ThreadPoolExecutor(
+            max_workers=SOFTWARE_WORKERS, thread_name_prefix="v1-software"
+        )
+        self._slots = threading.BoundedSemaphore(SOFTWARE_WORKERS)
+        self._task_lock = threading.Lock()
+        self._active: dict[str, str] = {}  # msg_id -> command（软件任务进行中）
+
+    def shutdown(self) -> None:
+        self._pool.shutdown(wait=False, cancel_futures=True)
+
+    def active_software(self) -> dict[str, str]:
+        with self._task_lock:
+            return dict(self._active)
 
     # ---------- 入口 ----------
     def handle(self, payload: bytes) -> None:
@@ -78,6 +96,7 @@ class CommandExecutor:
             logger.info("duplicate delivery of in-flight %s ignored", verdict.msg_id)
             return
         fp = fingerprint(raw)
+        handed_off = False
         try:
             if verdict.reject_code:
                 if verdict.reject_message == "msg_id reused":
@@ -90,13 +109,14 @@ class CommandExecutor:
             if verdict.mode == "DIAGNOSTIC":
                 self._diagnostic(verdict, fp, received)
             elif verdict.mode == "SOFTWARE_TEST":
-                self._software(verdict, fp, received)
+                handed_off = self._software(verdict, fp, received)
             else:
                 self._finish(
                     verdict, fp, False, "NO_HARDWARE", "本车未接入硬件执行路径", {}, received
                 )
         finally:
-            self.validator.dedup.release(verdict.msg_id)
+            if not handed_off:
+                self.validator.dedup.release(verdict.msg_id)
 
     # ---------- 诊断 ----------
     def _diagnostic(self, verdict: Verdict, fp: str, received: float) -> None:
@@ -128,11 +148,24 @@ class CommandExecutor:
             self._finish(verdict, fp, False, "INTERNAL", f"{command} failed: {exc}", {}, received)
 
     # ---------- 软件测试 ----------
-    def _software(self, verdict: Verdict, fp: str, received: float) -> None:
+    def _software(self, verdict: Verdict, fp: str, received: float) -> bool:
+        """回执 ACK 同步发布；ROS 执行交给有界线程池。返回 True 表示已移交（由 worker 释放）。"""
         wire = verdict.wire
         if self.bridge_request is None:
             self._finish(verdict, fp, False, "ROS_UNAVAILABLE", "ROS 软件桥未配置", {}, received)
-            return
+            return False
+        with self._task_lock:
+            busy = wire.command in LONG_RUNNING and any(
+                command in LONG_RUNNING for command in self._active.values()
+            )
+            if not busy and not self._slots.acquire(blocking=False):
+                busy = True
+            if not busy:
+                self._active[verdict.msg_id] = wire.command
+        if busy:
+            # 任务锁：已有启动类软件任务进行中 / 并发已满 → 明确 BUSY（确定未执行）
+            self._finish(verdict, fp, False, "BUSY", "已有软件任务执行中", {}, received)
+            return False
         self._finish(
             verdict,
             fp,
@@ -143,10 +176,30 @@ class CommandExecutor:
             received,
         )
         self.executions[wire.command] = self.executions.get(wire.command, 0) + 1
+        try:
+            self._pool.submit(self._run_software, verdict, received)
+        except RuntimeError:  # 执行器关闭中
+            self._release_software(verdict.msg_id)
+            self._feedback(
+                verdict,
+                {"state": "FAILED", "reason_code": "AGENT_STOPPING", "message": "agent stopping"},
+                received,
+            )
+            return False
+        return True
+
+    def _release_software(self, msg_id: str) -> None:
+        with self._task_lock:
+            self._active.pop(msg_id, None)
+        self._slots.release()
+        self.validator.dedup.release(msg_id)
+
+    def _run_software(self, verdict: Verdict, received: float) -> None:
+        wire = verdict.wire
         request = {
             "op": "command",
-            "request_id": str(uuid4()),
-            "command_id": str(wire.msg_id),
+            # SoftwareCommand.command_id = V1 msg_id（云端业务 command_id 只在云端关联表）
+            "command_id": verdict.msg_id,
             "command": wire.command,
             "params": wire.params,
             "issued_at": wire.ts.isoformat(),
@@ -155,7 +208,7 @@ class CommandExecutor:
         terminal = False
         try:
             for feedback in self.bridge_request(request):
-                terminal = feedback.get("state") in {"COMPLETED", "REJECTED", "FAILED"}
+                terminal = feedback.get("state") in {"COMPLETED", "REJECTED", "FAILED", "STOPPED"}
                 self._feedback(verdict, feedback, received)
                 if terminal:
                     break
@@ -166,13 +219,23 @@ class CommandExecutor:
                 {"state": "FAILED", "reason_code": "ROS_UNAVAILABLE", "message": str(exc)},
                 received,
             )
-            return
-        if not terminal:
+            terminal = True
+        except Exception as exc:  # noqa: BLE001 - 终态必须收敛
+            logger.exception("software task %s failed", verdict.msg_id)
             self._feedback(
                 verdict,
-                {"state": "FAILED", "reason_code": "FEEDBACK_TIMEOUT", "message": "无终态反馈"},
+                {"state": "FAILED", "reason_code": "INTERNAL", "message": str(exc)},
                 received,
             )
+            terminal = True
+        finally:
+            if not terminal:
+                self._feedback(
+                    verdict,
+                    {"state": "FAILED", "reason_code": "FEEDBACK_TIMEOUT", "message": "无终态反馈"},
+                    received,
+                )
+            self._release_software(verdict.msg_id)
 
     def _feedback(self, verdict: Verdict, feedback: dict, received: float) -> None:
         event = {
@@ -185,6 +248,8 @@ class CommandExecutor:
             "reason_code": feedback.get("reason_code"),
             "message": feedback.get("message"),
             "phase": feedback.get("phase"),
+            "ros_status": feedback.get("ros_status"),
+            "stopped_command_id": feedback.get("stopped_command_id"),
             "ros_ts": feedback.get("ts"),
             "duration_ms": int((time.monotonic() - received) * 1000),
             "ts": now_iso(),
