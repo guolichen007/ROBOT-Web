@@ -1370,3 +1370,38 @@
   display: block;
   overflow-wrap: anywhere;
 }
+
+/* G2 车端诊断 / ROS 软件测试 */
+.hmi-diagnostics h3 {
+  margin: 12px 0 6px;
+}
+.hmi-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #fff4d6;
+  color: #7a5200;
+  font-size: 12px;
+}
+.hmi-diag-table {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.hmi-diag-table th,
+.hmi-diag-table td {
+  padding: 3px 4px;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.25);
+  text-align: left;
+  vertical-align: top;
+}
+.hmi-diag-table .mono {
+  font-family: ui-monospace, monospace;
+  word-break: break-all;
+}
+.hmi-diag-table [data-outcome='failed'],
+.hmi-diag-table [data-outcome='timeout'] {
+  color: #b42318;
+}

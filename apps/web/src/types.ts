@@ -12,6 +12,7 @@ export interface UserProfile {
 export interface RobotState {
   agent_protocol?: 'CANONICAL_MQTT' | 'VEHICLE_AGENT_V1' | 'ROS_COMPAT'
   vehicle_agent_ready?: Record<string, boolean>
+  vehicle_agent_execution?: VehicleAgentExecution
   agent_state?: AgentState
   id?: string
   vehicle_id: string
@@ -272,12 +273,29 @@ export interface AgentState {
       patrol_next?: string | number | null
       patrol_count?: number | null
     }
+    // G2：ROS 软件测试状态（SOFTWARE_TEST / NO_HARDWARE），与真实任务状态分离
+    software?: { state?: string; patrol?: boolean; hardware?: string; mode?: string } | null
   }
   telemetry?: {
     battery?: { percentage?: number | null } | null
     thermal?: { max_temp?: number | null } | null
     smog?: { percentage?: number | null; alarm?: boolean | null } | null
   }
+}
+
+export interface VehicleAgentExecution {
+  profile: string | null
+  commands: Record<string, { mode: 'DIAGNOSTIC' | 'SOFTWARE_TEST' | 'REAL'; ready: boolean }>
+  hardware: 'NO_HARDWARE' | 'HARDWARE' | null
+}
+
+export interface SoftwareFeedback {
+  state: 'ACCEPTED' | 'EXECUTING' | 'COMPLETED' | 'REJECTED' | 'FAILED' | string
+  reason_code?: string | null
+  message?: string | null
+  phase?: string | null
+  duration_ms?: number | null
+  received_at?: string
 }
 
 export interface AgentCommand {
@@ -287,8 +305,20 @@ export interface AgentCommand {
   cmd: string
   lifecycle_status: string
   issued_at: string
+  published_at?: string | null
+  ack_at?: string | null
+  terminal_at?: string | null
   ack_reason?: string | null
-  ack_payload_json?: { code: string; message: string; success: boolean } | null
+  payload_json?: { execution_mode?: 'DIAGNOSTIC' | 'SOFTWARE_TEST' | 'REAL'; message_id?: string }
+  ack_payload_json?: {
+    code: string
+    message: string
+    success: boolean
+    duration_ms?: number
+    ack_source?: 'vehicle' | 'transport_timeout'
+    data?: Record<string, any>
+    software_feedback?: SoftwareFeedback[]
+  } | null
 }
 
 export interface RealtimeEvent {

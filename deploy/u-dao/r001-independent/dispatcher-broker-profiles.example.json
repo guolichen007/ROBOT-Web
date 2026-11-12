@@ -1,0 +1,9 @@
+{
+  "r001-independent-v1": {
+    "host": "r001-broker",
+    "port": 8883,
+    "username": "platform",
+    "password_file": "/run/r001-secrets/r001-platform-pw",
+    "ca_file": "/run/r001-secrets/ca.crt"
+  }
+}

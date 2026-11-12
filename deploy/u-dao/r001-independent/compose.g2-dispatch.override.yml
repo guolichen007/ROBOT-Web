@@ -1,0 +1,47 @@
+# G2 逐车下行路由 overlay（生产主栈 u-dao-firebot 的增量覆盖；默认不加载）。
+#
+# 作用：
+#   1) command-dispatcher 额外加入 r001 独立栈网络（external，由 compose.r001-independent.yml
+#      创建，名称 <R001_COMPOSE_PROJECT>_r001），以服务名 r001-broker:8883 合法访问独立 Broker；
+#      Dispatcher 仍是唯一 Outbox 认领者（FOR UPDATE SKIP LOCKED），按车辆 transport_profile
+#      选择 MQTT 客户端：default→原 mosquitto，r001-independent-v1→r001-broker。
+#   2) r001-broker 使用其独立签发的 platform 口令文件（r001-platform-pw，只读挂载）；
+#      原生产 platform 口令不进入 r001 网络（代码层亦拒绝同口令/同文件复用）。
+#   3) API / Dispatcher 读取与专属 Adapter 相同的 G2 配置（三侧一致；不一致 → 拒绝派发
+#      ROUTING_CONFIG_MISMATCH）。原 vehicle-agent-adapter 不在任何下行 allowlist 内。
+#
+# 加载（与现有 -f 列表一起，放在最后）：
+#   docker compose -f docker-compose.server.yml -f deploy/u-dao/compose.u-dao.yml \
+#     -f deploy/u-dao/r001-independent/compose.g2-dispatch.override.yml \
+#     --env-file <runtime>/server.env --env-file <runtime>/g2.env up -d --no-deps api command-dispatcher
+# 回滚：去掉本 overlay 重新 up 同两项服务（G2 键全部回到默认空/false，零下行）。
+services:
+  api:
+    environment:
+      VEHICLE_AGENT_V1_DOWNLINK_ENABLED: ${G2_DOWNLINK_ENABLED:-false}
+      VEHICLE_AGENT_V1_DOWNLINK_ALLOWLIST: ${G2_DOWNLINK_ALLOWLIST:-}
+      VEHICLE_TRANSPORT_PROFILES: ${G2_VEHICLE_TRANSPORT_PROFILES:-}
+      TRANSPORT_PROFILE_ADAPTERS: ${G2_TRANSPORT_PROFILE_ADAPTERS:-}
+      VEHICLE_EXECUTION_PROFILES: ${G2_VEHICLE_EXECUTION_PROFILES:-}
+
+  command-dispatcher:
+    environment:
+      VEHICLE_AGENT_V1_DOWNLINK_ENABLED: ${G2_DOWNLINK_ENABLED:-false}
+      VEHICLE_AGENT_V1_DOWNLINK_ALLOWLIST: ${G2_DOWNLINK_ALLOWLIST:-}
+      VEHICLE_TRANSPORT_PROFILES: ${G2_VEHICLE_TRANSPORT_PROFILES:-}
+      TRANSPORT_PROFILE_ADAPTERS: ${G2_TRANSPORT_PROFILE_ADAPTERS:-}
+      VEHICLE_EXECUTION_PROFILES: ${G2_VEHICLE_EXECUTION_PROFILES:-}
+      DISPATCHER_BROKER_PROFILES_FILE: /run/g2/dispatcher-broker-profiles.json
+    volumes:
+      - ${G2_DISPATCHER_PROFILES_JSON}:/run/g2/dispatcher-broker-profiles.json:ro
+      - ${R001_BROKER_CONF_DIR}/r001-platform-pw:/run/r001-secrets/r001-platform-pw:ro
+      - ${R001_BROKER_CONF_DIR}/certs/ca.crt:/run/r001-secrets/ca.crt:ro
+    networks: [firebot, r001]
+    healthcheck:
+      # 原有两项心跳 + 每个独立 profile 的 broker 连接心跳
+      test: ["CMD", "python", "-c", "from app.core.events import get_redis; r=get_redis(); raise SystemExit(0 if r.get('service:command-dispatcher:outbox-heartbeat') and r.get('service:command-dispatcher:safety-heartbeat') and r.get('service:command-dispatcher:broker-heartbeat:r001-independent-v1') else 1)"]
+
+networks:
+  r001:
+    external: true
+    name: ${R001_NETWORK:-u-dao-firebot-r001-prod_r001}

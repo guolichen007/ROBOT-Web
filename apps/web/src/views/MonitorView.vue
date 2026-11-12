@@ -6,6 +6,7 @@ import SituationBanner from '@/components/monitor/SituationBanner.vue'
 import MapSelectionBar from '@/components/monitor/MapSelectionBar.vue'
 import VideoSurveillancePanel from '@/components/monitor/VideoSurveillancePanel.vue'
 import VehicleAgentControls from '@/components/monitor/VehicleAgentControls.vue'
+import VehicleDiagnosticsPanel from '@/components/monitor/VehicleDiagnosticsPanel.vue'
 import VehicleAgentKpis from '@/components/monitor/VehicleAgentKpis.vue'
 import PrimaryAlarmPanel from '@/components/monitor/PrimaryAlarmPanel.vue'
 import OperationsCommandDock from '@/components/monitor/OperationsCommandDock.vue'
@@ -629,6 +630,7 @@ onUnmounted(() => {
             v-model:selected-slot-id="selectedSlotId"
             :slots="monitor.snapshot.parking_slots"
           />
+          <VehicleDiagnosticsPanel v-show="controlTab === 'auto'" />
           <section v-show="controlTab === 'monitor'" class="hmi-monitor-details">
             <template v-if="primaryAlarm">
               <PrimaryAlarmPanel
