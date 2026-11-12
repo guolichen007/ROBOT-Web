@@ -50,6 +50,7 @@ class RosSoftwareBridge:
         self.String = string_type
         self.topics = topics(namespace)
         self.waiters = {}
+        self.by_command = {}
         self.lock = threading.Lock()
         self.last_status = None
         self.last_status_at = 0.0
@@ -67,6 +68,9 @@ class RosSoftwareBridge:
             return
         with self.lock:
             target = self.waiters.get(data.get("request_id"))
+            if target is None and data.get("command_id"):
+                # 现场节点若只回显 command_id（= V1 msg_id，全局唯一）也可精确关联
+                target = self.by_command.get(data.get("command_id"))
         if target is None:
             LOG.info("feedback for unknown request_id %s dropped", data.get("request_id"))
             return
@@ -115,6 +119,8 @@ class RosSoftwareBridge:
         inbox = queue.Queue()
         with self.lock:
             self.waiters[request_id] = inbox
+            if request.get("command_id"):
+                self.by_command[request["command_id"]] = inbox
         try:
             payload = {
                 "interface_version": INTERFACE_VERSION,
@@ -155,6 +161,7 @@ class RosSoftwareBridge:
         finally:
             with self.lock:
                 self.waiters.pop(request_id, None)
+                self.by_command.pop(request.get("command_id"), None)
 
 
 def serve(bridge: RosSoftwareBridge, socket_path: str, group_gid=None) -> socketserver.BaseServer:
