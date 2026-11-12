@@ -7,7 +7,11 @@
     --env-file <runtime>/server.env --env-file <runtime>/g2.env config --format json > main.json
   docker compose -f deploy/u-dao/r001-independent/compose.r001-independent.yml \\
     --env-file <runtime>/r001.env --env-file <runtime>/g2.env config --format json > r001.json
-  python3 deploy/u-dao/r001-independent/g2-verify-compose.py main.json r001.json --sha <G2_SHA>
+  # 基线（强制，在同一发布树渲染以消除路径差异）：
+  #   当前生产 server.env、不加 overlay/g2.env → main-before.json
+  #   专属栈仅当前 G1 r001.env（不加 g2.env）   → r001-before.json
+  python3 deploy/u-dao/r001-independent/g2-verify-compose.py main.json r001.json \\
+    --sha <完整 40 位 G2 SHA> --baseline main-before.json --r001-baseline r001-before.json
 
 退出码 0 = 全部字段符合 G2 发布清单；非 0 = 列出不符合项（禁止发布）。
 """
@@ -44,7 +48,12 @@ G2_MAIN_SERVICES = {"api", "command-dispatcher", "web"}
 
 
 def verify(
-    main: dict, r001: dict, sha: str | None, adapter_id: str, baseline: dict | None = None
+    main: dict,
+    r001: dict,
+    sha: str | None,
+    adapter_id: str,
+    baseline: dict | None = None,
+    r001_baseline: dict | None = None,
 ) -> list[str]:
     problems: list[str] = []
     ms, rs = main["services"], r001["services"]
@@ -63,8 +72,10 @@ def verify(
     for name, image in images.items():
         if not image or image.endswith(":latest") or ":" not in image:
             problems.append(f"{name}: image {image!r} not pinned")
-        elif sha and sha[:7] not in image:
-            problems.append(f"{name}: image {image} does not carry G2 SHA {sha[:7]}")
+        elif sha and not image.endswith(f":g2-{sha}"):
+            problems.append(f"{name}: image {image} is not tagged g2-<full 40-char G2 SHA>")
+    if sha is not None and (len(sha) != 40 or any(c not in "0123456789abcdef" for c in sha)):
+        problems.append(f"--sha must be the full 40-char lowercase commit SHA, got {sha!r}")
     python_images = {
         images[k] for k in ("api", "command-dispatcher", "r001-adapter", "r001-ingress")
     }
@@ -130,28 +141,73 @@ def verify(
                     if (after or {}).get(key) != before.get(key)
                 )
                 problems.append(f"non-G2 service {name} changed: {changed}")
+    # 8) r001-broker（8884）对当前生产 G1 配置零变化
+    if r001_baseline is not None:
+        before = r001_baseline["services"].get("r001-broker")
+        after = rs.get("r001-broker")
+        if before != after:
+            changed = sorted(
+                key
+                for key in set(before or {}) | set(after or {})
+                if (after or {}).get(key) != (before or {}).get(key)
+            )
+            problems.append(f"r001-broker changed vs G1 baseline: {changed}")
+    return problems
+
+
+def verify_rollback(current: dict, baseline: dict, services: list[str]) -> list[str]:
+    """回滚核验：回滚后渲染结果必须与发布前（真实 G1）基线逐字段一致。"""
+    problems = []
+    for name in services:
+        before = baseline["services"].get(name)
+        after = current["services"].get(name)
+        if before != after:
+            changed = sorted(
+                key
+                for key in set(before or {}) | set(after or {})
+                if (after or {}).get(key) != (before or {}).get(key)
+            )
+            problems.append(f"rollback {name} differs from G1 baseline: {changed}")
     return problems
 
 
 def main() -> int:
+    if len(sys.argv) > 1 and sys.argv[1] == "rollback":
+        # python3 g2-verify-compose.py rollback <rendered.json> <baseline.json> svc1,svc2,...
+        with open(sys.argv[2], encoding="utf-8") as handle:
+            current = json.load(handle)
+        with open(sys.argv[3], encoding="utf-8") as handle:
+            baseline = json.load(handle)
+        problems = verify_rollback(current, baseline, sys.argv[4].split(","))
+        for problem in problems:
+            print("G2_ROLLBACK_FAIL", problem)
+        print("G2_ROLLBACK_VERIFY=" + ("PASS" if not problems else "FAIL"))
+        return 0 if not problems else 1
     parser = argparse.ArgumentParser()
     parser.add_argument("main_json")
     parser.add_argument("r001_json")
     parser.add_argument("--sha")
     parser.add_argument("--adapter-id", default="r001-dedicated-adapter-v2")
     parser.add_argument(
-        "--baseline", help="发布前（不含 G2 overlay/g2.env）主栈 config --format json"
+        "--baseline",
+        required=True,
+        help="发布前（当前生产，不含 G2 overlay/g2.env）主栈 config --format json（强制）",
+    )
+    parser.add_argument(
+        "--r001-baseline",
+        required=True,
+        help="发布前（当前生产 G1 r001.env，不含 g2.env）专属栈 config --format json（强制）",
     )
     args = parser.parse_args()
     with open(args.main_json, encoding="utf-8") as handle:
         main_cfg = json.load(handle)
     with open(args.r001_json, encoding="utf-8") as handle:
         r001_cfg = json.load(handle)
-    baseline = None
-    if args.baseline:
-        with open(args.baseline, encoding="utf-8") as handle:
-            baseline = json.load(handle)
-    problems = verify(main_cfg, r001_cfg, args.sha, args.adapter_id, baseline)
+    with open(args.baseline, encoding="utf-8") as handle:
+        baseline = json.load(handle)
+    with open(args.r001_baseline, encoding="utf-8") as handle:
+        r001_baseline = json.load(handle)
+    problems = verify(main_cfg, r001_cfg, args.sha, args.adapter_id, baseline, r001_baseline)
     for problem in problems:
         print("G2_COMPOSE_FAIL", problem)
     print("G2_COMPOSE_VERIFY=" + ("PASS" if not problems else "FAIL"))

@@ -340,6 +340,12 @@ def handle_software_feedback(db, robot: Robot, data: dict, received: datetime) -
             None,
         )
         entry["stopped_cloud_command_id"] = stopped.command_id if stopped else None
+    if command.cmd == "stop_patrol" and entry["state"] == "COMPLETED":
+        # 云端独立复核：stop 成功只能来自可信 STOPPED，且必须精确关联到同车同会话的
+        # SOFTWARE_TEST patrol；缺失/未知/跨会话/REAL 目标一律不得宣称停止成功。
+        if entry.get("ros_status") != "STOPPED" or not entry.get("stopped_cloud_command_id"):
+            entry["state"] = "FAILED"
+            entry["reason_code"] = "STOP_TARGET_MISMATCH"
     entry["received_at"] = received.isoformat()
     ack_payload = dict(command.ack_payload_json or {})
     history = ack_payload.get("software_feedback", [])

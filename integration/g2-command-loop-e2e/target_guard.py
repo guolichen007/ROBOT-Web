@@ -105,11 +105,20 @@ def check_live(expected: dict) -> None:
                 raise TargetGuardError("database contains production vehicle identities")
             if not {"R001", "R002"} <= ids:
                 raise TargetGuardError("database lacks test demo seed (R001/R002)")
-    client = redis_lib.Redis.from_url(os.environ["REDIS_URL"], socket_connect_timeout=2)
-    actual_db = client.connection_pool.connection_kwargs.get("db")
-    client.ping()
+    client = redis_lib.Redis.from_url(
+        os.environ["REDIS_URL"], socket_connect_timeout=2, decode_responses=True
+    )
+    # 服务端事实：CLIENT INFO 报告本连接实际所在 db 与对端端口（非 URL 自述）
+    # CLIENT ID + CLIENT LIST（Redis 5+ 均支持；CLIENT INFO 需 6.2+）
+    own = client.client_id()
+    line = next((row for row in client.client_list() if int(row.get("id", -1)) == own), {})
+    fields = {key: str(value) for key, value in line.items()}
+    actual_db = int(fields.get("db", -1))
     if actual_db != expected["redis"][2]:
-        raise TargetGuardError(f"redis connected to db {actual_db}")
+        raise TargetGuardError(f"redis server reports db {actual_db}")
+    server_port = int(client.info("server").get("tcp_port", -1))
+    if server_port != expected["redis"][1]:
+        raise TargetGuardError(f"redis server port {server_port} != {expected['redis'][1]}")
 
 
 def assert_isolated_target() -> dict:
