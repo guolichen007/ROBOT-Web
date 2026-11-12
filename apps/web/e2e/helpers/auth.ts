@@ -49,13 +49,16 @@ export async function ensurePasswordReady(request: APIRequestContext): Promise<s
       data: { username: 'admin', password: credentials.value },
     })
     if (!login.ok()) throw new Error(`login failed status=${login.status()}`)
-    return (await login.json()).access_token
+    const accessToken = (await login.json()).access_token
+    await assertTestTarget(request, accessToken)
+    return accessToken
   }
   const login = await request.post('/api/v1/auth/login', {
     data: { username: 'admin', password: credentials.value },
   })
   if (!login.ok()) throw new Error(`login failed status=${login.status()}`)
   const accessToken = (await login.json()).access_token
+  await assertTestTarget(request, accessToken)
   const change = await request.post('/api/v1/auth/change-password', {
     headers: { Authorization: `Bearer ${accessToken}` },
     data: { current_password: credentials.value, new_password: changedPassword },
@@ -70,6 +73,25 @@ export async function ensurePasswordReady(request: APIRequestContext): Promise<s
 
 export async function getAccessToken(request: APIRequestContext): Promise<string> {
   return ensurePasswordReady(request)
+}
+
+// G1-P2-L0 D 目标隔离检查：任何测试探针运行前必须确认目标不是生产入口。
+// 判定依据为测试种子数据特征（名称），绝不只凭端口判断（18080 与生产 nginx
+// 回环端口曾冲突，导致隔离登录探针误打生产 API 的事故）。
+const TEST_TARGET_ROBOT_NAMES = ['灭火机器人 R001', '灭火机器人 R002']
+
+export async function assertTestTarget(request: APIRequestContext, accessToken: string): Promise<void> {
+  const robots = await request.get('/api/v1/robots', {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (!robots.ok()) throw new Error(`robots probe failed status=${robots.status()}`)
+  const list = (await robots.json()) as Array<{ name?: string }>
+  const names = new Set(list.map((item) => item.name))
+  if (!TEST_TARGET_ROBOT_NAMES.some((name) => names.has(name))) {
+    throw new Error(
+      'E2E_TARGET_GUARD: 目标服务不是测试环境（缺少测试种子机器人名称），拒绝继续——不得对疑似生产入口发送任何探针',
+    )
+  }
 }
 
 export async function loginPage(page: Page, request: APIRequestContext): Promise<void> {

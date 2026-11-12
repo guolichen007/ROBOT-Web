@@ -129,9 +129,15 @@ export const useMonitorStore = defineStore('monitor', () => {
         }
         // Another client may disable the active vehicle in real time via
         // robot.updated; fall back immediately to the first enabled vehicle.
+        // G1-P2-L0 C：只读监测设备（VEHICLE_AGENT_V1）即使被停用仍保留选中；
+        // 普通停用设备保持原有回退行为。
         if (event.data.enabled === false) {
           const selected = robot.value
-          if (selected && (selected.vehicle_id === vehicleId || selected.id === vehicleId)) {
+          if (
+            selected &&
+            (selected.vehicle_id === vehicleId || selected.id === vehicleId) &&
+            selected.agent_protocol !== 'VEHICLE_AGENT_V1'
+          ) {
             selectFirstEnabledVehicle()
           }
         }

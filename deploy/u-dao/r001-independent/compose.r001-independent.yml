@@ -43,6 +43,7 @@ services:
       timeout: 5s
       retries: 12
     restart: unless-stopped
+    security_opt: ["no-new-privileges:true"]
     networks: [r001]
 
   r001-adapter:
@@ -63,6 +64,9 @@ services:
       VEHICLE_AGENT_V1_ROLLOUT: "false"
       VEHICLE_AGENT_SCOPE_VEHICLE_IDS: ${R001_SCOPE_VEHICLE_IDS:-firebot-vehicle-01}
       FIREBOT_SERVICE_INSTANCE_ID: r001-dedicated-adapter
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/tmp"]
     volumes:
       - app_secrets:/run/secrets:ro
       - ${R001_BROKER_CONF_DIR}/certs/ca.crt:/run/mqtt-ca.crt:ro
@@ -91,6 +95,9 @@ services:
       MQTT_ALLOW_ANONYMOUS: "false"
       VEHICLE_AGENT_SCOPE_VEHICLE_IDS: ${R001_SCOPE_VEHICLE_IDS:-firebot-vehicle-01}
       FIREBOT_SERVICE_INSTANCE_ID: r001-dedicated-ingress
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/tmp"]
     volumes:
       - app_secrets:/run/secrets:ro
       - ${R001_BROKER_CONF_DIR}/certs/ca.crt:/run/mqtt-ca.crt:ro

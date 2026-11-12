@@ -481,3 +481,48 @@ describe('R001 只读设备选择全链路（G1-P2-RC1 P0-1）', () => {
     expect(store2.activeRobotId).not.toBe('R002') // 普通停用设备拒绝
   })
 })
+
+describe('robot.updated 停用事件下只读设备选中保持（G1-P2-L0 C）', () => {
+  it('当前为 V1 只读设备时，enabled=false 事件不丢选中', async () => {
+    setActivePinia(createPinia())
+    const store = useMonitorStore()
+    const robot = baseRobot({ enabled: false })
+    store.snapshot = { ...emptySnapshot(), robots: [robot] }
+    store.activeRobotId = 'firebot-vehicle-01'
+    store.applyEvent({
+      stream_id: 's-1',
+      event_type: 'robot.updated',
+      data: { ...robot, enabled: false },
+    })
+    expect(store.activeRobotId).toBe('firebot-vehicle-01') // 保持选中
+  })
+
+  it('当前为 CANONICAL 停用设备时，回退到首个可用车辆', async () => {
+    setActivePinia(createPinia())
+    const store = useMonitorStore()
+    const r001 = baseRobot({ enabled: false })
+    const r002 = baseRobot({
+      id: 'r002',
+      vehicle_id: 'R002',
+      name: 'R002',
+      enabled: true,
+      agent_protocol: 'CANONICAL_MQTT',
+      agent_state: undefined,
+    })
+    const r003 = baseRobot({
+      id: 'r003',
+      vehicle_id: 'R003',
+      name: 'R003',
+      enabled: true,
+    })
+    store.snapshot = { ...emptySnapshot(), robots: [r002, r001, r003] }
+    store.activeRobotId = 'R002'
+    store.applyEvent({
+      stream_id: 's-2',
+      event_type: 'robot.updated',
+      data: { ...r002, enabled: false },
+    })
+    expect(store.activeRobotId).not.toBe('R002') // 普通停用设备回退
+    expect(store.activeRobotId).toBe('R003') // 回退到首个启用车辆（原有行为）
+  })
+})

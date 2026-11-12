@@ -260,6 +260,14 @@ def process(name: str, payload: bytes, handle_ack) -> bool:
             if not robot.boot_id:
                 robot.boot_id = str(uuid4())
             if kind in {"status", "availability"}:
+                # G1-P2-L0 A：旧 retained 数据不是当前事实。retained online/status
+                # 一律不得复活 OFFLINE、不得刷新 last_seen_at/server_received_at；
+                # 仅 retained LWT offline（权威离线）继续生效。新鲜 live 消息恢复 ONLINE。
+                if envelope.get("retained"):
+                    if kind == "status":
+                        return True
+                    if data.get("state") == "online":
+                        return True
                 online = data.get("state") == "online" if kind == "availability" else data["online"]
                 # Explicit offline remains authoritative until availability online.
                 if kind == "status" and state.get("availability") == "offline":
