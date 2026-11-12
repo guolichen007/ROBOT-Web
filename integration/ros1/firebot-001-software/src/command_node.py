@@ -39,7 +39,7 @@ class SoftwareStateMachine:
         self.feedback_pub = feedback_pub
         self.status_pub = status_pub
         self._patrol_thread = None
-        self._patrol_stop = threading.Event()
+        self._patrol_stop = None  # 每次 patrol 创建新 Event，杜绝跨次残留
         self.lock = threading.Lock()
 
     def _feedback(self, command_id, action, status, detail):
@@ -76,7 +76,7 @@ class SoftwareStateMachine:
 
     def _patrol_loop(self, command_id, rounds):
         for index in range(rounds):
-            if self._patrol_stop.is_set():
+            if self._patrol_stop is not None and self._patrol_stop.is_set():
                 with self.lock:
                     self.state = STATE_IDLE
                     self.current_command = None
@@ -134,6 +134,7 @@ class SoftwareStateMachine:
                 self.state = STATE_PATROL
                 self._feedback(command_id, action, "ACCEPTED", "software patrol started")
                 rounds = int(params.get("rounds", 3))
+                self._patrol_stop = threading.Event()  # 按次重置：上一次 stop 不影响本次
                 self._patrol_thread = threading.Thread(
                     target=self._patrol_loop, args=(command_id, rounds), daemon=True
                 )
