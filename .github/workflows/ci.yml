@@ -115,6 +115,8 @@ jobs:
       - run: pytest integration/vehicle-agent-real-e2e -v
       # G2：双 Broker 路由 + V1 执行器真实闭环（CI 无 rospy → ROS 软件用例显式 skip，非伪造通过）
       - run: pytest integration/g2-command-loop-e2e -v -rs
+      # G3：红外模拟数值真实链路（MQTT/Adapter/Ingress/PG/Redis）；媒体段需 MediaMTX，CI 无则显式 SKIP
+      - run: pytest integration/g3-media-ir-e2e -v -rs
 
   frontend:
     runs-on: ubuntu-24.04

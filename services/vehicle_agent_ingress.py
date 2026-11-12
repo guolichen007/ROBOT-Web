@@ -464,6 +464,27 @@ def process(name: str, payload: bytes, handle_ack) -> bool:
             elif kind == "telemetry":
                 source_at = datetime.fromisoformat(data["ts"]) if data.get("ts") else received
                 age = (received - source_at).total_seconds()
+                # G3：遥测“实时值”只接受新鲜、非 retained、且不早于当前实时值的消息。
+                # 过期（> stale 门限）/ 时钟超前 / retained / 乱序更旧的遥测一律不覆盖
+                # 实时 telemetry、Redis latest（top_ir 等）与实时 SensorSample。
+                previous_ts = (state.get("telemetry") or {}).get("ts")
+                older = bool(
+                    previous_ts
+                    and data.get("ts")
+                    and datetime.fromisoformat(data["ts"]) < datetime.fromisoformat(previous_ts)
+                )
+                stale_limit = get_settings().vehicle_agent_v1_status_stale_seconds
+                if envelope.get("retained") or not -2 <= age <= stale_limit or older:
+                    logger.warning(
+                        "v1 telemetry not applied as live (vehicle=%s retained=%s age=%.1fs "
+                        "older=%s)",
+                        vehicle,
+                        bool(envelope.get("retained")),
+                        age,
+                        older,
+                    )
+                    queue_redis_set(db, dedup, "1", ttl_seconds=300)
+                    return True
                 if (
                     not envelope.get("retained")
                     and state.get("availability") != "offline"

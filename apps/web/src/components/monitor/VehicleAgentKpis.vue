@@ -9,6 +9,7 @@ const { now } = useSystemClock()
 const freshness = computed(() =>
   agentFreshness(monitor.robot, monitor.connected, now.value?.getTime() ?? Date.now()),
 )
+const simulated = computed(() => monitor.robot?.simulation?.simulated === true)
 const cards = computed(() => {
   const robot = monitor.robot
   const v1 = robot?.agent_protocol === 'VEHICLE_AGENT_V1'
@@ -33,7 +34,7 @@ const cards = computed(() => {
       stale: freshness.value.stale,
     },
     {
-      label: '温度',
+      label: simulated.value ? '温度（模拟）' : '温度',
       value: metric(v1 ? telemetry?.thermal?.max_temp : robot?.top_ir, '℃'),
       stale: freshness.value.stale,
     },
@@ -52,11 +53,14 @@ const cards = computed(() => {
 </script>
 
 <template>
+  <p v-if="simulated" class="hmi-sim-banner" role="note" data-testid="simulated-source-banner">
+    SIMULATED · 模拟数据源（{{ monitor.robot?.vehicle_id }}）——非真实车辆/传感器
+  </p>
   <section class="hmi-kpis" aria-label="车辆实时指标">
     <article v-for="card in cards" :key="card.label" class="panel hmi-kpi" :data-stale="card.stale">
       <span>{{ card.label }}</span>
       <strong>{{ card.value }}</strong>
-      <small>{{ card.stale ? '陈旧 / 离线' : '服务器数据' }}</small>
+      <small>{{ card.stale ? '陈旧 / 离线' : simulated ? '模拟数据（SIMULATED）' : '服务器数据' }}</small>
     </article>
   </section>
 </template>

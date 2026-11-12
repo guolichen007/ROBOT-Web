@@ -423,7 +423,7 @@ def test_media_srt_publish_uses_streamid_password() -> None:
     """SRT 发布凭据经 streamid（MediaMTX 映射 user/password 字段）。
 
     user 非空 → per-vehicle HMAC 判定（user 必须为流所属 vehicle_id）；
-    user 空 + token → bootstrap/synthetic 全局 token 直通；禁止用 token 字段绕过 per-vehicle。
+    车辆流只接受 per-vehicle 身份；全局 token 仅限 SYNTHETIC_TEST 合成流（G3 收紧）。
     """
     from app.modules.media.router import vehicle_srt_publish_token
 
@@ -476,7 +476,8 @@ def test_media_srt_publish_uses_streamid_password() -> None:
             },
         )
         assert token_field.status_code == 401
-        # bootstrap/synthetic 全局 token 直通（user 空）
+        # G3：全局合成 token 不得发布真实车辆流（即使 user 为空）——只能发布登记为
+        # SYNTHETIC_TEST 的合成流（见 test_media_publish_isolation.py）
         synthetic = client.post(
             "/api/v1/media/authorize",
             json={
@@ -487,7 +488,7 @@ def test_media_srt_publish_uses_streamid_password() -> None:
                 "password": "",
             },
         )
-        assert synthetic.status_code == 200
+        assert synthetic.status_code == 401
 
 
 def _task_for_stop(db, *, robot: Robot, user: User, version: MapVersion) -> Task:

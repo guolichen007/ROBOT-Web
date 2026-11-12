@@ -13,6 +13,8 @@ export interface RobotState {
   agent_protocol?: 'CANONICAL_MQTT' | 'VEHICLE_AGENT_V1' | 'ROS_COMPAT'
   vehicle_agent_ready?: Record<string, boolean>
   vehicle_agent_execution?: VehicleAgentExecution
+  // G3：服务端登记的模拟来源（SIMULATED_VEHICLE_IDS）；真实车辆为 null
+  simulation?: { simulated: true; label: 'SIMULATED'; source: string } | null
   agent_state?: AgentState
   id?: string
   vehicle_id: string

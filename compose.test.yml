@@ -80,7 +80,10 @@ services:
     environment:
       MEDIA_RTSP_ORIGIN: rtsp://mediamtx:8554
       MEDIA_STREAM_ID: R001-roof_rgb
-      MEDIA_PUBLISH_TOKEN: test-media-publisher-token-2026
+      # G3：R001 是车辆流 → 以车辆身份发布（user=R001，password=HMAC(test master,"vehicle-srt:R001")，
+      # 测试专用值）；全局合成 token 已不能发布车辆流。
+      RTSP_USER: R001
+      MEDIA_PUBLISH_TOKEN: 43251ba5aaf72081afb5ec42367e0ff17b834772b5082f8abff03f164d92773d
     depends_on:
       api: { condition: service_healthy }
       mediamtx: { condition: service_healthy }

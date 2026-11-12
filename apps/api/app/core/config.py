@@ -79,6 +79,9 @@ class Settings(BaseSettings):
     #     （声明已知非默认 profile 及其专属 Adapter 实例）
     #   VEHICLE_EXECUTION_PROFILES="firebot-vehicle-01=ros-software-test"
     #     （未列出车辆=原有控制门禁，不变）
+    # G3 模拟来源登记：只有列在此处的 vehicle_id 被标识为 SIMULATED（独立模拟身份；
+    # 与 integration.source_kind=MOCK 测试元数据无关，也绝不用于真实车辆 ID）。
+    simulated_vehicle_ids: str = "firebot-sim-ir-01"
     vehicle_transport_profiles: str = ""
     transport_profile_adapters: str = ""
     vehicle_execution_profiles: str = ""
@@ -129,6 +132,10 @@ class Settings(BaseSettings):
             for item in self.vehicle_agent_v1_downlink_allowlist.split(",")
             if item.strip()
         }
+
+    def is_simulated_vehicle(self, vehicle_id: str) -> bool:
+        listed = {v.strip() for v in self.simulated_vehicle_ids.split(",") if v.strip()}
+        return vehicle_id in listed
 
     def vehicle_downlink_allowed(self, vehicle_id: str) -> bool:
         """global downlink=true 且 vehicle_id 在 allowlist 中才允许下行。"""
