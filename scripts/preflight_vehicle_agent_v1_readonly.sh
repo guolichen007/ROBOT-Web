@@ -59,19 +59,31 @@ preinstall() {
     pass "no legacy vehicle-bridge process"
   fi
 
-  # 3. 磁盘空间：目标分区至少 500MB 可用（venv+产物+日志余量）
-  if ! df -Pk "${ROOTFS}/opt/firebot" 2>/dev/null | awk 'NR==2 {exit !($4 >= 512000)}'; then
-    fail "disk space below 500MB on ${ROOTFS}/opt/firebot"
+  # 3. 磁盘空间：目标分区至少 500MB 可用（venv+产物+日志余量）。
+  # 区分「安装路径尚未创建」与「真实磁盘不足」：路径缺失是安装尚未开始（WARN），
+  # 磁盘检查落到其父分区（/opt 或 /），绝不假装通过。
+  if [ ! -d "${ROOTFS}/opt/firebot" ]; then
+    warn "install path ${ROOTFS}/opt/firebot not created yet (expected before install; checking parent partition)"
+    DF_MOUNT="${ROOTFS}/opt"
+    [ -d "${ROOTFS}/opt" ] || DF_MOUNT="${ROOTFS}/"
   else
-    pass "disk space sufficient"
+    DF_MOUNT="${ROOTFS}/opt/firebot"
+  fi
+  if ! df -Pk "$DF_MOUNT" 2>/dev/null | awk 'NR==2 {exit !($4 >= 512000)}'; then
+    fail "disk space below 500MB on $DF_MOUNT"
+  else
+    pass "disk space sufficient ($DF_MOUNT)"
   fi
 
-  # 4. Python 3.11 可用（版本精确到次版本，安装步骤将创建 venv）
-  if ! command -v python3.11 >/dev/null 2>&1 || \
-     ! python3.11 -c 'import sys; sys.exit(0 if sys.version_info[:2]==(3,11) else 1)' 2>/dev/null; then
-    fail "python3.11 not available"
+  # 4. Python 3.11 可用（版本精确到次版本，安装步骤将创建 venv）。
+  # 支持显式解释器路径（READONLY_PYTHON3_11）：目标机无系统 python3.11 时由安装
+  # 步骤提供受控解释器（如 uv-managed 独立构建），不假装 PATH 中存在。
+  PY3_11="${READONLY_PYTHON3_11:-python3.11}"
+  if ! command -v "$PY3_11" >/dev/null 2>&1 || \
+     ! "$PY3_11" -c 'import sys; sys.exit(0 if sys.version_info[:2]==(3,11) else 1)' 2>/dev/null; then
+    fail "python3.11 not available (${PY3_11})"
   else
-    pass "python3.11 available"
+    pass "python3.11 available (${PY3_11})"
   fi
 
   # 5. 身份冲突：旧身份环境变量必须不存在（新 Agent 会拒绝启动，这里提前暴露）
