@@ -13,10 +13,14 @@
 # 加载（与现有 -f 列表一起，放在最后）：
 #   docker compose -f docker-compose.server.yml -f deploy/u-dao/compose.u-dao.yml \
 #     -f deploy/u-dao/r001-independent/compose.g2-dispatch.override.yml \
-#     --env-file <runtime>/server.env --env-file <runtime>/g2.env up -d --no-deps api command-dispatcher
-# 回滚：去掉本 overlay 重新 up 同两项服务（G2 键全部回到默认空/false，零下行）。
+#     --env-file <runtime>/server.env --env-file <runtime>/g2.env up -d --no-deps api command-dispatcher web
+# 发布前必须：config --format json 并通过 g2-verify-compose.py（含 --baseline 非 G2 服务零变化）。
+# 回滚：去掉本 overlay 重新 up --no-deps 同三项服务（G2 键回到默认空/false，零下行；镜像回旧值）。
 services:
   api:
+    # G2-R2：G2 服务使用专用镜像变量；不改 FIREBOT_PYTHON_IMAGE，确保 002 链路
+    # （mosquitto / mqtt-ingress / vehicle-agent-adapter 等）展开配置不变、不会被重建。
+    image: ${G2_PYTHON_IMAGE:?G2_PYTHON_IMAGE required (G2 approved SHA image)}
     environment:
       VEHICLE_AGENT_V1_DOWNLINK_ENABLED: ${G2_DOWNLINK_ENABLED:-false}
       VEHICLE_AGENT_V1_DOWNLINK_ALLOWLIST: ${G2_DOWNLINK_ALLOWLIST:-}
@@ -25,6 +29,7 @@ services:
       VEHICLE_EXECUTION_PROFILES: ${G2_VEHICLE_EXECUTION_PROFILES:-}
 
   command-dispatcher:
+    image: ${G2_PYTHON_IMAGE:?G2_PYTHON_IMAGE required (G2 approved SHA image)}
     environment:
       VEHICLE_AGENT_V1_DOWNLINK_ENABLED: ${G2_DOWNLINK_ENABLED:-false}
       VEHICLE_AGENT_V1_DOWNLINK_ALLOWLIST: ${G2_DOWNLINK_ALLOWLIST:-}
@@ -40,6 +45,9 @@ services:
     healthcheck:
       # 原有两项心跳 + 每个独立 profile 的 broker 连接心跳
       test: ["CMD", "python", "-c", "from app.core.events import get_redis; r=get_redis(); raise SystemExit(0 if r.get('service:command-dispatcher:outbox-heartbeat') and r.get('service:command-dispatcher:safety-heartbeat') and r.get('service:command-dispatcher:broker-heartbeat:r001-independent-v1') else 1)"]
+
+  web:
+    image: ${G2_WEB_IMAGE:?G2_WEB_IMAGE required (G2 approved SHA image)}
 
 networks:
   r001:

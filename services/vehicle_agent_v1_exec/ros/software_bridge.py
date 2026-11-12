@@ -75,6 +75,18 @@ class Pending:
         self.action = action
         self.inbox: queue.Queue = queue.Queue()
         self.accepted = False
+        # stop_patrol 专用：发送时绑定的当前活动 patrol（V1 msg_id）；None = 无可关联巡检
+        self.target: str | None = None
+        # 目标巡检在本 stop 被 ACCEPTED 之前已结束（STOPPED/COMPLETED），记录原始状态
+        self.target_ended_before_accept: str | None = None
+        self.resolved = False
+
+
+def trusted(data: dict) -> bool:
+    """可信软件反馈：software_test=true 且非适配器判定的不可信结果。"""
+    return data.get("software_test") is True and data.get("reason_code") != (
+        "SOFTWARE_TEST_FLAG_MISSING"
+    )
 
 
 class RosSoftwareBridge:
@@ -95,40 +107,104 @@ class RosSoftwareBridge:
     # ---------------- ROS 回调 ----------------
     def _on_feedback(self, message) -> None:
         data = feedback_to_dict(message)
+        outcomes: list[tuple[Pending, dict]] = []
         with self.lock:
             target = self.pending.get(data["command_id"])
-            stops = []
-            if data["ros_status"] == "STOPPED" or (
-                data["action"] == "patrol" and data["state"] in TERMINAL_STATES
+            if target is not None and target.action != data["action"]:
+                # command_id 与 action 不一致：不可信串联，按失败交给该请求
+                data = {**data, "state": "FAILED", "reason_code": "FEEDBACK_ACTION_MISMATCH"}
+            # 1) 巡检终止（仅可信 STOPPED/COMPLETED）→ 只关联绑定了该 patrol 的 stop
+            if (
+                data["action"] == "patrol"
+                and data["ros_status"] in ("STOPPED", "COMPLETED")
+                and trusted(data)
             ):
-                stops = [
-                    p
-                    for p in self.pending.values()
-                    if p.action == "stop_patrol" and p.accepted and p is not target
-                ]
-        if target is not None:
-            if data["state"] == "ACCEPTED":
+                for stop in self.pending.values():
+                    if stop.action != "stop_patrol" or stop.target != data["command_id"]:
+                        continue
+                    if stop.resolved:
+                        continue
+                    if not stop.accepted:
+                        stop.target_ended_before_accept = data["ros_status"]
+                        continue
+                    stop.resolved = True
+                    outcomes.append((stop, self._stop_outcome(stop, data["ros_status"], data)))
+            # 2) stop 自身 ACCEPTED：若目标已提前结束 / 无可关联巡检，立即给出非成功终态
+            if (
+                target is not None
+                and target.action == "stop_patrol"
+                and data["state"] == "ACCEPTED"
+                and trusted(data)
+            ):
                 target.accepted = True
+                if target.target is None:
+                    target.resolved = True
+                    outcomes.append(
+                        (
+                            target,
+                            self._stop_result(
+                                target,
+                                "FAILED",
+                                "STOP_TARGET_UNTRACKED",
+                                "stop accepted but no tracked active patrol (result unconfirmed)",
+                                data,
+                            ),
+                        )
+                    )
+                elif target.target_ended_before_accept:
+                    target.resolved = True
+                    outcomes.append(
+                        (
+                            target,
+                            self._stop_result(
+                                target,
+                                "REJECTED",
+                                "STOP_NOT_EFFECTIVE",
+                                "patrol ended ("
+                                + target.target_ended_before_accept
+                                + ") before stop was accepted",
+                                data,
+                            ),
+                        )
+                    )
+            elif target is not None and data["state"] == "ACCEPTED" and trusted(data):
+                target.accepted = True
+        if target is not None:
             target.inbox.put(data)
         else:
             LOG.info("feedback for unknown command_id %s (%s)", data["command_id"], data["state"])
-        for stop in stops:
-            stopped = data["ros_status"] == "STOPPED"
-            stop.inbox.put(
-                {
-                    "command_id": stop.command_id,
-                    "action": "stop_patrol",
-                    "state": "COMPLETED",
-                    "ros_status": data["ros_status"],
-                    "reason_code": None if stopped else "ALREADY_STOPPED",
-                    "message": data["message"]
-                    if stopped
-                    else "patrol finished before stop took effect: " + data["message"],
-                    "software_test": data["software_test"],
-                    "stopped_command_id": data["command_id"],
-                    "ts": data["ts"],
-                }
-            )
+        for stop, result in outcomes:
+            stop.inbox.put(result)
+
+    def _stop_outcome(self, stop: Pending, ros_status: str, data: dict) -> dict:
+        if ros_status == "STOPPED":
+            return {
+                **self._stop_result(stop, "COMPLETED", None, data["message"], data),
+                "ros_status": "STOPPED",
+            }
+        # 巡检自然完成与停止竞争：停止未生效，不得报成功
+        return self._stop_result(
+            stop,
+            "REJECTED",
+            "PATROL_ALREADY_FINISHED",
+            "patrol completed naturally before stop took effect: " + data["message"],
+            data,
+        )
+
+    @staticmethod
+    def _stop_result(stop: Pending, state, reason, message, data) -> dict:
+        return {
+            "command_id": stop.command_id,
+            "action": "stop_patrol",
+            "state": state,
+            "ros_status": data.get("ros_status"),
+            "reason_code": reason,
+            "message": message,
+            "software_test": True,
+            "stopped_command_id": stop.target,
+            "source": "bridge-correlation",
+            "ts": data.get("ts") or now_iso(),
+        }
 
     def _on_status(self, message) -> None:
         self.last_status = status_to_dict(message)
@@ -169,6 +245,10 @@ class RosSoftwareBridge:
             if command_id in self.pending:
                 emit(self._local(command_id, action, "REJECTED", "BUSY", "duplicate in-flight"))
                 return
+            if action == "stop_patrol":
+                # 只绑定当前活动 patrol（本桥在途、已被节点 ACCEPTED 的唯一巡检）
+                active = [p for p in self.pending.values() if p.action == "patrol" and p.accepted]
+                pending.target = active[-1].command_id if len(active) == 1 else None
             self.pending[command_id] = pending
         try:
             self.publisher.publish(

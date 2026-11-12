@@ -309,6 +309,9 @@ def handle_software_feedback(db, robot: Robot, data: dict, received: datetime) -
         or payload["target_boot_id"] != data.get("target_boot_id")
     ):
         return
+    if data.get("software_test") is not True and data.get("state") in {"COMPLETED", "STOPPED"}:
+        # 不可信反馈不得驱动成功/停止终态
+        data = {**data, "state": "FAILED", "reason_code": "UNTRUSTED_SOFTWARE_FEEDBACK"}
     entry = {
         key: data.get(key)
         for key in (
@@ -331,6 +334,8 @@ def handle_software_feedback(db, robot: Robot, data: dict, received: datetime) -
                     select(Command).where(Command.robot_id == robot.id, Command.cmd == "patrol")
                 ).all()
                 if row.payload_json.get("message_id") == entry["stopped_command_id"]
+                and row.payload_json.get("target_boot_id") == payload["target_boot_id"]
+                and row.payload_json.get("execution_mode") == "SOFTWARE_TEST"
             ),
             None,
         )

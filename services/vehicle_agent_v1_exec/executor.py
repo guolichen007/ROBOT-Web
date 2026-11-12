@@ -244,6 +244,8 @@ class CommandExecutor:
             "command": verdict.wire.command,
             "mode": "SOFTWARE_TEST",
             "hardware": "NO_HARDWARE",
+            # 车端可信标记：仅 ROS 反馈 software_test=true（或桥/执行器自身生成）才为 true
+            "software_test": feedback.get("software_test", True) is True,
             "state": feedback.get("state"),
             "reason_code": feedback.get("reason_code"),
             "message": feedback.get("message"),

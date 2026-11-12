@@ -48,7 +48,9 @@ services:
     networks: [r001]
 
   r001-adapter:
-    image: ${FIREBOT_PYTHON_IMAGE:-firebot-python:server}
+    # G2-R2：专属服务镜像独立变量（与主栈 api/dispatcher 同一 G2 批准 SHA 镜像；
+    # 旧版 r001-ingress 不得处理新版软件反馈 → 两者必须同批升级）
+    image: ${R001_ADAPTER_IMAGE:-${FIREBOT_PYTHON_IMAGE:-firebot-python:server}}
     command: ["python", "/workspace/services/vehicle-agent-adapter/main.py"]
     environment:
       # 生产业务库/缓存：复用生产 app_secrets 卷（只读），绝不复制连接串到本目录
@@ -71,7 +73,9 @@ services:
       VEHICLE_AGENT_TRANSPORT_PROFILE: ${G2_R001_TRANSPORT_PROFILE:-default}
       VEHICLE_AGENT_V1_ROLLOUT: "false"
       VEHICLE_AGENT_SCOPE_VEHICLE_IDS: ${R001_SCOPE_VEHICLE_IDS:-firebot-vehicle-01}
-      FIREBOT_SERVICE_INSTANCE_ID: r001-dedicated-adapter
+      # G2-R2：实例 ID 显式变量（默认与模板一致；生产 G2 使用 r001-dedicated-adapter-v2，
+      # 必须与 TRANSPORT_PROFILE_ADAPTERS 中的实例名一致，否则 API/Dispatcher 读不到其心跳）
+      FIREBOT_SERVICE_INSTANCE_ID: ${R001_ADAPTER_INSTANCE_ID:-r001-dedicated-adapter}
     security_opt: ["no-new-privileges:true"]
     read_only: true
     tmpfs: ["/tmp"]
@@ -89,7 +93,7 @@ services:
     networks: [r001, firebot]
 
   r001-ingress:
-    image: ${FIREBOT_PYTHON_IMAGE:-firebot-python:server}
+    image: ${R001_INGRESS_IMAGE:-${FIREBOT_PYTHON_IMAGE:-firebot-python:server}}
     command: ["python", "/workspace/services/mqtt-ingress/main.py"]
     environment:
       DATABASE_URL_FILE: /run/secrets/database_url
@@ -102,7 +106,7 @@ services:
       MQTT_CA_FILE: /run/mqtt-ca.crt
       MQTT_ALLOW_ANONYMOUS: "false"
       VEHICLE_AGENT_SCOPE_VEHICLE_IDS: ${R001_SCOPE_VEHICLE_IDS:-firebot-vehicle-01}
-      FIREBOT_SERVICE_INSTANCE_ID: r001-dedicated-ingress
+      FIREBOT_SERVICE_INSTANCE_ID: ${R001_INGRESS_INSTANCE_ID:-r001-dedicated-ingress}
     security_opt: ["no-new-privileges:true"]
     read_only: true
     tmpfs: ["/tmp"]

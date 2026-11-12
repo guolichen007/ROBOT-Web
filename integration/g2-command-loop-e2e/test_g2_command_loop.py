@@ -392,6 +392,107 @@ def test_08_stop_patrol_while_running(g2, api):
     assert row.lifecycle_status == "SUCCEEDED"
 
 
+def test_08a_patrol_after_stop_completes_naturally(g2, api):
+    """P0-A：start → patrol → stop_patrol → start → patrol 自然完成 → close。
+
+    上一次 stop 不得残留影响下一次巡检（001 节点 _patrol_stop 按次重置）。
+    """
+    if not g2["ros"]:
+        pytest.skip("rospy 不可用：NOT_EXECUTED")
+    _, row = _software(api, "start", {"with_navigation": True})
+    assert row.lifecycle_status == "SUCCEEDED", row.ack_payload_json
+    first = _post_software(api, "patrol", {"rounds": 20})
+    wait_for(lambda: "EXECUTING" in _states(command_row(first["command_id"])), 15)
+    stop = _post_software(api, "stop_patrol")
+    stop_row = wait_terminal(stop["command_id"], {"SUCCEEDED", "FAILED", "ACK_REJECTED"}, 15)
+    assert stop_row.lifecycle_status == "SUCCEEDED"
+    first_row = wait_terminal(first["command_id"], {"CANCELLED", "SUCCEEDED", "FAILED"}, 10)
+    assert first_row.lifecycle_status == "CANCELLED"
+    # 001 节点停止后回到 idle：需再次 start 才能巡检
+    _, row = _software(api, "start", {"with_navigation": True})
+    assert row.lifecycle_status == "SUCCEEDED", row.ack_payload_json
+    second, second_row = _software(api, "patrol", {"rounds": 3})
+    assert second_row.lifecycle_status == "SUCCEEDED", (
+        second_row.ack_reason,
+        _states(second_row),
+    )
+    feedback = second_row.ack_payload_json["software_feedback"]
+    assert [f["ros_status"] for f in feedback] == [
+        "ACCEPTED",
+        "RUNNING",
+        "RUNNING",
+        "RUNNING",
+        "COMPLETED",
+    ], feedback
+    assert "STOPPED" not in _states(second_row)
+    _, row = _software(api, "close")
+    assert row.lifecycle_status == "SUCCEEDED"
+    print(
+        "G2_REPATROL_EVIDENCE "
+        + json.dumps(
+            {
+                "first_patrol": [first["command_id"], first_row.lifecycle_status],
+                "stop": [stop["command_id"], stop_row.lifecycle_status],
+                "second_patrol": [second["command_id"], second_row.lifecycle_status],
+                "second_ros_status": [f["ros_status"] for f in feedback],
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
+ROGUE_PUBLISHER = """
+import sys, time, rospy
+from firebot_001_software.msg import SoftwareFeedback
+rospy.init_node("g2_rogue_feedback", anonymous=True, disable_signals=True)
+pub = rospy.Publisher("/firebot_001/software/feedback", SoftwareFeedback, queue_size=5)
+deadline = time.time() + 10
+while pub.get_num_connections() == 0 and time.time() < deadline:
+    time.sleep(0.05)
+time.sleep(0.5)
+msg = SoftwareFeedback(command_id=sys.argv[1], action="patrol", status="STOPPED",
+                       detail="forged stop", software_test=False, ts="forged")
+pub.publish(msg)
+time.sleep(1.0)
+"""
+
+
+def test_08c_untrusted_ros_feedback_rejected(g2, api):
+    """不可信反馈（software_test=false）不得驱动 STOPPED/成功；stop 只关联当前活动巡检。"""
+    if not g2["ros"]:
+        pytest.skip("rospy 不可用：NOT_EXECUTED")
+    import subprocess
+
+    _, row = _software(api, "start", {"with_navigation": True})
+    assert row.lifecycle_status == "SUCCEEDED"
+    patrol = _post_software(api, "patrol", {"rounds": 20})
+    wait_for(lambda: "EXECUTING" in _states(command_row(patrol["command_id"])), 15)
+    python3, env = g2["ros_env"]
+    forged = subprocess.run(
+        [python3, "-c", ROGUE_PUBLISHER, patrol["payload_json"]["message_id"]],
+        env=env,
+        capture_output=True,
+        timeout=30,
+    )
+    assert forged.returncode == 0, forged.stderr.decode()[-500:]
+    row = wait_terminal(patrol["command_id"], {"CANCELLED", "SUCCEEDED", "FAILED"}, 10)
+    assert row.lifecycle_status == "FAILED", (row.ack_reason, _states(row))
+    assert row.ack_reason == "SOFTWARE_TEST_FLAG_MISSING"
+    assert "STOPPED" not in _states(row)
+    # 该巡检已被桥判定终止（不再追踪）→ 新 stop 无可关联活动巡检：结果未确认，不得成功
+    stop = _post_software(api, "stop_patrol")
+    stop_row = wait_terminal(stop["command_id"], {"SUCCEEDED", "FAILED", "ACK_REJECTED"}, 15)
+    assert stop_row.lifecycle_status == "FAILED"
+    assert stop_row.ack_reason == "STOP_TARGET_UNTRACKED"
+    # 真实节点确实已停（state=idle），云端 patrol 仍保持 FAILED（不被后到的 STOPPED 改写）
+    assert wait_for(
+        lambda: (s := (robot_row().agent_state_json or {}).get("status", {}).get("software"))
+        and s.get("state") == "idle",
+        15,
+    )
+    assert command_row(patrol["command_id"]).lifecycle_status == "FAILED"
+
+
 def test_08b_ros_rejection_is_failure_not_success(g2, api):
     if not g2["ros"]:
         pytest.skip("rospy 不可用：NOT_EXECUTED")

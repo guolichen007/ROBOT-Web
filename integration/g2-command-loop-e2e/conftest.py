@@ -37,7 +37,7 @@ VEHICLE_PASSWORD = "g2-vehicle-01-password"
 PLATFORM_PASSWORD_A = "g2-platform-A-password"
 PLATFORM_PASSWORD_B = "g2-platform-B-password-independent"
 PROFILE = "r001-independent-v1"
-DEDICATED_ADAPTER = "r001-dedicated-adapter"
+DEDICATED_ADAPTER = "r001-dedicated-adapter-v2"  # 与生产 g2.env 一致
 DEDICATED_INGRESS = "r001-dedicated-ingress"
 ROS_NAMESPACE = "/firebot_001/software"
 ACK_TIMEOUT = 8
@@ -268,6 +268,13 @@ def g2(tmp_path_factory):
             os.environ.setdefault(key, value)
         else:
             os.environ[key] = value
+    # P0-C：任何 DB 写入 / Redis flushdb 之前校验测试目标身份；失败直接退出整个会话
+    from target_guard import TargetGuardError, assert_isolated_target
+
+    try:
+        assert_isolated_target()
+    except TargetGuardError as exc:
+        pytest.exit(f"G2_E2E_TARGET_GUARD: {exc}", returncode=3)
     workdir = tmp_path_factory.mktemp("g2")
     certs = workdir / "certs"
     subprocess.run(
@@ -470,6 +477,7 @@ def g2(tmp_path_factory):
         "bridge_socket": bridge_socket,
         "agent": None,
         "evidence": {},
+        "ros_env": (python3, ros_env) if ros else None,
     }
     try:
         yield context
