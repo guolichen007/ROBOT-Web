@@ -3,9 +3,23 @@
 from datetime import UTC, datetime, timedelta
 
 from app.core.config import get_settings
+from app.core.events import get_redis
 from app.core.vehicle_agent_health import adapter_healthy
+from app.core.vehicle_routing import (
+    RoutingError,
+    adapter_config_consistent,
+    adapter_instance,
+    execution_mode,
+    execution_profile,
+    transport_profile,
+)
 from app.db.models import Robot, RobotCapability, RobotIntegrationProfile
 from services.vehicle_agent_v1 import COMMANDS, PROTOCOL, program_ready
+
+
+def command_mode(robot: Robot, action: str) -> str:
+    """命令执行模式（DIAGNOSTIC / SOFTWARE_TEST / REAL）；档外命令抛 RoutingError。"""
+    return execution_mode(robot.vehicle_id, action)
 
 
 def gate_reason(db, robot: Robot, action: str, now: datetime | None = None) -> str:
@@ -13,12 +27,41 @@ def gate_reason(db, robot: Robot, action: str, now: datetime | None = None) -> s
         return "AGENT_PROTOCOL_MISMATCH"
     if action not in COMMANDS:
         return "ROBOT_CAPABILITY_UNSUPPORTED"
-    if not get_settings().vehicle_agent_v1_downlink_enabled:
+    settings = get_settings()
+    if not settings.vehicle_agent_v1_downlink_enabled:
         return "VEHICLE_AGENT_DOWNLINK_DISABLED"
+    # 逐车 allowlist：全局开关不能绕过（G2-E）
+    if not settings.vehicle_downlink_allowed(robot.vehicle_id):
+        return "VEHICLE_NOT_IN_DOWNLINK_ALLOWLIST"
+    try:
+        profile = transport_profile(robot.vehicle_id)
+        instance = adapter_instance(profile)
+        governed = execution_profile(robot.vehicle_id) is not None
+        mode = command_mode(robot, action)
+    except RoutingError:
+        return "EXECUTION_PROFILE_DENIED"
+    if governed and mode in {"DIAGNOSTIC", "SOFTWARE_TEST"}:
+        # G2：逐车执行档授权的诊断/软件测试命令不触达任何硬件，不以 enabled（真实控制
+        # 开关）或 supported_commands（真实控制能力声明）作为前提；真实动作（REAL）仍走
+        # 下方完整原有门禁。急停 NULL 保持“未验证”，不得为软件测试改写。
+        if robot.online_state != "ONLINE":
+            return "ROBOT_OFFLINE"
+        if not adapter_healthy(instance=instance):
+            return "VEHICLE_AGENT_ADAPTER_UNAVAILABLE"
+        if not adapter_config_consistent(get_redis(), instance):
+            return "ROUTING_CONFIG_MISMATCH"
+        integration = db.get(RobotIntegrationProfile, robot.id)
+        if not integration or integration.source_kind not in {PROTOCOL, "MOCK"}:
+            return "INTEGRATION_PROFILE_MISSING"
+        if robot.estop_active is True:
+            return "ROBOT_ESTOP_ACTIVE"
+        return ""
     if not robot.enabled or robot.online_state != "ONLINE":
         return "ROBOT_OFFLINE"
-    if not adapter_healthy():
+    if not adapter_healthy(instance=instance):
         return "VEHICLE_AGENT_ADAPTER_UNAVAILABLE"
+    if not adapter_config_consistent(get_redis(), instance):
+        return "ROUTING_CONFIG_MISMATCH"
     integration = db.get(RobotIntegrationProfile, robot.id)
     if not integration or integration.source_kind not in {PROTOCOL, "MOCK"}:
         return "INTEGRATION_PROFILE_MISSING"

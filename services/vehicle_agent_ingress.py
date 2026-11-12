@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from app.core.audit import write_audit
@@ -26,7 +26,13 @@ from app.db.session import SessionLocal
 from app.modules.commands.readiness import robot_readiness
 from sqlalchemy import select
 
-from services.vehicle_agent_v1 import PROTOCOL, Ack, normalize, status_confirms
+from services.vehicle_agent_v1 import (
+    NOT_EXECUTED_CODES,
+    PROTOCOL,
+    Ack,
+    normalize,
+    status_confirms,
+)
 
 logger = logging.getLogger("vehicle-agent-ingress")
 
@@ -54,10 +60,25 @@ def converge_commands(db, robot: Robot, received: datetime) -> None:
     for command in db.scalars(
         select(Command).where(
             Command.robot_id == robot.id,
-            Command.lifecycle_status == "ACK_ACCEPTED",
+            Command.lifecycle_status.in_(["ACK_ACCEPTED", "EXECUTING"]),
         )
     ).all():
         if command.payload_json.get("schema_version") != "vehicle-agent-v1":
+            continue
+        software = command.payload_json.get("execution_mode") == "SOFTWARE_TEST"
+        if command.lifecycle_status != "ACK_ACCEPTED" and not software:
+            continue
+        if software:
+            # 软件测试命令只由车端 ROS 软件反馈收敛（不得用底盘 programs 状态冒充）；
+            # 车端在 ACK 后未给出终态反馈 → 超时失败（结果未确认，不宣称成功）。
+            deadline = command.expires_at + timedelta(
+                seconds=get_settings().vehicle_agent_v1_ack_timeout_seconds
+            )
+            if received > deadline:
+                command.lifecycle_status = "FAILED"
+                command.ack_reason = "SOFTWARE_FEEDBACK_TIMEOUT"
+                command.terminal_at = received
+                queue_event(db, "command.updated", serialize_model(command))
             continue
         query = command.cmd in {"ping", "get_status", "get_telemetry"}
         if not query and (not status_at or status_at < command.issued_at):
@@ -175,10 +196,16 @@ def handle_v1_ack(db, robot: Robot, data: dict, received: datetime, handle_ack) 
     payload = command.payload_json
     if payload["message_id"] != str(ack.msg_id) or payload["message_id"] != data["message_id"]:
         return
-    if (
-        payload["target_boot_id"] != data["target_boot_id"]
-        or robot.boot_id != data["target_boot_id"]
-    ):
+    if payload["target_boot_id"] != data["target_boot_id"]:
+        return
+    # 车端确定未执行的拒绝（旧会话/过期/跨设备/未授权）在会话已切换后仍须落库，
+    # 否则命令会永久停留 PUBLISHED；拒绝不宣称任何执行，因此不受当前会话限制。
+    definitive_reject = (
+        data.get("ack_source", "vehicle") == "vehicle"
+        and not ack.accepted
+        and ack.code in NOT_EXECUTED_CODES
+    )
+    if robot.boot_id != data["target_boot_id"] and not definitive_reject:
         return
     synthetic = data.get("ack_source") == "transport_timeout"
     if synthetic:
@@ -192,7 +219,12 @@ def handle_v1_ack(db, robot: Robot, data: dict, received: datetime, handle_ack) 
         queue_event(db, "command.updated", serialize_model(command))
         converge_tasks(db, robot, received)
         return
-    command.ack_payload_json = {**ack.model_dump(mode="json"), "ack_source": "vehicle"}
+    previous_feedback = (command.ack_payload_json or {}).get("software_feedback")
+    command.ack_payload_json = {
+        **ack.model_dump(mode="json"),
+        "ack_source": "vehicle",
+        **({"software_feedback": previous_feedback} if previous_feedback else {}),
+    }
     handle_ack(
         db,
         robot,
@@ -225,8 +257,64 @@ def handle_v1_ack(db, robot: Robot, data: dict, received: datetime, handle_ack) 
                 task.failure_code, task.failure_message = ack.code, ack.message
                 task.completed_at = received
             queue_event(db, "task.updated", serialize_model(task))
+    if ack.accepted and previous_feedback:
+        # 软件终态反馈先于 ACK 到达（不同 topic 无序）：ACK 落库后补收敛
+        apply_software_feedback(db, command, previous_feedback[-1], received)
     converge_tasks(db, robot, received)
     converge_commands(db, robot, received)
+
+
+SOFTWARE_TERMINAL = {"COMPLETED": "SUCCEEDED", "FAILED": "FAILED", "REJECTED": "FAILED"}
+
+
+def apply_software_feedback(db, command: Command, feedback: dict, received: datetime) -> None:
+    terminal = SOFTWARE_TERMINAL.get(feedback.get("state"))
+    if command.lifecycle_status not in {"ACK_ACCEPTED", "EXECUTING"}:
+        return
+    if terminal:
+        command.lifecycle_status = terminal
+        command.terminal_at = received
+        if terminal == "FAILED":
+            command.ack_reason = feedback.get("reason_code") or "SOFTWARE_FAILED"
+    else:
+        command.lifecycle_status = "EXECUTING"
+    queue_event(db, "command.updated", serialize_model(command))
+
+
+def handle_software_feedback(db, robot: Robot, data: dict, received: datetime) -> None:
+    """ROS 软件反馈 → Command（仅 SOFTWARE_TEST；必须与已下发命令及当前会话精确关联）。"""
+    command = db.scalar(
+        select(Command)
+        .where(Command.robot_id == robot.id, Command.command_id == data.get("command_id"))
+        .with_for_update()
+    )
+    if not command or command.payload_json.get("execution_mode") != "SOFTWARE_TEST":
+        return
+    payload = command.payload_json
+    if (
+        payload["message_id"] != data.get("message_id")
+        or str(data.get("msg_id")) != payload["message_id"]
+        or payload["target_boot_id"] != data.get("target_boot_id")
+    ):
+        return
+    entry = {
+        key: data.get(key)
+        for key in ("state", "reason_code", "message", "phase", "ros_ts", "duration_ms")
+    }
+    entry["received_at"] = received.isoformat()
+    ack_payload = dict(command.ack_payload_json or {})
+    history = ack_payload.get("software_feedback", [])
+    if any(
+        item.get("state") == entry["state"] and item.get("ros_ts") == entry["ros_ts"]
+        for item in history
+    ):
+        return  # 车端重放（ACK 丢失后的原结果重发）不重复记录
+    ack_payload["software_feedback"] = [*history, entry][-10:]
+    command.ack_payload_json = ack_payload
+    if command.ack_at:
+        apply_software_feedback(db, command, entry, received)
+    else:
+        queue_event(db, "command.updated", serialize_model(command))
 
 
 def process(name: str, payload: bytes, handle_ack) -> bool:
@@ -260,6 +348,29 @@ def process(name: str, payload: bytes, handle_ack) -> bool:
             data = normalize(kind, data)
             state = dict(robot.agent_state_json or {})
             previous_online = robot.online_state
+            # G2 会话合同：车端自报会话 ID（双向执行器每次 MQTT 会话新生成）为唯一事实源，
+            # 云端直接采纳——车端只校验自己生成过的 UUID。retained 旧会话不得采纳。
+            # 未上报（只读 Agent）沿用原云端生成逻辑。
+            vehicle_boot = data.get("boot_id") if kind in {"status", "availability"} else None
+            if vehicle_boot and not envelope.get("retained"):
+                if robot.boot_id != vehicle_boot:
+                    logger.info(
+                        "v1 vehicle session adopted (vehicle=%s boot=%s)", vehicle, vehicle_boot
+                    )
+                    robot.boot_id = vehicle_boot
+                    if kind == "availability":
+                        # 新会话：旧 status 不代表新会话事实
+                        state["status_received_at"] = None
+                state["boot_source"] = "vehicle"
+            elif (
+                kind == "status"
+                and not envelope.get("retained")
+                and state.get("boot_source") == "vehicle"
+            ):
+                # 回退到不上报会话的 Agent（如只读模式）：退出车端会话合同，新建云端会话，
+                # 旧车端会话的待发命令随 boot 变化失效。
+                robot.boot_id = str(uuid4())
+                state["boot_source"] = "cloud"
             if not robot.boot_id:
                 robot.boot_id = str(uuid4())
             if kind in {"status", "availability"}:
@@ -288,7 +399,8 @@ def process(name: str, payload: bytes, handle_ack) -> bool:
                     state["telemetry_online"] = False
                 robot.last_seen_at = received if online else None
                 if online and previous_online == "OFFLINE":
-                    robot.boot_id = str(uuid4())
+                    if state.get("boot_source") != "vehicle":
+                        robot.boot_id = str(uuid4())
                     # Availability proves connectivity, never the new session's
                     # chassis/navigation state. Wait for a post-reconnect status.
                     state["status_received_at"] = None
@@ -337,6 +449,8 @@ def process(name: str, payload: bytes, handle_ack) -> bool:
                         )
                     )
             elif kind == "event":
+                if data.get("type") == "software_feedback":
+                    handle_software_feedback(db, robot, data, received)
                 write_audit(
                     db,
                     action="VEHICLE_AGENT_EVENT",

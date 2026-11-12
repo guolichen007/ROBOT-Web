@@ -119,7 +119,18 @@ def bind_protocol(
     capability.protocol_version = "vehicle-agent-v1" if payload.protocol == PROTOCOL else "unknown"
     # G1-R1：能力列表必须诚实——下行总开关关闭或该车不在 allowlist 时，
     # 不得宣称任何控制命令可用（只读 V1 设备能力为空）。
-    if payload.protocol == PROTOCOL and settings.vehicle_agent_v1_downlink_enabled:
+    from app.core.vehicle_routing import RoutingError, execution_profile
+
+    try:
+        governed = execution_profile(robot.vehicle_id) is not None
+    except RoutingError:
+        governed = True
+    # G2：受逐车执行档管理的车辆（诊断/软件测试）不宣称任何真实控制能力。
+    if (
+        payload.protocol == PROTOCOL
+        and settings.vehicle_downlink_allowed(robot.vehicle_id)
+        and not governed
+    ):
         capability.supported_commands_json = list(COMMANDS)
     else:
         capability.supported_commands_json = []
@@ -220,7 +231,17 @@ def command(
         )
     )
     task_id = None
-    if action in {"patrol", "resume_patrol", "navigate", "homing"}:
+    from app.core.vehicle_routing import RoutingError, execution_mode
+
+    try:
+        mode = execution_mode(robot.vehicle_id, action)
+    except RoutingError as exc:
+        raise PlatformError("EXECUTION_PROFILE_DENIED", "车辆执行档不允许此命令") from exc
+    if mode == "SOFTWARE_TEST":
+        # G2 软件测试：只驱动车端 ROS 软件状态机，不创建业务巡检任务、不要求地图合同，
+        # 不得冒充真实巡检（Web 标注 SOFTWARE_TEST）。
+        pass
+    elif action in {"patrol", "resume_patrol", "navigate", "homing"}:
         if active:
             raise PlatformError("ACTIVE_TASK_CONFLICT", "机器人已有活动业务任务")
         map_row = db.get(Map, robot.current_map_id) if robot.current_map_id else None

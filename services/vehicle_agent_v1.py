@@ -38,7 +38,32 @@ ACK_CODES = (
     "TIMEOUT",
     "ROS_UNAVAILABLE",
     "INTERNAL",
+    # G2 车端独立校验拒绝码（协议扩展；旧码语义不变）
+    "EXPIRED",
+    "STALE_BOOT",
+    "WRONG_VEHICLE",
+    "NOT_AUTHORIZED",
+    "MODE_MISMATCH",
+    "NO_HARDWARE",
 )
+# 车端会话/时效拒绝：命令确定未执行（与 TIMEOUT“结果未知”不同）。
+NOT_EXECUTED_CODES = {"EXPIRED", "STALE_BOOT", "WRONG_VEHICLE", "NOT_AUTHORIZED", "MODE_MISMATCH"}
+DIAGNOSTIC_COMMANDS = ("ping", "get_status", "get_telemetry")
+SOFTWARE_TEST_COMMANDS = ("start", "close", "patrol", "stop_patrol")
+# 执行模式：DIAGNOSTIC（只读诊断）/ SOFTWARE_TEST（仅 ROS 软件状态机，无硬件）/ REAL（真实整车）
+EXECUTION_MODES = ("DIAGNOSTIC", "SOFTWARE_TEST", "REAL")
+# 逐车执行能力档（G2）：命令 → 执行模式。未列出的命令一律拒绝。
+# 档位只允许逐级显式授予；software-test 档绝不包含真实底盘/导航动作。
+EXECUTION_PROFILES: dict[str, dict[str, str]] = {
+    "telemetry-only": {},
+    "diagnostic": dict.fromkeys(DIAGNOSTIC_COMMANDS, "DIAGNOSTIC"),
+    "ros-software-test": {
+        **dict.fromkeys(DIAGNOSTIC_COMMANDS, "DIAGNOSTIC"),
+        **dict.fromkeys(SOFTWARE_TEST_COMMANDS, "SOFTWARE_TEST"),
+    },
+}
+# 车端软件执行反馈（沿用 FIREBOT_BRIDGE_CONTRACT §3.2 枚举）
+SOFTWARE_FEEDBACK_STATES = ("ACCEPTED", "EXECUTING", "COMPLETED", "REJECTED", "FAILED")
 TOPIC_CONTRACT = {
     "cmd": (1, False),
     "ack": (1, False),
@@ -85,9 +110,17 @@ class WireCommand(WireModel):
     ]
     params: dict[str, Any] = Field(default_factory=dict)
     ts: AwareDatetime
+    # G2 会话合同（向后兼容的可选扩展）：车端据此独立拒绝跨设备/旧会话/过期命令，
+    # 不得仅依赖云端校验。新执行器要求四项全部存在（缺失即拒绝）。
+    vehicle_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    target_boot_id: UUID | None = None
+    expires_at: AwareDatetime | None = None
+    mode: Literal["DIAGNOSTIC", "SOFTWARE_TEST", "REAL"] | None = None
 
     @model_validator(mode="after")
     def validate_params(self) -> WireCommand:
+        if self.expires_at is not None and self.expires_at <= self.ts:
+            raise ValueError("expires_at must be after ts")
         if self.command == "start":
             if (
                 set(self.params) != {"with_navigation"}
@@ -143,6 +176,8 @@ class CanonicalCommand(WireModel):
     operator_id: str = Field(min_length=1)
     cmd: str
     params: dict[str, Any]
+    # G2：执行模式由 API 依据逐车执行档计算；Dispatcher/Adapter/车端各自复核。
+    execution_mode: Literal["DIAGNOSTIC", "SOFTWARE_TEST", "REAL"] | None = None
 
 
 class UplinkModel(WireModel):
@@ -162,6 +197,10 @@ class Status(UplinkModel):
     programs: dict[str, bool | str | None] = Field(default_factory=dict)
     task: AgentTask
     ts: AwareDatetime | None = None
+    # G2：车端自生成的会话 ID（每次 MQTT 会话建立时新生成）；云端采纳为 robot.boot_id。
+    boot_id: UUID | None = None
+    # G2：ROS 软件测试状态（SOFTWARE_TEST，非真实底盘）；仅展示，不参与任务收敛。
+    software: dict[str, Any] | None = None
 
 
 class Pose(UplinkModel):
@@ -233,6 +272,10 @@ def command_from_canonical(payload: dict[str, Any]) -> dict[str, Any]:
         command=payload["cmd"],
         params=payload["params"],
         ts=payload["issued_at"],
+        vehicle_id=canonical.vehicle_id,
+        target_boot_id=canonical.target_boot_id,
+        expires_at=canonical.expires_at,
+        mode=canonical.execution_mode or "REAL",
     ).model_dump(mode="json")
 
 
@@ -248,7 +291,10 @@ def normalize(kind: str, payload: Any) -> dict[str, Any]:
         state = payload if isinstance(payload, str) else payload.get("state")
         if state not in {"online", "offline"}:
             raise ValueError("invalid availability")
-        return {"state": state}
+        result: dict[str, Any] = {"state": state}
+        if isinstance(payload, dict) and payload.get("boot_id") is not None:
+            result["boot_id"] = str(UUID(str(payload["boot_id"])))
+        return result
     if kind == "event" and isinstance(payload, dict):
         return payload
     raise ValueError("unsupported uplink")

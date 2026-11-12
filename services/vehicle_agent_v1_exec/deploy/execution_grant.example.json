@@ -1,0 +1,6 @@
+{
+  "vehicle_id": "firebot-vehicle-01",
+  "execution_profile": "ros-software-test",
+  "ros_bridge_socket": "/run/firebot-ros-bridge/bridge.sock",
+  "not_after": "2026-12-31T23:59:59+08:00"
+}

@@ -94,9 +94,23 @@ def test_topic_contract(kind, qos, retain):
 def test_each_wire_command(action):
     payload = canonical(action)
     wire = command_from_canonical(payload)
-    assert set(wire) == {"msg_id", "command", "params", "ts"}
+    # G2 会话合同：车端必须获知目标设备/会话/过期时间/执行模式以独立拒绝
+    assert set(wire) == {
+        "msg_id",
+        "command",
+        "params",
+        "ts",
+        "vehicle_id",
+        "target_boot_id",
+        "expires_at",
+        "mode",
+    }
     assert wire["msg_id"] == payload["message_id"]
     assert wire["command"] == action
+    assert wire["vehicle_id"] == payload["vehicle_id"]
+    assert wire["target_boot_id"] == payload["target_boot_id"]
+    assert wire["expires_at"] is not None
+    assert wire["mode"] == "REAL"  # 未指定 execution_mode 的旧命令按真实控制门禁语义
 
 
 def test_generated_contract_is_current():

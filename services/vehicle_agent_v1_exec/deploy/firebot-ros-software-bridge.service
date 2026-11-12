@@ -1,0 +1,25 @@
+# firebot-ros-software-bridge：本地 ROS1 软件桥（系统 Python + rospy，Noetic）。
+# 只做 Unix socket ⇄ /firebot_001/software/{command,feedback,status} 转发；不触碰硬件。
+# ROS 环境（ROS_MASTER_URI 等）沿用 001 现场 ROS 部署；按车辆修改 --namespace。
+[Unit]
+Description=Firebot ROS software bridge (SOFTWARE_TEST relay, no hardware)
+After=network-online.target
+
+[Service]
+Type=simple
+User=firebot
+Group=firebot
+RuntimeDirectory=firebot-ros-bridge
+RuntimeDirectoryMode=0750
+WorkingDirectory=/opt/firebot/vehicle-agent-v1-readonly/repo
+Environment=PYTHONPATH=/opt/firebot/vehicle-agent-v1-readonly/repo
+EnvironmentFile=-/etc/firebot/vehicle-agent-v1-exec/ros.env
+ExecStart=/bin/bash -c 'source /opt/ros/noetic/setup.bash && exec /usr/bin/python3 \
+  -m services.vehicle_agent_v1_exec.ros.software_bridge \
+  --namespace ${FIREBOT_ROS_SOFTWARE_NS:-/firebot_001/software} \
+  --socket /run/firebot-ros-bridge/bridge.sock'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

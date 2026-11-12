@@ -39,6 +39,51 @@ def dispatcher_instance_id() -> str:
 INSTANCE_ID = dispatcher_instance_id()
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=INSTANCE_ID, protocol=mqtt.MQTTv5)
 
+# G2 逐车 Broker 路由：本进程是唯一 Outbox 认领者（FOR UPDATE SKIP LOCKED 不变），
+# 按车辆 transport_profile 选择 MQTT 客户端。default=原 Broker（上方 client，行为不变）；
+# 其余 profile 各自一个独立客户端，使用该 Broker 独立签发的 platform 凭证
+# （DISPATCHER_BROKER_PROFILES_FILE，口令只以文件路径给出）。未配置客户端的 profile
+# 一律拒绝派发，绝不回退到原 Broker。
+profile_clients: dict[str, mqtt.Client] = {}
+profile_specs: dict[str, dict] = {}
+
+
+def load_broker_profiles() -> None:
+    from app.core.vehicle_routing import DEFAULT_PROFILE, known_profiles, validate_configuration
+
+    validate_configuration()
+    path = settings.dispatcher_broker_profiles_file
+    if not path:
+        return
+    with open(path, encoding="utf-8") as handle:
+        specs = json.load(handle)
+    for name, spec in specs.items():
+        if name == DEFAULT_PROFILE or name not in known_profiles():
+            raise ValueError(f"broker profile {name!r} not declared in TRANSPORT_PROFILE_ADAPTERS")
+        if spec.get("password_file") is None or "password" in spec:
+            raise ValueError("broker profile credentials must be given as password_file only")
+        if spec.get("password_file") == settings.mqtt_password_file:
+            raise ValueError("independent broker must not reuse the default platform credential")
+        profile_specs[name] = spec
+        profile_clients[name] = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2,
+            client_id=f"{INSTANCE_ID}-{name}",
+            protocol=mqtt.MQTTv5,
+        )
+
+
+def client_for(profile: str) -> mqtt.Client:
+    from app.core.vehicle_routing import DEFAULT_PROFILE, RoutingError
+
+    if profile == DEFAULT_PROFILE:
+        return client
+    try:
+        return profile_clients[profile]
+    except KeyError as exc:
+        raise RoutingError(
+            f"no dispatcher broker client for transport_profile {profile!r}"
+        ) from exc
+
 
 def publish_command(payload: dict, qos: int) -> None:
     validate_message(payload)
@@ -51,15 +96,37 @@ def publish_command(payload: dict, qos: int) -> None:
     # 车辆仍必须校验 payload.expires_at。
     expiry_interval = max(1, math.ceil((expires - now).total_seconds()))
     destination = f"robot/{payload['vehicle_id']}/command"
+    from app.core.vehicle_routing import (
+        DEFAULT_PROFILE,
+        RoutingError,
+        adapter_instance,
+        execution_mode,
+        transport_profile,
+    )
+
+    # 未知 profile → RoutingError（fail-closed，进入退避重试并记录 last_error，不回退）
+    profile = transport_profile(payload["vehicle_id"])
     with SessionLocal() as db:
         robot = db.scalar(select(Robot).where(Robot.vehicle_id == payload["vehicle_id"]))
         if robot is None:
             raise ValueError("unknown command vehicle")
+        if profile != DEFAULT_PROFILE and robot.agent_protocol != "VEHICLE_AGENT_V1":
+            raise RoutingError("independent transport_profile only carries vehicle-agent-v1")
         if robot.agent_protocol == "VEHICLE_AGENT_V1":
             from app.core.vehicle_agent_health import adapter_healthy
 
-            if not adapter_healthy():
+            instance = adapter_instance(profile)
+            if not adapter_healthy(instance=instance):
                 raise ValueError("v1 adapter unavailable before dispatch")
+            from app.core.vehicle_routing import adapter_config_consistent
+
+            if not adapter_config_consistent(redis, instance):
+                raise RoutingError("dedicated adapter routing config differs from dispatcher")
+            # 执行模式复核：API 写入的 execution_mode 必须与当前逐车执行档一致
+            if (payload.get("execution_mode") or "REAL") != execution_mode(
+                robot.vehicle_id, payload["cmd"]
+            ):
+                raise RoutingError("execution_mode no longer permitted for vehicle")
             if not settings.vehicle_agent_v1_downlink_enabled:
                 raise ValueError("v1 downlink disabled")
             if not settings.vehicle_downlink_allowed(robot.vehicle_id):
@@ -78,7 +145,11 @@ def publish_command(payload: dict, qos: int) -> None:
             raise ValueError("v1 command forbidden on legacy transport")
         elif robot.agent_protocol == "ROS_COMPAT":
             raise ValueError("ROS_COMPAT downlink is not implemented")
-    info = client.publish(
+    target = client_for(profile)
+    if profile != DEFAULT_PROFILE and not target.is_connected():
+        # 独立 Broker 未连接：拒绝（退避重试），绝不改走默认 Broker
+        raise RuntimeError(f"dispatcher broker client {profile!r} not connected")
+    info = target.publish(
         destination,
         json.dumps(payload, ensure_ascii=False),
         qos=qos,
@@ -88,6 +159,7 @@ def publish_command(payload: dict, qos: int) -> None:
     info.wait_for_publish(timeout=3)
     if not info.is_published():
         raise RuntimeError("MQTT publish did not complete")
+    # 注意：is_published 仅表示目标 Broker 已 PUBACK（Broker 收到），不代表车端收到或执行。
 
 
 def _manual_heartbeat() -> None:
@@ -213,6 +285,13 @@ def dispatch_next() -> bool:
     # 恢复依赖 paho 有界重连，而非容器重启。
     if client.is_connected():
         redis.setex("service:command-dispatcher:outbox-heartbeat", 5, datetime.now(UTC).isoformat())
+    for name, extra in profile_clients.items():
+        if extra.is_connected():
+            redis.setex(
+                f"service:command-dispatcher:broker-heartbeat:{name}",
+                5,
+                datetime.now(UTC).isoformat(),
+            )
     with SessionLocal.begin() as db:
         row = db.scalar(
             select(OutboxEvent)
@@ -289,7 +368,36 @@ def connect() -> None:
         time.sleep(2)
 
 
+def connect_profile(name: str, extra: mqtt.Client) -> None:
+    """独立 Broker 客户端：异步连接 + paho 有界重连；连接失败只影响该 profile 的命令。"""
+    spec = profile_specs[name]
+    with open(spec["password_file"], encoding="utf-8") as handle:
+        password = handle.read().strip()
+    if not password or password == settings.effective_mqtt_password:
+        raise ValueError("independent broker must use its own platform credential")
+    extra.username_pw_set(spec["username"], password)
+    extra.reconnect_delay_set(
+        min_delay=settings.mqtt_reconnect_min_delay, max_delay=settings.mqtt_reconnect_max_delay
+    )
+    if spec.get("tls", True):
+        import ssl
+
+        extra.tls_set(ca_certs=spec["ca_file"], cert_reqs=ssl.CERT_REQUIRED)
+        extra.tls_insecure_set(False)
+    extra.connect_async(
+        spec["host"],
+        int(spec.get("port", 8883)),
+        keepalive=30,
+        clean_start=True,
+        properties=settings.mqtt_connect_properties(),
+    )
+    extra.loop_start()
+
+
 def main() -> None:
+    load_broker_profiles()
+    for name, extra in profile_clients.items():
+        connect_profile(name, extra)
     connect()
     threading.Thread(target=manual_loop, daemon=True).start()
     threading.Thread(target=safety_loop, daemon=True).start()

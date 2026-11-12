@@ -31,9 +31,29 @@ def task_code(prefix: str = "T") -> str:
     return f"{prefix}{datetime.now(UTC):%Y%m%d%H%M%S}-{str(uuid4())[:8]}"
 
 
+def _profile_governed_non_real(robot: Robot, action: str) -> bool:
+    from app.core.vehicle_routing import RoutingError, execution_mode, execution_profile
+
+    try:
+        if execution_profile(robot.vehicle_id) is None:
+            return False
+        return execution_mode(robot.vehicle_id, action) in {"DIAGNOSTIC", "SOFTWARE_TEST"}
+    except RoutingError:
+        # 档外命令/畸形配置：交给 gate 统一拒绝（EXECUTION_PROFILE_DENIED）
+        return True
+
+
 def assert_robot_can_execute(
     db: Session, robot: Robot, action: str, ignore_task_id: str | None = None
 ) -> None:
+    if robot.agent_protocol == "VEHICLE_AGENT_V1" and _profile_governed_non_real(robot, action):
+        # G2：逐车执行档内的诊断/软件测试命令——完整判定在 vehicle_agent_gate
+        from app.modules.commands.vehicle_agent_gate import gate_reason
+
+        reason = gate_reason(db, robot, action)
+        if reason:
+            raise PlatformError(reason, "车辆状态或执行档不允许此操作", details={"action": action})
+        return
     if not robot.enabled:
         raise PlatformError("ROBOT_DISABLED", "机器人已禁用")
     if robot.online_state in {"STALE", "OFFLINE"} and action not in {
@@ -189,6 +209,7 @@ def build_command_payload(
     lease_id: str | None = None,
     control_session_id: str | None = None,
     seq: int = 0,
+    execution_mode: str | None = None,
 ) -> dict[str, Any]:
     now = datetime.now(UTC)
     if not robot.boot_id and cmd != "emergency_stop":
@@ -219,6 +240,7 @@ def build_command_payload(
         "cmd": cmd,
         "params": params,
         **({"seq": seq} if cmd == "manual_control" else {}),
+        **({"execution_mode": execution_mode} if execution_mode else {}),
     }
 
 
@@ -234,6 +256,14 @@ def create_durable_command(
     priority: int = 50,
 ) -> Command:
     assert_robot_can_execute(db, robot, cmd, ignore_task_id=task_id)
+    mode = None
+    if robot.agent_protocol == "VEHICLE_AGENT_V1":
+        from app.core.vehicle_routing import RoutingError, execution_mode
+
+        try:
+            mode = execution_mode(robot.vehicle_id, cmd)
+        except RoutingError as exc:
+            raise PlatformError("EXECUTION_PROFILE_DENIED", "车辆执行档不允许此命令") from exc
     payload = build_command_payload(
         robot=robot,
         operator_id=operator_id,
@@ -242,6 +272,7 @@ def create_durable_command(
         ttl_ms=ttl_ms,
         priority=priority,
         task_id=task_id,
+        execution_mode=mode,
     )
     if robot.agent_protocol == "VEHICLE_AGENT_V1":
         from services.vehicle_agent_v1 import command_from_canonical

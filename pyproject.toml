@@ -7,6 +7,10 @@ extend-exclude = ["packages/generated-python"]
 select = ["E", "F", "I", "B", "UP"]
 ignore = ["B008"]
 
+[tool.ruff.lint.per-file-ignores]
+# G2：车端 ROS1 侧运行于 ROS Noetic 系统 Python 3.8（rospy），不得使用 3.11+ 的 datetime.UTC
+"services/vehicle_agent_v1_exec/ros/*.py" = ["UP017"]
+
 [tool.mypy]
 python_version = "3.12"
 plugins = ["pydantic.mypy"]

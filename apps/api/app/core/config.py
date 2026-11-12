@@ -73,6 +73,19 @@ class Settings(BaseSettings):
     # G1-P2 专属 Adapter/Ingress 的 vehicle_id 白名单（逗号分隔；空=不限）。
     # 独立 Broker 专属实例只处理白名单车辆，非目标车辆消息直接丢弃，不落入共享 PG/Redis。
     vehicle_agent_scope_vehicle_ids: str = ""
+    # G2 逐车路由/执行档（API、Dispatcher、Adapter 三侧必须读取同一份配置）：
+    #   VEHICLE_TRANSPORT_PROFILES="firebot-vehicle-01=r001-independent-v1"（未列出=default）
+    #   TRANSPORT_PROFILE_ADAPTERS="r001-independent-v1=r001-dedicated-adapter"
+    #     （声明已知非默认 profile 及其专属 Adapter 实例）
+    #   VEHICLE_EXECUTION_PROFILES="firebot-vehicle-01=ros-software-test"
+    #     （未列出车辆=原有控制门禁，不变）
+    vehicle_transport_profiles: str = ""
+    transport_profile_adapters: str = ""
+    vehicle_execution_profiles: str = ""
+    # 本实例（Adapter）所服务的 transport_profile；只下行路由到本 profile 的车辆。
+    vehicle_agent_transport_profile: str = "default"
+    # Dispatcher 非默认 Broker 连接描述文件（JSON；口令只以 *_file 路径给出）。
+    dispatcher_broker_profiles_file: str | None = None
     vehicle_agent_v1_ack_timeout_seconds: int = Field(default=90, ge=1, le=240)
     vehicle_agent_v1_status_stale_seconds: int = Field(default=8, ge=6)
     vehicle_agent_v1_offline_seconds: int = Field(default=15, ge=10)

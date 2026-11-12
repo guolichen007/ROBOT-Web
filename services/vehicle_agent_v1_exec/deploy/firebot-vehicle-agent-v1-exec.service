@@ -1,0 +1,30 @@
+# firebot-vehicle-agent-v1-exec：G2 显式授权的双向执行模式（诊断 + ROS 软件测试）
+# 与 readonly 单元互斥（Conflicts=）：同一设备身份同一时刻只有一个 MQTT 通信 owner；
+# 两者还共享同一 run-dir 的 agent.lock（flock）作为第二层互斥。
+# 授权文件缺失/过期/与身份不符 → 退出码 2，不重启风暴（RestartPreventExitStatus=2 3）。
+[Unit]
+Description=Firebot Vehicle Agent V1 (exec: diagnostic + ROS software-test, NO_HARDWARE)
+After=network-online.target firebot-ros-software-bridge.service
+Wants=network-online.target
+Conflicts=firebot-vehicle-agent-v1-readonly.service
+ConditionPathExists=/etc/firebot/vehicle-agent-v1-exec/execution_grant.json
+
+[Service]
+Type=simple
+User=firebot
+Group=firebot
+WorkingDirectory=/opt/firebot/vehicle-agent-v1-readonly/repo
+Environment=PYTHONPATH=/opt/firebot/vehicle-agent-v1-readonly/repo
+ExecStart=/opt/firebot/vehicle-agent-v1-readonly/venv/bin/python3 \
+  -m services.vehicle_agent_v1_exec.main \
+  --config /etc/firebot/vehicle-agent-v1-readonly/device_identity.json \
+  --grant /etc/firebot/vehicle-agent-v1-exec/execution_grant.json \
+  --run-dir /var/lib/firebot/vehicle-agent-v1-readonly
+Restart=on-failure
+RestartSec=5
+RestartPreventExitStatus=2 3
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

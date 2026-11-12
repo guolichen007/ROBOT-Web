@@ -146,17 +146,49 @@ def robot_readiness(db: Session, robot: Robot) -> dict[str, Any]:
     if unsupported:
         reasons.append("UNSUPPORTED_COMMANDS:" + ",".join(unsupported))
     v1_readiness = {}
+    execution_ready: dict[str, Any] = {"profile": None, "commands": {}, "hardware": None}
     if robot.agent_protocol == "VEHICLE_AGENT_V1":
+        from app.core.vehicle_routing import RoutingError, execution_mode, execution_profile
         from app.modules.commands.vehicle_agent_gate import gate_reason
         from services.vehicle_agent_v1 import BUSINESS_COMMANDS
 
-        v1_readiness = {action: not gate_reason(db, robot, action) for action in BUSINESS_COMMANDS}
+        def real(action: str) -> bool:
+            try:
+                return execution_mode(robot.vehicle_id, action) == "REAL"
+            except RoutingError:
+                return False
+
+        # 真实控制就绪只统计 REAL 模式；软件测试/诊断单独呈现，绝不混入真实控制按钮。
+        v1_readiness = {
+            action: real(action) and not gate_reason(db, robot, action)
+            for action in BUSINESS_COMMANDS
+        }
+        try:
+            profile_name = execution_profile(robot.vehicle_id)
+        except RoutingError:
+            profile_name = "INVALID"
+        if profile_name and profile_name != "INVALID":
+            from services.vehicle_agent_v1 import EXECUTION_PROFILES
+
+            granted = EXECUTION_PROFILES[profile_name]
+            execution_ready = {
+                "profile": profile_name,
+                "commands": {
+                    action: {"mode": mode, "ready": not gate_reason(db, robot, action)}
+                    for action, mode in granted.items()
+                },
+                "hardware": "NO_HARDWARE" if "REAL" not in granted.values() else "HARDWARE",
+            }
+        else:
+            execution_ready = {"profile": profile_name, "commands": {}, "hardware": None}
         # Legacy operations must never publish legacy safety/motion on a v1 vehicle.
         safety = dict.fromkeys(SAFETY_COMMANDS, False)
         autonomous = dict.fromkeys(AUTONOMOUS_COMMANDS, False)
         manual_ready = False
     return {
         "vehicle_agent_ready": v1_readiness,
+        # G2：逐车执行档（诊断 / SOFTWARE_TEST）就绪；与真实控制就绪严格分离
+        "vehicle_agent_execution": execution_ready,
         "monitor_ready": online,
         "safety_command_ready": safety,
         "manual_control_ready": manual_ready,

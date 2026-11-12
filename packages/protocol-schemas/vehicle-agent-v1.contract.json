@@ -61,6 +61,62 @@
           "format": "date-time",
           "title": "Ts",
           "type": "string"
+        },
+        "vehicle_id": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9_-]{1,64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vehicle Id"
+        },
+        "target_boot_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target Boot Id"
+        },
+        "expires_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expires At"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "DIAGNOSTIC",
+                "SOFTWARE_TEST",
+                "REAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mode"
         }
       },
       "required": [
@@ -210,6 +266,32 @@
           ],
           "default": null,
           "title": "Ts"
+        },
+        "boot_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Boot Id"
+        },
+        "software": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Software"
         }
       },
       "required": [
@@ -571,6 +653,23 @@
           "additionalProperties": true,
           "title": "Params",
           "type": "object"
+        },
+        "execution_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "DIAGNOSTIC",
+                "SOFTWARE_TEST",
+                "REAL"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Execution Mode"
         }
       },
       "required": [

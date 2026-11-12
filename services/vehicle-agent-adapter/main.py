@@ -67,11 +67,21 @@ def safe_json(payload: bytes) -> Any:
 
 
 class Adapter:
-    def __init__(self, redis: Any, publish: Any, *, downlink: bool = False, ack_seconds: int = 90):
+    def __init__(
+        self,
+        redis: Any,
+        publish: Any,
+        *,
+        downlink: bool = False,
+        ack_seconds: int = 90,
+        transport_profile: str | None = None,
+    ):
         self.redis = redis
         self.publish = publish
         self.downlink = downlink
         self.ack_seconds = ack_seconds
+        # G2：本实例服务的 transport_profile（None=读取配置 VEHICLE_AGENT_TRANSPORT_PROFILE）
+        self.transport_profile = transport_profile
 
     def emit(self, vehicle: str, kind: str, data: dict, *, retained: bool = False) -> None:
         self.publish(
@@ -99,6 +109,15 @@ class Adapter:
             raise ValueError("vehicle_agent downlink disabled")
         if not get_settings().vehicle_downlink_allowed(vehicle):
             raise ValueError("vehicle not in v1 downlink allowlist")
+        # G2：本 Adapter 只下行属于本实例 transport_profile 的车辆（跨 Broker 误投即拒绝）；
+        # 执行模式必须与逐车执行档一致（三侧一致性复核）。
+        from app.core.vehicle_routing import execution_mode, transport_profile
+
+        owned = self.transport_profile or get_settings().vehicle_agent_transport_profile
+        if transport_profile(vehicle) != owned:
+            raise ValueError("vehicle transport_profile not owned by this adapter")
+        if wire.get("mode") != execution_mode(vehicle, wire["command"]):
+            raise ValueError("execution_mode not permitted by vehicle execution_profile")
         binding = f"{PROTOCOL}:{payload['target_boot_id']}"
         if self.redis.get(f"vehicle-agent:binding:{vehicle}") != binding:
             raise ValueError("binding/boot no longer active")
@@ -228,6 +247,20 @@ class Adapter:
         if kind == "ack" and retained:
             raise ValueError("retained ACK forbidden")
         normalized = normalize(kind, data)
+        if kind == "event" and normalized.get("type") == "software_feedback":
+            # G2：ROS 软件反馈必须与本车一条已下发命令精确关联，否则丢弃（不得凭空生成结果）
+            raw = self.redis.get(key(vehicle, str(normalized.get("msg_id"))))
+            if not raw:
+                raise ValueError("software feedback has no exact vehicle/msg_id correlation")
+            entry = json.loads(raw)
+            normalized = {
+                **normalized,
+                "command_id": entry["command_id"],
+                "message_id": entry["message_id"],
+                "target_boot_id": entry["target_boot_id"],
+            }
+            self.emit(vehicle, kind, normalized, retained=retained)
+            return
         if kind == "ack":
             raw = self.redis.get(key(vehicle, normalized["msg_id"]))
             if not raw:
@@ -258,6 +291,9 @@ def main() -> None:
         if info.rc != mqtt.MQTT_ERR_SUCCESS:
             raise RuntimeError("adapter MQTT publish rejected")
 
+    from app.core.vehicle_routing import validate_configuration
+
+    validate_configuration()
     adapter = Adapter(
         redis,
         publish,
@@ -305,6 +341,9 @@ def main() -> None:
                 )
                 # 兼容键只由主实例写入（FIREBOT_LEGACY_HEARTBEAT=1）；专属实例不得
                 # 掩盖原实例停机（api 侧命令门/系统健康读取的是主实例兼容键）。
+                from app.core.vehicle_routing import config_fingerprint, fingerprint_key
+
+                redis.setex(fingerprint_key(instance_id()), 30, config_fingerprint())
                 if legacy_heartbeat_owner():
                     redis.setex(
                         "service:vehicle-agent-adapter:heartbeat",
