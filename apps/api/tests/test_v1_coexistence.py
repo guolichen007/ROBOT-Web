@@ -86,3 +86,49 @@ def test_dual_instance_heartbeat_keys_live(monkeypatch):
     redis.set(key_b, "ts-b", ex=30)
     assert redis.get(key_a) == "ts-a"
     assert redis.get(key_b) == "ts-b"
+
+
+def test_legacy_heartbeat_owner_env(monkeypatch):
+    from app.core.service_identity import legacy_heartbeat_owner
+
+    monkeypatch.delenv("FIREBOT_LEGACY_HEARTBEAT", raising=False)
+    assert legacy_heartbeat_owner() is False
+    monkeypatch.setenv("FIREBOT_LEGACY_HEARTBEAT", "1")
+    assert legacy_heartbeat_owner() is True
+    monkeypatch.setenv("FIREBOT_LEGACY_HEARTBEAT", "0")
+    assert legacy_heartbeat_owner() is False
+
+
+def test_adapter_down_rejected_when_downlink_disabled():
+    """G1-P2-RC1 P0-1：后端控制拒绝——总下行关闭时任何命令在 Adapter 层被拒绝。"""
+    import importlib
+    from datetime import UTC, datetime, timedelta
+    from uuid import uuid4
+
+    import pytest as _pytest
+
+    Adapter = importlib.import_module("services.vehicle-agent-adapter.main").Adapter
+
+    adapter = Adapter(None, lambda *a, **k: None, downlink=False)
+    issued = datetime.now(UTC)
+    with _pytest.raises(ValueError, match="downlink disabled"):
+        adapter.down(
+            "firebot-vehicle-01",
+            {
+                "schema_version": "vehicle-agent-v1",
+                "type": "command",
+                "message_id": str(uuid4()),
+                "vehicle_id": "firebot-vehicle-01",
+                "target_boot_id": str(uuid4()),
+                "command_id": "c-1",
+                "correlation_id": str(uuid4()),
+                "issued_at": issued.isoformat(),
+                "expires_at": (issued + timedelta(seconds=30)).isoformat(),
+                "ttl_ms": 30000,
+                "priority": 50,
+                "source": "WEB",
+                "operator_id": "op-1",
+                "cmd": "patrol",
+                "params": {},
+            },
+        )

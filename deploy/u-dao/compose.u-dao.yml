@@ -118,6 +118,8 @@ services:
     environment:
       # 实例身份（G1-P2）：心跳键/客户端标识命名空间；专属实例必须覆盖为独立值
       FIREBOT_SERVICE_INSTANCE_ID: ${FIREBOT_INGRESS_INSTANCE_ID:-mqtt-ingress-prod}
+      # 主实例写兼容键（系统健康/命令门）；专属实例禁止设置
+      FIREBOT_LEGACY_HEARTBEAT: "1"
     depends_on:
       app-secrets-init: { condition: service_completed_successfully }
 
@@ -149,6 +151,8 @@ services:
     environment:
       # 实例身份（G1-P2）：心跳键/客户端标识命名空间；专属实例必须覆盖为独立值
       FIREBOT_SERVICE_INSTANCE_ID: ${FIREBOT_ADAPTER_INSTANCE_ID:-vehicle-agent-adapter-prod}
+      # 主实例写兼容键（系统健康/命令门）；专属实例禁止设置
+      FIREBOT_LEGACY_HEARTBEAT: "1"
     depends_on:
       app-secrets-init: { condition: service_completed_successfully }
 

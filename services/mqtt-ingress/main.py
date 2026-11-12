@@ -24,7 +24,12 @@ from app.core.metrics import (
     robot_boot_rejected_total,
 )
 from app.core.serialization import serialize_model
-from app.core.service_identity import heartbeat_key, in_v1_scope, instance_id
+from app.core.service_identity import (
+    heartbeat_key,
+    in_v1_scope,
+    instance_id,
+    legacy_heartbeat_owner,
+)
 from app.db.models import (
     Command,
     FireEvent,
@@ -1079,15 +1084,61 @@ def process(topic: str, payload: bytes) -> None:
     redis.delete(pending_key)
 
 
+def sweep_stale_v1_robots() -> None:
+    """G1-P2-RC1 P0-5：V1 车辆在 offline_seconds 内无任何上行（含旧 retained online
+    在真实设备离线后被恢复的场景）必须退化为 OFFLINE，不得保留虚假 ONLINE。"""
+    from app.db.models import Robot
+    from app.db.session import SessionLocal
+
+    threshold = datetime.now(UTC) - timedelta(seconds=settings.vehicle_agent_v1_offline_seconds)
+    with SessionLocal() as db:
+        stale = db.scalars(
+            select(Robot)
+            .where(
+                Robot.agent_protocol == "VEHICLE_AGENT_V1",
+                Robot.online_state == "ONLINE",
+                Robot.last_seen_at.is_not(None),
+                Robot.last_seen_at < threshold,
+            )
+            .with_for_update(skip_locked=True)
+        ).all()
+        for robot in stale:
+            robot.online_state = "OFFLINE"
+            state = dict(robot.agent_state_json or {})
+            state["availability"] = "offline"
+            robot.agent_state_json = state
+            raw = redis.get(f"robot:{robot.vehicle_id}:latest")
+            if raw:
+                latest = json.loads(raw)
+                latest["online_state"] = "OFFLINE"
+                queue_redis_set(db, f"robot:{robot.vehicle_id}:latest", json.dumps(latest))
+            queue_event(db, "vehicle.offline", {"vehicle_id": robot.vehicle_id})
+            logger.warning(
+                "v1 robot %s stale -> OFFLINE (last_seen %s)",
+                robot.vehicle_id,
+                robot.last_seen_at,
+            )
+        db.commit()
+
+
 def service_heartbeat(realtime_client, durable_client) -> None:
+    last_sweep = 0.0
     while True:
         try:
             # 心跳绑定连接（R2-7）：healthcheck 暴露 unhealthy，恢复靠 paho 有界重连
             if realtime_client.is_connected() and durable_client.is_connected():
                 stamp = datetime.now(UTC).isoformat()
                 redis.setex(heartbeat_key("mqtt-ingress", instance_id()), 5, stamp)
-                # 兼容键："任一实例存活"语义（系统健康/既有脚本读取）
-                redis.setex("service:mqtt-ingress:heartbeat", 5, stamp)
+                # 兼容键只由主实例写入（FIREBOT_LEGACY_HEARTBEAT=1）；专属实例不得
+                # 掩盖原实例停机（系统健康读取的是主实例兼容键）。
+                if legacy_heartbeat_owner():
+                    redis.setex("service:mqtt-ingress:heartbeat", 5, stamp)
+            if time.monotonic() - last_sweep >= 5:
+                last_sweep = time.monotonic()
+                try:
+                    sweep_stale_v1_robots()
+                except Exception:
+                    logger.warning("v1 stale sweep failed", exc_info=True)
         except Exception:
             logger.warning("MQTT ingress heartbeat store unavailable", exc_info=True)
         time.sleep(1)

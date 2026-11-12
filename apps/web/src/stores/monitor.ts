@@ -155,21 +155,25 @@ export const useMonitorStore = defineStore('monitor', () => {
     resyncing.value = true
     try {
       snapshot.value = (await api.get('/monitor/snapshot')).data
-      // Restore priority: stored vehicle_id -> in-memory id -> first enabled.
+      // Restore priority: stored vehicle_id -> in-memory id -> first enabled
+      // （只读监测设备 enabled=false+V1 同样可恢复选中）。
       const enabled = enabledRobots.value
+      const eligible = snapshot.value.robots.filter(
+        (item) => item.enabled !== false || item.agent_protocol === 'VEHICLE_AGENT_V1',
+      )
       const stored = readStoredVehicleId()
       let next: string | null = null
       if (stored) {
-        const hit = enabled.find((item) => item.vehicle_id === stored)
+        const hit = eligible.find((item) => item.vehicle_id === stored)
         if (hit) next = hit.vehicle_id
       }
       if (!next) {
-        const current = enabled.find(
+        const current = eligible.find(
           (item) => item.id === activeRobotId.value || item.vehicle_id === activeRobotId.value,
         )
         if (current) next = current.vehicle_id
       }
-      if (!next) next = enabled[0]?.vehicle_id || null
+      if (!next) next = enabled[0]?.vehicle_id || eligible[0]?.vehicle_id || null
       activeRobotId.value = next
       if (next !== stored) writeStoredVehicleId(next)
       lastStreamId.value = snapshot.value.snapshot_watermark
@@ -183,7 +187,9 @@ export const useMonitorStore = defineStore('monitor', () => {
       (item) => item.vehicle_id === vehicleId || item.id === vehicleId,
     )
     if (!target) return false
-    if (target.enabled === false) return false
+    // G1-P2-RC1 P0-1：只读监测设备（enabled=false + VEHICLE_AGENT_V1）允许选中；
+    // 普通停用设备继续拒绝。
+    if (target.enabled === false && target.agent_protocol !== 'VEHICLE_AGENT_V1') return false
     activeRobotId.value = target.vehicle_id
     writeStoredVehicleId(target.vehicle_id)
     return true

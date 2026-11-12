@@ -34,3 +34,12 @@ def v1_scope_set() -> set[str] | None:
 def in_v1_scope(vehicle_id: str) -> bool:
     scope = v1_scope_set()
     return scope is None or vehicle_id in scope
+
+
+def legacy_heartbeat_owner() -> bool:
+    """兼容键（无命名空间）只由主实例写入：FIREBOT_LEGACY_HEARTBEAT=1。
+
+    专属实例不写兼容键——原实例停机时其健康检查必须 FAIL，不允许被专属实例心跳
+    掩盖（G1-P2-RC1 P0-3 严格隔离）。
+    """
+    return os.environ.get("FIREBOT_LEGACY_HEARTBEAT") == "1"

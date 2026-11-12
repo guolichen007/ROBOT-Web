@@ -2,9 +2,10 @@
 // 关键语义：Agent 在线 ≠ 控制就绪；急停未验证 ≠ 未触发；无底盘不显示"待命"；
 // enabled=false 只读可监测、不可控制；R002 既有显示行为不变。
 import { mount } from '@vue/test-utils'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, nextTick } from 'vue'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import MonitorView from './MonitorView.vue'
 import RobotsView from './RobotsView.vue'
 import { useMonitorStore } from '@/stores/monitor'
@@ -396,5 +397,87 @@ describe('V1 链路与硬件新鲜度分离（G1-P2）', () => {
     await nextTick()
     expect(wrapper.text()).toContain('数据离线')
     wrapper.unmount()
+  })
+})
+
+describe('R001 只读设备选择全链路（G1-P2-RC1 P0-1）', () => {
+  const ACTIVE_KEY = 'firebot.activeVehicleId'
+
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  it('真实点击：activeRobotId 变化 + 跳转 /monitor + localStorage 持久化', async () => {
+    setActivePinia(createPinia())
+    const store = useMonitorStore()
+    store.snapshot = { ...emptySnapshot(), robots: [baseRobot({ enabled: false })] }
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/monitor', component: { template: '<div>monitor</div>' } }],
+    })
+    await router.push('/')
+    const push = vi.spyOn(router, 'push')
+    const wrapper = mount(RobotsView, {
+      attachTo: document.body,
+      global: {
+        plugins: [router],
+        stubs: {
+          PageHeader: { template: '<header><slot /></header>' },
+          RouterLink: true,
+        },
+      },
+    })
+    await nextTick()
+    await nextTick()
+
+    const button = wrapper.findAll('button').find((b) => b.text().includes('切换监控'))
+    expect(button).toBeDefined()
+    await button!.trigger('click')
+    await nextTick()
+
+    expect(store.activeRobotId).toBe('firebot-vehicle-01') // 1) activeRobotId 变化
+    expect(push).toHaveBeenCalledWith('/monitor') // 2) 跳转 /monitor
+    expect(localStorage.getItem(ACTIVE_KEY)).toBe('firebot-vehicle-01') // 刷新可恢复基础
+    wrapper.unmount()
+  })
+
+  it('刷新恢复 + WebSocket 快照更新不丢失选中（enabled=false 的 V1 设备）', async () => {
+    const { api } = await import('@/lib/api')
+    const getMock = api.get as unknown as ReturnType<typeof vi.fn>
+    const robot = baseRobot({ enabled: false })
+    getMock.mockResolvedValue({
+      data: { ...emptySnapshot(), robots: [robot], snapshot_watermark: 'w-1' },
+    })
+
+    // 刷新前：localStorage 已有选中
+    localStorage.setItem(ACTIVE_KEY, 'firebot-vehicle-01')
+    setActivePinia(createPinia())
+    const store = useMonitorStore()
+    await store.loadSnapshot()
+    expect(store.activeRobotId).toBe('firebot-vehicle-01') // 刷新可恢复
+
+    // WebSocket 驱动的快照更新（新 watermark、同车辆列表）
+    getMock.mockResolvedValue({
+      data: { ...emptySnapshot(), robots: [robot], snapshot_watermark: 'w-2' },
+    })
+    await store.loadSnapshot()
+    expect(store.activeRobotId).toBe('firebot-vehicle-01') // 更新不丢选中
+
+    // 对比：CANONICAL 停用设备不可选中
+    const r002 = baseRobot({
+      id: 'r002',
+      vehicle_id: 'R002',
+      name: 'R002',
+      enabled: false,
+      agent_protocol: 'CANONICAL_MQTT',
+      agent_state: undefined,
+    })
+    getMock.mockResolvedValue({
+      data: { ...emptySnapshot(), robots: [r002], snapshot_watermark: 'w-3' },
+    })
+    localStorage.setItem(ACTIVE_KEY, 'R002')
+    const store2 = useMonitorStore()
+    await store2.loadSnapshot()
+    expect(store2.activeRobotId).not.toBe('R002') // 普通停用设备拒绝
   })
 })

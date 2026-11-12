@@ -100,12 +100,11 @@ function capabilityRows(robot: RobotState): Array<{ label: string; ok: boolean }
   ]
 }
 
-function switchMonitor(robot: RobotState): void {
-  if (monitor.selectRobot(robot.vehicle_id)) toast(`已切换当前监控车辆：${robot.vehicle_id}`)
-}
-
 function enterMonitor(robot: RobotState): void {
-  if (monitor.selectRobot(robot.vehicle_id)) void router.push('/monitor')
+  if (monitor.selectRobot(robot.vehicle_id)) {
+    toast(`已切换当前监控车辆：${robot.vehicle_id}`)
+    void router.push('/monitor')
+  }
 }
 
 function requestDisable(robot: RobotState): void {
@@ -183,7 +182,7 @@ function toast(value: string): void {
             v-else-if="robot.enabled !== false || robot.agent_protocol === 'VEHICLE_AGENT_V1'"
             class="secondary-button compact"
             type="button"
-            @click="switchMonitor(robot)"
+            @click="enterMonitor(robot)"
           >
             切换监控
           </button>
@@ -302,7 +301,7 @@ function toast(value: string): void {
           </div>
           <div class="detail-actions">
             <button
-              v-if="robot.enabled !== false"
+              v-if="robot.enabled !== false || robot.agent_protocol === 'VEHICLE_AGENT_V1'"
               class="primary-button compact"
               type="button"
               @click="enterMonitor(robot)"

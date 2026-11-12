@@ -206,6 +206,8 @@ def e2e_stack(tmp_path_factory):
 
         # ---- Adapter + Ingress（现有服务进程，TLS + platform 凭证）----
         env = dict(os.environ)
+        # 主实例语义：与生产 compose.u-dao.yml 一致（写无命名空间兼容键）
+        env["FIREBOT_LEGACY_HEARTBEAT"] = "1"
         # app 模块位于 apps/api；services 位于仓库根。与 pyproject pythonpath 配置一致。
         env["PYTHONPATH"] = os.pathsep.join([str(REPO_ROOT), str(REPO_ROOT / "apps" / "api")])
         adapter_handle = open(workdir / "adapter.log", "ab")  # noqa: SIM115

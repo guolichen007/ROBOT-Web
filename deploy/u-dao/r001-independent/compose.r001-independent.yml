@@ -1,17 +1,27 @@
-# R001 独立接入部署模板（G1-P2-RC，版本化工件；占位符经 env-file 注入，不含任何真实值）
+# R001 独立接入部署模板（G1-P2-RC1，版本化工件；占位符经 env-file 注入，不含任何真实值）
 #
 # 用途：为独立 Broker 部署专属 Adapter/Ingress（共享生产 PG/Redis，不启动第二套
 # API/DB/Redis/迁移/任务执行器）。生产 Broker 零变更。
 #
+# 网络拓扑（P0-2）：
+#   - r001-broker 仅加入 r001 网络（不接触生产网络）。
+#   - r001-adapter / r001-ingress 同时加入 r001 网络（连专属 Broker）与生产 firebot
+#     网络（DNS 解析 postgres/redis + 复用生产 app_secrets 卷）。生产网络/卷名经
+#     env-file 注入（默认值为生产名），测试环境可覆盖为隔离网络/卷。
+#
+# 凭证（P0-4）：任何口令不进入容器元数据（.Config.Env/.Cmd/healthcheck）。
+#   - 服务凭证一律 *_FILE 路径（宿主 root:600 文件 bind mount）；
+#   - broker healthcheck 从容器内挂载的 secret 文件运行时读取口令。
+#
 # 前置（见同目录 README.md）：
 #   1) 生产 DB 备份 + 隔离恢复通过（OWNER 授权）
-#   2) 独立 Broker 证书/ACL/凭证就绪（R001 专属 CA；ACL 与生产 %u 模板一致）
+#   2) 独立 Broker 证书/ACL/凭证就绪（R001 专属 CA；SAN 覆盖公网主机名+内部服务名）
 #   3) 公网端口（默认 8884）与腾讯云安全组放行（OWNER 授权）
 #   4) R001 车辆资产已 preregister + 协议绑定 VEHICLE_AGENT_V1（受控 API 路径）
 #
 # 启动:  docker compose -f compose.r001-independent.yml --env-file r001.env up -d --wait
 # 停止:  docker compose -f compose.r001-independent.yml --env-file r001.env down   # 生产栈不受影响
-# 回滚:  down 即回滚（本栈无状态卷；车辆数据停更，不影响历史数据）
+# 回滚:  down 即回滚（本栈无业务状态卷；车辆数据停更，不影响历史数据）
 name: u-dao-firebot-r001
 
 services:
@@ -24,19 +34,16 @@ services:
       - ${R001_BROKER_CONF_DIR}/acl:/mosquitto/config/acl:ro
       - ${R001_BROKER_CONF_DIR}/passwords:/mosquitto/config/passwords:ro
       - ${R001_BROKER_CONF_DIR}/certs:/mosquitto/config/certs:ro
+      - ${R001_BROKER_CONF_DIR}/broker-platform-pw:/run/secrets/broker-platform-pw:ro
       - r001_mqtt_data:/mosquitto/data
     healthcheck:
-      test: ["CMD", "mosquitto_pub", "-h", "127.0.0.1", "-p", "8883",
-             "--cafile", "/mosquitto/config/certs/ca.crt",
-             "-u", "platform", "-P", "${R001_BROKER_PLATFORM_PASSWORD}",
-             "-t", "_platform/vehicle-agent-v1/r001-hc", "-m", "1", "-q", "0"]
+      # 口令从挂载的 secret 文件运行时读取，不进入容器配置元数据
+      test: ["CMD-SHELL", "mosquitto_pub -h 127.0.0.1 -p 8883 --cafile /mosquitto/config/certs/ca.crt -u platform -P \"$$(cat /run/secrets/broker-platform-pw)\" -t _platform/vehicle-agent-v1/r001/hc -m 1 -q 0"]
       interval: 10s
       timeout: 5s
       retries: 12
     restart: unless-stopped
-    networks:
-      - r001
-      - u-dao-firebot # 生产 firebot 网络（external）：专属服务与生产 PG/Redis 互通
+    networks: [r001]
 
   r001-adapter:
     image: ${FIREBOT_PYTHON_IMAGE:-firebot-python:server}
@@ -48,7 +55,7 @@ services:
       MQTT_HOST: r001-broker
       MQTT_PORT: "8883"
       MQTT_USERNAME: platform
-      MQTT_PASSWORD: ${R001_BROKER_PLATFORM_PASSWORD}
+      MQTT_PASSWORD_FILE: /run/r001-secrets/r001-platform-pw
       MQTT_TLS: "true"
       MQTT_CA_FILE: /run/mqtt-ca.crt
       MQTT_ALLOW_ANONYMOUS: "false"
@@ -57,8 +64,9 @@ services:
       VEHICLE_AGENT_SCOPE_VEHICLE_IDS: ${R001_SCOPE_VEHICLE_IDS:-firebot-vehicle-01}
       FIREBOT_SERVICE_INSTANCE_ID: r001-dedicated-adapter
     volumes:
-      - u-dao-firebot_app_secrets:/run/secrets:ro
+      - app_secrets:/run/secrets:ro
       - ${R001_BROKER_CONF_DIR}/certs/ca.crt:/run/mqtt-ca.crt:ro
+      - ${R001_BROKER_CONF_DIR}/r001-platform-pw:/run/r001-secrets/r001-platform-pw:ro
     healthcheck:
       test: ["CMD", "python", "-c",
              "from app.core.vehicle_agent_health import adapter_healthy; import os; raise SystemExit(0 if adapter_healthy(instance=os.environ.get('FIREBOT_SERVICE_INSTANCE_ID')) else 1)"]
@@ -66,7 +74,7 @@ services:
       timeout: 5s
       retries: 12
     restart: unless-stopped
-    networks: [r001]
+    networks: [r001, firebot]
 
   r001-ingress:
     image: ${FIREBOT_PYTHON_IMAGE:-firebot-python:server}
@@ -77,15 +85,16 @@ services:
       MQTT_HOST: r001-broker
       MQTT_PORT: "8883"
       MQTT_USERNAME: platform
-      MQTT_PASSWORD: ${R001_BROKER_PLATFORM_PASSWORD}
+      MQTT_PASSWORD_FILE: /run/r001-secrets/r001-platform-pw
       MQTT_TLS: "true"
       MQTT_CA_FILE: /run/mqtt-ca.crt
       MQTT_ALLOW_ANONYMOUS: "false"
       VEHICLE_AGENT_SCOPE_VEHICLE_IDS: ${R001_SCOPE_VEHICLE_IDS:-firebot-vehicle-01}
       FIREBOT_SERVICE_INSTANCE_ID: r001-dedicated-ingress
     volumes:
-      - u-dao-firebot_app_secrets:/run/secrets:ro
+      - app_secrets:/run/secrets:ro
       - ${R001_BROKER_CONF_DIR}/certs/ca.crt:/run/mqtt-ca.crt:ro
+      - ${R001_BROKER_CONF_DIR}/r001-platform-pw:/run/r001-secrets/r001-platform-pw:ro
     healthcheck:
       test: ["CMD", "python", "-c",
              "from app.core.events import get_redis; from app.core.service_identity import heartbeat_key; raise SystemExit(0 if get_redis().get(heartbeat_key('mqtt-ingress')) else 1)"]
@@ -93,15 +102,16 @@ services:
       timeout: 5s
       retries: 12
     restart: unless-stopped
-    networks: [r001]
+    networks: [r001, firebot]
 
 volumes:
   r001_mqtt_data:
-  u-dao-firebot_app_secrets:
+  app_secrets:
     external: true
+    name: ${R001_APP_SECRETS_VOLUME:-u-dao-firebot_app_secrets}
 
 networks:
   r001:
-  u-dao-firebot:
+  firebot:
     external: true
-    name: u-dao-firebot_firebot
+    name: ${R001_FIREBOT_NETWORK:-u-dao-firebot_firebot}

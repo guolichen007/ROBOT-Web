@@ -16,7 +16,12 @@ import paho.mqtt.client as mqtt
 from app.core.config import get_settings, mqtt_message_expiry_properties
 from app.core.events import get_redis
 from app.core.logging import configure_logging
-from app.core.service_identity import heartbeat_key, in_v1_scope, instance_id
+from app.core.service_identity import (
+    heartbeat_key,
+    in_v1_scope,
+    instance_id,
+    legacy_heartbeat_owner,
+)
 from redis.exceptions import WatchError
 
 from services.vehicle_agent_v1 import (
@@ -298,11 +303,14 @@ def main() -> None:
                     5,
                     datetime.now(UTC).isoformat(),
                 )
-                # 兼容键（"任一实例存活"语义）：api 侧命令门/系统健康与既有脚本读取；
-                # 命名空间键才是实例级 healthcheck 的唯一事实源。
-                redis.setex(
-                    "service:vehicle-agent-adapter:heartbeat", 5, datetime.now(UTC).isoformat()
-                )
+                # 兼容键只由主实例写入（FIREBOT_LEGACY_HEARTBEAT=1）；专属实例不得
+                # 掩盖原实例停机（api 侧命令门/系统健康读取的是主实例兼容键）。
+                if legacy_heartbeat_owner():
+                    redis.setex(
+                        "service:vehicle-agent-adapter:heartbeat",
+                        5,
+                        datetime.now(UTC).isoformat(),
+                    )
         except Exception:
             logger.exception("adapter maintenance failed")
         time.sleep(0.5)

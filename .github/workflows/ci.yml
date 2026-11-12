@@ -103,7 +103,13 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements-dev.txt
-      - run: sudo apt-get update && sudo apt-get install -y mosquitto mosquitto-clients
+      - name: Install mosquitto (network retry x3)
+        run: |
+          for attempt in 1 2 3; do
+            if sudo apt-get update && sudo apt-get install -y mosquitto mosquitto-clients; then exit 0; fi
+            echo "mosquitto install attempt $attempt failed; retry in 10s"; sleep 10
+          done
+          exit 1
       - working-directory: apps/api
         run: alembic upgrade head && python -m app.db.seed
       - run: pytest integration/vehicle-agent-real-e2e -v
@@ -267,7 +273,13 @@ jobs:
       - working-directory: apps/web
         run: npm ci --ignore-scripts
       - working-directory: apps/web
-        run: npx playwright install --with-deps chromium
+        name: Install playwright chromium (network retry x3)
+        run: |
+          for attempt in 1 2 3; do
+            if npx playwright install --with-deps chromium; then exit 0; fi
+            echo "playwright install attempt $attempt failed; retry in 10s"; sleep 10
+          done
+          exit 1
       - working-directory: apps/web
         run: npm run test:e2e -- --grep-invert 'Browser → API → Outbox → adapter'
       - if: always()
@@ -307,7 +319,13 @@ jobs:
       - working-directory: apps/web
         run: npm ci --ignore-scripts
       - working-directory: apps/web
-        run: npx playwright install --with-deps chromium
+        name: Install playwright chromium (network retry x3)
+        run: |
+          for attempt in 1 2 3; do
+            if npx playwright install --with-deps chromium; then exit 0; fi
+            echo "playwright install attempt $attempt failed; retry in 10s"; sleep 10
+          done
+          exit 1
       - name: Vehicle agent spec RUN; skipped must equal zero
         working-directory: apps/web
         run: |

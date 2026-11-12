@@ -72,3 +72,13 @@ docker compose -f compose.r001-independent.yml --env-file r001.env down
 - 范围过滤实证：scope 外车辆（firebot-vehicle-77，有云端资产+ACL 段）在 Broker2 发布
   v1 status → 专属 Adapter 丢弃 → 不落库（Redis latest 不存在）。
 - 原实例兼容心跳持续更新，原链路不受影响。
+
+## 附：G1-P2-RC1 实测修正（模板文件权限与挂载约定）
+
+- 服务容器以 uid 10001 运行：`r001-platform-pw`（专属 broker platform 口令）与 CA 证书
+  宿主文件须对该 uid 可读（如 644/或 chown 10001）；broker 所需文件（passwords/acl/
+  server.key）属 1883。
+- 口令文件挂载点必须避开生产 app_secrets 卷的只读挂载目录：使用 `/run/r001-secrets/`
+  独立路径（见 compose 注释）。
+- Broker healthcheck 口令经容器内 secret 文件运行时读取（`$$(cat ...)`），不进入容器配置元数据。
+- G1-P2-RC1 实测：`CREDENTIAL_IN_DOCKER_METADATA=NONE`（模板三容器 inspect 无任何口令值）。

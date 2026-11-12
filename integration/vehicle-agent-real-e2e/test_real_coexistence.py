@@ -142,6 +142,8 @@ def test_dual_instance_coexistence(e2e_stack, vehicle_asset):
         assert _port_open("127.0.0.1", port2, 15.0), "broker2 did not listen"
 
         env = dict(os.environ)
+        # 专属实例不得写兼容键（P0-3 严格隔离）：剥离主实例标志
+        env.pop("FIREBOT_LEGACY_HEARTBEAT", None)
         env["PYTHONPATH"] = os.pathsep.join([str(REPO_ROOT), str(REPO_ROOT / "apps" / "api")])
         env["MQTT_PORT"] = str(port2)
         env["MQTT_CA_FILE"] = str(e2e_stack["certs"] / "ca.crt")
