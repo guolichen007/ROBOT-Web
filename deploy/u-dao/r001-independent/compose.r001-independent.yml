@@ -22,7 +22,7 @@
 # 启动:  docker compose -f compose.r001-independent.yml --env-file r001.env up -d --wait
 # 停止:  docker compose -f compose.r001-independent.yml --env-file r001.env down   # 生产栈不受影响
 # 回滚:  down 即回滚（本栈无业务状态卷；车辆数据停更，不影响历史数据）
-name: u-dao-firebot-r001
+name: ${R001_COMPOSE_PROJECT:-u-dao-firebot-r001-prod}
 
 services:
   r001-broker:
