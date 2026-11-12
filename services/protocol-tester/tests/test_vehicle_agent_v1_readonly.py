@@ -1096,9 +1096,7 @@ def test_live_availability_online_non_retained_contract(identity_config, broker,
     local = broker()
     identity = load_identity(identity_config(port=local.port), allow_placeholder_password=True)
     # CI 冷启动负载下 PUBACK 可能延迟：放宽确认窗口，避免时序假阴性
-    transport = MqttTransport(
-        identity, TransportConfig(publish_confirm_timeout_seconds=5.0)
-    )
+    transport = MqttTransport(identity, TransportConfig(publish_confirm_timeout_seconds=5.0))
     transport.connect()
     assert transport.wait_for_connect(10.0) is True
     assert transport.publish_availability_live() is True
