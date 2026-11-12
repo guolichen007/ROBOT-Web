@@ -61,6 +61,7 @@ def _write_identity(workdir: Path, certs: Path, port: int) -> Path:
             }
         )
     )
+    config.chmod(0o600)
     return config
 
 

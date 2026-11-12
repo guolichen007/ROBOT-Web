@@ -113,6 +113,9 @@ services:
   mqtt-ingress:
     <<: *python-service
     command: ["python", "/workspace/services/mqtt-ingress/main.py"]
+    environment:
+      <<: *test-environment
+      FIREBOT_LEGACY_HEARTBEAT: "1"
     depends_on:
       migrate: { condition: service_completed_successfully }
       mosquitto: { condition: service_healthy }
@@ -140,6 +143,9 @@ services:
   vehicle-agent-adapter:
     <<: *python-service
     command: ["python", "/workspace/services/vehicle-agent-adapter/main.py"]
+    environment:
+      <<: *test-environment
+      FIREBOT_LEGACY_HEARTBEAT: "1"
     depends_on:
       migrate: { condition: service_completed_successfully }
       mosquitto: { condition: service_healthy }

@@ -37,7 +37,8 @@ async function switchToR002(
     .filter({ hasText: 'R002' })
     .getByRole('button', { name: '切换监控' })
     .click()
-  await expect(page.getByText('已切换当前监控车辆：R002')).toBeVisible()
+  // G1-P2-RC1 P0-1：点击后直接跳转监控页（不再停留在车辆列表等 toast）
+  await expect(page).toHaveURL(/\/monitor/)
 }
 
 // 1) 快照含 R001+R002，且每个 stream 有明确合法 robot owner（StreamRegistry.robot_id 是 owner，
