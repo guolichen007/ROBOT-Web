@@ -111,8 +111,13 @@ test('R001 live media does not leak into the R002 video panel', async ({ page, r
 
 // 5) 刷新持久化：整页 reload 后 active vehicle 仍为 R002。
 test('active R002 selection persists across reload', async ({ page, request }) => {
+  // G1-P2-RC1 P0-1：切换后直接进入监控页；刷新后仍在监控页且选中 R002 不丢失
   await switchToR002(page, request)
+  await expect(page.getByRole('heading', { name: '停车场二维地图' })).toBeVisible()
   await page.reload()
-  await expect(page.getByRole('heading', { name: '车辆配置' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '停车场二维地图' })).toBeVisible()
+  await page.getByRole('button', { name: '监测', exact: true }).click()
+  await expect(page.locator('.device-snapshot')).toBeVisible()
+  await expect(deviceRow(page, '机器人编号')).toHaveText('R002')
   await expect.poll(() => page.evaluate(() => localStorage.getItem('firebot.activeVehicleId'))).toBe('R002')
 })
