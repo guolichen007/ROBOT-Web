@@ -33,12 +33,16 @@ def media(g3):
         pytest.skip("MediaMTX/ffmpeg 不可用：MEDIA E2E NOT_EXECUTED")
     workdir = g3["workdir"]
     os.environ["MEDIA_PUBLISH_TOKEN"] = MASTER
+    os.environ["SYNTHETIC_MEDIA_VEHICLE_IDS"] = SIM_MEDIA
     from app.core.config import get_settings
 
     get_settings.cache_clear()
     _register_streams()
     api_port, rtsp, srt, whep, ctl = (free_port() for _ in range(5))
-    env = {**g3["base"], "MEDIA_PUBLISH_TOKEN": MASTER}
+    env = {**g3["base"], "MEDIA_PUBLISH_TOKEN": MASTER, "SYNTHETIC_MEDIA_VEHICLE_IDS": SIM_MEDIA}
+    master_file = workdir / "media-master"
+    master_file.write_text(MASTER)
+    master_file.chmod(0o600)
     api = spawn(
         workdir,
         "api",
@@ -96,6 +100,7 @@ def media(g3):
         "workdir": workdir,
         "base": env,
         "publishers": {},
+        "master_file": master_file,
     }
     try:
         yield context
@@ -150,20 +155,27 @@ def _unregister_streams():
         db.commit()
 
 
-def start_publisher(media, stream_id, *, kind, user="", token=MASTER, name=None):
+def start_publisher(media, stream_id, *, kind, user="", name=None):
+    """合成源只拿到主密钥文件路径（0600）；在进程内派生按流 token，主密钥不进入 ffmpeg argv。"""
     env = {
-        **media["base"],
-        "MEDIA_STREAM_ID": stream_id,
-        "OUTPUT_PROTOCOL": "srt",
-        "SRT_USER": user,
-        "MEDIA_PUBLISH_TOKEN": token,
-        "SRT_PUBLISH_PASSPHRASE": PASSPHRASE,
-        "MEDIA_SRT_ORIGIN": f"srt://127.0.0.1:{media['srt']}",
-        "SIMULATED_LABEL": kind.upper(),
-        "SIMULATED_KIND": kind,
-        "HEALTH_PORT": str(free_port()),
-        "HEALTH_HOST": "127.0.0.1",
+        key: value
+        for key, value in media["base"].items()
+        if key not in {"MEDIA_PUBLISH_TOKEN", "MEDIA_PUBLISH_MASTER"}
     }
+    env.update(
+        {
+            "MEDIA_STREAM_ID": stream_id,
+            "OUTPUT_PROTOCOL": "srt",
+            "SRT_USER": user,
+            "MEDIA_PUBLISH_MASTER_FILE": str(media["master_file"]),
+            "SRT_PUBLISH_PASSPHRASE": PASSPHRASE,
+            "MEDIA_SRT_ORIGIN": f"srt://127.0.0.1:{media['srt']}",
+            "SIMULATED_LABEL": f"{kind.upper()} {stream_id}",
+            "SIMULATED_KIND": kind,
+            "HEALTH_PORT": str(free_port()),
+            "HEALTH_HOST": "127.0.0.1",
+        }
+    )
     proc = spawn(
         media["workdir"],
         name or f"pub-{stream_id}",
@@ -172,6 +184,18 @@ def start_publisher(media, stream_id, *, kind, user="", token=MASTER, name=None)
     )
     media["publishers"][name or stream_id] = proc
     return proc
+
+
+def cmdlines() -> list[str]:
+    result = []
+    for entry in os.listdir("/proc"):
+        if entry.isdigit():
+            try:
+                with open(f"/proc/{entry}/cmdline", "rb") as handle:
+                    result.append(handle.read().replace(b"\0", b" ").decode(errors="replace"))
+            except OSError:
+                continue
+    return result
 
 
 def path_ready(media, stream_id):
@@ -251,6 +275,10 @@ def whep_delete(media, location):
 def test_publish_play_and_reconnect(media, stream_id, kind):
     start_publisher(media, stream_id, kind=kind)
     item = wait_for(lambda: path_ready(media, stream_id), 25)
+    # 凭证边界：主密钥绝不出现在任何进程 argv（ffmpeg 只拿按流派生口令）
+    procs = cmdlines()
+    assert any("ffmpeg" in c and stream_id in c for c in procs)
+    assert not [c for c in procs if MASTER in c]
     assert item, (media["workdir"] / f"pub-{stream_id}.log").read_text()[-800:]
     tracks = item.get("tracks") or item.get("tracks2") or []
     assert any("H264" in json.dumps(t) for t in tracks), tracks
@@ -373,6 +401,8 @@ def test_publish_auth_isolation_real_mediamtx(media):
 
     # 全局合成 token 发布车辆流 R001-roof_rgb → 拒绝（旧实现允许）
     assert raw_publish("R001-roof_rgb", "", MASTER) != 0
+    # 原始主密钥也不能发布合成流（只认按流派生 token）
+    assert raw_publish(RGB + "-raw", "", MASTER) != 0
     assert path_ready(media, "R001-roof_rgb") is None
     # R001 车辆凭证发布 R002 / 合成流 → 拒绝
     r001 = vehicle_srt_publish_token("R001")

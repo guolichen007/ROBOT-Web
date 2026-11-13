@@ -29,7 +29,17 @@ SIM_STREAM = "firebot-sim-media-01-roof_rgb"
 
 
 @pytest.fixture(scope="module", autouse=True)
-def streams():
+def synthetic_assets():
+    """仅本测试：把 firebot-sim-media-01 配置为合成媒体资产（生产默认空）。"""
+    settings = get_settings()
+    previous = settings.synthetic_media_vehicle_ids
+    settings.synthetic_media_vehicle_ids = "firebot-sim-media-01"
+    yield
+    settings.synthetic_media_vehicle_ids = previous
+
+
+@pytest.fixture(scope="module", autouse=True)
+def streams(synthetic_assets):
     """测试库：真实车辆 001 的 RGB 流（非合成）+ 显式登记的合成测试流。"""
     from app.modules.media.router import SYNTHETIC_TEST_SOURCE
 
@@ -97,11 +107,49 @@ def test_global_token_cannot_publish_real_vehicle_streams(path, protocol):
         )
 
 
-def test_global_token_publishes_only_registered_synthetic_stream():
+def test_synthetic_stream_accepts_only_its_derived_token():
+    from app.modules.media.router import synthetic_media_publish_token
+
     with TestClient(app) as client:
-        assert publish(client, SIM_STREAM, token=global_token()).status_code == 200
+        assert (
+            publish(client, SIM_STREAM, token=synthetic_media_publish_token(SIM_STREAM)).status_code
+            == 200
+        )
+        # G3-R1：原始全局主密钥不再是发布凭据（不应出现在任何发布进程参数中）
+        assert publish(client, SIM_STREAM, token=global_token()).status_code == 401
+        # 他流派生 token 不能跨流使用
+        other = synthetic_media_publish_token("firebot-sim-media-01-roof_thermal")
+        assert publish(client, SIM_STREAM, token=other).status_code == 401
         assert publish(client, SIM_STREAM, token="WRONG").status_code == 401
         assert publish(client, SIM_STREAM, token="").status_code == 401
+
+
+@pytest.mark.parametrize("vehicle", ["R001", "R002", REAL_VEHICLE])
+def test_mislabelled_real_vehicle_stream_not_publishable_with_synthetic_token(vehicle):
+    """真实车辆流即使被误标 source_ref=SYNTHETIC_TEST（甚至被误配进合成资产名单），
+    也不允许任何合成/全局 token 发布。"""
+    from app.modules.media.router import SYNTHETIC_TEST_SOURCE, synthetic_media_publish_token
+
+    stream_id = f"{vehicle}-roof_rgb"
+    settings = get_settings()
+    previous = settings.synthetic_media_vehicle_ids
+    with SessionLocal() as db:
+        row = db.scalar(select(StreamRegistry).where(StreamRegistry.stream_id == stream_id))
+        original = row.source_ref
+        row.source_ref = SYNTHETIC_TEST_SOURCE
+        db.commit()
+    try:
+        with TestClient(app) as client:
+            for misconfig in ("", f"firebot-sim-media-01,{vehicle}"):
+                settings.synthetic_media_vehicle_ids = misconfig
+                for token in (global_token(), synthetic_media_publish_token(stream_id)):
+                    assert publish(client, stream_id, token=token).status_code in (401, 403)
+    finally:
+        settings.synthetic_media_vehicle_ids = previous
+        with SessionLocal() as db:
+            row = db.scalar(select(StreamRegistry).where(StreamRegistry.stream_id == stream_id))
+            row.source_ref = original
+            db.commit()
 
 
 def test_vehicle_identity_bound_and_not_cross_vehicle():
@@ -207,13 +255,30 @@ def test_no_camera_hardware_control_commands(action):
     from services.vehicle_agent_v1 import COMMANDS
 
     assert action not in COMMANDS
+    from app.core.security import hash_password
+    from app.db.models import Role, user_roles
+    from sqlalchemy import insert
+
+    with SessionLocal() as db:  # 测试库专用管理员（不触碰 bootstrap admin）
+        user = db.scalar(select(User).where(User.username == "g3-media-test-admin"))
+        if user is None:
+            user = User(
+                username="g3-media-test-admin",
+                password_hash=hash_password("G3-Media-Test-Only-2026!"),
+                display_name="g3 test",
+                must_change_password=False,
+            )
+            db.add(user)
+            db.flush()
+            role = db.scalar(select(Role).where(Role.code == "super_admin"))
+            db.execute(insert(user_roles).values(user_id=user.id, role_id=role.id))
+            db.commit()
     with TestClient(app) as client:
         login = client.post(
             "/api/v1/auth/login",
-            json={"username": "admin", "password": get_settings().effective_admin_password},
+            json={"username": "g3-media-test-admin", "password": "G3-Media-Test-Only-2026!"},
         )
-        if login.status_code != 200:
-            pytest.skip("admin 登录不可用（隔离库密码不同）；命令集断言已覆盖")
+        assert login.status_code == 200, login.text
         response = client.post(
             f"/api/v1/robots/R001/agent/commands/{action}",
             json={"params": {}},

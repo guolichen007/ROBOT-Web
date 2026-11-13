@@ -6,6 +6,9 @@ from pathlib import Path
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# 已登记的真实车辆 canonical ID：任何模拟/合成配置都不得把它们当作合成资产。
+REAL_VEHICLE_IDS = frozenset({"firebot-vehicle-01", "firebot-vehicle-02", "R001", "R002"})
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
@@ -82,6 +85,10 @@ class Settings(BaseSettings):
     # G3 模拟来源登记：只有列在此处的 vehicle_id 被标识为 SIMULATED（独立模拟身份；
     # 与 integration.source_kind=MOCK 测试元数据无关，也绝不用于真实车辆 ID）。
     simulated_vehicle_ids: str = "firebot-sim-ir-01"
+    # G3：允许用按流派生的合成 token 发布媒体的“合成测试资产”vehicle_id（与流登记 source_ref
+    # 双重条件；原始全局主密钥永不作为发布凭据）。
+    # 默认空 = 生产无任何合成发布资格；仅隔离测试栈显式配置。
+    synthetic_media_vehicle_ids: str = ""
     vehicle_transport_profiles: str = ""
     transport_profile_adapters: str = ""
     vehicle_execution_profiles: str = ""
@@ -132,6 +139,11 @@ class Settings(BaseSettings):
             for item in self.vehicle_agent_v1_downlink_allowlist.split(",")
             if item.strip()
         }
+
+    def is_synthetic_media_vehicle(self, vehicle_id: str) -> bool:
+        listed = {v.strip() for v in self.synthetic_media_vehicle_ids.split(",") if v.strip()}
+        # 真实生产车辆身份永不具备合成发布资格（即便误配置）
+        return vehicle_id in listed and vehicle_id not in REAL_VEHICLE_IDS
 
     def is_simulated_vehicle(self, vehicle_id: str) -> bool:
         listed = {v.strip() for v in self.simulated_vehicle_ids.split(",") if v.strip()}

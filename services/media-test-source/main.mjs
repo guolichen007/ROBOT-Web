@@ -1,13 +1,48 @@
 import http from 'node:http'
 import { spawn } from 'node:child_process'
+import { createHmac } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { redact } from './lib/redact.mjs'
 
 // 合成视频测试源（RGB/thermal 双流可多实例）。
-// 输出协议：OUTPUT_PROTOCOL=rtsp（默认，?token=）或 srt（streamid 携带发布 token + 独立加密 passphrase）。
+// 输出协议：OUTPUT_PROTOCOL=rtsp（默认）或 srt（streamid 携带派生发布口令 + 独立加密 passphrase）。
 // V1 浏览器基准合同：H.264 + yuv420p（MediaMTX 不转码）。
-const token = process.env.MEDIA_PUBLISH_TOKEN || 'test-media-publisher-token-2026'
 const streamId = process.env.MEDIA_STREAM_ID || 'R001-roof_rgb'
 const outputProtocol = (process.env.OUTPUT_PROTOCOL || 'rtsp').toLowerCase()
+
+// G3 凭证交付边界：
+// - 主密钥（MEDIA_PUBLISH_MASTER_FILE / MEDIA_PUBLISH_MASTER）只在本进程内用于派生，
+//   绝不出现在 ffmpeg argv、日志或健康检查输出中；
+// - 交给 ffmpeg 的只有“按身份/流派生”的一次性发布口令：车辆流 = HMAC(master,"vehicle-srt:<id>")，
+//   合成流 = HMAC(master,"synthetic-media:<stream>")，泄露后只影响该车/该合成流、可随主密钥轮换；
+// - 兼容：MEDIA_PUBLISH_TOKEN 直接给出已派生口令（生产 compose.media-e2e.yml 现有用法）。
+// ffmpeg 子进程 argv 对同用户/同容器进程可见（/proc/<pid>/cmdline）：合成源只在专用、
+// 测完即停的隔离容器中以非 root 用户运行；stderr 经 redact 后才落日志。
+function readMaster() {
+  const file = process.env.MEDIA_PUBLISH_MASTER_FILE
+  if (file) return readFileSync(file, 'utf8').trim()
+  return process.env.MEDIA_PUBLISH_MASTER || ''
+}
+
+function derive(master, label) {
+  return createHmac('sha256', master).update(label).digest('hex')
+}
+
+function publishToken() {
+  if (process.env.MEDIA_PUBLISH_TOKEN) return process.env.MEDIA_PUBLISH_TOKEN
+  const master = readMaster()
+  if (!master) throw new Error('MEDIA_PUBLISH_TOKEN or MEDIA_PUBLISH_MASTER(_FILE) required')
+  const vehicle = outputProtocol === 'srt' ? process.env.SRT_USER ?? 'R001' : process.env.RTSP_USER || ''
+  return vehicle ? derive(master, `vehicle-srt:${vehicle}`) : derive(master, `synthetic-media:${streamId}`)
+}
+
+const token = publishToken()
+// 主密钥相关环境变量不传给子进程
+const childEnv = { ...process.env }
+delete childEnv.MEDIA_PUBLISH_MASTER
+delete childEnv.MEDIA_PUBLISH_MASTER_FILE
+delete childEnv.MEDIA_PUBLISH_TOKEN
+delete childEnv.SRT_PUBLISH_PASSPHRASE
 const rtspOrigin = process.env.MEDIA_RTSP_ORIGIN || 'rtsp://mediamtx:8554'
 const srtOrigin = process.env.MEDIA_SRT_ORIGIN || 'srt://mediamtx:8890'
 const srtPassphrase = process.env.SRT_PUBLISH_PASSPHRASE || ''
@@ -85,7 +120,7 @@ if (outputProtocol === 'srt') {
 
 let ready = false
 let lastError = null
-const ffmpeg = spawn('ffmpeg', args, { stdio: ['ignore', 'inherit', 'pipe'] })
+const ffmpeg = spawn('ffmpeg', args, { stdio: ['ignore', 'inherit', 'pipe'], env: childEnv })
 ffmpeg.stderr.setEncoding('utf8')
 // P0-B：ffmpeg/libSRT stderr 可能包含完整 SRT URL（streamid 内发布 token + passphrase
 // 查询值）。按行缓冲 + redact 后才写 console/持久日志，避免跨 chunk 切分造成漏脱敏。
