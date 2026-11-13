@@ -424,3 +424,56 @@ def test_publish_auth_isolation_real_mediamtx(media):
         assert secret not in (media["workdir"] / "api.log").read_text(errors="replace")
     EVIDENCE["auth_denied_logged"] = "media publish denied" in logs
     print("G3_MEDIA_EVIDENCE " + json.dumps(EVIDENCE))
+
+
+@pytest.mark.parametrize(("stream_id", "kind"), [(RGB, "rgb"), (THERMAL, "thermal")])
+def test_browser_webrtc_decode(media, stream_id, kind):
+    """浏览器级：真实 Chromium WebRTC → WHEP；分级断言 201 协商 / ICE connected / 解码且帧变化。
+
+    缺少 chrome-headless-shell（CHROMIUM_PATH）时显式 SKIP——MEDIA_BROWSER_DECODE=NOT_RUN，不伪造。
+    """
+    chromium = os.environ.get("CHROMIUM_PATH")
+    if not chromium or not os.path.exists(chromium):
+        pytest.skip("CHROMIUM_PATH 未提供：浏览器解码 NOT_RUN")
+    if path_ready(media, stream_id) is None:
+        start_publisher(media, stream_id, kind=kind, name=f"browser-{stream_id}")
+        assert wait_for(lambda: path_ready(media, stream_id), 25)
+    ticket = ticket_for(media, stream_id)
+    result = subprocess.run(
+        [
+            "node",
+            str(REPO_ROOT / "integration/g3-media-ir-e2e/browser/whep_decode.mjs"),
+            f"http://127.0.0.1:{media['whep']}/{stream_id}/whep",
+            ticket,
+            "6",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=90,
+        env={
+            **os.environ,
+            "CHROMIUM_PATH": chromium,
+            "SCREENSHOT_PATH": str(media["workdir"] / f"browser-{stream_id}.png"),
+        },
+    )
+    assert result.returncode == 0, result.stderr[-800:]
+    data = json.loads(result.stdout.strip().splitlines()[-1])
+    EVIDENCE.setdefault("browser", {})[stream_id] = {
+        k: data.get(k)
+        for k in (
+            "whep_status",
+            "ice_connected",
+            "frames",
+            "width",
+            "height",
+            "distinct_frames",
+            "decoded_changing",
+        )
+    }
+    EVIDENCE["browser"][stream_id]["banner_top_rgb"] = (data.get("hashes") or [{}])[-1].get("top")
+    print("G3_BROWSER_EVIDENCE " + json.dumps({stream_id: EVIDENCE["browser"][stream_id]}))
+    assert data["whep_status"] == 201
+    assert data["ice_connected"] is True
+    assert data["decoded_changing"] is True, data
+    r, g, b = data["hashes"][-1]["top"]
+    assert r > 150 and g < 90 and b < 90  # 浏览器解码画面顶部即红色 SIMULATED 横幅

@@ -127,3 +127,43 @@ def test_simulator_refuses_real_vehicle_identity(g3, tmp_path):
         timeout=30,
     )
     assert result.returncode == 2 and "must be firebot-sim-ir-01" in result.stderr
+
+
+def test_sim_identity_cannot_touch_real_vehicle_telemetry(g3, api):
+    """模拟身份独立：sim 的上行不会写入 firebot-vehicle-01；sim 账号也无法发布 001 topic（ACL）。"""
+    import paho.mqtt.client as mqtt
+
+    real = "firebot-vehicle-01"
+    before = g3["redis"].get(f"robot:{real}:latest")
+    run_sim(g3, "--values", "66.6", "--interval", "1.2")
+    assert wait_for(lambda: latest(g3).get("top_ir") == 66.6, 15)
+    # sim 凭证直接向 001 的 telemetry topic 发布：Broker ACL（%u）拒绝
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="g3-sim-spoof")
+    identity = json.loads(g3["identity"].read_text())
+    client.username_pw_set(identity["mqtt_username"], identity["mqtt_password"])
+    client.tls_set(ca_certs=identity["ca_cert_path"])
+    client.connect("127.0.0.1", g3["port"])
+    client.loop_start()
+    forged = {
+        "thermal": {"max_temp": 99.9},
+        "ts": __import__("datetime").datetime.now(__import__("datetime").UTC).isoformat(),
+    }
+    client.publish(f"v1/robot/{real}/telemetry", json.dumps(forged), qos=1).wait_for_publish(5)
+    time.sleep(2)
+    client.loop_stop()
+    client.disconnect()
+    assert g3["redis"].get(f"robot:{real}:latest") == before  # 001 实时数据未被触碰
+    from app.db.models import Robot, SensorSample
+    from app.db.session import SessionLocal
+
+    with SessionLocal() as db:
+        robot = db.scalar(select(Robot).where(Robot.vehicle_id == real))
+        if robot is not None:
+            hits = db.scalars(
+                select(SensorSample).where(
+                    SensorSample.robot_id == robot.id, SensorSample.top_ir_max.in_([66.6, 99.9])
+                )
+            ).all()
+            assert not hits
+    log = (g3["workdir"] / "mosquitto.log").read_text(errors="replace")
+    assert "Denied PUBLISH" in log or "denied" in log.lower()

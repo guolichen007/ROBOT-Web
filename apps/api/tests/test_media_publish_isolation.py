@@ -72,6 +72,23 @@ def streams(synthetic_assets):
                 )
         db.commit()
     yield
+    # 共享测试库清理：只删除本测试创建的行（不触碰 seed 或其他套件资产）
+    from sqlalchemy import delete
+
+    with SessionLocal() as db:
+        db.execute(
+            delete(StreamRegistry).where(
+                StreamRegistry.stream_id.in_([f"{REAL_VEHICLE}-roof_rgb", SIM_STREAM])
+            )
+        )
+        if created:
+            from app.db.models import Base
+
+            for table in reversed(Base.metadata.sorted_tables):
+                if "robot_id" in table.c and table.name != "robots":
+                    db.execute(table.delete().where(table.c.robot_id.in_(created)))
+            db.execute(delete(Robot).where(Robot.id.in_(created)))
+        db.commit()
 
 
 def publish(client, path, *, protocol="rtsp", user="", password="", token=""):

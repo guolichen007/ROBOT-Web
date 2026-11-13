@@ -120,6 +120,8 @@ def g3(tmp_path_factory):
                 f"keyfile {certs / 'server.key'}",
                 "require_certificate false",
                 "persistence false",
+                "log_type all",
+                f"log_dest file {workdir / 'mosquitto.log'}",
             ]
         )
         + "\n"
