@@ -439,14 +439,26 @@ def test_browser_webrtc_decode(media, stream_id, kind):
         start_publisher(media, stream_id, kind=kind, name=f"browser-{stream_id}")
         assert wait_for(lambda: path_ready(media, stream_id), 25)
     ticket = ticket_for(media, stream_id)
+    cmdlines_seen: list[str] = []
+    import threading
+
+    stop_sampling = threading.Event()
+
+    def sample():
+        while not stop_sampling.is_set():
+            cmdlines_seen.extend(c for c in cmdlines() if "whep_decode" in c or "chrome" in c)
+            stop_sampling.wait(0.5)
+
+    sampler = threading.Thread(target=sample, daemon=True)
+    sampler.start()
     result = subprocess.run(
         [
             "node",
             str(REPO_ROOT / "integration/g3-media-ir-e2e/browser/whep_decode.mjs"),
             f"http://127.0.0.1:{media['whep']}/{stream_id}/whep",
-            ticket,
             "6",
         ],
+        input=ticket,  # 票据经 stdin，不进 argv
         capture_output=True,
         text=True,
         timeout=90,
@@ -456,8 +468,13 @@ def test_browser_webrtc_decode(media, stream_id, kind):
             "SCREENSHOT_PATH": str(media["workdir"] / f"browser-{stream_id}.png"),
         },
     )
+    stop_sampling.set()
+    sampler.join(2)
     assert result.returncode == 0, result.stderr[-800:]
+    assert any("whep_decode" in c for c in cmdlines_seen)  # 确实采样到了解码进程
     data = json.loads(result.stdout.strip().splitlines()[-1])
+    # 票据未出现在任何进程 argv 中（解码进程运行期间采样到的 cmdline 见 EVIDENCE）
+    assert ticket not in json.dumps(cmdlines_seen)
     EVIDENCE.setdefault("browser", {})[stream_id] = {
         k: data.get(k)
         for k in (
@@ -471,6 +488,9 @@ def test_browser_webrtc_decode(media, stream_id, kind):
         )
     }
     EVIDENCE["browser"][stream_id]["banner_top_rgb"] = (data.get("hashes") or [{}])[-1].get("top")
+    EVIDENCE["browser"][stream_id]["screenshot_after_verdict"] = data.get("screenshot") is True
+    EVIDENCE["browser"][stream_id]["ticket_in_argv"] = False
+    EVIDENCE["browser"][stream_id]["page"] = "isolated test page (about:blank + RTCPeerConnection)"
     print("G3_BROWSER_EVIDENCE " + json.dumps({stream_id: EVIDENCE["browser"][stream_id]}))
     assert data["whep_status"] == 201
     assert data["ice_connected"] is True

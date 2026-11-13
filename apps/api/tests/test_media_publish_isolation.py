@@ -306,3 +306,80 @@ def test_no_camera_hardware_control_commands(action):
         )
         assert response.status_code >= 400
         assert response.json()["error"]["code"] == "UNKNOWN_COMMAND"
+
+
+@pytest.mark.parametrize(
+    "vehicle",
+    [
+        "firebot-vehicle-01",
+        "firebot-vehicle-02",
+        "firebot-vehicle-03",  # 未来真实车辆：不在硬编码清单，也必须被结构性拒绝
+        "firebot-vehicle-99",
+        "R001",
+        "R003",
+        "firebot-sim",  # 缺少名称段
+        "firebot-sim-",  # 空名称段
+        "FIREBOT-SIM-IR-01",  # 大小写变体
+        "x-firebot-sim-01",  # 前缀伪装
+        "firebot-sim-01/../firebot-vehicle-01",
+        "firebot-simulator-01",
+    ],
+)
+def test_synthetic_namespace_rejects_real_and_malformed_ids(vehicle):
+    """G3-R1：合成资格 = 显式白名单 ∧ 合成专用命名空间 firebot-sim-<name>；白名单误配也无效。"""
+    from app.core.config import is_synthetic_namespace
+
+    settings = get_settings()
+    previous = (settings.synthetic_media_vehicle_ids, settings.simulated_vehicle_ids)
+    settings.synthetic_media_vehicle_ids = f"firebot-sim-media-01,{vehicle}"
+    settings.simulated_vehicle_ids = f"firebot-sim-ir-01,{vehicle}"
+    try:
+        assert not is_synthetic_namespace(vehicle)
+        assert not settings.is_synthetic_media_vehicle(vehicle)
+        assert not settings.is_simulated_vehicle(vehicle)
+        assert settings.is_synthetic_media_vehicle("firebot-sim-media-01")
+        assert settings.is_simulated_vehicle("firebot-sim-ir-01")
+    finally:
+        settings.synthetic_media_vehicle_ids, settings.simulated_vehicle_ids = previous
+
+
+def test_future_real_vehicle_stream_mislabelled_and_whitelisted_still_denied():
+    """firebot-vehicle-03 真实流：source_ref 误标 + 误入合成白名单 → 仍拒绝合成发布。"""
+    from app.modules.media.router import SYNTHETIC_TEST_SOURCE, synthetic_media_publish_token
+    from sqlalchemy import delete
+
+    settings = get_settings()
+    previous = settings.synthetic_media_vehicle_ids
+    stream_id = "firebot-vehicle-03-roof_rgb"
+    with SessionLocal() as db:
+        site = db.scalar(select(Site).order_by(Site.id).limit(1))
+        robot = Robot(vehicle_id="firebot-vehicle-03", name="003", site_id=site.id, enabled=False)
+        db.add(robot)
+        db.flush()
+        db.add(
+            StreamRegistry(
+                stream_id=stream_id,
+                robot_id=robot.id,
+                camera_type="roof_rgb",
+                source_ref=SYNTHETIC_TEST_SOURCE,
+                state="OFFLINE",
+            )
+        )
+        db.commit()
+        robot_id = robot.id
+    settings.synthetic_media_vehicle_ids = "firebot-sim-media-01,firebot-vehicle-03"
+    try:
+        with TestClient(app) as client:
+            for token in (synthetic_media_publish_token(stream_id), global_token()):
+                response = publish(client, stream_id, token=token)
+                assert response.status_code in (401, 403), response.text
+            # 真实车辆身份发布仍可用（只是不能走合成通道）
+            v03 = vehicle_srt_publish_token("firebot-vehicle-03")
+            ok = publish(client, stream_id, protocol="srt", user="firebot-vehicle-03", password=v03)
+            assert ok.status_code == 200
+    finally:
+        settings.synthetic_media_vehicle_ids = previous
+        with SessionLocal() as db:
+            db.execute(delete(StreamRegistry).where(StreamRegistry.stream_id == stream_id))
+            db.execute(delete(Robot).where(Robot.id == robot_id))
+            db.commit()

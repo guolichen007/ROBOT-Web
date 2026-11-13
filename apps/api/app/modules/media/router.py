@@ -199,11 +199,16 @@ def authorize_publish(payload: MediaAuthRequest, db) -> dict:
     if not stream:
         raise _deny_publish(payload.path, "unregistered_path", 403)
     robot = db.get(Robot, stream.robot_id)
-    if stream.source_ref == SYNTHETIC_TEST_SOURCE:
-        # 双重条件：流登记为合成 + 所属机器人为显式配置的合成资产（非真实车辆）。
-        # 真实车辆流即使被误标 source_ref 也不允许全局 token 发布。
-        if not robot or not get_settings().is_synthetic_media_vehicle(robot.vehicle_id):
-            raise _deny_publish(stream.stream_id, "synthetic_label_on_non_synthetic_asset", 403)
+    synthetic_asset = bool(robot) and get_settings().is_synthetic_media_vehicle(robot.vehicle_id)
+    if stream.source_ref == SYNTHETIC_TEST_SOURCE and not synthetic_asset:
+        # 误标：流标为合成但所属机器人不是合成命名空间内的白名单资产 → 按真实流处理
+        # （合成 token 一律拒绝；只认该车自己的车辆身份），并留审计。
+        logger.warning(
+            "media synthetic label ignored for non-synthetic asset",
+            extra={"stream_id": stream.stream_id[:96]},
+        )
+    if stream.source_ref == SYNTHETIC_TEST_SOURCE and synthetic_asset:
+        # 合成发布双重条件：流登记为合成 + 所属机器人为合成命名空间内的显式白名单资产
         if payload.user:
             raise _deny_publish(stream.stream_id, "vehicle_identity_on_synthetic_stream", 403)
         presented = payload.token or payload.password

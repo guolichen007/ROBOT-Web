@@ -4,7 +4,8 @@
 //   ice_connected      —— RTCPeerConnection.connectionState/iceConnectionState 达到 connected（媒体连接建立）
 //   decoded_changing   —— <video> 真实解码出帧（requestVideoFrameCallback 计数、videoWidth>0），且相隔
 //                         一段时间抓取的两帧像素哈希不同（画面在变化，不是静帧）
-// 用法：node whep_decode.mjs <whep_url> <ticket> <seconds>
+// 用法：printf '%s' "$TICKET" | node whep_decode.mjs <whep_url> <seconds>
+//   媒体票据只经 stdin 传入（不出现在 Node/Chromium 的 argv 或环境变量中；/proc/<pid>/cmdline 不可见）
 // 依赖：apps/web/node_modules/playwright-core（CHROMIUM_PATH 指向 chrome-headless-shell）
 import { createRequire } from 'node:module'
 import path from 'node:path'
@@ -13,7 +14,18 @@ const require = createRequire(import.meta.url)
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../../apps/web')
 const { chromium } = require(path.join(root, 'node_modules/playwright-core'))
 
-const [whepUrl, ticket, seconds = '6'] = process.argv.slice(2)
+const [whepUrl, seconds = '6'] = process.argv.slice(2)
+const ticket = await new Promise((resolve, reject) => {
+  let data = ''
+  process.stdin.setEncoding('utf8')
+  process.stdin.on('data', (chunk) => (data += chunk))
+  process.stdin.on('end', () => resolve(data.trim()))
+  process.stdin.on('error', reject)
+})
+if (!ticket) {
+  console.error('media ticket required on stdin')
+  process.exit(2)
+}
 const browser = await chromium.launch({
   executablePath: process.env.CHROMIUM_PATH,
   args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required'],
@@ -89,11 +101,13 @@ const result = await page.evaluate(
   },
   { whepUrl, ticket, seconds: Number(seconds) },
 )
-if (process.env.SCREENSHOT_PATH && result.decoded_changing !== false) {
-  await page.screenshot({ path: process.env.SCREENSHOT_PATH })
-}
-await browser.close()
+// 先计算判定，再决定是否截图（截图只作为通过时的证据，绝不影响判定）
 const distinct = new Set(result.hashes.map((h) => h.hash)).size
 result.decoded_changing = result.frames > 5 && result.width > 0 && distinct >= 2
 result.distinct_frames = distinct
+if (process.env.SCREENSHOT_PATH && result.decoded_changing === true) {
+  await page.screenshot({ path: process.env.SCREENSHOT_PATH })
+  result.screenshot = true
+}
+await browser.close()
 console.log(JSON.stringify(result))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -8,6 +9,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 已登记的真实车辆 canonical ID：任何模拟/合成配置都不得把它们当作合成资产。
 REAL_VEHICLE_IDS = frozenset({"firebot-vehicle-01", "firebot-vehicle-02", "R001", "R002"})
+# G3-R1 正向约束：合成/模拟资产必须位于专用命名空间 firebot-sim-<name>（小写字母数字/连字符），
+# 真实车辆命名空间（firebot-vehicle-NN、R00N 等）在结构上不可能匹配——未来 firebot-vehicle-03
+# 等新车即使被误加进白名单或流被误标 source_ref，也无法取得合成发布资格。
+SYNTHETIC_ID_PATTERN = re.compile(r"^firebot-sim-[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def is_synthetic_namespace(vehicle_id: str) -> bool:
+    return bool(SYNTHETIC_ID_PATTERN.fullmatch(vehicle_id)) and vehicle_id not in REAL_VEHICLE_IDS
 
 
 class Settings(BaseSettings):
@@ -142,12 +151,12 @@ class Settings(BaseSettings):
 
     def is_synthetic_media_vehicle(self, vehicle_id: str) -> bool:
         listed = {v.strip() for v in self.synthetic_media_vehicle_ids.split(",") if v.strip()}
-        # 真实生产车辆身份永不具备合成发布资格（即便误配置）
-        return vehicle_id in listed and vehicle_id not in REAL_VEHICLE_IDS
+        # 白名单（显式登记）且位于合成专用命名空间，二者缺一不可
+        return vehicle_id in listed and is_synthetic_namespace(vehicle_id)
 
     def is_simulated_vehicle(self, vehicle_id: str) -> bool:
         listed = {v.strip() for v in self.simulated_vehicle_ids.split(",") if v.strip()}
-        return vehicle_id in listed
+        return vehicle_id in listed and is_synthetic_namespace(vehicle_id)
 
     def vehicle_downlink_allowed(self, vehicle_id: str) -> bool:
         """global downlink=true 且 vehicle_id 在 allowlist 中才允许下行。"""
