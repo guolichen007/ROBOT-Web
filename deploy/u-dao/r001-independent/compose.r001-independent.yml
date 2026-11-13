@@ -106,6 +106,13 @@ services:
       MQTT_CA_FILE: /run/mqtt-ca.crt
       MQTT_ALLOW_ANONYMOUS: "false"
       VEHICLE_AGENT_SCOPE_VEHICLE_IDS: ${R001_SCOPE_VEHICLE_IDS:-firebot-vehicle-01}
+      # G2 P0：与专属 Adapter 完全一致的五项 G2 环境（fail-closed 默认）——Ingress 推送的
+      # Redis latest 才能携带正确的 vehicle_agent_execution（否则 Web 诊断面板闪现消失）
+      VEHICLE_AGENT_V1_DOWNLINK_ENABLED: ${G2_DOWNLINK_ENABLED:-false}
+      VEHICLE_AGENT_V1_DOWNLINK_ALLOWLIST: ${G2_DOWNLINK_ALLOWLIST:-}
+      VEHICLE_TRANSPORT_PROFILES: ${G2_VEHICLE_TRANSPORT_PROFILES:-}
+      TRANSPORT_PROFILE_ADAPTERS: ${G2_TRANSPORT_PROFILE_ADAPTERS:-}
+      VEHICLE_EXECUTION_PROFILES: ${G2_VEHICLE_EXECUTION_PROFILES:-}
       FIREBOT_SERVICE_INSTANCE_ID: ${R001_INGRESS_INSTANCE_ID:-r001-dedicated-ingress}
     security_opt: ["no-new-privileges:true"]
     read_only: true
