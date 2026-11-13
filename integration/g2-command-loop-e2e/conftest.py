@@ -42,6 +42,14 @@ DEDICATED_INGRESS = "r001-dedicated-ingress"
 ROS_NAMESPACE = "/firebot_001/software"
 ACK_TIMEOUT = 8
 
+INGRESS_G2_KEYS = (
+    "VEHICLE_AGENT_V1_DOWNLINK_ENABLED",
+    "VEHICLE_AGENT_V1_DOWNLINK_ALLOWLIST",
+    "VEHICLE_TRANSPORT_PROFILES",
+    "TRANSPORT_PROFILE_ADAPTERS",
+    "VEHICLE_EXECUTION_PROFILES",
+)
+
 G2_ENV = {
     "APP_ENV": "test",
     "DATABASE_URL": "postgresql+psycopg://firebot_e2e:firebot_e2e@localhost:5432/firebot_e2e",
@@ -352,12 +360,12 @@ def g2(tmp_path_factory):
         [py, "services/vehicle-agent-adapter/main.py"],
         {**env_b, "FIREBOT_SERVICE_INSTANCE_ID": DEDICATED_ADAPTER},
     )
-    spawn(
-        workdir,
-        "ingress-B",
-        [py, "services/mqtt-ingress/main.py"],
-        {**env_b, "FIREBOT_SERVICE_INSTANCE_ID": DEDICATED_INGRESS},
-    )
+    ingress_b_env = {**env_b, "FIREBOT_SERVICE_INSTANCE_ID": DEDICATED_INGRESS}
+    if os.environ.get("G2_E2E_OLD_INGRESS_ENV") == "1":
+        # 反证开关：复现 43d76f4 的 compose（r001-ingress 未传入五个 G2 键）
+        for key in INGRESS_G2_KEYS:
+            ingress_b_env.pop(key, None)
+    spawn(workdir, "ingress-B", [py, "services/mqtt-ingress/main.py"], ingress_b_env)
     spawn(
         workdir,
         "dispatcher",

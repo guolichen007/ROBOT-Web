@@ -58,7 +58,7 @@ jobs:
       - run: python scripts/test_migration_matrix.py
       - working-directory: apps/api
         run: alembic upgrade head && python -m app.db.seed
-      - run: pytest apps/api/tests services/protocol-tester/tests scripts/test_secret_redaction.py
+      - run: pytest apps/api/tests services/protocol-tester/tests scripts/test_secret_redaction.py deploy/u-dao/r001-independent/tests
       - working-directory: apps/api
         run: alembic downgrade base && alembic upgrade head && python -m app.db.seed
 
