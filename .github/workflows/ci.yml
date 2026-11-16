@@ -339,13 +339,9 @@ jobs:
       # 交付方通过 check-runs API 读取精确 file:line（可审计、不降级）。
       - run: |
           docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.24.2 \
-            git --config=/repo/.gitleaks.toml --no-banner --report-format sarif \
-            --report-path /repo/gitleaks.sarif /repo > /tmp/gitleaks.out 2>&1 || true
+            git --config=/repo/.gitleaks.toml --no-banner --report-format json \
+            /repo > /tmp/gitleaks.out 2>&1; echo $? > /tmp/gitleaks.rc
           cat /tmp/gitleaks.out
-          if [ ! -f /repo/gitleaks.sarif ]; then
-            echo "::error file=.github/workflows/ci.yml,line=1::GITLEAKS_RUNNER_FAILURE: $(tail -c 500 /tmp/gitleaks.out | tr '\n' ' ')"
-            exit 1
-          fi
           python3 /repo/scripts/gitleaks_annotate.py
       - run: docker run --rm -v "$PWD:/repo" ghcr.io/aquasecurity/trivy:0.59.1 fs --db-repository ghcr.io/aquasecurity/trivy-db:2 --exit-code 1 --severity CRITICAL --ignore-unfixed /repo
       - run: docker run --rm -v "$PWD:/repo" ghcr.io/aquasecurity/trivy:0.59.1 fs --db-repository ghcr.io/aquasecurity/trivy-db:2 --exit-code 0 --severity HIGH,CRITICAL --format json --output /repo/trivy-high.json /repo
