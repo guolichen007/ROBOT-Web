@@ -338,9 +338,12 @@ jobs:
       # gitleaks 门禁保持 exit 1；同时把发现以 workflow 注解暴露，供无管理员权限的
       # 交付方通过 check-runs API 读取精确 file:line（可审计、不降级）。
       - run: |
+          set +e
           docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.24.2 \
             git --config=/repo/.gitleaks.toml --no-banner --report-format json \
-            /repo > /tmp/gitleaks.out 2>&1; echo $? > /tmp/gitleaks.rc
+            /repo > /tmp/gitleaks.out 2>&1
+          echo $? > /tmp/gitleaks.rc
+          set -e
           cat /tmp/gitleaks.out
           python3 /repo/scripts/gitleaks_annotate.py
       - run: docker run --rm -v "$PWD:/repo" ghcr.io/aquasecurity/trivy:0.59.1 fs --db-repository ghcr.io/aquasecurity/trivy-db:2 --exit-code 1 --severity CRITICAL --ignore-unfixed /repo
