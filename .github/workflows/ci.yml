@@ -345,7 +345,7 @@ jobs:
           echo $? > /tmp/gitleaks.rc
           set -e
           cat /tmp/gitleaks.out
-          python3 /repo/scripts/gitleaks_annotate.py
+          python3 scripts/gitleaks_annotate.py
       - run: docker run --rm -v "$PWD:/repo" ghcr.io/aquasecurity/trivy:0.59.1 fs --db-repository ghcr.io/aquasecurity/trivy-db:2 --exit-code 1 --severity CRITICAL --ignore-unfixed /repo
       - run: docker run --rm -v "$PWD:/repo" ghcr.io/aquasecurity/trivy:0.59.1 fs --db-repository ghcr.io/aquasecurity/trivy-db:2 --exit-code 0 --severity HIGH,CRITICAL --format json --output /repo/trivy-high.json /repo
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
