@@ -80,13 +80,19 @@ def verify(
         images[k] for k in ("api", "command-dispatcher", "r001-adapter", "r001-ingress")
     }
     if len(python_images) != 1:
-        problems.append(f"python services on different images: {sorted(python_images)}")
-    # 2) 三侧 G2 配置一致
+        problems.append(f"python services on different images: {sorted(map(str, python_images))}")
+    # 2) 四侧 G2 配置一致
+    # 四侧：r001-ingress 执行 robot_readiness 并把 vehicle_agent_execution 写入 Redis latest /
+    # WebSocket 车辆事件；其 G2 键必须与 API 初始快照所用值一致，否则前端执行档在增量事件后漂移。
     sides = {
         "api": env(ms, "api"),
         "command-dispatcher": env(ms, "command-dispatcher"),
         "r001-adapter": env(rs, "r001-adapter"),
+        "r001-ingress": env(rs, "r001-ingress"),
     }
+    for name, services in (("r001-adapter", rs), ("r001-ingress", rs), ("api", ms)):
+        if name not in services:
+            problems.append(f"{name}: service missing from rendered config")
     for key in G2_KEYS:
         values = {side: values.get(key) for side, values in sides.items()}
         if len(set(values.values())) != 1:
