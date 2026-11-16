@@ -48,12 +48,28 @@ for start in reversed(starts):
     except (json.JSONDecodeError, ValueError):
         continue
 
-if findings:
-    print(f"GITLEAKS_FINDINGS={findings}")
-    sys.exit(1)
-if rc_text == "0":
-    print("GITLEAKS_FINDINGS=0")
-    sys.exit(0)
-annotate(".github/workflows/ci.yml", 1, f"GITLEAKS_RUNNER_FAILURE rc={rc_text}: {log_tail}")
-print(f"GITLEAKS_RUNNER_FAILURE rc={rc_text}")
-sys.exit(1)
+
+def main() -> int:
+    if findings:
+        print(f"GITLEAKS_FINDINGS={findings}")
+        return 1
+    if rc_text == "0":
+        print("GITLEAKS_FINDINGS=0")
+        return 0
+    annotate(".github/workflows/ci.yml", 1, f"GITLEAKS_RUNNER_FAILURE rc={rc_text}: {log_tail}")
+    print(f"GITLEAKS_RUNNER_FAILURE rc={rc_text}")
+    return 1
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except Exception:  # noqa: BLE001 —— 任何异常都以注解自解释，绝不留静默失败
+        import traceback
+
+        annotate(
+            ".github/workflows/ci.yml",
+            1,
+            "GITLEAKS_ANNOTATE_CRASH: " + traceback.format_exc()[-400:],
+        )
+        sys.exit(2)
