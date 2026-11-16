@@ -335,7 +335,35 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.24.2 git --config=/repo/.gitleaks.toml --no-banner /repo
+      # gitleaks 门禁保持 exit 1；同时把发现以 workflow 注解暴露，供无管理员权限的
+      # 交付方通过 check-runs API 读取精确 file:line（可审计、不降级）。
+      - run: |
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.24.2 \
+            git --config=/repo/.gitleaks.toml --no-banner --report-format sarif \
+            --report-path /repo/gitleaks.sarif /repo > /tmp/gitleaks.out 2>&1 || true
+          cat /tmp/gitleaks.out
+          if [ -f /repo/gitleaks.sarif ]; then
+            python3 - <<'PY'
+          import json
+          report = json.load(open("/repo/gitleaks.sarif"))
+          findings = 0
+          for run in report.get("runs", []):
+              for result in run.get("results", []):
+                  findings += 1
+                  loc = result["locations"][0]["physicalLocation"]
+                  uri = loc["artifactLocation"]["uri"].replace("file:///repo/", "")
+                  line = loc["region"].get("startLine", 1)
+                  print(
+                      f"::error file={uri},line={line}::"
+                      f"{result.get('ruleId', 'unknown')}: {result['message']['text'][:200]}"
+                  )
+          print(f"GITLEAKS_FINDINGS={findings}")
+          raise SystemExit(1 if findings else 0)
+          PY
+          else
+            echo "GITLEAKS_NO_REPORT"
+            exit 1
+          fi
       - run: docker run --rm -v "$PWD:/repo" ghcr.io/aquasecurity/trivy:0.59.1 fs --db-repository ghcr.io/aquasecurity/trivy-db:2 --exit-code 1 --severity CRITICAL --ignore-unfixed /repo
       - run: docker run --rm -v "$PWD:/repo" ghcr.io/aquasecurity/trivy:0.59.1 fs --db-repository ghcr.io/aquasecurity/trivy-db:2 --exit-code 0 --severity HIGH,CRITICAL --format json --output /repo/trivy-high.json /repo
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
