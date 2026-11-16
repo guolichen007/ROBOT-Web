@@ -47,7 +47,7 @@ SoftwareStatus:
   `latch=True` 保留；状态字段与 diagnostics 均为真实值，不伪造执行成功。
 - 心跳由 rospy.Timer（/use_sim_time 未启用时的真实时间）驱动；读取状态字段与
   状态机线程共用 RLock，无竞态、无自死锁。
-- 修复 SHA：`b6ee382842e3856dd625599d40ca2c9be3449657`（单独提交，不改 G2-R3 业务代码）。
+- 修复提交：`b6ee382`（feature/r001-v1-readonly-g1，单独提交，不改 G2-R3 业务代码）。
 
 ## 3. 状态机语义（真实执行，非假装成功）
 
