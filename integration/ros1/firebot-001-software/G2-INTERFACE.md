@@ -40,6 +40,15 @@ SoftwareStatus:
   string ts
 ```
 
+## 2b. 状态心跳（G2-P0 修复后行为）
+
+- `/firebot_001/software/status` 现在**每 2s 周期发布**（此前仅在状态迁移时发布）：
+  静置 idle/ready 也持续刷新，保证 socket `age_s < 10s`、云端软件状态不再 UNKNOWN；
+  `latch=True` 保留；状态字段与 diagnostics 均为真实值，不伪造执行成功。
+- 心跳由 rospy.Timer（/use_sim_time 未启用时的真实时间）驱动；读取状态字段与
+  状态机线程共用 RLock，无竞态、无自死锁。
+- 修复 SHA：`b6ee382842e3856dd625599d40ca2c9be3449657`（单独提交，不改 G2-R3 业务代码）。
+
 ## 3. 状态机语义（真实执行，非假装成功）
 
 | 命令 | 前置 | 成功路径（feedback 序列） | 拒绝路径 |
