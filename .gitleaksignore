@@ -1,0 +1,9 @@
+# Gitleaks 精确指纹例外（每行一个 finding 指纹：<commit>:<file>:<rule>:<line>）。
+# 只允许逐条登记已核实的非生产测试值；不得用于放宽规则、文件或目录。
+#
+# fb1c547 / compose.test.yml:86 / generic-api-key
+#   值 = HMAC-SHA256("test-media-publisher-token-2026", "vehicle-srt:R001")：由隔离测试栈专用主值
+#   （同文件 API 测试配置，非生产）派生的 R001 测试发布口令；仅 compose.test.yml 隔离栈使用。
+#   958a5dd 已从文件中移除（改为合成源进程内派生）；该提交已推送，按项目规则不改写历史。
+#   核实人/日期：G3-R1，2026-11-13。
+fb1c5474ee611e9eade6ebd0df7ec48b3cf29dc8:compose.test.yml:generic-api-key:86
