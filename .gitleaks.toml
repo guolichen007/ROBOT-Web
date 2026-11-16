@@ -24,7 +24,9 @@ regexes = [
     '''E2e-Only-Admin-Password-2026!''',
     '''firebot_e2e:firebot_e2e@localhost''',
     '''local-acceptance-cred-CHANGE-ME''',
-    '''PLACEHOLDER-CHANGE-ME-G1'''
+    '''PLACEHOLDER-CHANGE-ME-G1''',
+    # compose.test.yml 隔离测试栈媒体发布 token（G3 测试编排，非生产）
+    '''43251ba5aaf72081afb5ec42367e0ff17b834772b5082f8abff03f164d92773d''',
 ]
 paths = [
     '''gitleaks\.toml''',
