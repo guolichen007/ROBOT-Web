@@ -202,7 +202,8 @@ def e2e_stack(tmp_path_factory):
         )
         stack_procs.append(mosquitto)
         assert mosquitto.poll() is None, "mosquitto exited immediately"
-        assert _port_open("127.0.0.1", mqtt_port, 15.0), "mosquitto did not listen"
+        # CI 共享 runner 资源抖动：监听探测窗口放宽至 20s（本地实测 <2s 即就绪）
+        assert _port_open("127.0.0.1", mqtt_port, 20.0), "mosquitto did not listen"
 
         # ---- Adapter + Ingress（现有服务进程，TLS + platform 凭证）----
         env = dict(os.environ)
@@ -236,7 +237,7 @@ def e2e_stack(tmp_path_factory):
                 and redis_client.get("service:mqtt-ingress:heartbeat")
             )
 
-        deadline = time.monotonic() + 30.0
+        deadline = time.monotonic() + 40.0  # CI 抖动容限：adapter/ingress 心跳窗口 40s
         while time.monotonic() < deadline and not heartbeats_ready():
             time.sleep(0.5)
         assert heartbeats_ready(), (
