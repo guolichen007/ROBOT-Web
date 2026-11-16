@@ -72,9 +72,10 @@ def verify(
     for name, image in images.items():
         if not image or image.endswith(":latest") or ":" not in image:
             problems.append(f"{name}: image {image!r} not pinned")
-        elif sha and not image.endswith(f":g2-{sha}"):
+        elif not sha or not image.endswith(f":g2-{sha}"):
             problems.append(f"{name}: image {image} is not tagged g2-<full 40-char G2 SHA>")
-    if sha is not None and (len(sha) != 40 or any(c not in "0123456789abcdef" for c in sha)):
+    # --sha 强制：缺省/空值不得跳过镜像 SHA 核验（fail-closed）
+    if not sha or len(sha) != 40 or any(c not in "0123456789abcdef" for c in sha):
         problems.append(f"--sha must be the full 40-char lowercase commit SHA, got {sha!r}")
     python_images = {
         images[k] for k in ("api", "command-dispatcher", "r001-adapter", "r001-ingress")
@@ -192,7 +193,11 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("main_json")
     parser.add_argument("r001_json")
-    parser.add_argument("--sha")
+    parser.add_argument(
+        "--sha",
+        required=True,
+        help="完整 40 位小写 G2 commit SHA（强制；五服务镜像必须为 :g2-<SHA>）",
+    )
     parser.add_argument("--adapter-id", default="r001-dedicated-adapter-v2")
     parser.add_argument(
         "--baseline",

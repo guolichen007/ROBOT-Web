@@ -13,6 +13,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -109,6 +110,60 @@ def test_ingress_service_absent_fails():
     main, r001 = fixture()
     del r001["services"]["r001-ingress"]
     assert run(main, r001)
+
+
+@pytest.mark.parametrize("bad_sha", [None, "", SHA[:7], SHA.upper(), SHA + "0"])
+def test_missing_or_short_sha_fails_in_verify(bad_sha):
+    """反证：verify() 未拿到完整 40 位 SHA 时不得跳过镜像核验，必须 FAIL。"""
+    main, r001 = fixture()
+    problems = g2verify.verify(
+        main, r001, bad_sha, "r001-dedicated-adapter-v2", copy.deepcopy(main), copy.deepcopy(r001)
+    )
+    assert any("--sha must be the full 40-char" in p for p in problems), problems
+
+
+def _cli(tmp_path, *extra):
+    main, r001 = fixture()
+    paths = {}
+    for name, cfg in (("main", main), ("r001", r001)):
+        paths[name] = tmp_path / f"{name}.json"
+        paths[name].write_text(json.dumps(cfg))
+    return subprocess.run(
+        [
+            sys.executable,
+            str(HERE.parent / "g2-verify-compose.py"),
+            str(paths["main"]),
+            str(paths["r001"]),
+            "--baseline",
+            str(paths["main"]),
+            "--r001-baseline",
+            str(paths["r001"]),
+            *extra,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+def test_cli_rejects_missing_sha(tmp_path):
+    """反证：命令行缺少 --sha 必须直接拒绝运行（argparse 退出码 2），不得输出 PASS。"""
+    proc = _cli(tmp_path)
+    assert proc.returncode == 2, (proc.returncode, proc.stdout, proc.stderr)
+    assert "--sha" in proc.stderr
+    assert "G2_COMPOSE_VERIFY=PASS" not in proc.stdout
+
+
+def test_cli_rejects_empty_sha(tmp_path):
+    proc = _cli(tmp_path, "--sha", "")
+    assert proc.returncode == 1, (proc.returncode, proc.stdout, proc.stderr)
+    assert "G2_COMPOSE_VERIFY=FAIL" in proc.stdout
+
+
+def test_cli_full_sha_pass(tmp_path):
+    proc = _cli(tmp_path, "--sha", SHA)
+    assert proc.returncode == 0, (proc.stdout, proc.stderr)
+    assert "G2_COMPOSE_VERIFY=PASS" in proc.stdout
 
 
 # ---------------------------------------------------------------- 真实 compose 渲染
