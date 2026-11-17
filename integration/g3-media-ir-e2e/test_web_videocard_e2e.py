@@ -452,14 +452,20 @@ def test_stream_outage_and_reconnect_in_videocard(web):
     assert wait_for(ready_file.exists, 60), "browser never connected"
     stop(web["publishers"].pop(RGB))  # 断流
     assert wait_for(lambda: not _ready(web, RGB), 20)
-    time.sleep(12)  # 现场断流量级（>ICE 断开检测窗口）
+    # 短断流（预算内）：生产 VideoCard 有界重连预算 = ICE 判定断开（实测 ~7s）后 1s/2s/4s 三次，
+    # 即断流后约 14s 内源必须恢复。此处 3s 后恢复（加发布端 ready 2-4s），确定性落在预算内，
+    # 严格断言 recovered=auto。超出预算的长断流见 test_manual_recovery_after_long_outage。
+    outage_started = time.monotonic()
+    time.sleep(3)
     _publish(web, RGB, "rgb")  # 恢复
     assert wait_for(lambda: _ready(web, RGB), 30)
+    outage_seconds = round(time.monotonic() - outage_started, 1)
     restored_file.write_text("restored")
     proc.wait(timeout=90)
     out, err = proc.stdout.read(), proc.stderr.read()
     data = json.loads(out.strip().splitlines()[-1])
     assert data.get("ok"), (data, err[-800:])
+    data["outage_seconds"] = outage_seconds
     EVIDENCE["reconnect"] = data
     assert data["state_during_outage"], data  # 断流期间 VideoCard 离开 LIVE（不伪装在线）
     assert data["violations"] == 0, data
