@@ -1405,3 +1405,14 @@
 .hmi-diag-table [data-outcome='timeout'] {
   color: #b42318;
 }
+
+/* G3 模拟来源标识 */
+.hmi-sim-banner {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  background: #b42318;
+  color: #fff;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}

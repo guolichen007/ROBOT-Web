@@ -463,6 +463,8 @@
             "max_temp": {
               "anyOf": [
                 {
+                  "maximum": 1200,
+                  "minimum": -50,
                   "type": "number"
                 },
                 {

@@ -371,6 +371,13 @@ def monitor_snapshot(
         state["integration"] = serialize_model(integration) if integration else None
         readiness = robot_readiness(db, robot)
         state.update(readiness)
+        # G3：模拟来源标识只由服务端登记决定（SIMULATED_VEHICLE_IDS），不从 source_kind=MOCK
+        # 推断，也不接受车端自报——Web 据此显示 SIMULATED，真实车辆永远为 None。
+        state["simulation"] = (
+            {"simulated": True, "label": "SIMULATED", "source": "simulated_vehicle_ids"}
+            if get_settings().is_simulated_vehicle(robot.vehicle_id)
+            else None
+        )
         if (
             integration
             and integration.source_kind == "ROS_COMPAT"

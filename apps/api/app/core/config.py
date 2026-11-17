@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+import re
 from functools import lru_cache
 from pathlib import Path
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# 已登记的真实车辆 canonical ID：任何模拟/合成配置都不得把它们当作合成资产。
+REAL_VEHICLE_IDS = frozenset({"firebot-vehicle-01", "firebot-vehicle-02", "R001", "R002"})
+# G3-R1 正向约束：合成/模拟资产必须位于专用命名空间 firebot-sim-<name>（小写字母数字/连字符），
+# 真实车辆命名空间（firebot-vehicle-NN、R00N 等）在结构上不可能匹配——未来 firebot-vehicle-03
+# 等新车即使被误加进白名单或流被误标 source_ref，也无法取得合成发布资格。
+SYNTHETIC_ID_PATTERN = re.compile(r"^firebot-sim-[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+
+def is_synthetic_namespace(vehicle_id: str) -> bool:
+    return bool(SYNTHETIC_ID_PATTERN.fullmatch(vehicle_id)) and vehicle_id not in REAL_VEHICLE_IDS
 
 
 class Settings(BaseSettings):
@@ -79,6 +91,13 @@ class Settings(BaseSettings):
     #     （声明已知非默认 profile 及其专属 Adapter 实例）
     #   VEHICLE_EXECUTION_PROFILES="firebot-vehicle-01=ros-software-test"
     #     （未列出车辆=原有控制门禁，不变）
+    # G3 模拟来源登记：只有列在此处的 vehicle_id 被标识为 SIMULATED（独立模拟身份；
+    # 与 integration.source_kind=MOCK 测试元数据无关，也绝不用于真实车辆 ID）。
+    simulated_vehicle_ids: str = "firebot-sim-ir-01"
+    # G3：允许用按流派生的合成 token 发布媒体的“合成测试资产”vehicle_id（与流登记 source_ref
+    # 双重条件；原始全局主密钥永不作为发布凭据）。
+    # 默认空 = 生产无任何合成发布资格；仅隔离测试栈显式配置。
+    synthetic_media_vehicle_ids: str = ""
     vehicle_transport_profiles: str = ""
     transport_profile_adapters: str = ""
     vehicle_execution_profiles: str = ""
@@ -129,6 +148,15 @@ class Settings(BaseSettings):
             for item in self.vehicle_agent_v1_downlink_allowlist.split(",")
             if item.strip()
         }
+
+    def is_synthetic_media_vehicle(self, vehicle_id: str) -> bool:
+        listed = {v.strip() for v in self.synthetic_media_vehicle_ids.split(",") if v.strip()}
+        # 白名单（显式登记）且位于合成专用命名空间，二者缺一不可
+        return vehicle_id in listed and is_synthetic_namespace(vehicle_id)
+
+    def is_simulated_vehicle(self, vehicle_id: str) -> bool:
+        listed = {v.strip() for v in self.simulated_vehicle_ids.split(",") if v.strip()}
+        return vehicle_id in listed and is_synthetic_namespace(vehicle_id)
 
     def vehicle_downlink_allowed(self, vehicle_id: str) -> bool:
         """global downlink=true 且 vehicle_id 在 allowlist 中才允许下行。"""

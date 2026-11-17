@@ -236,7 +236,18 @@ class Smog(UplinkModel):
 
 
 class Thermal(UplinkModel):
-    max_temp: float | None = None
+    # G3：严格数值（拒绝字符串/布尔隐式转换），物理合理范围（热像仪测温量程外即非法）
+    max_temp: float | None = Field(default=None, strict=True, ge=-50, le=1200)
+
+    @model_validator(mode="before")
+    @classmethod
+    def int_is_number(cls, values: Any) -> Any:
+        # strict float 不接受 int；JSON 整数温度（如 42）是合法数值，布尔不是
+        if isinstance(values, dict):
+            value = values.get("max_temp")
+            if isinstance(value, int) and not isinstance(value, bool):
+                values = {**values, "max_temp": float(value)}
+        return values
 
 
 class Telemetry(UplinkModel):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import logging
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -16,6 +17,11 @@ from app.core.serialization import serialize_model
 from app.db.models import Robot, StreamRegistry, User
 
 router = APIRouter(prefix="/api/v1/media", tags=["media"])
+logger = logging.getLogger("media-auth")
+
+# 合成测试流登记标记（StreamRegistry.source_ref）。只有显式登记为该值、且所属机器人是显式
+# 配置的合成资产的流，才允许用按流派生的合成 token 发布；真实车辆流一律要求车辆绑定身份。
+SYNTHETIC_TEST_SOURCE = "SYNTHETIC_TEST"
 
 
 class TicketRequest(BaseModel):
@@ -49,6 +55,21 @@ def vehicle_srt_publish_token(vehicle_id: str) -> str:
         master.encode("utf-8"),
         f"vehicle-srt:{vehicle_id}".encode(),
         hashlib.sha256,
+    ).hexdigest()
+
+
+def synthetic_media_publish_token(stream_id: str) -> str:
+    """合成测试流发布 token：HMAC-SHA256(master, "synthetic-media:"+stream_id)。
+
+    G3：全局媒体主密钥本身永不作为发布凭据——它不离开 API/密钥存储，也就不会出现在
+    发布进程（ffmpeg）参数中；合成源只拿到按流派生、只对该合成流有效的 token。
+    """
+    import hashlib
+    import hmac as hmac_mod
+
+    master = get_settings().effective_media_publish_token
+    return hmac_mod.new(
+        master.encode("utf-8"), f"synthetic-media:{stream_id}".encode(), hashlib.sha256
     ).hexdigest()
 
 
@@ -134,26 +155,7 @@ def media_ticket(
 @router.post("/authorize", include_in_schema=False)
 def authorize_media(payload: MediaAuthRequest, db: DbSession) -> dict:
     if payload.action == "publish":
-        stream = db.scalar(select(StreamRegistry).where(StreamRegistry.stream_id == payload.path))
-        if not stream:
-            raise PlatformError("PERMISSION_DENIED", "媒体发布路径未登记", status_code=403)
-        robot = db.get(Robot, stream.robot_id)
-        if payload.protocol == "srt" and payload.user:
-            # per-vehicle SRT 发布：user 必须是流所属 canonical vehicle_id，
-            # password == HMAC 派生 token（R001 token 不得用于 R002 流）。
-            if (
-                robot
-                and payload.user == robot.vehicle_id
-                and hmac.compare_digest(
-                    payload.password, vehicle_srt_publish_token(robot.vehicle_id)
-                )
-            ):
-                return {"authorized": True, "action": payload.action, "stream_id": stream.stream_id}
-            raise PlatformError("AUTH_REQUIRED", "媒体发布凭据无效", status_code=401)
-        # bootstrap/synthetic 全局 token（明确作用域：仅合成测试源；真实多车使用 per-vehicle）。
-        if payload.token != get_settings().effective_media_publish_token:
-            raise PlatformError("AUTH_REQUIRED", "媒体发布凭据无效", status_code=401)
-        return {"authorized": True, "action": payload.action, "stream_id": stream.stream_id}
+        return authorize_publish(payload, db)
     if payload.action not in {"read", "playback"}:
         raise PlatformError("PERMISSION_DENIED", "媒体动作未授权", status_code=403)
     # Browser playback tickets are accepted only through the Authorization
@@ -172,4 +174,52 @@ def authorize_media(payload: MediaAuthRequest, db: DbSession) -> dict:
         or stream.camera_type != claims["camera"]
     ):
         raise PlatformError("PERMISSION_DENIED", "媒体票据绑定对象不匹配", status_code=403)
+    return {"authorized": True, "action": payload.action, "stream_id": stream.stream_id}
+
+
+def _deny_publish(stream_id: str, reason: str, status_code: int = 401) -> PlatformError:
+    # 只记录流路径与原因；绝不记录 user/password/token/query（可能含 SRT token、passphrase）
+    logger.warning("media publish denied", extra={"stream_id": stream_id[:96], "reason": reason})
+    message = "媒体发布凭据无效" if status_code == 401 else "媒体发布未授权"
+    code = "AUTH_REQUIRED" if status_code == 401 else "PERMISSION_DENIED"
+    return PlatformError(code, message, status_code=status_code)
+
+
+def authorize_publish(payload: MediaAuthRequest, db) -> dict:
+    """发布鉴权（G3 收紧）：
+
+    - 流必须已登记；
+    - 合成测试流（source_ref=SYNTHETIC_TEST 且所属机器人在 SYNTHETIC_MEDIA_VEHICLE_IDS 中、
+      非真实车辆）：只接受按流派生的合成 token（token 字段，或 user 为空时的 password）；
+      原始全局主密钥与任何车辆凭证均拒绝；
+    - 真实车辆流：只接受车辆绑定身份——user == 流所属 vehicle_id 且 password == 该车 HMAC
+      派生口令（SRT streamid / RTSP basic 均映射到 user/password）；全局 token 一律拒绝。
+    """
+    stream = db.scalar(select(StreamRegistry).where(StreamRegistry.stream_id == payload.path))
+    if not stream:
+        raise _deny_publish(payload.path, "unregistered_path", 403)
+    robot = db.get(Robot, stream.robot_id)
+    synthetic_asset = bool(robot) and get_settings().is_synthetic_media_vehicle(robot.vehicle_id)
+    if stream.source_ref == SYNTHETIC_TEST_SOURCE and not synthetic_asset:
+        # 误标：流标为合成但所属机器人不是合成命名空间内的白名单资产 → 按真实流处理
+        # （合成 token 一律拒绝；只认该车自己的车辆身份），并留审计。
+        logger.warning(
+            "media synthetic label ignored for non-synthetic asset",
+            extra={"stream_id": stream.stream_id[:96]},
+        )
+    if stream.source_ref == SYNTHETIC_TEST_SOURCE and synthetic_asset:
+        # 合成发布双重条件：流登记为合成 + 所属机器人为合成命名空间内的显式白名单资产
+        if payload.user:
+            raise _deny_publish(stream.stream_id, "vehicle_identity_on_synthetic_stream", 403)
+        presented = payload.token or payload.password
+        expected = synthetic_media_publish_token(stream.stream_id)
+        if not presented or not hmac.compare_digest(presented.encode(), expected.encode()):
+            raise _deny_publish(stream.stream_id, "invalid_synthetic_token")
+        return {"authorized": True, "action": payload.action, "stream_id": stream.stream_id}
+    if not robot or not payload.user or payload.user != robot.vehicle_id:
+        raise _deny_publish(stream.stream_id, "vehicle_identity_required")
+    if not payload.password or not hmac.compare_digest(
+        payload.password.encode(), vehicle_srt_publish_token(robot.vehicle_id).encode()
+    ):
+        raise _deny_publish(stream.stream_id, "invalid_vehicle_credential")
     return {"authorized": True, "action": payload.action, "stream_id": stream.stream_id}
