@@ -45,7 +45,7 @@ Internet（本阶段全部 OWNER_ACTION，未配置）
 | 正式公网 TLS | 443/tcp | 替换 bootstrap 证书；shared ingress 生产 server 块（模板内注释提供） |
 | Web HTTP 入口 | 80/443/tcp | 由 platform ingress 统一开放 |
 | 车端 MQTT 入口 | 8883/tcp | 车端凭证需 per-robot ACL；正式 MQTT 证书单独签发（不复用 bootstrap cert） |
-| 车端视频上云 | 8890/udp | SRT：鉴权 token + 独立加密 passphrase（两者禁止复用）；per-robot/per-stream 发布凭据需评估（bootstrap 全局 token 不是最终多车模型） |
+| 车端视频上云 | 8890/udp | SRT：鉴权 token + 独立加密 passphrase（两者禁止复用）；发布凭据已为 per-vehicle / per-stream HMAC 派生（全局主密钥不直接用于发布，见《车端云通信与视频链路》） |
 | WebRTC ICE | 8189/udp（+tcp fallback） | 端口保持；公网 ICE 未验收（本阶段只做 localhost candidate 断言） |
 | TURN | 3478/udp+tcp | coturn 仅有模板；公网 ICE 不达标时启用 |
 | off-host 备份 | — | COS / 第二云盘（同盘备份 ≠ 灾难恢复） |
