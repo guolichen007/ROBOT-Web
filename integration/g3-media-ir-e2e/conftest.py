@@ -188,39 +188,55 @@ def g3(tmp_path_factory):
         _cleanup_sim_robot()
 
 
+def _assert_sim_namespace(vehicle_id: str) -> None:
+    """fixture 只允许创建/清理合成命名空间资产；真实车辆（R001/R002/firebot-vehicle-*）一律拒绝。"""
+    from app.core.config import REAL_VEHICLE_IDS, is_synthetic_namespace
+
+    if not is_synthetic_namespace(vehicle_id) or vehicle_id in REAL_VEHICLE_IDS:
+        raise RuntimeError(f"G3 fixture refuses non-synthetic vehicle {vehicle_id!r}")
+
+
+# 本次会话创建的资源（只清理这些；预先存在的同名合成资产保留原状）
+CREATED: dict[str, set] = {"robots": set(), "streams": set()}
+
+
 def _ensure_sim_robot():
     from app.db.models import Robot, Site
     from app.db.session import SessionLocal
     from sqlalchemy import select
 
+    _assert_sim_namespace(SIM)
     with SessionLocal() as db:
         if not db.scalar(select(Robot).where(Robot.vehicle_id == SIM)):
             site = db.scalar(select(Site).order_by(Site.id).limit(1))
-            db.add(
-                Robot(
-                    vehicle_id=SIM,
-                    name="SIMULATED IR 01",
-                    site_id=site.id,
-                    agent_protocol="VEHICLE_AGENT_V1",
-                    enabled=False,
-                )
+            robot = Robot(
+                vehicle_id=SIM,
+                name="SIMULATED IR 01",
+                site_id=site.id,
+                agent_protocol="VEHICLE_AGENT_V1",
+                enabled=False,
             )
+            db.add(robot)
             db.commit()
+            CREATED["robots"].add(robot.id)
 
 
 def _cleanup_sim_robot():
+    """只删除本会话创建的模拟机器人及其派生行；预先存在的同名资产不动（只清理本次产生的流）。"""
     from app.db.models import Base, Robot
     from app.db.session import SessionLocal
     from sqlalchemy import delete, select
 
     with SessionLocal() as db:
         robot = db.scalar(select(Robot).where(Robot.vehicle_id == SIM))
-        if robot:
+        if robot and robot.id in CREATED["robots"]:
+            _assert_sim_namespace(robot.vehicle_id)
             for table in reversed(Base.metadata.sorted_tables):
                 if "robot_id" in table.c and table.name != "robots":
                     db.execute(table.delete().where(table.c.robot_id == robot.id))
             db.execute(delete(Robot).where(Robot.id == robot.id))
             db.commit()
+            CREATED["robots"].discard(robot.id)
 
 
 def run_sim(g3, *extra: str) -> dict:

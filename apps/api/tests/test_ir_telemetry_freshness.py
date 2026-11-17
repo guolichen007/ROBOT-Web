@@ -118,3 +118,52 @@ def test_invalid_temperature_type_rejected(runtime, bad):
     send(runtime, bad)
     assert latest(runtime)["top_ir"] == 42.0
     assert last_sample(runtime).top_ir_max == 42.0
+
+
+def sample_count(runtime):
+    from app.db.models import Robot, SensorSample
+    from sqlalchemy import func
+
+    with runtime.SessionLocal() as db:
+        robot = db.scalar(select(Robot).where(Robot.vehicle_id == SIM))
+        return db.scalar(
+            select(func.count()).select_from(SensorSample).where(SensorSample.robot_id == robot.id)
+        )
+
+
+def test_equal_timestamp_duplicate_is_idempotent(runtime):
+    """同会话、同 ts、同内容（QoS1 重投）：实时值不变、不重复落 SensorSample。"""
+    ts = datetime.now(UTC)
+    send(runtime, 61.5, ts=ts)
+    count = sample_count(runtime)
+    received_at = state(runtime)["telemetry_received_at"]
+    send(runtime, 61.5, ts=ts)  # send() 清除 1s 采样限流，确保不是被限流挡住
+    assert sample_count(runtime) == count
+    assert state(runtime)["telemetry_received_at"] == received_at
+    assert latest(runtime)["top_ir"] == 61.5
+
+
+def test_equal_timestamp_conflict_keeps_first_value(runtime):
+    """同会话、同 ts、不同内容：冲突，保留先到值，不覆盖实时值、不落样本。"""
+    ts = datetime.now(UTC)
+    send(runtime, 40.0, ts=ts)
+    count = sample_count(runtime)
+    send(runtime, 95.0, ts=ts)
+    assert latest(runtime)["top_ir"] == 40.0
+    assert state(runtime)["telemetry"]["thermal"]["max_temp"] == 40.0
+    assert sample_count(runtime) == count
+
+
+def test_equal_timestamp_after_session_change_is_applied(runtime):
+    """boot_id 变化（车端新会话）后同 ts 的新内容是新会话事实，正常应用。"""
+    from uuid import uuid4
+
+    from app.db.models import Robot
+
+    ts = datetime.now(UTC)
+    send(runtime, 33.0, ts=ts)
+    with runtime.SessionLocal.begin() as db:
+        db.scalar(select(Robot).where(Robot.vehicle_id == SIM)).boot_id = str(uuid4())
+    send(runtime, 34.0, ts=ts)
+    assert latest(runtime)["top_ir"] == 34.0
+    assert state(runtime)["telemetry"]["thermal"]["max_temp"] == 34.0

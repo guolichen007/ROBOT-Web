@@ -467,12 +467,33 @@ def process(name: str, payload: bytes, handle_ack) -> bool:
                 # G3：遥测“实时值”只接受新鲜、非 retained、且不早于当前实时值的消息。
                 # 过期（> stale 门限）/ 时钟超前 / retained / 乱序更旧的遥测一律不覆盖
                 # 实时 telemetry、Redis latest（top_ir 等）与实时 SensorSample。
-                previous_ts = (state.get("telemetry") or {}).get("ts")
+                previous = state.get("telemetry") or {}
+                previous_ts = previous.get("ts")
                 older = bool(
                     previous_ts
                     and data.get("ts")
                     and datetime.fromisoformat(data["ts"]) < datetime.fromisoformat(previous_ts)
                 )
+                # 相同 ts 语义（V1 telemetry 无 msg_id/boot_id，会话归属取云端当前 robot.boot_id）：
+                # - 同会话 + 同 ts + 同内容 = 幂等重复（MQTT QoS1 重投）：不更新实时值、不再落样本；
+                # - 同会话 + 同 ts + 不同内容 = 冲突：保留先到值，告警，不覆盖；
+                # - 会话已切换（boot_id 变化）：新会话事实，正常应用。
+                same_ts = bool(
+                    previous_ts
+                    and data.get("ts")
+                    and datetime.fromisoformat(data["ts"]) == datetime.fromisoformat(previous_ts)
+                    and state.get("telemetry_boot_id") == robot.boot_id
+                )
+                if same_ts:
+                    duplicate = previous == data
+                    logger.warning(
+                        "v1 telemetry same-ts %s ignored (vehicle=%s boot=%s)",
+                        "duplicate" if duplicate else "conflict",
+                        vehicle,
+                        robot.boot_id,
+                    )
+                    queue_redis_set(db, dedup, "1", ttl_seconds=300)
+                    return True
                 stale_limit = get_settings().vehicle_agent_v1_status_stale_seconds
                 if envelope.get("retained") or not -2 <= age <= stale_limit or older:
                     logger.warning(
@@ -494,6 +515,7 @@ def process(name: str, payload: bytes, handle_ack) -> bool:
                     robot.online_state = "ONLINE"
                 state["telemetry_online"] = robot.online_state == "ONLINE"
                 state["telemetry"] = data
+                state["telemetry_boot_id"] = robot.boot_id
                 state["telemetry_received_at"] = received.isoformat()
                 timestamp = datetime.fromisoformat(data["ts"]) if data.get("ts") else None
                 delay = (received - timestamp).total_seconds() * 1000 if timestamp else None

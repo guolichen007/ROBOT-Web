@@ -16,7 +16,17 @@ import urllib.error
 import urllib.request
 
 import pytest
-from conftest import REPO_ROOT, free_port, mediamtx_binary, spawn, stop, wait_for, wait_port
+from conftest import (
+    CREATED,
+    REPO_ROOT,
+    _assert_sim_namespace,
+    free_port,
+    mediamtx_binary,
+    spawn,
+    stop,
+    wait_for,
+    wait_port,
+)
 
 SIM_MEDIA = "firebot-sim-media-01"
 RGB = f"{SIM_MEDIA}-roof_rgb"
@@ -118,6 +128,7 @@ def _register_streams():
     from app.modules.media.router import SYNTHETIC_TEST_SOURCE
     from sqlalchemy import select
 
+    _assert_sim_namespace(SIM_MEDIA)
     with SessionLocal() as db:
         robot = db.scalar(select(Robot).where(Robot.vehicle_id == SIM_MEDIA))
         if robot is None:
@@ -127,8 +138,10 @@ def _register_streams():
             )
             db.add(robot)
             db.flush()
+            CREATED["robots"].add(robot.id)
         for stream_id, camera in ((RGB, "roof_rgb"), (THERMAL, "roof_thermal")):
             if not db.scalar(select(StreamRegistry).where(StreamRegistry.stream_id == stream_id)):
+                CREATED["streams"].add(stream_id)
                 db.add(
                     StreamRegistry(
                         stream_id=stream_id,
@@ -149,9 +162,13 @@ def _unregister_streams():
 
     with SessionLocal() as db:
         robot = db.scalar(select(Robot).where(Robot.vehicle_id == SIM_MEDIA))
-        db.execute(delete(StreamRegistry).where(StreamRegistry.stream_id.in_([RGB, THERMAL])))
-        if robot:
+        mine = [sid for sid in (RGB, THERMAL) if sid in CREATED["streams"]]
+        if mine:
+            db.execute(delete(StreamRegistry).where(StreamRegistry.stream_id.in_(mine)))
+            CREATED["streams"].difference_update(mine)
+        if robot and robot.id in CREATED["robots"]:
             db.delete(robot)
+            CREATED["robots"].discard(robot.id)
         db.commit()
 
 

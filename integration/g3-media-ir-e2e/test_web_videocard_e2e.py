@@ -26,8 +26,10 @@ from pathlib import Path
 
 import pytest
 from conftest import (
+    CREATED,
     REPO_ROOT,
     SIM,
+    _assert_sim_namespace,
     free_port,
     mediamtx_binary,
     run_sim,
@@ -183,10 +185,12 @@ def _register_streams():
     from app.modules.media.router import SYNTHETIC_TEST_SOURCE
     from sqlalchemy import select
 
+    _assert_sim_namespace(SIM)
     with SessionLocal() as db:
         robot = db.scalar(select(Robot).where(Robot.vehicle_id == SIM))
         for stream_id, camera in ((RGB, "roof_rgb"), (THERMAL, "roof_thermal")):
             if not db.scalar(select(StreamRegistry).where(StreamRegistry.stream_id == stream_id)):
+                CREATED["streams"].add(stream_id)
                 db.add(
                     StreamRegistry(
                         stream_id=stream_id,
@@ -206,7 +210,10 @@ def _unregister_streams():
     from sqlalchemy import delete
 
     with SessionLocal() as db:
-        db.execute(delete(StreamRegistry).where(StreamRegistry.stream_id.in_([RGB, THERMAL])))
+        mine = [sid for sid in (RGB, THERMAL) if sid in CREATED["streams"]]
+        if mine:
+            db.execute(delete(StreamRegistry).where(StreamRegistry.stream_id.in_(mine)))
+            CREATED["streams"].difference_update(mine)
         db.commit()
 
 
