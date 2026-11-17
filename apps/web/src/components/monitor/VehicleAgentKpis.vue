@@ -35,7 +35,12 @@ const cards = computed(() => {
     },
     {
       label: simulated.value ? '温度（模拟）' : '温度',
-      value: metric(v1 ? telemetry?.thermal?.max_temp : robot?.top_ir, '℃'),
+      // 已收到 V1 遥测但 thermal=null 或 max_temp=null（车端/模拟源显式上报“无测温值”）→ 未知；
+      // 尚无任何遥测仍为 --（不把“没数据”说成“未知温度”）
+      value:
+        v1 && telemetry && 'thermal' in telemetry && typeof telemetry.thermal?.max_temp !== 'number'
+          ? '未知'
+          : metric(v1 ? telemetry?.thermal?.max_temp : robot?.top_ir, '℃'),
       stale: freshness.value.stale,
     },
     {
@@ -57,7 +62,13 @@ const cards = computed(() => {
     SIMULATED · 模拟数据源（{{ monitor.robot?.vehicle_id }}）——非真实车辆/传感器
   </p>
   <section class="hmi-kpis" aria-label="车辆实时指标">
-    <article v-for="card in cards" :key="card.label" class="panel hmi-kpi" :data-stale="card.stale">
+    <article
+      v-for="card in cards"
+      :key="card.label"
+      class="panel hmi-kpi"
+      :data-stale="card.stale"
+      :data-kpi="card.label.startsWith('温度') ? 'temperature' : undefined"
+    >
       <span>{{ card.label }}</span>
       <strong>{{ card.value }}</strong>
       <small>{{ card.stale ? '陈旧 / 离线' : simulated ? '模拟数据（SIMULATED）' : '服务器数据' }}</small>

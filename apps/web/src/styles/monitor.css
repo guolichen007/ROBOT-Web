@@ -573,6 +573,18 @@
   border-radius: 50%;
   background: #22b15e;
 }
+.video-stalled {
+  position: absolute;
+  inset: auto 8px 8px 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(180, 35, 24, 0.88);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  z-index: 2;
+}
+
 .video-time {
   position: absolute;
   left: 12px;

@@ -42,6 +42,55 @@ let hadLiveSession = false
 let reconnectAttempts = 0
 let reconnectTimer: number | undefined
 
+// 画面停滞看门狗：WebRTC 在源断流后仍可能保持 connected 数秒（ICE 超时前），此期间不得继续
+// 宣称「实时」。以浏览器真实解码帧（requestVideoFrameCallback / currentTime 推进）为准：
+// 连续 STALL_MS 无新帧 → stalled（显示“画面中断”，隐藏实时标签）；新帧到达即自动恢复。
+const STALL_MS = 3000
+const stalled = ref(false)
+let lastFrameAt = 0
+let lastMediaTime = -1
+let stallTimer: number | undefined
+let frameCallbackVideo: HTMLVideoElement | null = null
+
+function markFrame(): void {
+  lastFrameAt = performance.now()
+  if (stalled.value) stalled.value = false
+}
+
+function watchFrames(el: HTMLVideoElement): void {
+  frameCallbackVideo = el
+  const anyVideo = el as HTMLVideoElement & {
+    requestVideoFrameCallback?: (cb: () => void) => number
+  }
+  if (typeof anyVideo.requestVideoFrameCallback === 'function') {
+    const tick = () => {
+      if (frameCallbackVideo !== el) return
+      markFrame()
+      anyVideo.requestVideoFrameCallback!(tick)
+    }
+    anyVideo.requestVideoFrameCallback(tick)
+  }
+  markFrame()
+  window.clearInterval(stallTimer)
+  stallTimer = window.setInterval(() => {
+    if (state.value !== 'LIVE') return
+    // 无 rVFC 的浏览器以 currentTime 推进作为帧到达
+    if (el.currentTime !== lastMediaTime) {
+      if (lastMediaTime >= 0 && typeof anyVideo.requestVideoFrameCallback !== 'function') markFrame()
+      lastMediaTime = el.currentTime
+    }
+    if (performance.now() - lastFrameAt > STALL_MS) stalled.value = true
+  }, 500)
+}
+
+function stopFrameWatch(): void {
+  frameCallbackVideo = null
+  window.clearInterval(stallTimer)
+  stallTimer = undefined
+  stalled.value = false
+  lastMediaTime = -1
+}
+
 const canPlay = computed(() => Boolean(props.stream?.stream_id && props.stream.state !== 'DISABLED'))
 const stateText = computed(() => {
   if (state.value === 'DISABLED') return '通道已停用'
@@ -116,6 +165,7 @@ async function disconnect(): Promise<void> {
     resourceUrl = ''
   }
   old?.close()
+  stopFrameWatch()
   if (video.value) video.value.srcObject = null
   // 播放器回到空闲态，而不是回落到「媒体源状态」。
   state.value = idlePlayerState()
@@ -158,13 +208,17 @@ async function startSession(isReconnect: boolean): Promise<void> {
     pc.ontrack = (event) => {
       if (!valid()) return
       if (video.value) video.value.srcObject = event.streams[0]
-      if (pc.connectionState === 'connected') state.value = 'LIVE'
+      if (pc.connectionState === 'connected') {
+        state.value = 'LIVE'
+        if (video.value) watchFrames(video.value)
+      }
     }
     pc.onconnectionstatechange = () => {
       if (!valid()) return
       if (pc.connectionState === 'connected' && video.value?.srcObject) {
         state.value = 'LIVE'
         hadLiveSession = true
+        watchFrames(video.value)
       }
       if (['failed', 'disconnected'].includes(pc.connectionState)) {
         // 短暂断开：仅已建立过会话且流仍 active 时有界自动重连
@@ -263,7 +317,10 @@ onUnmounted(() => {
           )
         }}
       </div>
-      <div v-if="state === 'LIVE'" class="video-live-tag">{{ streamStateLabel(state) }}</div>
+      <div v-if="state === 'LIVE' && !stalled" class="video-live-tag">{{ streamStateLabel(state) }}</div>
+      <div v-if="state === 'LIVE' && stalled" class="video-stalled" data-video-stalled role="status">
+        画面中断（{{ STALL_MS / 1000 }}s 无新帧），等待恢复…
+      </div>
       <button
         v-if="state === 'LIVE'"
         class="video-fullscreen"

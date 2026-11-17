@@ -39,4 +39,20 @@ describe('VehicleAgentKpis SIMULATED 标识', () => {
       expect(wrapper.text()).not.toContain('模拟')
     }
   })
+
+  it('thermal=null 显示“未知”，数值保留一位小数', () => {
+    const base = {
+      vehicle_id: 'firebot-sim-ir-01',
+      agent_protocol: 'VEHICLE_AGENT_V1' as const,
+      simulation: { simulated: true as const, label: 'SIMULATED' as const, source: 'simulated_vehicle_ids' },
+    }
+    const unknown = mountWith({ ...base, agent_state: { telemetry: { thermal: { max_temp: null } } } })
+    expect(unknown.find('[data-kpi="temperature"] strong').text()).toBe('未知')
+    const nullObject = mountWith({ ...base, agent_state: { telemetry: { thermal: null } } })
+    expect(nullObject.find('[data-kpi="temperature"] strong').text()).toBe('未知')
+    const known = mountWith({ ...base, agent_state: { telemetry: { thermal: { max_temp: 67.8 } } } })
+    expect(known.find('[data-kpi="temperature"] strong').text()).toBe('67.8℃')
+    const none = mountWith({ ...base, agent_state: { telemetry: {} } })
+    expect(none.find('[data-kpi="temperature"] strong').text()).toBe('--')
+  })
 })
