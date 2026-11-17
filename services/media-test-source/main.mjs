@@ -53,7 +53,7 @@ function buildTarget() {
     // 注意：streamid 的分号分隔结构必须保持原文；token/passphrase 作为“值”需编码
     // （base64 含 '+'，ffmpeg 会对查询值做 URL 解码，'+' 会被解码为空格导致鉴权/加密失败）。
     // per-vehicle SRT 发布语义：user 必须为流所属 canonical vehicle_id（默认 R001 合成流）
-    // SRT_USER 显式为空字符串 = 合成流（全局合成 token，user 为空）
+    // SRT_USER 显式为空字符串 = 合成流（user 为空，口令 = HMAC(master,"synthetic-media:<stream>") 逐流派生）
     const srtUser = process.env.SRT_USER ?? 'R001'
     const streamid = `publish:${streamId}:${srtUser}:${encodeURIComponent(token)}`
     let query = `streamid=${streamid}&pkt_size=1316`
@@ -61,7 +61,7 @@ function buildTarget() {
     return `${srtOrigin}?${query}`
   }
   // RTSP 发布身份（G3）：真实车辆流必须以车辆身份（user=vehicle_id、password=该车派生 token）
-  // 发布；只有登记为 SYNTHETIC_TEST 的合成流才使用全局合成 token（?token=）。
+  // 发布；只有登记为 SYNTHETIC_TEST 的合成流才使用逐流派生合成口令（?token=，非全局主密钥）。
   const rtspUser = process.env.RTSP_USER || ''
   if (rtspUser) {
     const origin = new URL(rtspOrigin)
