@@ -40,7 +40,9 @@ class SoftwareStateMachine:
         self.status_pub = status_pub
         self._patrol_thread = None
         self._patrol_stop = None  # 每次 patrol 创建新 Event，杜绝跨次残留
-        self.lock = threading.Lock()
+        # RLock：dispatch/_patrol_loop 持锁期间会调用 _publish_status（其内部也取锁），
+        # 非重入 Lock 会自死锁（G2-P0 实测：首命令后心跳停摆、后续命令冻结）。
+        self.lock = threading.RLock()
 
     def _feedback(self, command_id, action, status, detail):
         msg = SoftwareFeedback()
@@ -56,8 +58,11 @@ class SoftwareStateMachine:
         )
 
     def _publish_status(self):
+        with self.lock:  # 周期心跳与状态机线程并发安全（G2-P0 心跳修复）
+            state = self.state
+            current_command = self.current_command
         msg = SoftwareStatus()
-        msg.state = self.state
+        msg.state = state
         with open("/proc/uptime") as fh:
             msg.uptime_seconds = float(fh.read().split()[0])
         msg.pid = os.getpid()
@@ -68,8 +73,7 @@ class SoftwareStateMachine:
             )
         msg.mem_available_bytes = float(avail)
         msg.diagnostics = (
-            f"command={self.current_command or 'none'}; "
-            "hardware_executors=NONE (software test only)"
+            f"command={current_command or 'none'}; hardware_executors=NONE (software test only)"
         )
         msg.ts = datetime.now(timezone.utc).isoformat()
         self.status_pub.publish(msg)
@@ -172,10 +176,17 @@ def main():
         "[SOFTWARE_TEST] command node ready; namespace /firebot_001/software; "
         "hardware executors=NONE"
     )
+    # G2-P0 心跳修复：SoftwareStatus 静置时也每 2s 周期刷新（原实现仅在状态迁移时
+    # 发布，导致云端软件状态 age 超过 10s 变 UNKNOWN）。/use_sim_time 未启用
+    # （现场 rosparam 未设置）→ rospy.Timer 真实时间推进，不依赖模拟 ROS 时间。
+    status_timer = rospy.Timer(rospy.Duration(2.0), lambda _event: machine._publish_status())
     rospy.Subscriber(
         "/firebot_001/software/command", SoftwareCommand, machine.dispatch, queue_size=10
     )
-    rospy.spin()
+    try:
+        rospy.spin()
+    finally:
+        status_timer.shutdown()
 
 
 if __name__ == "__main__":
