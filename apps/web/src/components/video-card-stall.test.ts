@@ -175,7 +175,9 @@ describe('VideoCard 首帧门控 / 停滞看门狗 / 回调隔离', () => {
     await nextTick()
     expect(wrapper.find('.video-live-tag').exists()).toBe(true)
     const stale = [...frames.pending.values()]
-    await wrapper.setProps({ stream: { stream_id: 'other', state: 'ONLINE', camera_type: 'roof_rgb' } })
+    await wrapper.setProps({
+      stream: { stream_id: 'other', state: 'ONLINE', camera_type: 'roof_rgb' } as never,
+    })
     await flush()
     expect(frames.stats.cancelled).toBeGreaterThanOrEqual(1)
     stale.forEach((cb) => cb()) // 浏览器仍投递已排队的旧回调

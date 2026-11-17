@@ -89,11 +89,15 @@ function disabled(action: DiagnosticAction): boolean {
   return Boolean(disabledReason(action))
 }
 
+// 历史（HTTP）只经 monitor.mergeCommands：版本感知、不推进 WS watermark、不覆盖已确认的新终态。
+// historyIds 保留本面板刚提交但尚未出现在历史响应中的命令（避免轮询把新命令“挤掉”）。
 function mergeHistory(list: AgentCommand[]) {
-  for (const row of [...list].reverse()) {
-    monitor.applyEvent({ stream_id: monitor.lastStreamId, event_type: 'command.updated', data: row })
-  }
-  historyIds.value = list.map((row) => row.command_id).slice(0, HISTORY_LIMIT)
+  monitor.mergeCommands(list)
+  const vehicleRobotId = monitor.robot?.id
+  const fromServer = list.filter((row) => !vehicleRobotId || row.robot_id === vehicleRobotId)
+  const known = new Set(fromServer.map((row) => row.command_id))
+  const pendingLocal = historyIds.value.filter((id) => !known.has(id))
+  historyIds.value = [...pendingLocal, ...fromServer.map((row) => row.command_id)].slice(0, HISTORY_LIMIT)
 }
 
 async function loadHistory(vehicle: string, token: number): Promise<boolean> {
@@ -165,7 +169,7 @@ async function send(action: DiagnosticAction, params: Record<string, unknown>) {
       0,
       HISTORY_LIMIT,
     )
-    monitor.applyEvent({ stream_id: monitor.lastStreamId, event_type: 'command.updated', data })
+    monitor.mergeCommands([data])
     schedule(vehicle, token, ACTIVE_POLL_MS)
   } catch (reason) {
     if (token === generation) error.value = errorMessage(reason)

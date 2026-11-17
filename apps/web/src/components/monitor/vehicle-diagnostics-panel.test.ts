@@ -211,6 +211,96 @@ describe('VehicleDiagnosticsPanel', () => {
   })
 })
 
+describe('VehicleDiagnosticsPanel 历史/WS 竞态', () => {
+  beforeEach(() => {
+    vi.useRealTimers()
+    vi.mocked(api.post).mockReset()
+    vi.mocked(api.get).mockReset()
+  })
+
+  it('历史请求在途时 WS 推来终态，迟到的旧历史响应不得覆盖', async () => {
+    const monitor = setup(robot())
+    let resolve: (value: unknown) => void = () => {}
+    vi.mocked(api.get).mockReturnValue(new Promise((r) => (resolve = r)) as never)
+    const wrapper = mount(VehicleDiagnosticsPanel)
+    await flush()
+    monitor.applyEvent({
+      stream_id: '200-0',
+      event_type: 'command.updated',
+      data: cmd('R-1', 'patrol', 'SUCCEEDED', {
+        published_at: '2026-11-17T05:00:01Z',
+        ack_at: '2026-11-17T05:00:01Z',
+        terminal_at: '2026-11-17T05:00:09Z',
+      }),
+    })
+    resolve({
+      data: [
+        cmd('R-1', 'patrol', 'EXECUTING', {
+          published_at: '2026-11-17T05:00:01Z',
+          ack_at: '2026-11-17T05:00:01Z',
+        }),
+      ],
+    })
+    await flush()
+    expect(wrapper.find('[data-command-id="R-1"] [data-lifecycle]').attributes('data-lifecycle')).toBe(
+      'SUCCEEDED',
+    )
+    expect(monitor.lastStreamId).toBe('200-0') // HTTP 合并不改写 WS watermark
+  })
+
+  it('切车后旧车辆的迟到历史响应被丢弃，不进入新车辆面板', async () => {
+    const monitor = setup(robot())
+    const second = robot({ id: 'fb02', vehicle_id: 'firebot-vehicle-02' })
+    monitor.snapshot.robots = [...monitor.snapshot.robots, second]
+    const pending: Array<(value: unknown) => void> = []
+    vi.mocked(api.get).mockImplementation(() => new Promise((r) => pending.push(r)) as never)
+    const wrapper = mount(VehicleDiagnosticsPanel)
+    await flush()
+    monitor.activeRobotId = 'firebot-vehicle-02'
+    await flush()
+    // 旧车辆（fb01）的第一个请求迟到返回
+    pending[0]!({ data: [cmd('OLD-VEH', 'ping', 'SUCCEEDED')] })
+    await flush()
+    expect(wrapper.find('[data-command-id="OLD-VEH"]').exists()).toBe(false)
+    pending[1]?.({ data: [] })
+    await flush()
+    expect(wrapper.find('[data-command-id="OLD-VEH"]').exists()).toBe(false)
+  })
+
+  it('浏览器刷新（重新挂载）：历史恢复并展示 ACK / Feedback / 终态 / 只读原因', async () => {
+    const closed = Object.fromEntries(
+      Object.entries(robot().vehicle_agent_execution!.commands).map(([key, value]) => [
+        key,
+        { ...value, ready: false, reason: 'VEHICLE_AGENT_DOWNLINK_DISABLED' },
+      ]),
+    )
+    const history = [
+      cmd('H-1', 'patrol', 'CANCELLED', {
+        ack_reason: 'STOPPED',
+        ack_payload_json: {
+          code: 'OK',
+          message: '',
+          success: true,
+          ack_source: 'vehicle',
+          software_feedback: [{ state: 'ACCEPTED' }, { state: 'EXECUTING' }, { state: 'STOPPED' }],
+        },
+      }),
+    ]
+    for (let i = 0; i < 2; i += 1) {
+      setup(robot({ vehicle_agent_execution: { ...robot().vehicle_agent_execution!, commands: closed } }))
+      vi.mocked(api.get).mockResolvedValue({ data: history })
+      const wrapper = mount(VehicleDiagnosticsPanel)
+      await flush()
+      const tr = wrapper.find('[data-command-id="H-1"]')
+      expect(tr.find('[data-col="ack"]').text()).toContain('OK')
+      expect(tr.find('[data-col="feedback"]').text()).toBe('ACCEPTED → EXECUTING → STOPPED')
+      expect(tr.find('[data-lifecycle]').attributes('data-lifecycle')).toBe('CANCELLED')
+      expect(wrapper.find('[data-reason-for="ping"]').text()).toContain('下行已关闭')
+      wrapper.unmount()
+    }
+  })
+})
+
 function cmd(id: string, action: string, status: string, extra: Partial<AgentCommand> = {}): AgentCommand {
   return {
     id,

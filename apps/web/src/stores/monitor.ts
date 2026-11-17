@@ -107,6 +107,61 @@ export const useMonitorStore = defineStore('monitor', () => {
     else rows.unshift(value)
   }
 
+  // 命令行“新旧”判定（HTTP 历史/POST 响应与 WS 增量合并用）。服务端生命周期允许
+  // PUBLISHED_UNCONFIRMED ↔ ACK_ACCEPTED 双向（迟到 ACK / 状态确认超时），因此非终态不能按
+  // 固定秩排序。规则：
+  // 1) 已是真正终态的行，永不被非终态覆盖（旧 HTTP 响应不得撤销 WS 已确认终态）；
+  // 2) 其余按“服务端最近一次状态变更时间” terminal_at > ack_at > published_at > issued_at 比较；
+  // 3) 时间相同则按软件反馈条数，再相同视为同一事实（幂等，不替换）。
+  const TERMINAL = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED', 'EXPIRED', 'ACK_REJECTED', 'ACK_UNSUPPORTED'])
+  function commandStamp(row: AgentCommand): number {
+    const value = row.terminal_at || row.ack_at || row.published_at || row.issued_at
+    const parsed = value ? Date.parse(value) : NaN
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+  function isNewerCommand(incoming: AgentCommand, current: AgentCommand): boolean {
+    const terminalIn = TERMINAL.has(incoming.lifecycle_status)
+    const terminalCur = TERMINAL.has(current.lifecycle_status)
+    if (terminalCur && !terminalIn) return false
+    if (terminalIn && !terminalCur) return true
+    const a = commandStamp(incoming)
+    const b = commandStamp(current)
+    if (a !== b) return a > b
+    const feedbackA = incoming.ack_payload_json?.software_feedback?.length ?? 0
+    const feedbackB = current.ack_payload_json?.software_feedback?.length ?? 0
+    if (feedbackA !== feedbackB) return feedbackA > feedbackB
+    // 同一时刻、同反馈数但状态不同（如 ACK_ACCEPTED→EXECUTING 不改时间戳）：
+    // EXECUTING 只能由 ACK_ACCEPTED 前进而来
+    return incoming.lifecycle_status === 'EXECUTING' && current.lifecycle_status === 'ACK_ACCEPTED'
+  }
+
+  /**
+   * HTTP 来源（历史查询 / 命令 POST 响应 / 轮询）的命令行合并：不经过 applyEvent，
+   * **不推进/改写 WS watermark**（lastStreamId / snapshot_watermark），且只在 incoming 更新时替换，
+   * 旧响应不得覆盖 WS 已确认的新终态。返回实际被替换/新增的行数。
+   */
+  function mergeCommands(rows: AgentCommand[]): number {
+    snapshot.value.commands ??= []
+    let changed = 0
+    for (const row of rows) {
+      const list: AgentCommand[] = snapshot.value.commands
+      const index = list.findIndex((item) => item.command_id === row.command_id || item.id === row.id)
+      if (index < 0) {
+        list.push(row)
+        changed += 1
+      } else if (isNewerCommand(row, list[index]!)) {
+        list[index] = { ...list[index], ...row }
+        changed += 1
+      }
+    }
+    if (changed) {
+      snapshot.value.commands = [...snapshot.value.commands]
+        .sort((x, y) => Date.parse(y.issued_at) - Date.parse(x.issued_at))
+        .slice(0, 200)
+    }
+    return changed
+  }
+
   function applyEvent(event: RealtimeEvent): void {
     lastStreamId.value = event.stream_id
     snapshot.value.snapshot_watermark = event.stream_id
@@ -152,7 +207,12 @@ export const useMonitorStore = defineStore('monitor', () => {
       replaceById(snapshot.value.tasks, event.data as Task)
     } else if (event.event_type === 'command.updated') {
       snapshot.value.commands ??= []
-      replaceById(snapshot.value.commands, event.data as AgentCommand)
+      const incoming = event.data as AgentCommand
+      const current = snapshot.value.commands.find((row) => row.id === incoming.id)
+      // WS 增量按服务端顺序到达，正常总是更新；仅防御重放/重复终态把已确认终态改回非终态
+      if (!current || isNewerCommand(incoming, current) || !isNewerCommand(current, incoming)) {
+        replaceById(snapshot.value.commands, incoming)
+      }
       snapshot.value.commands = snapshot.value.commands.slice(0, 200)
     }
   }
@@ -296,6 +356,7 @@ export const useMonitorStore = defineStore('monitor', () => {
     disconnect,
     loadSnapshot,
     applyEvent,
+    mergeCommands,
     reconnectDelay,
   }
 })
