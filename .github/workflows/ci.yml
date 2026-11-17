@@ -357,21 +357,28 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      # gitleaks 门禁保持 exit 1；同时把发现以 workflow 注解暴露，供无管理员权限的
-      # 交付方通过 check-runs API 读取精确 file:line（可审计、不降级）。
-      - run: |
-          set +e
+      # gitleaks 门禁保持 exit 1。release 二进制固定 SHA256（官方 checksums.txt），校验失败立即停止；
+      # 扫描强制 --redact=100、报告写文件（不进日志），注解只含 RuleID/File/Line/Commit/Fingerprint。
+      - name: gitleaks (pinned + redacted)
+        env:
+          GITLEAKS_VERSION: 8.24.2
+          GITLEAKS_SHA256: fa0500f6b7e41d28791ebc680f5dd9899cd42b58629218a5f041efa899151a8e
+        run: |
+          set -euo pipefail
           curl -fsSL -o /tmp/gitleaks.tgz \
-            https://github.com/gitleaks/gitleaks/releases/download/v8.24.2/gitleaks_8.24.2_linux_x64.tar.gz
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tgz" | sha256sum -c -
           tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
           chmod +x /tmp/gitleaks
-          # 自检：规则真实加载 + 隔离植入凭证必检出（rc≠0）+ 例外不外溢；失败即门禁失败
-          python3 scripts/gitleaks_selftest.py /tmp/gitleaks || exit 1
-          /tmp/gitleaks git --config=.gitleaks.toml --no-banner --report-format json . \
-            > /tmp/gitleaks.out 2>&1
+          # 自检：规则真实加载 + 植入凭证必检出（rc≠0）+ 例外不外溢 + 输出不含植入值
+          python3 scripts/gitleaks_selftest.py /tmp/gitleaks
+          set +e
+          /tmp/gitleaks git --config=.gitleaks.toml --no-banner --redact=100 \
+            --report-format=json --report-path=/tmp/gitleaks.json . > /tmp/gitleaks.log 2>&1
           echo $? > /tmp/gitleaks.rc
           set -e
-          cat /tmp/gitleaks.out
+          # 只输出摘要行（gitleaks 自身日志已脱敏，仍不回显原文）
+          grep -E "commits scanned|leaks found|no leaks found" /tmp/gitleaks.log || true
           python3 scripts/gitleaks_annotate.py
       - run: docker run --rm -v "$PWD:/repo" ghcr.io/aquasecurity/trivy:0.59.1 fs --db-repository ghcr.io/aquasecurity/trivy-db:2 --exit-code 1 --severity CRITICAL --ignore-unfixed /repo
       - run: docker run --rm -v "$PWD:/repo" ghcr.io/aquasecurity/trivy:0.59.1 fs --db-repository ghcr.io/aquasecurity/trivy-db:2 --exit-code 0 --severity HIGH,CRITICAL --format json --output /repo/trivy-high.json /repo

@@ -67,7 +67,7 @@ def check_config() -> int:
     return len(rules)
 
 
-def scan(gitleaks: str, files: dict[str, str]) -> tuple[int, list[dict]]:
+def scan(gitleaks: str, files: dict[str, str]) -> tuple[int, list[dict], str]:
     with tempfile.TemporaryDirectory() as tmp:
         git = ["git", "-C", tmp, "-c", "user.name=t", "-c", "user.email=t@t"]
         subprocess.run([*git, "init", "-q"], check=True)
@@ -91,8 +91,30 @@ def scan(gitleaks: str, files: dict[str, str]) -> tuple[int, list[dict]]:
             text=True,
             timeout=120,
         )
-        findings = json.loads(report.read_text()) if report.is_file() else []
-        return proc.returncode, findings
+        raw_report = report.read_text() if report.is_file() else "[]"
+        findings = json.loads(raw_report)
+        # 端到端脱敏反证：用 CI 注解脚本处理同一报告，收集其完整输出
+        rc_file = Path(tmp) / ".rc"
+        rc_file.write_text(str(proc.returncode))
+        annotate = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys, pathlib; sys.path.insert(0, sys.argv[1]); "
+                "import gitleaks_annotate as a; "
+                "sys.exit(a.main(pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])))",
+                str(ROOT / "scripts"),
+                str(report),
+                str(rc_file),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        transcript = proc.stdout + proc.stderr + raw_report + annotate.stdout + annotate.stderr
+        if findings and annotate.returncode != 1:
+            fail(f"annotate gate returned {annotate.returncode} for findings (expected 1)")
+        return proc.returncode, findings, transcript
 
 
 def main() -> int:
@@ -112,16 +134,34 @@ def main() -> int:
         ("suffix.yml", "generic-api-key"),
         ("prefix.yml", "generic-api-key"),
     }
-    rc, findings = scan(gitleaks, planted)
+    rc, findings, transcript = scan(gitleaks, planted)
     if rc == 0:
         fail("planted credentials scanned with rc=0 (rules not loaded / gate disabled)")
     missing = expected - {(f["File"], f["RuleID"]) for f in findings}
     if missing:
         fail(f"planted credentials not detected: {sorted(missing)}")
-    _, ok = scan(gitleaks, {"ok.yml": 'auth_token: "ci-jwt-secret-at-least-32-characters-long"\n'})
+    # 脱敏反证：植入值（及其可识别片段）不得出现在 gitleaks 日志、JSON 报告、CI 注解任何一处
+    for name, value in (("aws", aws), ("generic", body)):
+        for probe in (value, value[:12], value[-12:]):
+            if probe in transcript:
+                fail(
+                    f"planted {name} credential fragment leaked into scan/report/annotation output"
+                )
+    for finding in findings:
+        # --redact=100：Secret == "REDACTED"；Match 为脱敏后的上下文（凭证位被 REDACTED 替换）
+        if finding.get("Secret") != "REDACTED":
+            fail(f"report Secret not redacted ({finding.get('RuleID')})")
+        if "REDACTED" not in str(finding.get("Match", "")):
+            fail(f"report Match not redacted ({finding.get('RuleID')})")
+    _, ok, _ = scan(
+        gitleaks, {"ok.yml": 'auth_token: "ci-jwt-secret-at-least-32-characters-long"\n'}
+    )
     if ok:
         fail(f"exact test value unexpectedly flagged: {ok[0].get('RuleID')}")
-    print(f"GITLEAKS_SELFTEST=PASS rules={n_rules} planted_rc={rc} detected={len(expected)}")
+    print(
+        f"GITLEAKS_SELFTEST=PASS rules={n_rules} planted_rc={rc} detected={len(expected)} "
+        "redaction=verified(log,report,annotation)"
+    )
     return 0
 
 
