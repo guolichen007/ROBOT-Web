@@ -162,8 +162,6 @@ const sevClass = computed(() => ({
   battery: batterySeverityClass.value,
   task: taskSeverity(activeTask.value?.type),
   localization: localizationSeverity(robot.value?.localization_status),
-  topIr: channelSeverity(effectiveChannelState('top_ir')),
-  bottomIr: channelSeverity(effectiveChannelState('bottom_ir')),
   smoke: channelSeverity(effectiveChannelState('smoke')),
   freshness:
     freshnessAge.value == null
@@ -321,18 +319,7 @@ function onUserMenuClick(data: { value?: unknown }): void {
               >
             </div>
             <div class="status-telemetry-row">
-              <span class="status-cell status-telemetry"
-                ><span>顶部热像</span
-                ><b :class="sevLabel(sevClass.topIr)">{{
-                  metricValue(robot?.top_ir, 'top_ir', '℃')
-                }}</b></span
-              >
-              <span class="status-cell status-telemetry"
-                ><span>底部红外</span
-                ><b :class="sevLabel(sevClass.bottomIr)">{{
-                  metricValue(robot?.bottom_ir, 'bottom_ir', '℃')
-                }}</b></span
-              >
+              <!-- G3-R2：不配置独立红外测温传感器，顶栏不展示顶部/底部红外温度数值（API 字段保留兼容） -->
               <span class="status-cell status-telemetry"
                 ><span>烟雾浓度</span
                 ><b :class="sevLabel(sevClass.smoke)">{{ metricValue(robot?.smoke, 'smoke', '%') }}</b></span

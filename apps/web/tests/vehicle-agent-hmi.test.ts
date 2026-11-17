@@ -176,7 +176,10 @@ describe('vehicle agent HMI', () => {
     monitor.connected = false
     const wrapper = mount(VehicleAgentKpis)
     mounted.push(wrapper)
-    expect(wrapper.findAll('[data-stale="true"]')).toHaveLength(5)
+    // G3-R2：首页固定四项指标（状态 / 电池 / 烟雾 / 通信），离线时四项全部标记陈旧
+    expect(wrapper.findAll('.hmi-kpi')).toHaveLength(4)
+    expect(wrapper.findAll('[data-stale="true"]')).toHaveLength(4)
+    expect(wrapper.find('[data-kpi="temperature"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('--')
     expect(wrapper.text()).toContain('陈旧 / 离线')
     expect(agentFreshness(robot(), false, Date.now()).stale).toBe(true)

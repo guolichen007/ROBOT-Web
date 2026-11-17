@@ -10,6 +10,11 @@
   gap: 10px;
   overflow: hidden;
 }
+/* SIMULATED 横幅是 VehicleAgentKpis 片段的第一个子节点：多占一行，KPI 行须保持 auto，
+ * 否则 KPI 落入 minmax(0,1fr) 行被地图区挤压裁切（G3-R2 顺手修复，真实车辆无横幅不受影响）。 */
+.yd-monitor-view:has(> .hmi-sim-banner) {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
 
 /* ---------------- Situation banner (teleported above topbar) ---------------- */
 .workspace-alert {
@@ -1174,7 +1179,8 @@
 }
 .hmi-kpis {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  /* G3-R2：取消独立温度卡片后固定四项（状态 / 电池 / 烟雾 / 通信） */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   min-width: 0;
 }

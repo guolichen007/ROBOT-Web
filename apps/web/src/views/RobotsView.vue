@@ -29,11 +29,9 @@ const CHANNEL_LABELS: Array<[string, string]> = [
   ['odom', '里程计'],
   ['battery', '电量'],
   ['smoke', '烟雾'],
-  ['top_ir', '上红外'],
-  ['bottom_ir', '下红外'],
   ['estop', '急停'],
   ['roof_rgb', '车顶相机'],
-  ['roof_thermal', '顶部热像'],
+  ['roof_thermal', '顶部热成像视频'],
 ]
 
 function isCurrent(robot: RobotState): boolean {

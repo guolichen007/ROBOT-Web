@@ -26,29 +26,29 @@ const cards = computed(() => {
             ? '未启动'
             : '--'
       : '在线'
+  // G3-R2 硬件契约：不配置独立红外测温传感器 → 首页固定四项指标，不含温度卡片。
+  // 即使后端仍收到历史/兼容 telemetry.thermal 或 top_ir，也不在此展示（热成像视频另由 VideoSurveillancePanel 承载）。
   return [
-    { label: '智能车状态', value: state, stale: v1 ? freshness.value.statusStale : !freshness.value.online },
     {
+      key: 'state',
+      label: '智能车状态',
+      value: state,
+      stale: v1 ? freshness.value.statusStale : !freshness.value.online,
+    },
+    {
+      key: 'battery',
       label: '电池',
       value: metric(v1 ? telemetry?.battery?.percentage : robot?.battery, '%'),
       stale: freshness.value.stale,
     },
     {
-      label: simulated.value ? '温度（模拟）' : '温度',
-      // 已收到 V1 遥测但 thermal=null 或 max_temp=null（车端/模拟源显式上报“无测温值”）→ 未知；
-      // 尚无任何遥测仍为 --（不把“没数据”说成“未知温度”）
-      value:
-        v1 && telemetry && 'thermal' in telemetry && typeof telemetry.thermal?.max_temp !== 'number'
-          ? '未知'
-          : metric(v1 ? telemetry?.thermal?.max_temp : robot?.top_ir, '℃'),
-      stale: freshness.value.stale,
-    },
-    {
+      key: 'smoke',
       label: '烟雾',
       value: metric(v1 ? telemetry?.smog?.percentage : robot?.smoke, '%'),
       stale: freshness.value.stale,
     },
     {
+      key: 'link',
       label: '通信状态 / 接收延迟',
       value: freshness.value.online ? metric(robot?.agent_state?.receive_latency_ms, 'ms') : '未连接',
       stale: !freshness.value.online,
@@ -64,10 +64,10 @@ const cards = computed(() => {
   <section class="hmi-kpis" aria-label="车辆实时指标">
     <article
       v-for="card in cards"
-      :key="card.label"
+      :key="card.key"
       class="panel hmi-kpi"
       :data-stale="card.stale"
-      :data-kpi="card.label.startsWith('温度') ? 'temperature' : undefined"
+      :data-kpi="card.key"
     >
       <span>{{ card.label }}</span>
       <strong>{{ card.value }}</strong>

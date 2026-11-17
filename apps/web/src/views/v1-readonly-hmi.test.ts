@@ -268,6 +268,10 @@ describe('RobotsView 急停文案语义（G1-R1）', () => {
     const text = wrapper.text()
     expect(text).toContain('未验证') // firebot-vehicle-01：无急停数据源
     expect(text).toContain('未触发') // R002：真实急停 false
+    // G3-R2：设备详情不再列出独立红外测温通道；热成像视频通道保留
+    expect(text).not.toContain('上红外')
+    expect(text).not.toContain('下红外')
+    expect(text).toContain('顶部热成像视频')
     wrapper.unmount()
   })
 })
