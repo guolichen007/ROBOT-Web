@@ -14,6 +14,16 @@ const { ticketPost, fetchMock, createdPeers, fakeConfig } = vi.hoisted(() => ({
   },
 }))
 
+// G2G3-R1 首帧门控：VideoCard 只在首个真实解码帧（requestVideoFrameCallback）后才置 LIVE。
+// jsdom 不解码视频，这里用可控 rVFC 模拟“浏览器解码出一帧”。track 到达 ≠ LIVE。
+const pendingFrames = new Map<number, () => void>()
+let frameSeq = 0
+function decodeFrame(): void {
+  const callbacks = [...pendingFrames.values()]
+  pendingFrames.clear()
+  callbacks.forEach((cb) => cb())
+}
+
 vi.mock('@/lib/api', () => ({
   api: { post: (...args: unknown[]) => ticketPost(...args) },
   errorMessage: (error: unknown) => String(error),
@@ -136,6 +146,19 @@ describe('VideoCard WHEP session stability', () => {
     })
     vi.stubGlobal('RTCPeerConnection', FakePeerConnection)
     vi.stubGlobal('fetch', fetchMock)
+    pendingFrames.clear()
+    const proto = HTMLVideoElement.prototype as unknown as {
+      requestVideoFrameCallback: (cb: () => void) => number
+      cancelVideoFrameCallback: (id: number) => void
+    }
+    proto.requestVideoFrameCallback = (cb) => {
+      frameSeq += 1
+      pendingFrames.set(frameSeq, cb)
+      return frameSeq
+    }
+    proto.cancelVideoFrameCallback = (id) => {
+      pendingFrames.delete(id)
+    }
   })
 
   afterEach(() => {
@@ -315,6 +338,19 @@ describe('VideoCard bounded auto-reconnect（R2-15）', () => {
     })
     vi.stubGlobal('RTCPeerConnection', FakePeerConnection)
     vi.stubGlobal('fetch', fetchMock)
+    pendingFrames.clear()
+    const proto = HTMLVideoElement.prototype as unknown as {
+      requestVideoFrameCallback: (cb: () => void) => number
+      cancelVideoFrameCallback: (id: number) => void
+    }
+    proto.requestVideoFrameCallback = (cb) => {
+      frameSeq += 1
+      pendingFrames.set(frameSeq, cb)
+      return frameSeq
+    }
+    proto.cancelVideoFrameCallback = (id) => {
+      pendingFrames.delete(id)
+    }
   })
 
   afterEach(() => {
@@ -327,6 +363,8 @@ describe('VideoCard bounded auto-reconnect（R2-15）', () => {
     await flushPromises()
     const peer = createdPeers[createdPeers.length - 1] as unknown as FakePeerConnection
     peer.deliverTrack()
+    await flushPromises()
+    decodeFrame() // 首帧到达 → LIVE
     await flushPromises()
     return peer
   }
@@ -356,6 +394,9 @@ describe('VideoCard bounded auto-reconnect（R2-15）', () => {
     expect(ticketPost).toHaveBeenCalledTimes(2)
     const peer2 = createdPeers[createdPeers.length - 1] as unknown as FakePeerConnection
     peer2.deliverTrack()
+    await flushPromises()
+    expect(wrapper.find('.video-live-tag').exists()).toBe(false) // 重连 track 到达但尚无新帧
+    decodeFrame()
     await flushPromises()
     expect(wrapper.find('.video-live-tag').exists()).toBe(true)
   })
