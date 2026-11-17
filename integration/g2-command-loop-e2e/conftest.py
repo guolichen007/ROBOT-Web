@@ -128,13 +128,28 @@ def stop(proc: subprocess.Popen | None, sig_kill: bool = False) -> None:
         proc.wait(timeout=5)
 
 
+def _add_broker_user(passwd, user: str, password: str) -> None:
+    """口令经 stdin 交给 mosquitto_passwd（不进 argv）。
+
+    失败时异常只含用户名与退出码，不再像 CalledProcessError 那样携带含口令的 argv。
+    """
+    result = subprocess.run(
+        ["mosquitto_passwd", str(passwd), user],
+        input=f"{password}\n{password}\n",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or "").replace(password, "***")[-300:]
+        raise RuntimeError(f"mosquitto_passwd failed for {user} rc={result.returncode}: {detail}")
+
+
 def start_broker(workdir: Path, name: str, certs: Path, platform_password: str) -> int:
     passwd = workdir / f"passwd.{name}"
     passwd.touch()
     for user, password in (("platform", platform_password), (VEHICLE, VEHICLE_PASSWORD)):
-        subprocess.run(
-            ["mosquitto_passwd", "-b", str(passwd), user, password], check=True, capture_output=True
-        )
+        _add_broker_user(passwd, user, password)
     acl = workdir / f"acl.{name}"
     acl.write_text(ACL)
     port = free_port()

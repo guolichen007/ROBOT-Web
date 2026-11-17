@@ -23,6 +23,8 @@ import sys
 import time
 from pathlib import Path
 
+from conftest import _add_broker_user
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VEHICLE = "firebot-vehicle-01"
 VEHICLE_PASSWORD = "e2e-vehicle-01-password"
@@ -107,11 +109,7 @@ def test_dual_instance_coexistence(e2e_stack, vehicle_asset):
     passwd2 = workdir / "passwd.broker2"
 
     shutil.copy(workdir / "passwd", passwd2)
-    subprocess.run(
-        ["mosquitto_passwd", "-b", str(passwd2), SCOPE_GHOST, "e2e-scope-ghost-password"],
-        check=True,
-        capture_output=True,
-    )
+    _add_broker_user(passwd2, SCOPE_GHOST, "e2e-scope-ghost-password")
     conf2 = workdir / "mosquitto.broker2.conf"
     conf2.write_text(
         "\n".join(

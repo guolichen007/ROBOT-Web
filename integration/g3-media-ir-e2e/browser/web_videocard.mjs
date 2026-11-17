@@ -2,8 +2,8 @@
 // 通过监控页 VideoSurveillancePanel 内的生产 VideoCard「连接视频」建立 WHEP 会话（非独立测试页）。
 // 输入（stdin JSON，凭据不进 argv）：{username, password}
 // argv：<base_url> <vehicle_id> <out_dir> <phase>
-//   phase=play      ：两路 VideoCard 连接 → 解码帧计数增长 + 像素哈希变化 → 截图；读温度 KPI
-//   phase=temps     ：只读温度 KPI（配合外部模拟源逐值上报），按 stdin.expect 序列等待
+//   phase=play      ：两路 VideoCard 连接 → 解码帧计数增长 + 像素哈希变化 → 截图；读 KPI（应无温度卡片）
+//   phase=kpis      ：G3-R2 只读首页 KPI：四项标签、温度卡片数、KPI 区是否含 温度/℃、页面是否含 stdin.forbid_text
 //   phase=reconnect ：连接 → 等外部断流（stdin.signal_file 出现）→ 等恢复 → 再次解码
 // 输出最后一行 JSON。
 import { createRequire } from 'node:module'
@@ -30,7 +30,7 @@ await context.addInitScript((vid) => localStorage.setItem('firebot.activeVehicle
 const page = await context.newPage()
 const requests = []
 page.on('request', (r) => requests.push(`${r.method()} ${new URL(r.url()).pathname}`))
-const out = { phase, vehicle: vehicleId, cards: {}, temps: [], requests_media: 0 }
+const out = { phase, vehicle: vehicleId, cards: {}, requests_media: 0 }
 
 async function login() {
   await page.goto(`${base}/login`)
@@ -148,9 +148,27 @@ async function connect(label) {
   await c.locator('.video-live-tag').waitFor({ timeout: 30000 })
 }
 
-async function readTemp() {
-  const kpi = page.locator('[data-kpi="temperature"]')
-  return { label: (await kpi.locator('span').textContent())?.trim(), value: (await kpi.locator('strong').textContent())?.trim() }
+// G3-R2：首页 KPI 只读（无独立温度传感器 → 不得出现温度卡片 / 温度文案 / ℃）
+async function readKpis(forbidText) {
+  await page.locator('.hmi-kpis .hmi-kpi').first().waitFor({ timeout: 15000 })
+  await page.waitForTimeout(1500) // 等 WS 增量应用（历史温度数据若到达也已渲染）
+  const kpiText = (await page.locator('.hmi-kpis').textContent()) || ''
+  const mainText = (await page.locator('main').first().textContent()) || ''
+  return {
+    kpi_labels: (await page.locator('.hmi-kpis .hmi-kpi > span').allTextContents()).map((t) => t.trim()),
+    temperature_cards: await page.locator('[data-kpi="temperature"]').count(),
+    kpi_text_has_temp: /温度|℃/.test(kpiText),
+    page_has_forbidden: forbidText ? mainText.includes(forbidText) : false,
+  }
+}
+
+// SECRET_LOG_REDACTION：Playwright 的错误 call log 含 `fill("<value>")`，凭据会随 String(err)
+// 进入 stdout JSON → pytest 失败断言。输出前统一掩码 stdin 中的全部字符串凭据。
+const SECRETS = [input.password].filter((v) => typeof v === 'string' && v.length > 0)
+function redact(text) {
+  let t = String(text)
+  for (const s of SECRETS) t = t.split(s).join('***')
+  return t
 }
 
 try {
@@ -163,17 +181,13 @@ try {
       out.cards[key] = { ...s, gate, live: true, decoded_changing: s.frames > 30 && s.width > 0 && s.distinct >= 3 }
       await card(label).screenshot({ path: path.join(outDir, `videocard-${key}.png`) })
     }
-    out.temp = await readTemp()
+    Object.assign(out, await readKpis())
     await page.screenshot({ path: path.join(outDir, 'monitor-page.png'), fullPage: false })
-  } else if (phase === 'temps') {
-    for (const expect of input.expect) {
-      const deadline = Date.now() + 25000
-      let t = await readTemp()
-      while (t.value !== expect && Date.now() < deadline) { await page.waitForTimeout(500); t = await readTemp() }
-      out.temps.push({ expect, ...t, ok: t.value === expect })
-      if (input.ack_dir) fs.writeFileSync(path.join(input.ack_dir, `seen-${out.temps.length}`), t.value || '')
-      await page.locator('.hmi-kpis').screenshot({ path: path.join(outDir, `temp-${out.temps.length}.png`) })
-    }
+  } else if (phase === 'kpis') {
+    Object.assign(out, await readKpis(input.forbid_text))
+    await page.locator('.hmi-kpis').screenshot({
+      path: path.join(outDir, input.forbid_text ? 'kpis-legacy-temp-ignored.png' : 'kpis-no-temperature.png'),
+    })
   } else if (phase === 'reconnect') {
     const label = '监控相机'
     await connect(label)
@@ -316,7 +330,7 @@ try {
   out.ok = true
 } catch (err) {
   out.ok = false
-  out.error = String(err).slice(0, 500)
+  out.error = redact(err).slice(0, 500)
   await page.screenshot({ path: path.join(outDir, `failure-${phase}.png`) }).catch(() => {})
 } finally {
   await browser.close()

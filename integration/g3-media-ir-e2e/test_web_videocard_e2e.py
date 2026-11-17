@@ -6,11 +6,13 @@
                               └─ /media/ → MediaMTX WHEP（authHTTP → 真实 API 鉴权）
   media-test-source（SIMULATED 叠字）经 SRT 发布：firebot-sim-ir-01-roof_rgb / -roof_thermal，
   使用 SYNTHETIC_TEST 登记 + firebot-sim-* 白名单 + 逐流 HMAC 口令（主密钥只给文件路径）。
-  ir_telemetry_sim（固定身份 firebot-sim-ir-01）经 MQTT→Adapter→Ingress→PG/Redis 上报温度。
+  模拟设备在线：sim_presence（固定身份 firebot-sim-ir-01）只上报 availability/status，
+  **零 telemetry**。
 
-验证：两路 VideoCard 真实解码且帧变化；断流后不显示 LIVE、恢复后重连解码；
-温度 27.5/42.0/67.8 在 PG SensorSample、Redis latest、API snapshot、Web KPI 一致；
-thermal=null → Web“未知”；模拟横幅；真实 001 无任何传感器写入。
+G3-R2 产品契约：无独立红外测温传感器——热成像视频保留，红外温度数值停用。
+验证：两路 VideoCard（RGB + thermal）真实解码且帧变化；首帧门控；双路 60s；自动/手动恢复；
+切车隔离；模拟横幅（SIMULATED）；Web 首页不显示温度卡片——无温度数据时不显示，
+即使云端收到历史/兼容温度数据（显式兼容开关注入）也不显示；真实 001 无任何传感器写入。
 需要 REAL_E2E=1、G3_MEDIAMTX、ffmpeg、CHROMIUM_PATH、WEB_DIST（vite build 产物）；否则 SKIP。
 """
 
@@ -29,9 +31,12 @@ from conftest import (
     CREATED,
     REPO_ROOT,
     SIM,
+    SIM_PASSWORD,
     _assert_sim_namespace,
     free_port,
     mediamtx_binary,
+    redact_text,
+    run_presence,
     run_sim,
     spawn,
     stop,
@@ -163,8 +168,10 @@ def web(g3):
         _publish(ctx, stream_id, kind)
     for stream_id in (RGB, THERMAL):
         assert wait_for(lambda s=stream_id: _ready(ctx, s), 30), stream_id
-    # 模拟设备在线 + 初始温度（Web 监控页需要 ONLINE 才显示数值）
-    run_sim(g3, "--values", "27.5", "--interval", "1.2")
+    # G3-R2：模拟设备在线只上报 availability/status（不发送任何 telemetry / 温度）
+    sensor_before = len(_sim_samples())
+    run_presence(g3, "--hold-seconds", "1")
+    ctx["sim_samples_after_presence"] = (sensor_before, len(_sim_samples()))
     try:
         yield ctx
     finally:
@@ -312,6 +319,11 @@ def _api_top_ir(ctx):
     return next(x for x in robots if x["vehicle_id"] == SIM).get("top_ir")
 
 
+def _redact(text: str) -> str:
+    """G3-R2 SECRET_LOG_REDACTION：失败断言/日志尾部输出前掩码全部测试凭据。"""
+    return redact_text(text, (_admin_credentials()[1], SIM_PASSWORD, MASTER, PASSPHRASE))
+
+
 def _browser(ctx, phase: str, extra: dict | None = None, timeout: int = 120) -> dict:
     username, password = _admin_credentials()
     result = subprocess.run(
@@ -329,9 +341,9 @@ def _browser(ctx, phase: str, extra: dict | None = None, timeout: int = 120) -> 
         timeout=timeout,
         env={**os.environ, "CHROMIUM_PATH": ctx["chromium"]},
     )
-    assert result.returncode == 0, result.stderr[-1500:]
+    assert result.returncode == 0, _redact(result.stderr[-1500:])
     data = json.loads(result.stdout.strip().splitlines()[-1])
-    assert data.get("ok"), data
+    assert data.get("ok"), _redact(json.dumps(data, ensure_ascii=False)[-1500:])
     return data
 
 
@@ -351,70 +363,44 @@ def test_production_videocard_rgb_and_thermal_decode(web):
     # 走的是生产 VideoCard 的票据 + /media/ WHEP 路径（同源网关 = nginx 语义）
     assert any("POST /api/v1/media/tickets" in r for r in data["requests"])
     assert any(r.startswith("POST /media/") and r.endswith("/whep") for r in data["requests"])
+    # G3-R2：双路视频播放中首页仍固定四项指标、无温度卡片；热成像视频本身保留
+    assert data["temperature_cards"] == 0 and data["kpi_text_has_temp"] is False, data
+    assert len(data["kpi_labels"]) == 4, data
 
 
-def test_temperatures_consistent_pg_redis_api_web(web, g3):
-    ack = web["workdir"] / "temps-ack"
-    ack.mkdir(exist_ok=True)
-    expected = ["27.5℃", "42℃", "67.8℃", "未知"]
-    proc = subprocess.Popen(
-        [
-            "node",
-            str(BROWSER / "web_videocard.mjs"),
-            web["base_url"],
-            SIM,
-            str(_evidence_dir()),
-            "temps",
-        ],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        env={**os.environ, "CHROMIUM_PATH": web["chromium"]},
-    )
-    username, password = _admin_credentials()
-    proc.stdin.write(
-        json.dumps(
-            {"username": username, "password": password, "expect": expected, "ack_dir": str(ack)}
-        )
-    )
-    proc.stdin.close()
+def test_no_temperature_card_without_sensor_and_with_legacy_data(web, g3):
+    """G3-R2 TEMPERATURE_UI_DISABLED（真实生产构建 Web + 真实 API/Ingress）。
+
+    1) 产品路径：模拟设备只上报在线状态（零 telemetry）→ PG 无新增 SensorSample、Web 无温度卡片；
+    2) 历史 / 兼容数据：显式兼容开关注入 thermal.max_temp=67.8 → 云端照常保存（兼容），
+       但 Web 首页仍固定四项指标、无温度卡片、页面无“温度 / ℃ / 67.8”。
+    """
+    before, after = web["sim_samples_after_presence"]
+    assert after == before, "presence must not create SensorSample"
+    data = _browser(web, "kpis")
+    assert data["kpi_labels"] == ["智能车状态", "电池", "烟雾", "通信状态 / 接收延迟"], data
+    assert data["temperature_cards"] == 0 and data["kpi_text_has_temp"] is False, data
+    # 历史 / 兼容温度数据到达云端（兼容链路保留）
+    run_sim(g3, "--values", "67.8", "--interval", "1.2")
     redis = web["redis"]
-    rows = []
-    for index, raw in enumerate(["27.5", "42.0", "67.8", "null"], start=1):
-        run_sim(g3, "--values", raw, "--interval", "1.2")
-        value = None if raw == "null" else float(raw)
-        latest = wait_for(
-            lambda v=value: (d := json.loads(redis.get(f"robot:{SIM}:latest") or "{}"))
-            and d.get("top_ir", "x") == v
-            and d,
-            15,
-        )
-        assert latest, raw
-        if value is not None:
-            assert wait_for(lambda v=value: v in _sim_samples(), 10), (raw, _sim_samples())
-        # 等浏览器读到本值后再推进下一个（Web 侧顺序断言）
-        wait_for(lambda i=index: (ack / f"seen-{i}").exists(), 30)
-        api_value = wait_for(lambda v=value: (x := _api_top_ir(web)) == v and ("ok", x), 10)
-        assert api_value, (raw, _api_top_ir(web))
-        rows.append(
-            {
-                "sent": raw,
-                "redis_top_ir": latest.get("top_ir"),
-                "api_top_ir": api_value[1],
-                "pg_sample": value in _sim_samples() if value is not None else "n/a",
-            }
-        )
-    proc.wait(timeout=60)
-    out, err = proc.stdout.read(), proc.stderr.read()
-    data = json.loads(out.strip().splitlines()[-1])
-    assert data.get("ok"), (data, err[-800:])
-    for row, web_row in zip(rows, data["temps"], strict=True):
-        row["web"] = web_row["value"]
-        row["web_label"] = web_row["label"]
-        assert web_row["ok"], (row, web_row)
-        assert web_row["label"] == "温度（模拟）"
-    EVIDENCE["temps"] = rows
+    assert wait_for(
+        lambda: json.loads(redis.get(f"robot:{SIM}:latest") or "{}").get("top_ir") == 67.8, 15
+    )
+    assert wait_for(lambda: 67.8 in _sim_samples(), 10)
+    assert _api_top_ir(web) == 67.8  # API 字段保留（不破坏协议）
+    legacy = _browser(web, "kpis", {"forbid_text": "67.8"})
+    assert legacy["kpi_labels"] == data["kpi_labels"], legacy
+    assert legacy["temperature_cards"] == 0 and legacy["kpi_text_has_temp"] is False, legacy
+    assert legacy["page_has_forbidden"] is False, legacy
+    EVIDENCE["temperature_ui_disabled"] = {
+        "presence_sensor_samples_delta": after - before,
+        "no_sensor": {k: data[k] for k in ("kpi_labels", "temperature_cards", "kpi_text_has_temp")},
+        "legacy_67_8_in_api": True,
+        "legacy_web": {
+            k: legacy[k]
+            for k in ("kpi_labels", "temperature_cards", "kpi_text_has_temp", "page_has_forbidden")
+        },
+    }
 
 
 def test_stream_outage_and_reconnect_in_videocard(web):
@@ -464,7 +450,7 @@ def test_stream_outage_and_reconnect_in_videocard(web):
     proc.wait(timeout=90)
     out, err = proc.stdout.read(), proc.stderr.read()
     data = json.loads(out.strip().splitlines()[-1])
-    assert data.get("ok"), (data, err[-800:])
+    assert data.get("ok"), _redact(json.dumps(data, ensure_ascii=False)[-800:] + err[-800:])
     data["outage_seconds"] = outage_seconds
     EVIDENCE["reconnect"] = data
     assert data["state_during_outage"], data  # 断流期间 VideoCard 离开 LIVE（不伪装在线）
@@ -476,7 +462,7 @@ def test_stream_outage_and_reconnect_in_videocard(web):
 
 
 def test_simulation_never_writes_real_001_sensor_facts(web):
-    # 浏览器验收全程（含 4 次模拟温度上报）后，真实车辆 SensorSample 计数不变，
+    # 浏览器验收全程（含 1 次兼容温度注入）后，真实车辆 SensorSample 计数不变，
     # Redis 中真实车辆 latest 不含任何模拟温度值
     assert _real_sensor_counts() == web["real_before"]
     for vid in REAL_VEHICLES:
@@ -512,7 +498,7 @@ def _finish(proc, timeout):
     proc.wait(timeout=timeout)
     out, err = proc.stdout.read(), proc.stderr.read()
     data = json.loads(out.strip().splitlines()[-1])
-    assert data.get("ok"), (data, err[-800:])
+    assert data.get("ok"), _redact(json.dumps(data, ensure_ascii=False)[-800:] + err[-800:])
     return data
 
 

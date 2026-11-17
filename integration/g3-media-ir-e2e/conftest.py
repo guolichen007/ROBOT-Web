@@ -1,4 +1,8 @@
-"""G3 隔离真实组件 E2E：红外模拟数值链路 + 媒体（MediaMTX）RGB/thermal。
+"""G3 隔离真实组件 E2E：媒体（MediaMTX）RGB/thermal + 旧红外数值协议兼容性。
+
+G3-R2：产品不再有独立温度数值来源。ir_telemetry_sim 仅在 run_legacy_thermal_sim
+（兼容性测试）中以显式开关运行；Web/媒体验收的模拟设备在线状态只用 run_presence
+（availability/status，零 telemetry）。
 
 复用 G2 E2E 的测试目标守卫（任何写入前校验隔离 DB/Redis）。所有组件只连 127.0.0.1 随机端口。
 需要 REAL_E2E=1；媒体段另需 G3_MEDIAMTX（MediaMTX 二进制）与 ffmpeg，否则显式 skip。
@@ -74,6 +78,32 @@ def spawn(workdir: Path, name: str, args: list[str], env: dict) -> subprocess.Po
     return proc
 
 
+def add_broker_user(passwd: Path, user: str, password: str) -> None:
+    """G3-R2 SECRET_LOG_REDACTION：口令经 stdin 交给 mosquitto_passwd，不进 argv。
+
+    旧写法 ``mosquitto_passwd -b <file> <user> <password>`` + check=True 失败时，
+    CalledProcessError 的 str() 携带完整 argv，pytest 失败日志会原样输出测试口令。
+    """
+    result = subprocess.run(
+        ["mosquitto_passwd", str(passwd), user],
+        input=f"{password}\n{password}\n",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        # 只报告用户名与退出码；stderr 也经掩码（防御：工具若回显口令）
+        detail = (result.stderr or "").replace(password, "***")[-300:]
+        raise RuntimeError(f"mosquitto_passwd failed for {user} rc={result.returncode}: {detail}")
+
+
+def redact_text(text: str, secrets: tuple[str, ...]) -> str:
+    for secret in secrets:
+        if secret:
+            text = text.replace(secret, "***")
+    return text
+
+
 def stop(proc):
     if proc and proc.poll() is None:
         proc.terminate()
@@ -103,9 +133,7 @@ def g3(tmp_path_factory):
     passwd = workdir / "passwd"
     passwd.touch()
     for user, password in (("platform", PLATFORM_PASSWORD), (SIM, SIM_PASSWORD)):
-        subprocess.run(
-            ["mosquitto_passwd", "-b", str(passwd), user, password], check=True, capture_output=True
-        )
+        add_broker_user(passwd, user, password)
     (workdir / "acl").write_text(ACL)
     port = free_port()
     (workdir / "mosquitto.conf").write_text(
@@ -239,24 +267,41 @@ def _cleanup_sim_robot():
             CREATED["robots"].discard(robot.id)
 
 
-def run_sim(g3, *extra: str) -> dict:
+LEGACY_THERMAL_ENV = "FIREBOT_LEGACY_THERMAL_COMPAT_TEST"
+
+
+def _run_module(g3, module: str, extra: tuple[str, ...], env_extra: dict | None = None) -> dict:
     result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "services.ir_telemetry_sim.main",
-            "--config",
-            str(g3["identity"]),
-            *extra,
-        ],
+        [sys.executable, "-m", module, "--config", str(g3["identity"]), *extra],
         cwd=str(REPO_ROOT),
-        env=g3["base"],
+        env={**g3["base"], **(env_extra or {})},
         capture_output=True,
         text=True,
         timeout=60,
     )
-    assert result.returncode == 0, result.stderr[-500:]
+    assert result.returncode == 0, redact_text(result.stderr[-500:], (SIM_PASSWORD,))
     return json.loads(result.stdout.strip().splitlines()[-1])
+
+
+def run_legacy_thermal_sim(g3, *extra: str) -> dict:
+    """仅旧协议兼容性测试：显式开关下运行已停用的 ir_telemetry_sim（发送 telemetry.thermal）。"""
+    return _run_module(
+        g3,
+        "services.ir_telemetry_sim.main",
+        ("--legacy-compat-test", *extra),
+        {LEGACY_THERMAL_ENV: "1"},
+    )
+
+
+# 兼容旧调用名：仍是“旧温度协议兼容性”专用
+run_sim = run_legacy_thermal_sim
+
+
+def run_presence(g3, *extra: str) -> dict:
+    """G3-R2 产品路径：模拟设备只上报 availability/status，不发送任何 telemetry/温度。"""
+    data = _run_module(g3, "services.sim_presence.main", extra)
+    assert data["telemetry_sent"] == 0, data
+    return data
 
 
 def mediamtx_binary() -> str | None:

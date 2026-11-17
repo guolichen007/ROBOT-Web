@@ -123,6 +123,23 @@ def _spawn(name: str, args: list[str], env: dict, log_handle) -> subprocess.Pope
     )
 
 
+def _add_broker_user(passwd, user: str, password: str) -> None:
+    """口令经 stdin 交给 mosquitto_passwd（不进 argv）。
+
+    失败时异常只含用户名与退出码，不再像 CalledProcessError 那样携带含口令的 argv。
+    """
+    result = subprocess.run(
+        ["mosquitto_passwd", str(passwd), user],
+        input=f"{password}\n{password}\n",
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or "").replace(password, "***")[-300:]
+        raise RuntimeError(f"mosquitto_passwd failed for {user} rc={result.returncode}: {detail}")
+
+
 @pytest.fixture(scope="session")
 def e2e_stack(tmp_path_factory):
     if os.environ.get("REAL_E2E") != "1":
@@ -154,11 +171,7 @@ def e2e_stack(tmp_path_factory):
         (NOACL_VEHICLE, "e2e-noacl-password"),  # 仅 passwd；ACL 无 user 段
         (LEGACY_VEHICLE, "e2e-legacy-password"),
     ):
-        subprocess.run(
-            ["mosquitto_passwd", "-b", str(passwd), user, password],
-            check=True,
-            capture_output=True,
-        )
+        _add_broker_user(passwd, user, password)
     mosquitto_conf = workdir / "mosquitto.e2e.conf"
     # 随机空闲端口：避免与孤儿进程/系统 mosquitto/并行运行冲突（固定端口曾导致
     # 新会话连上旧 broker、CA 签名不匹配的假故障）。

@@ -1,4 +1,10 @@
-"""G3 IR 真实组件 E2E：模拟数值 → MQTT → Adapter/Ingress → PG/Redis/API。"""
+"""G3 IR 旧协议兼容性 E2E：模拟数值 → MQTT → Adapter/Ingress → PG/Redis/API。
+
+G3-R2：产品已停用独立温度数值（无独立红外测温传感器）。本文件保留为**兼容性测试**——
+云端仍须正确处理历史/兼容 telemetry.thermal（采集、新鲜度、类型、幂等、身份隔离、ACL），
+不做破坏性迁移；模拟器只在显式开关下运行（conftest.run_legacy_thermal_sim）。
+另含 G3-R2 新合同：模拟器默认停用；sim_presence 只上报在线状态、不发送任何 telemetry。
+"""
 
 from __future__ import annotations
 
@@ -6,7 +12,7 @@ import json
 import time
 
 import pytest
-from conftest import SIM, run_sim, wait_for
+from conftest import LEGACY_THERMAL_ENV, SIM, run_presence, run_sim, wait_for
 from sqlalchemy import select
 
 
@@ -119,9 +125,16 @@ def test_simulator_refuses_real_vehicle_identity(g3, tmp_path):
     path.write_text(json.dumps(spoof))
     path.chmod(0o600)
     result = subprocess.run(
-        [sys.executable, "-m", "services.ir_telemetry_sim.main", "--config", str(path)],
+        [
+            sys.executable,
+            "-m",
+            "services.ir_telemetry_sim.main",
+            "--legacy-compat-test",
+            "--config",
+            str(path),
+        ],
         cwd=str(REPO_ROOT),
-        env=g3["base"],
+        env={**g3["base"], LEGACY_THERMAL_ENV: "1"},
         capture_output=True,
         text=True,
         timeout=30,
@@ -167,3 +180,102 @@ def test_sim_identity_cannot_touch_real_vehicle_telemetry(g3, api):
             assert not hits
     log = (g3["workdir"] / "mosquitto.log").read_text(errors="replace")
     assert "Denied PUBLISH" in log or "denied" in log.lower()
+
+
+# ---------------- G3-R2 新合同：温度模拟停用 + 在线状态源零 telemetry ----------------
+
+
+def _sim_sensor_count() -> int:
+    return len(samples())
+
+
+@pytest.mark.parametrize(
+    "argv,env_flag",
+    [
+        ([], None),  # 默认：停用
+        (["--legacy-compat-test"], None),  # 只有命令行开关：停用
+        ([], "1"),  # 只有环境变量：停用
+    ],
+)
+def test_temperature_simulator_disabled_by_default(g3, api, argv, env_flag):
+    """G3-R2 TEMPERATURE_SIM_DISABLED：缺任一显式开关 → 退出码 3，零 MQTT 发布、零温度写入。"""
+    import subprocess
+    import sys
+
+    from conftest import REPO_ROOT
+
+    before_latest = g3["redis"].get(f"robot:{SIM}:latest")
+    before_samples = _sim_sensor_count()
+    env = {k: v for k, v in g3["base"].items() if k != LEGACY_THERMAL_ENV}
+    if env_flag:
+        env[LEGACY_THERMAL_ENV] = env_flag
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "services.ir_telemetry_sim.main",
+            *argv,
+            "--config",
+            str(g3["identity"]),
+            "--values",
+            "88.8",
+        ],
+        cwd=str(REPO_ROOT),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 3, result.stderr[-300:]
+    assert "disabled" in result.stderr and result.stdout == ""
+    time.sleep(1.5)
+    assert g3["redis"].get(f"robot:{SIM}:latest") == before_latest
+    assert _sim_sensor_count() == before_samples and 88.8 not in samples()
+
+
+def test_presence_reports_online_without_any_telemetry(g3, api):
+    """G3-R2：模拟设备在线只靠 availability/status；不产生 telemetry / SensorSample / 温度变化。"""
+    before_samples = _sim_sensor_count()
+    before_top_ir = latest(g3).get("top_ir", "absent")
+    before_state = snapshot_robot(api).get("agent_state") or {}
+    before_telemetry_at = before_state.get("telemetry_received_at")
+    data = run_presence(g3, "--hold-seconds", "2")
+    assert data == {
+        "vehicle_id": SIM,
+        "simulated": True,
+        "telemetry_sent": 0,
+        "availability": True,
+        "status": True,
+    }
+    assert wait_for(lambda: snapshot_robot(api)["online_state"] == "ONLINE", 15)
+    robot = snapshot_robot(api)
+    assert robot["simulation"]["simulated"] is True
+    assert (robot.get("agent_state") or {}).get("telemetry_received_at") == before_telemetry_at
+    assert _sim_sensor_count() == before_samples
+    assert latest(g3).get("top_ir", "absent") == before_top_ir
+
+
+def test_presence_refuses_real_vehicle_identity(g3, tmp_path):
+    import subprocess
+    import sys
+
+    from conftest import REPO_ROOT
+
+    for real in ("firebot-vehicle-01", "R002", "firebot-vehicle-03"):
+        spoof = json.loads(g3["identity"].read_text())
+        spoof["vehicle_id"] = spoof["mqtt_username"] = real
+        path = tmp_path / f"spoof-{real}.json"
+        path.write_text(json.dumps(spoof))
+        path.chmod(0o600)
+        result = subprocess.run(
+            [sys.executable, "-m", "services.sim_presence.main", "--config", str(path)],
+            cwd=str(REPO_ROOT),
+            env=g3["base"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        # 退出码 2：命名空间门禁（firebot-sim-<name>）或身份加载器既有冻结名单（R001/R002）先拒绝
+        assert result.returncode == 2, (real, result.stderr[-200:])
+        assert "refusing" in result.stderr or "identity rejected" in result.stderr, real
+        assert result.stdout == "", real  # 未连接 Broker、未发布任何消息
