@@ -18,6 +18,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useMonitorStore } from '@/stores/monitor'
 import { api, errorMessage } from '@/lib/api'
 import { newUuid } from '@/lib/id'
+import { pollBackoff } from '@/lib/vehicle-diagnostics'
 import { operationalSituation } from '@/lib/operations'
 import { alarmStateLabel, alarmTypeLabel, reasonCodeLabel } from '@/lib/ui-labels'
 import robotIdleArt from '@/assets/yd/gate4/status/robot_state_idle_art.png'
@@ -220,13 +221,28 @@ function requireControl(ready: boolean, label: string): boolean {
   toast(dockReason.value || `${label}未就绪`)
   return false
 }
-async function refreshCoverage() {
-  if (!robot.value) return
+async function refreshCoverage(): Promise<boolean> {
+  if (!robot.value) return true
   try {
     coverage.value = (await api.get(`/robots/${robot.value.vehicle_id}/detection-coverage`)).data
+    return true
   } catch {
     coverage.value = null
+    return false
   }
+}
+// 覆盖率轮询：成功 1s；失败按 2s→4s→…→30s 退避，成功即恢复（API 重建期间不每秒打 502）
+let coverageFailures = 0
+let coverageStopped = false
+function scheduleCoverage(delay: number) {
+  window.clearTimeout(coverageTimer)
+  if (coverageStopped) return
+  coverageTimer = window.setTimeout(async () => {
+    const ok = await refreshCoverage()
+    if (coverageStopped) return
+    coverageFailures = ok ? 0 : coverageFailures + 1
+    scheduleCoverage(ok ? 1000 : pollBackoff(coverageFailures))
+  }, delay)
 }
 async function refreshTimeline() {
   timeline.value = primaryAlarm.value ? (await api.get(`/alarms/${primaryAlarm.value.id}/timeline`)).data : []
@@ -508,11 +524,11 @@ async function resetEstop() {
 }
 
 onMounted(() => {
-  void refreshCoverage()
-  coverageTimer = window.setInterval(() => void refreshCoverage(), 1000)
+  scheduleCoverage(0)
 })
 onUnmounted(() => {
-  window.clearInterval(coverageTimer)
+  coverageStopped = true
+  window.clearTimeout(coverageTimer)
   window.clearInterval(stopTimer)
 })
 </script>

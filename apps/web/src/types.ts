@@ -287,7 +287,10 @@ export interface AgentState {
 
 export interface VehicleAgentExecution {
   profile: string | null
-  commands: Record<string, { mode: 'DIAGNOSTIC' | 'SOFTWARE_TEST' | 'REAL'; ready: boolean }>
+  commands: Record<
+    string,
+    { mode: 'DIAGNOSTIC' | 'SOFTWARE_TEST' | 'REAL'; ready: boolean; reason?: string | null }
+  >
   hardware: 'NO_HARDWARE' | 'HARDWARE' | null
 }
 

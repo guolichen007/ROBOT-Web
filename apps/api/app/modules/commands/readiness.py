@@ -173,9 +173,11 @@ def robot_readiness(db: Session, robot: Robot) -> dict[str, Any]:
             granted = EXECUTION_PROFILES[profile_name]
             execution_ready = {
                 "profile": profile_name,
+                # reason：门禁原因码（只读呈现，供 Web 显示按钮不可用原因；门禁本身不变）
                 "commands": {
-                    action: {"mode": mode, "ready": not gate_reason(db, robot, action)}
+                    action: {"mode": mode, "ready": not reason, "reason": reason or None}
                     for action, mode in granted.items()
+                    for reason in (gate_reason(db, robot, action),)
                 },
                 "hardware": "NO_HARDWARE" if "REAL" not in granted.values() else "HARDWARE",
             }

@@ -156,6 +156,27 @@ def bind_protocol(
     return result
 
 
+@router.get("/{robot_id}/agent/commands")
+def command_history(
+    robot_id: str,
+    db: DbSession,
+    _: AuthContext = Depends(require_permission("robot.read")),
+    limit: int = 20,
+) -> list[dict]:
+    """当前车辆的 vehicle_agent 命令历史（服务端事实，含任何用户/API 发起的合法命令）。
+
+    只读；下行关闭时仍可查看。按 issued_at 倒序，limit 1..100。
+    """
+    robot = find_robot(db, robot_id)
+    rows = db.scalars(
+        select(Command)
+        .where(Command.robot_id == robot.id)
+        .order_by(Command.issued_at.desc())
+        .limit(max(1, min(limit, 100)))
+    ).all()
+    return [serialize_model(row) for row in rows]
+
+
 @router.post("/{robot_id}/agent/commands/{action}", status_code=202)
 def command(
     robot_id: str,

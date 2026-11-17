@@ -113,3 +113,35 @@ export function durationLabel(row: AgentCommand): string {
   const ms = last?.duration_ms ?? row.ack_payload_json?.duration_ms
   return typeof ms === 'number' && Number.isFinite(ms) ? `${ms} ms` : '--'
 }
+
+// 门禁原因码 → 操作员可读说明（只读呈现；门禁本身在服务端，不在前端放宽）
+const REASON_TEXT: Record<string, string> = {
+  VEHICLE_AGENT_DOWNLINK_DISABLED: '下行已关闭（只读，可查看历史）',
+  VEHICLE_NOT_IN_DOWNLINK_ALLOWLIST: '该车不在下行白名单',
+  ROBOT_OFFLINE: '车辆离线',
+  VEHICLE_AGENT_ADAPTER_UNAVAILABLE: '专属 Adapter 不可用',
+  ROUTING_CONFIG_MISMATCH: '路由配置不一致',
+  INTEGRATION_PROFILE_MISSING: '集成档案缺失',
+  ROBOT_ESTOP_ACTIVE: '急停已触发',
+  EXECUTION_PROFILE_DENIED: '执行档不允许',
+  AGENT_PROTOCOL_MISMATCH: '未绑定 vehicle_agent v1',
+}
+
+export function reasonText(code: string | null | undefined): string {
+  if (!code) return ''
+  return REASON_TEXT[code] ?? code
+}
+
+export const SOFTWARE_PATROL_MAX_ROUNDS = 20
+
+/** 软件巡检 rounds：整数 1..20（合同上限 1000，Web 受限更小）；非法值回落到 1。 */
+export function clampRounds(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number.parseInt(String(value ?? ''), 10)
+  if (!Number.isFinite(n)) return 1
+  return Math.min(SOFTWARE_PATROL_MAX_ROUNDS, Math.max(1, Math.trunc(n)))
+}
+
+/** 失败退避：2s 起指数增长，封顶 30s（API 重建 502 期间不每秒打满请求）。 */
+export function pollBackoff(failures: number): number {
+  return Math.min(30_000, 2_000 * 2 ** Math.max(0, Math.min(failures, 4)))
+}

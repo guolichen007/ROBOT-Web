@@ -298,3 +298,31 @@ def test_stop_remains_available_when_motion_ack_is_lost(runtime, client):
     assert command(client, stopped)["lifecycle_status"] == "SUCCEEDED"
     with runtime.SessionLocal() as db:
         assert db.get(Task, row["task_id"]).status == "CANCELLED"
+
+
+def test_command_history_per_vehicle_survives_reload_and_downlink_off(runtime, client):
+    """诊断面板历史来自服务端（按车过滤、含任意发起方），下行关闭时仍只读可见。"""
+    sent = send(runtime, client, "ping")
+    history = client.get("/api/v1/robots/R001/agent/commands?limit=5")
+    assert history.status_code == 200, history.text
+    rows = history.json()
+    assert rows and rows[0]["command_id"] == sent["command_id"]
+    assert {row["robot_id"] for row in rows} == {sent["robot_id"]}
+    issued = [row["issued_at"] for row in rows]
+    assert issued == sorted(issued, reverse=True)
+    other = client.get("/api/v1/robots/R002/agent/commands")
+    assert other.status_code == 200
+    assert sent["command_id"] not in {row["command_id"] for row in other.json()}
+    runtime.settings.vehicle_agent_v1_downlink_enabled = False
+    try:
+        closed = client.get("/api/v1/robots/R001/agent/commands")
+        assert closed.status_code == 200
+        assert sent["command_id"] in {row["command_id"] for row in closed.json()}
+        blocked = client.post(
+            "/api/v1/robots/R001/agent/commands/ping",
+            json={"params": {}},
+            headers={"Idempotency-Key": str(uuid4())},
+        )
+        assert blocked.status_code >= 400  # 下行门禁不因历史只读接口放宽
+    finally:
+        runtime.settings.vehicle_agent_v1_downlink_enabled = True
