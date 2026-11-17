@@ -2,31 +2,31 @@ title = "Firebot Gitleaks policy"
 
 [allowlist]
 description = "official defaults + firebot test-profile allowlists"
+# Firebot 测试值例外：全部 ^…$ 整值锚定——只放行“secret 恰好等于该测试值”，
+# 含测试值子串的真实凭证仍被检出（scripts/gitleaks_selftest.py 负例覆盖）。
 regexes = [
     '''(?i)^true|false|null$''',
     '''^(?i:a+|b+|c+|d+|e+|f+|g+|h+|i+|j+|k+|l+|m+|n+|o+|p+|q+|r+|s+|t+|u+|v+|w+|x+|y+|z+|\*+|\.+)$''',
     '''^\$(?:\d+|{\d+})$''',
-    '''ci-jwt-secret-at-least-32-characters-long''',
-    '''ci-csrf-secret-at-least-32-characters-long''',
-    '''ci-refresh-secret-at-least-32-characters''',
-    '''test-jwt-secret-at-least-32-bytes-long''',
-    '''test-csrf-secret-at-least-32-bytes-long''',
-    '''Firebot-CI-Only-2026!''',
-    '''Bootstrap-Server-Secret-2026!''',
-    '''strong-password''',
-    '''mqtt-secret''',
-    '''e2e-platform-password''',
-    '''e2e-vehicle-01-password''',
-    '''e2e-ghost-password''',
-    '''e2e-jwt-secret-0123456789abcdef0123456789''',
-    '''e2e-refresh-secret-0123456789abcdef012345''',
-    '''e2e-csrf-secret-0123456789abcdef0123456789''',
-    '''E2e-Only-Admin-Password-2026!''',
-    '''firebot_e2e:firebot_e2e@localhost''',
-    '''local-acceptance-cred-CHANGE-ME''',
-    '''PLACEHOLDER-CHANGE-ME-G1''',
-    # compose.test.yml 隔离测试栈媒体发布 token（G3 测试编排，非生产）
-    '''43251ba5aaf72081afb5ec42367e0ff17b834772b5082f8abff03f164d92773d''',
+    '''^ci\-jwt\-secret\-at\-least\-32\-characters\-long$''',
+    '''^ci\-csrf\-secret\-at\-least\-32\-characters\-long$''',
+    '''^ci\-refresh\-secret\-at\-least\-32\-characters$''',
+    '''^test\-jwt\-secret\-at\-least\-32\-bytes\-long$''',
+    '''^test\-csrf\-secret\-at\-least\-32\-bytes\-long$''',
+    '''^Firebot\-CI\-Only\-2026!$''',
+    '''^Bootstrap\-Server\-Secret\-2026!$''',
+    '''^strong\-password$''',
+    '''^mqtt\-secret$''',
+    '''^e2e\-platform\-password$''',
+    '''^e2e\-vehicle\-01\-password$''',
+    '''^e2e\-ghost\-password$''',
+    '''^e2e\-jwt\-secret\-0123456789abcdef0123456789$''',
+    '''^e2e\-refresh\-secret\-0123456789abcdef012345$''',
+    '''^e2e\-csrf\-secret\-0123456789abcdef0123456789$''',
+    '''^E2e\-Only\-Admin\-Password\-2026!$''',
+    '''^firebot_e2e:firebot_e2e@localhost$''',
+    '''^local\-acceptance\-cred\-CHANGE\-ME$''',
+    '''^PLACEHOLDER\-CHANGE\-ME\-G1$''',
 ]
 paths = [
     '''gitleaks\.toml''',

@@ -365,6 +365,8 @@ jobs:
             https://github.com/gitleaks/gitleaks/releases/download/v8.24.2/gitleaks_8.24.2_linux_x64.tar.gz
           tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
           chmod +x /tmp/gitleaks
+          # 自检：规则真实加载 + 隔离植入凭证必检出（rc≠0）+ 例外不外溢；失败即门禁失败
+          python3 scripts/gitleaks_selftest.py /tmp/gitleaks || exit 1
           /tmp/gitleaks git --config=.gitleaks.toml --no-banner --report-format json . \
             > /tmp/gitleaks.out 2>&1
           echo $? > /tmp/gitleaks.rc
