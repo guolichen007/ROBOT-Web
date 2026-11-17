@@ -102,7 +102,15 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -r requirements-dev.txt
+      # Run 44021732853：本步骤 PyPI 下载瞬断导致作业失败（代码未执行）。有界重试 x3，
+      # 三次均失败仍 exit 1，不掩盖真实依赖错误。
+      - name: Install Python deps (network retry x3)
+        run: |
+          for attempt in 1 2 3; do
+            if pip install -r requirements-dev.txt; then exit 0; fi
+            echo "pip install attempt $attempt failed; retry in 15s"; sleep 15
+          done
+          exit 1
       - name: Install mosquitto (network retry x3)
         run: |
           for attempt in 1 2 3; do
