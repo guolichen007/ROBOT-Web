@@ -333,6 +333,37 @@ def test_07_ros_001_custom_messages_start_patrol_close(g2, api):
     assert "hardware_executors=NONE" in software["diagnostics"]
 
 
+def test_07a_ros_heartbeat_survives_65s_idle_after_commands(g2, api):
+    """b6ee382 反证：001 节点静置时 SoftwareStatus 每 2s 周期心跳，且首命令后不再自死锁。
+
+    旧实现（仅状态迁移时发布 + 非重入 Lock）：命令结束后静置 >10s，执行器把软件状态
+    判为 UNKNOWN/stale，云端 age 超时。本用例在 test_07 的 start/patrol/close 之后静置
+    65s，期间每 5s 采样云端 status.software：必须始终非 stale、state=idle，且 ROS 端
+    ts / uptime 单调前进（证明是新消息而非缓存）。
+    """
+    if not g2["ros"]:
+        pytest.skip("rospy 不可用：ROS 心跳 NOT_EXECUTED（不伪造通过）")
+    samples = []
+    deadline = time.monotonic() + 65.0
+    while time.monotonic() < deadline:
+        software = (robot_row().agent_state_json or {}).get("status", {}).get("software") or {}
+        samples.append(software)
+        time.sleep(5.0)
+    assert len(samples) >= 13
+    for software in samples:
+        assert not software.get("stale"), software
+        assert software.get("state") == "idle", software
+    ts = [s["ts"] for s in samples]
+    uptimes = [s["uptime_seconds"] for s in samples]
+    assert len(set(ts)) >= 10, ts  # 静置期间持续收到新 SoftwareStatus
+    assert uptimes == sorted(uptimes) and uptimes[-1] - uptimes[0] >= 55, uptimes
+    # 心跳后节点仍可执行命令（RLock：首命令后不冻结）
+    created, row = _software(api, "start", {"with_navigation": True})
+    assert row.lifecycle_status == "SUCCEEDED", (row.ack_reason, row.ack_payload_json)
+    created, row = _software(api, "close")
+    assert row.lifecycle_status == "SUCCEEDED"
+
+
 def test_08_stop_patrol_while_running(g2, api):
     """巡检运行中停止：stop 在巡检自然完成之前收到反馈；patrol 记录为 STOPPED（非 FAILED）。"""
     if not g2["ros"]:
