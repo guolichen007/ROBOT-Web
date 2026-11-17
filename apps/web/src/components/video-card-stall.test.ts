@@ -1,4 +1,4 @@
-// G3：生产 VideoCard 画面停滞看门狗——源断流后 WebRTC 仍 connected 的窗口内不得继续宣称「实时」。
+// G3-R1：生产 VideoCard 首帧门控 + 画面停滞看门狗 + 回调取消/旧会话隔离。
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
@@ -39,7 +39,59 @@ async function flush() {
   await nextTick()
 }
 
-describe('VideoCard 画面停滞看门狗', () => {
+interface FrameApi {
+  requestVideoFrameCallback: (cb: () => void) => number
+  cancelVideoFrameCallback: (handle: number) => void
+}
+
+/** 可控的 rVFC：记录挂起回调、注册次数与取消。 */
+function fakeFrames(el: Element) {
+  const video = el as unknown as FrameApi
+  const pending = new Map<number, () => void>()
+  let next = 1
+  const stats = { registered: 0, cancelled: 0 }
+  video.requestVideoFrameCallback = (cb) => {
+    stats.registered += 1
+    const id = next++
+    pending.set(id, cb)
+    return id
+  }
+  video.cancelVideoFrameCallback = (id) => {
+    if (pending.delete(id)) stats.cancelled += 1
+  }
+  return {
+    stats,
+    pending,
+    /** 浏览器解码出一帧：触发全部挂起回调（真实 rVFC 语义：一次性，回调内自行续订） */
+    frame() {
+      const cbs = [...pending.values()]
+      pending.clear()
+      cbs.forEach((cb) => cb())
+    },
+  }
+}
+
+const stream = { stream_id: 's', state: 'ONLINE', camera_type: 'roof_rgb' }
+
+function mountCard(props: Record<string, unknown> = {}) {
+  return mount(VideoCard, {
+    props: { title: 'RGB', stream: stream as never, ...props },
+    global: { stubs: { 't-button': { template: '<button @click="$emit(\'click\')"><slot /></button>' } } },
+  })
+}
+
+async function connectAndTrack(wrapper: ReturnType<typeof mountCard>) {
+  await wrapper.find('button').trigger('click')
+  await flush()
+  const peer = FakePeer.last
+  peer.connectionState = 'connected'
+  peer.ontrack?.({ streams: [{}] })
+  peer.onconnectionstatechange?.()
+  await flush()
+  return peer
+}
+
+describe('VideoCard 首帧门控 / 停滞看门狗 / 回调隔离', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.useFakeTimers()
@@ -53,51 +105,95 @@ describe('VideoCard 画面停滞看门狗', () => {
         text: async () => 'v=0',
       }),
     )
-    vi.mocked(api.post).mockResolvedValue({
-      data: { ticket: 't', playback_url: '/media/s/whep' },
-    })
+    vi.mocked(api.post).mockResolvedValue({ data: { ticket: 't', playback_url: '/media/s/whep' } })
   })
   afterEach(() => {
     vi.useRealTimers()
     vi.unstubAllGlobals()
   })
 
-  it('连接后无新帧超过 3s → 隐藏「实时」并显示画面中断；新帧到达自动恢复', async () => {
-    const wrapper = mount(VideoCard, {
-      props: { title: 'RGB', stream: { stream_id: 's', state: 'ONLINE', camera_type: 'roof_rgb' } as never },
-      global: { stubs: { 't-button': { template: '<button @click="$emit(\'click\')"><slot /></button>' } } },
-    })
-    const video = wrapper.find('video').element as unknown as {
-      requestVideoFrameCallback: (cb: () => void) => number
-    }
-    const frames: { next: () => void } = { next: () => {} }
-    video.requestVideoFrameCallback = (cb) => {
-      frames.next = cb
-      return 1
-    }
-    await wrapper.find('button').trigger('click')
-    await flush()
-    const peer = FakePeer.last
-    peer.connectionState = 'connected'
+  it('connected + ontrack 但无解码帧 → 不显示「实时」；首帧到达后才 LIVE', async () => {
+    const wrapper = mountCard()
+    const frames = fakeFrames(wrapper.find('video').element)
+    await connectAndTrack(wrapper)
+    expect(wrapper.find('.video-live-tag').exists()).toBe(false)
+    expect(wrapper.find('.video-placeholder').text()).toContain('等待首帧')
+    expect(wrapper.find('video').attributes('data-first-frame')).toBe('no')
+    frames.frame()
+    await nextTick()
+    expect(wrapper.find('.video-live-tag').exists()).toBe(true)
+    expect(wrapper.find('video').attributes('data-first-frame')).toBe('yes')
+  })
+
+  it('connected 后 10s 仍无首帧 → ERROR（不停留在连接中、不伪装实时）', async () => {
+    const wrapper = mountCard()
+    fakeFrames(wrapper.find('video').element)
+    await connectAndTrack(wrapper)
+    vi.advanceTimersByTime(11_000)
+    await nextTick()
+    expect(wrapper.find('.video-live-tag').exists()).toBe(false)
+    expect(wrapper.find('.video-placeholder').text()).toContain('未收到画面')
+  })
+
+  it('ontrack 与 connectionstatechange 重复调用 watchFrames：只保留一条 rVFC 链', async () => {
+    const wrapper = mountCard()
+    const frames = fakeFrames(wrapper.find('video').element)
+    const peer = await connectAndTrack(wrapper)
+    peer.onconnectionstatechange?.()
     peer.ontrack?.({ streams: [{}] })
     await flush()
-    expect(wrapper.find('.video-live-tag').exists()).toBe(true)
-    // 1.5s 内有帧 → 仍实时
+    frames.frame()
+    frames.frame()
+    expect(frames.pending.size).toBe(1)
+  })
+
+  it('3s 无新帧 → 画面中断；新帧到达恢复', async () => {
+    const wrapper = mountCard()
+    const frames = fakeFrames(wrapper.find('video').element)
+    await connectAndTrack(wrapper)
+    frames.frame()
     vi.advanceTimersByTime(1500)
-    frames.next()
+    frames.frame()
     vi.advanceTimersByTime(1000)
     await nextTick()
     expect(wrapper.find('[data-video-stalled]').exists()).toBe(false)
-    // 断流：4s 无帧 → 停滞
     vi.advanceTimersByTime(4000)
     await nextTick()
     expect(wrapper.find('.video-live-tag').exists()).toBe(false)
     expect(wrapper.find('[data-video-stalled]').text()).toContain('画面中断')
-    // 恢复：新帧 → 立即回到实时
-    frames.next()
+    frames.frame()
     await nextTick()
     expect(wrapper.find('[data-video-stalled]').exists()).toBe(false)
     expect(wrapper.find('.video-live-tag').exists()).toBe(true)
+  })
+
+  it('切换流（切车）后旧会话的帧回调不得改写新卡片状态；旧回调被取消', async () => {
+    const wrapper = mountCard()
+    const frames = fakeFrames(wrapper.find('video').element)
+    await connectAndTrack(wrapper)
+    frames.frame()
+    await nextTick()
+    expect(wrapper.find('.video-live-tag').exists()).toBe(true)
+    const stale = [...frames.pending.values()]
+    await wrapper.setProps({ stream: { stream_id: 'other', state: 'ONLINE', camera_type: 'roof_rgb' } })
+    await flush()
+    expect(frames.stats.cancelled).toBeGreaterThanOrEqual(1)
+    stale.forEach((cb) => cb()) // 浏览器仍投递已排队的旧回调
+    await nextTick()
+    expect(wrapper.find('.video-live-tag').exists()).toBe(false)
+    expect(wrapper.find('.video-placeholder').text()).toContain('视频未连接')
+  })
+
+  it('组件销毁：取消 rVFC 与定时器，WHEP 会话 DELETE', async () => {
+    const wrapper = mountCard()
+    const frames = fakeFrames(wrapper.find('video').element)
+    await connectAndTrack(wrapper)
+    frames.frame()
     wrapper.unmount()
+    expect(frames.stats.cancelled).toBeGreaterThanOrEqual(1)
+    expect(frames.pending.size).toBe(0)
+    const calls = vi.mocked(fetch).mock.calls.map((c) => (c[1] as RequestInit | undefined)?.method)
+    expect(calls).toContain('DELETE')
+    expect(vi.getTimerCount()).toBe(0)
   })
 })

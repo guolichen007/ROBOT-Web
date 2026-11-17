@@ -42,52 +42,108 @@ let hadLiveSession = false
 let reconnectAttempts = 0
 let reconnectTimer: number | undefined
 
-// 画面停滞看门狗：WebRTC 在源断流后仍可能保持 connected 数秒（ICE 超时前），此期间不得继续
-// 宣称「实时」。以浏览器真实解码帧（requestVideoFrameCallback / currentTime 推进）为准：
-// 连续 STALL_MS 无新帧 → stalled（显示“画面中断”，隐藏实时标签）；新帧到达即自动恢复。
+// 首帧门控 + 画面停滞看门狗（G3-R1）：
+// - WebRTC connected / ontrack 只代表传输就绪，**首个真实解码帧**到达前保持 CONNECTING（“等待首帧”）；
+// - 以浏览器真实解码帧（requestVideoFrameCallback；不支持时 currentTime 推进）为准，
+//   连续 STALL_MS 无新帧 → stalled（隐藏「实时」、显示“画面中断”），新帧到达即恢复；
+// - 每次 watchFrames 取得新 watchToken 并取消旧 rVFC 回调与定时器（ontrack 与 connectionstatechange
+//   都会调用，必须幂等），回调同时校验会话 epoch，旧会话/切车/销毁后的帧不得改写当前状态。
 const STALL_MS = 3000
+const FIRST_FRAME_TIMEOUT_MS = 10_000
 const stalled = ref(false)
+const firstFrameAt = ref<number | null>(null)
 let lastFrameAt = 0
 let lastMediaTime = -1
 let stallTimer: number | undefined
-let frameCallbackVideo: HTMLVideoElement | null = null
+let watchToken = 0
+let watchedVideo: HTMLVideoElement | null = null
+let frameHandle: number | undefined
+let watchEpoch = -1
+let watchStartedAt = 0
 
-function markFrame(): void {
+type FrameVideo = HTMLVideoElement & {
+  requestVideoFrameCallback?: (cb: () => void) => number
+  cancelVideoFrameCallback?: (handle: number) => void
+}
+
+function onFrame(epoch: number): void {
+  if (epoch !== sessionEpoch || disposed) return
   lastFrameAt = performance.now()
+  if (firstFrameAt.value === null) {
+    firstFrameAt.value = lastFrameAt
+    detail.value = ''
+    state.value = 'LIVE'
+    hadLiveSession = true
+    reconnectAttempts = 0 // 真正恢复出画面才清零有界重连计数
+  }
   if (stalled.value) stalled.value = false
 }
 
-function watchFrames(el: HTMLVideoElement): void {
-  frameCallbackVideo = el
-  const anyVideo = el as HTMLVideoElement & {
-    requestVideoFrameCallback?: (cb: () => void) => number
-  }
-  if (typeof anyVideo.requestVideoFrameCallback === 'function') {
+function watchFrames(el: HTMLVideoElement, epoch: number): void {
+  if (watchedVideo === el && stallTimer !== undefined && watchEpoch === epoch) return // 同会话幂等
+  stopFrameWatch()
+  const token = ++watchToken
+  watchedVideo = el
+  watchEpoch = epoch
+  const fv = el as FrameVideo
+  const hasRvfc = typeof fv.requestVideoFrameCallback === 'function'
+  if (hasRvfc) {
     const tick = () => {
-      if (frameCallbackVideo !== el) return
-      markFrame()
-      anyVideo.requestVideoFrameCallback!(tick)
+      if (token !== watchToken) return
+      onFrame(epoch)
+      frameHandle = fv.requestVideoFrameCallback!(tick)
     }
-    anyVideo.requestVideoFrameCallback(tick)
+    frameHandle = fv.requestVideoFrameCallback!(tick)
   }
-  markFrame()
-  window.clearInterval(stallTimer)
+  lastFrameAt = performance.now()
+  watchStartedAt = lastFrameAt
   stallTimer = window.setInterval(() => {
-    if (state.value !== 'LIVE') return
-    // 无 rVFC 的浏览器以 currentTime 推进作为帧到达
-    if (el.currentTime !== lastMediaTime) {
-      if (lastMediaTime >= 0 && typeof anyVideo.requestVideoFrameCallback !== 'function') markFrame()
+    if (token !== watchToken || epoch !== sessionEpoch) return
+    if (!hasRvfc && el.currentTime !== lastMediaTime) {
+      if (lastMediaTime >= 0) onFrame(epoch)
       lastMediaTime = el.currentTime
     }
-    if (performance.now() - lastFrameAt > STALL_MS) stalled.value = true
+    if (firstFrameAt.value !== null && state.value === 'LIVE') {
+      if (performance.now() - lastFrameAt > STALL_MS) stalled.value = true
+    } else if (performance.now() - watchStartedAt > FIRST_FRAME_TIMEOUT_MS) {
+      // 传输已建立但始终没有可解码画面：不得停留在“连接中”，按失败处理
+      onNoFirstFrame(epoch)
+    }
   }, 500)
 }
 
+function onNoFirstFrame(epoch: number): void {
+  if (epoch !== sessionEpoch || disposed) return
+  const streamId = props.stream?.stream_id
+  const wasLive = hadLiveSession
+  stopFrameWatch()
+  peer?.close()
+  peer = null
+  if (video.value) video.value.srcObject = null
+  if (wasLive && streamId) {
+    state.value = 'CONNECTING'
+    detail.value = '未收到画面，正在重试…'
+    hadLiveSession = true
+    scheduleReconnect(epoch, streamId)
+  } else {
+    state.value = 'ERROR'
+    detail.value = `已连接但 ${FIRST_FRAME_TIMEOUT_MS / 1000}s 内未收到画面`
+  }
+}
+
 function stopFrameWatch(): void {
-  frameCallbackVideo = null
+  watchToken += 1
+  const fv = watchedVideo as FrameVideo | null
+  if (fv && frameHandle !== undefined && typeof fv.cancelVideoFrameCallback === 'function') {
+    fv.cancelVideoFrameCallback(frameHandle)
+  }
+  frameHandle = undefined
+  watchedVideo = null
+  watchEpoch = -1
   window.clearInterval(stallTimer)
   stallTimer = undefined
   stalled.value = false
+  firstFrameAt.value = null
   lastMediaTime = -1
 }
 
@@ -207,18 +263,17 @@ async function startSession(isReconnect: boolean): Promise<void> {
     pc.addTransceiver('video', { direction: 'recvonly' })
     pc.ontrack = (event) => {
       if (!valid()) return
-      if (video.value) video.value.srcObject = event.streams[0]
-      if (pc.connectionState === 'connected') {
-        state.value = 'LIVE'
-        if (video.value) watchFrames(video.value)
+      if (video.value) {
+        video.value.srcObject = event.streams[0]
+        watchFrames(video.value, epoch) // 首帧到达前不置 LIVE
       }
+      if (pc.connectionState === 'connected') detail.value = '已连接，等待首帧…'
     }
     pc.onconnectionstatechange = () => {
       if (!valid()) return
       if (pc.connectionState === 'connected' && video.value?.srcObject) {
-        state.value = 'LIVE'
-        hadLiveSession = true
-        watchFrames(video.value)
+        if (firstFrameAt.value === null) detail.value = '已连接，等待首帧…'
+        watchFrames(video.value, epoch)
       }
       if (['failed', 'disconnected'].includes(pc.connectionState)) {
         // 短暂断开：仅已建立过会话且流仍 active 时有界自动重连
@@ -309,7 +364,17 @@ onUnmounted(() => {
 <template>
   <article class="video-card" :class="{ prominent }">
     <div ref="stage" class="video-stage">
-      <video v-show="state === 'LIVE'" ref="video" autoplay muted playsinline />
+      <!-- 首帧门控：CONNECTING 期间 video 需在布局中（opacity 0）才会解码并触发 rVFC；
+           display:none 的 video 在 Chromium 不渲染帧，会使“首帧到达”永不发生。 -->
+      <video
+        v-show="state === 'LIVE' || state === 'CONNECTING'"
+        ref="video"
+        :class="{ 'video-pending-frame': state !== 'LIVE' }"
+        :data-first-frame="firstFrameAt !== null ? 'yes' : 'no'"
+        autoplay
+        muted
+        playsinline
+      />
       <div v-if="state === 'LIVE'" class="video-time">
         {{
           new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'medium', hour12: false }).format(
@@ -330,7 +395,11 @@ onUnmounted(() => {
       >
         <FullscreenIcon />
       </button>
-      <div v-if="state !== 'LIVE'" class="video-placeholder">
+      <div
+        v-if="state !== 'LIVE'"
+        class="video-placeholder"
+        :class="{ 'video-placeholder-overlay': state === 'CONNECTING' }"
+      >
         <span class="video-glyph"><VideoCameraIcon /></span>
         <strong>{{ stateText }}</strong>
         <small v-if="detail">{{ detail }}</small>

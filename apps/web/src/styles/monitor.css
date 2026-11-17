@@ -534,6 +534,15 @@
   color: #8a97ab;
   background: #13171d;
 }
+.video-stage video.video-pending-frame {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+.video-placeholder-overlay {
+  position: relative;
+  z-index: 1;
+}
 .video-placeholder strong {
   font-size: 13px;
   font-weight: 500;

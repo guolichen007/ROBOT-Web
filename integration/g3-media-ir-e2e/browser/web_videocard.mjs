@@ -77,7 +77,72 @@ async function sample(label, seconds) {
   }, { video: handle, seconds })
 }
 
+
+async function probe(label) {
+  const c = card(label)
+  const live = (await c.locator('.video-live-tag').count()) > 0
+  const stale = (await c.locator('[data-video-stalled]').count()) > 0
+  const ff = await c.locator('video').getAttribute('data-first-frame').catch(() => null)
+  const ph = c.locator('.video-placeholder')
+  const text = (await ph.count()) ? ((await ph.textContent({ timeout: 200 }).catch(() => '')) || '').trim() : ''
+  return { live, stale, first_frame: ff, text }
+}
+
+// 点击「连接视频」后 100ms 采样：记录首帧门控（live 标签只能在 data-first-frame=yes 后出现）
+async function connectGated(label) {
+  clicks += 1
+  const c = card(label)
+  const t0 = Date.now()
+  await c.getByRole('button', { name: '连接视频' }).click()
+  const samples = []
+  while (Date.now() - t0 < 15000) {
+    const p = await probe(label)
+    samples.push({ t: Date.now() - t0, ...p })
+    if (p.live) break
+    await page.waitForTimeout(100)
+  }
+  const liveAt = samples.find((x) => x.live)?.t ?? null
+  const violation = samples.some((x) => x.live && x.first_frame !== 'yes')
+  const connectingSeen = samples.some((x) => !x.live && /连接|首帧/.test(x.text))
+  return { live_at_ms: liveAt, violation, connecting_seen: connectingSeen, samples: samples.length }
+}
+
+// 两路同时：每秒记录各自解码帧数（页面内 rVFC 计数）、像素哈希、停滞/实时标签
+async function dualSample(labels, seconds) {
+  const handles = []
+  for (const l of labels) handles.push(await card(l).locator('video').elementHandle())
+  await page.evaluate((videos) => {
+    window.__dual = videos.map(() => 0)
+    videos.forEach((v, i) => {
+      const tick = () => { window.__dual[i] += 1; v.requestVideoFrameCallback(tick) }
+      v.requestVideoFrameCallback(tick)
+    })
+  }, handles)
+  const rows = []
+  for (let sec = 1; sec <= seconds; sec += 1) {
+    await page.waitForTimeout(1000)
+    const counts = await page.evaluate(() => [...window.__dual])
+    const hashes = await page.evaluate((videos) => videos.map((video) => {
+      const canvas = document.createElement('canvas')
+      canvas.width = video.videoWidth; canvas.height = video.videoHeight
+      if (!canvas.width) return 0
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })
+      ctx.drawImage(video, 0, 0)
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data
+      let h = 0
+      for (let i = 0; i < data.length; i += 997) h = (h * 31 + data[i]) >>> 0
+      return h
+    }), handles)
+    const states = []
+    for (const l of labels) states.push(await probe(l))
+    rows.push({ sec, counts, hashes, live: states.map((x) => x.live && !x.stale) })
+  }
+  return rows
+}
+
+let clicks = 0
 async function connect(label) {
+  clicks += 1
   const c = card(label)
   await c.getByRole('button', { name: '连接视频' }).click()
   await c.locator('.video-live-tag').waitFor({ timeout: 30000 })
@@ -93,9 +158,9 @@ try {
   out.banner = (await page.locator('[data-testid="simulated-source-banner"]').textContent().catch(() => null))?.trim() ?? null
   if (phase === 'play') {
     for (const [label, key] of [['监控相机', 'rgb'], ['红外热成像', 'thermal']]) {
-      await connect(label)
+      const gate = await connectGated(label)
       const s = await sample(label, 6)
-      out.cards[key] = { ...s, live: true, decoded_changing: s.frames > 30 && s.width > 0 && s.distinct >= 3 }
+      out.cards[key] = { ...s, gate, live: true, decoded_changing: s.frames > 30 && s.width > 0 && s.distinct >= 3 }
       await card(label).screenshot({ path: path.join(outDir, `videocard-${key}.png`) })
     }
     out.temp = await readTemp()
@@ -149,17 +214,102 @@ try {
     out.state_during_outage = out.frozen_samples > 0 && violations.length === 0 && out.first_not_live
       ? (out.first_not_live.stale ? 'stalled-indicator' : out.first_not_live.text || 'not-live')
       : false
-    // 源恢复：生产 VideoCard 有界自动重连（1s/2s/4s）或用户再次点击「连接视频」
-    let recovered = 'auto'
+    // 严格自动重连：本阶段绝不点击「连接视频」；30s 内未自行恢复即判失败（recovered=none）
+    let recovered = 'none'
+    const tRestore = Date.now()
     try {
-      await card(label).locator('.video-live-tag').waitFor({ timeout: 15000 })
+      await card(label).locator('.video-live-tag').waitFor({ timeout: 30000 })
+      recovered = 'auto'
     } catch {
-      recovered = 'manual'
-      await connect(label)
+      recovered = 'none'
     }
-    const after = await sample(label, 4)
+    out.recover_ms_after_restore = recovered === 'auto' ? Date.now() - tRestore : null
+    out.clicks_during_reconnect = clicks
+    const after = recovered === 'auto' ? await sample(label, 4) : { frames: 0, distinct: 0 }
     out.cards.rgb = { before, after, recovered, decoded_after: after.frames > 20 && after.distinct >= 2 }
     await card(label).screenshot({ path: path.join(outDir, 'videocard-rgb-reconnected.png') })
+  }
+  if (phase === 'dual60') {
+    const labels = ['监控相机', '红外热成像']
+    out.gates = []
+    for (const l of labels) out.gates.push(await connectGated(l))
+    const rows = await dualSample(labels, Number(input.seconds || 60))
+    out.dual = rows
+    const stats = labels.map((l, i) => {
+      const deltas = rows.map((r, k) => r.counts[i] - (k ? rows[k - 1].counts[i] : 0))
+      return {
+        label: l,
+        total_frames: rows.at(-1).counts[i],
+        min_fps_1s: Math.min(...deltas),
+        zero_fps_seconds: deltas.filter((d) => d === 0).length,
+        distinct_hashes: new Set(rows.map((r) => r.hashes[i])).size,
+        non_live_seconds: rows.filter((r) => !r.live[i]).length,
+      }
+    })
+    out.dual_stats = stats
+    await page.screenshot({ path: path.join(outDir, 'dual60-end.png') })
+  } else if (phase === 'manual') {
+    // 长时间断流：有界自动重连耗尽 → 明确“自动重连失败，请手动重试”；源恢复后不得自行恢复；
+    // 手动点击「连接视频」后恢复解码
+    const label = '监控相机'
+    await connect(label)
+    fs.writeFileSync(input.ready_file, 'connected')
+    const t0 = Date.now()
+    let exhausted = null
+    while (Date.now() - t0 < 90000) {
+      const p = await probe(label)
+      if (/自动重连失败/.test(p.text)) { exhausted = { t: Date.now() - t0, text: p.text }; break }
+      await page.waitForTimeout(500)
+    }
+    out.exhausted = exhausted
+    fs.writeFileSync(input.exhausted_file, exhausted ? 'yes' : 'no')
+    const deadline = Date.now() + 60000
+    while (!fs.existsSync(input.restored_file) && Date.now() < deadline) await page.waitForTimeout(300)
+    await page.waitForTimeout(6000) // 源已恢复 6s：不得无点击自行变为实时
+    out.auto_after_exhausted = (await probe(label)).live
+    out.clicks_before_manual = clicks
+    await connect(label)
+    const after = await sample(label, 4)
+    out.manual = { clicks: clicks, after, decoded_after: after.frames > 20 && after.distinct >= 2 }
+    await card(label).screenshot({ path: path.join(outDir, 'videocard-rgb-manual-recovered.png') })
+  } else if (phase === 'switch') {
+    // 模拟车辆双路播放 → 经设备页「切换监控」切到真实车辆 → 旧会话 DELETE，真实车辆页不出现模拟流/横幅
+    for (const l of ['监控相机', '红外热成像']) await connect(l)
+    out.before_switch = { banner: await page.locator('[data-testid="simulated-source-banner"]').count() }
+    const before = requests.length
+    // SPA 内导航（vue-router 接管，不整页重载）——验证组件卸载时真实释放旧 WHEP 会话
+    await page.evaluate(() => {
+      history.pushState({}, '', '/robots')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    await page.waitForSelector('.vehicle-row', { timeout: 30000 })
+    out.navigation = 'spa'
+    const row = page.locator('.vehicle-row', { hasText: input.target }).first()
+    await row.getByRole('button', { name: /切换监控|进入实时监控/ }).first().click()
+    await page.waitForURL(/\/monitor/, { timeout: 30000 })
+    await page.waitForSelector('.video-surveillance .hmi-camera', { timeout: 30000 })
+    await page.waitForTimeout(1500)
+    const after = requests.slice(before)
+    out.after_switch = {
+      stored_vehicle: await page.evaluate(() => localStorage.getItem('firebot.activeVehicleId')),
+      banner: await page.locator('[data-testid="simulated-source-banner"]').count(),
+      media_deletes: after.filter((r) => r.startsWith('DELETE /media/')).length,
+      // 切车后除释放旧会话的 DELETE 外，不得再有任何模拟流请求（票据 / WHEP POST）
+      sim_requests_after: after.filter((r) => r.includes('firebot-sim-') && !r.startsWith('DELETE ')).length,
+      sim_deletes: after.filter((r) => r.startsWith('DELETE /media/firebot-sim-')).length,
+      cards: [],
+    }
+    for (const l of ['监控相机', '红外热成像']) {
+      const c = card(l)
+      out.after_switch.cards.push({
+        label: l,
+        live: (await c.locator('.video-live-tag').count()) > 0,
+        video_src: await c.locator('video').evaluate((v) => Boolean(v.srcObject)),
+        text: ((await c.locator('.video-placeholder').textContent().catch(() => '')) || '').trim(),
+      })
+    }
+    out.page_text_has_sim = (await page.locator('main, body').first().textContent()).includes('firebot-sim-')
+    await page.screenshot({ path: path.join(outDir, 'vehicle-switch-real.png') })
   }
   out.requests_media = requests.filter((r) => r.includes('/media/')).length
   out.requests = requests.filter((r) => /\/(api\/v1\/media|media\/)/.test(r))

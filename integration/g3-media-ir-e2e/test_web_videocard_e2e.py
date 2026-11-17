@@ -335,6 +335,10 @@ def test_production_videocard_rgb_and_thermal_decode(web):
     for key in ("rgb", "thermal"):
         card = data["cards"][key]
         assert card["decoded_changing"], (key, card)
+        gate = card["gate"]
+        # 首帧门控：「实时」只在 data-first-frame=yes 后出现，且先经历“连接中/等待首帧”
+        assert gate["violation"] is False and gate["live_at_ms"] is not None, gate
+        assert gate["connecting_seen"], gate
         r, g, b = card["hashes"][-1]["top"]
         assert r > 150 and g < 90 and b < 90, (key, card["hashes"][-1])  # 画面内 SIMULATED 红色横幅
     # 走的是生产 VideoCard 的票据 + /media/ WHEP 路径（同源网关 = nginx 语义）
@@ -451,6 +455,10 @@ def test_stream_outage_and_reconnect_in_videocard(web):
     assert data.get("ok"), (data, err[-800:])
     EVIDENCE["reconnect"] = data
     assert data["state_during_outage"], data  # 断流期间 VideoCard 离开 LIVE（不伪装在线）
+    assert data["violations"] == 0, data
+    # 严格自动重连：浏览器侧只点过一次「连接视频」（初始连接），恢复必须是 auto
+    assert data["clicks_during_reconnect"] == 1, data
+    assert data["cards"]["rgb"]["recovered"] == "auto", data
     assert data["cards"]["rgb"]["decoded_after"], data
 
 
@@ -463,3 +471,115 @@ def test_simulation_never_writes_real_001_sensor_facts(web):
         if raw:
             assert json.loads(raw).get("top_ir") not in (27.5, 42.0, 67.8), vid
     EVIDENCE["real_isolation"] = {"real_sensor_counts": web["real_before"], "unchanged": True}
+
+
+def _spawn_browser(web, phase: str, payload: dict):
+    proc = subprocess.Popen(
+        [
+            "node",
+            str(BROWSER / "web_videocard.mjs"),
+            web["base_url"],
+            SIM,
+            str(_evidence_dir()),
+            phase,
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env={**os.environ, "CHROMIUM_PATH": web["chromium"]},
+    )
+    username, password = _admin_credentials()
+    proc.stdin.write(json.dumps({"username": username, "password": password, **payload}))
+    proc.stdin.close()
+    return proc
+
+
+def _finish(proc, timeout):
+    proc.wait(timeout=timeout)
+    out, err = proc.stdout.read(), proc.stderr.read()
+    data = json.loads(out.strip().splitlines()[-1])
+    assert data.get("ok"), (data, err[-800:])
+    return data
+
+
+def test_dual_stream_60s_continuous(web):
+    """RGB + thermal 两张生产 VideoCard 同时连续播放 60s。
+
+    每秒都有新解码帧、画面持续变化、始终实时。
+    """
+    for stream_id, kind in ((RGB, "rgb"), (THERMAL, "thermal")):
+        if not _ready(web, stream_id):
+            _publish(web, stream_id, kind)
+            assert wait_for(lambda s=stream_id: _ready(web, s), 30)
+    data = _browser(web, "dual60", {"seconds": 60}, timeout=150)
+    EVIDENCE["dual60"] = {
+        "stats": data["dual_stats"],
+        "gates": data["gates"],
+        "timeline": data["dual"],
+    }
+    assert len(data["dual"]) == 60
+    for stat in data["dual_stats"]:
+        assert stat["zero_fps_seconds"] == 0, stat  # 60 个 1 秒窗口均有新帧
+        assert stat["min_fps_1s"] >= 5, stat
+        assert stat["total_frames"] >= 600, stat
+        assert stat["distinct_hashes"] >= 50, stat  # 画面持续变化（非静帧）
+        assert stat["non_live_seconds"] == 0, stat
+    for gate in data["gates"]:
+        assert gate["violation"] is False, gate
+
+
+def test_manual_recovery_after_long_outage(web):
+    """长时间断流：有界自动重连耗尽 → 明确提示；源恢复后不自行恢复；手动「连接视频」后解码恢复。"""
+    ready = web["workdir"] / "mn-ready"
+    exhausted = web["workdir"] / "mn-exhausted"
+    restored = web["workdir"] / "mn-restored"
+    for f in (ready, exhausted, restored):
+        f.unlink(missing_ok=True)
+    if not _ready(web, RGB):
+        _publish(web, RGB, "rgb")
+        assert wait_for(lambda: _ready(web, RGB), 30)
+    proc = _spawn_browser(
+        web,
+        "manual",
+        {
+            "ready_file": str(ready),
+            "exhausted_file": str(exhausted),
+            "restored_file": str(restored),
+        },
+    )
+    assert wait_for(ready.exists, 60), "browser never connected"
+    stop(web["publishers"].pop(RGB))
+    assert wait_for(exhausted.exists, 100), "auto-reconnect never exhausted"
+    _publish(web, RGB, "rgb")
+    assert wait_for(lambda: _ready(web, RGB), 30)
+    restored.write_text("restored")
+    data = _finish(proc, 120)
+    EVIDENCE["manual"] = data
+    assert data["exhausted"] and "自动重连失败" in data["exhausted"]["text"], data
+    assert data["auto_after_exhausted"] is False, data  # 耗尽后不得无点击自行恢复
+    assert data["clicks_before_manual"] == 1, data
+    assert data["manual"]["decoded_after"], data
+
+
+def test_vehicle_switch_releases_sim_session_and_real_001_shows_no_sim(web):
+    """模拟设备双路播放 → 设备页切换到真实 001。
+
+    旧 WHEP 会话 DELETE；真实 001 页面无模拟横幅/模拟流。
+    """
+    for stream_id, kind in ((RGB, "rgb"), (THERMAL, "thermal")):
+        if not _ready(web, stream_id):
+            _publish(web, stream_id, kind)
+            assert wait_for(lambda s=stream_id: _ready(web, s), 30)
+    data = _browser(web, "switch", {"target": "firebot-vehicle-01"})
+    EVIDENCE["switch"] = data
+    assert data["navigation"] == "spa"
+    assert data["before_switch"]["banner"] == 1
+    after = data["after_switch"]
+    assert after["stored_vehicle"] == "firebot-vehicle-01", after
+    assert after["banner"] == 0, after
+    assert after["sim_deletes"] == 2, after  # 两路模拟旧会话在组件卸载时 DELETE 释放
+    assert after["sim_requests_after"] == 0, after
+    for c in after["cards"]:
+        assert c["live"] is False and c["video_src"] is False, c
+    assert data["page_text_has_sim"] is False
