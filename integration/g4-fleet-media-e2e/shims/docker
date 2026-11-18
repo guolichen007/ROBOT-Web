@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""docker CLI 替身（G4-Fleet-R2 隔离验收专用；绝不连接任何真实 docker / 生产服务）。
+
+把 fleet-register.sh / 60-onboard-vehicle.sh 的 docker 调用映射到本地隔离组件：
+  compose ... exec -T api python -c CODE   → 本地 venv python（隔离 PG/Redis，PYTHONPATH=apps/api）
+  run ... mosquitto_passwd /work/passwords → 本地 mosquitto_passwd（/work → -v 宿主路径；stdin 透传）
+  run ... busybox sh -c 'cp ...'           → 把 passwords/acl 同步到本地 broker 配置目录
+  run ... python3 61-verify-vehicle-acl.py → 本地运行（/runtime → 隔离 runtime；端口 → 本地 broker）
+  ps -q -f label=...mosquitto              → 本地 broker 标识
+  inspect --format {{.State.StartedAt}}    → 本地 broker 进程真实启动时刻（/proc/<pid>/stat）
+  kill --signal HUP                        → 对本地 broker 真实 SIGHUP
+所有调用记录到 $SHIM_LOG（argv），用于证明凭证不出现在任何进程参数中。
+"""
+
+import os
+import signal
+import subprocess
+import sys
+
+A = sys.argv[1:]
+LOG = os.environ["SHIM_LOG"]
+with open(LOG, "a", encoding="utf-8") as fh:
+    fh.write("DOCKER " + " ".join(A) + "\n")
+
+
+def broker_pid() -> int:
+    return int(open(os.environ["SHIM_BROKER_PID_FILE"]).read().strip())
+
+
+def mounts(args):
+    out = {}
+    i = 0
+    while i < len(args):
+        if args[i] == "-v":
+            host, cont = args[i + 1].split(":")[:2]
+            out[cont] = host
+            i += 2
+        else:
+            i += 1
+    return out
+
+
+def after_image(args):
+    i = 0
+    while i < len(args):
+        if args[i] in ("-v", "--network", "-w", "-e", "--name"):
+            i += 2
+        elif args[i].startswith("-"):
+            i += 1
+        else:
+            return args[i], args[i + 1 :]
+    return "", []
+
+
+if not A or A[0] == "info":
+    sys.exit(0)
+if A[:2] == ["ps", "-q"]:
+    print("mosquitto-shim")
+    sys.exit(0)
+if A[0] == "inspect":
+    fmt = A[A.index("--format") + 1] if "--format" in A else ""
+    if "StartedAt" in fmt:
+        stat = open("/proc/%d/stat" % broker_pid()).read().rsplit(")", 1)[1].split()
+        print("proc-start-ticks-%s" % stat[19])
+    else:
+        os.kill(broker_pid(), 0)
+        print("true healthy")
+    sys.exit(0)
+if A[0] == "kill" and "--signal" in A:
+    os.kill(broker_pid(), signal.SIGHUP)
+    sys.exit(0)
+if A[0] == "compose":
+    i = A.index("exec")
+    rest = A[i + 1 :]
+    while rest and rest[0].startswith("-"):
+        rest = rest[1:]
+    assert rest[0] == "api" and rest[1] == "python", rest
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.path.join(os.environ["SHIM_REPO"], "apps", "api")
+    r = subprocess.run([os.environ["SHIM_PY"]] + rest[2:], env=env,
+                       cwd=os.path.join(os.environ["SHIM_REPO"], "apps", "api"))
+    sys.exit(r.returncode)
+if A[0] == "run":
+    m = mounts(A[1:])
+    image, cmd = after_image(A[1:])
+    if cmd and cmd[0] == "mosquitto_passwd":
+        cmd = [c.replace("/work", m["/work"]) for c in cmd]
+        sys.exit(subprocess.run(cmd).returncode)
+    if cmd[:2] == ["sh", "-c"]:
+        src, dst = m["/source"], os.environ["SHIM_BROKER_DIR"]
+        for name in ("passwords", "acl"):
+            data = open(os.path.join(src, name), "rb").read()
+            with open(os.path.join(dst, name), "wb") as fh:
+                fh.write(data)
+            os.chmod(os.path.join(dst, name), 0o600)
+        sys.exit(0)
+    if any("61-verify-vehicle-acl.py" in c for c in cmd):
+        rt = m["/runtime"]
+        script = os.path.join(m["/workspace"], "deploy/u-dao/scripts/61-verify-vehicle-acl.py")
+        args = cmd[cmd.index(next(c for c in cmd if c.endswith("61-verify-vehicle-acl.py"))) + 1 :]
+        if "--mqtt-port" in args:
+            args[args.index("--mqtt-port") + 1] = os.environ["SHIM_BROKER_PORT"]
+        args += ["--ca-file", rt + "/secrets/mosquitto/certs/ca.crt",
+                 "--vehicle-password-file", rt + "/secrets/vehicles/{v}/mqtt_password",
+                 "--platform-password-file", rt + "/secrets/app/mqtt_platform_password"]
+        sys.exit(subprocess.run([os.environ["SHIM_PY"], script] + args).returncode)
+print("docker-shim: unsupported run %s %s" % (image, cmd), file=sys.stderr)
+sys.exit(1)

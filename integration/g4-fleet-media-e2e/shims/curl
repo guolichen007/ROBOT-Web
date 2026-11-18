@@ -1,0 +1,12 @@
+#!/bin/bash
+# curl 替身：把 enrollment 的正式 https 地址改写到隔离 API（http://127.0.0.1:<port>），其余参数原样传给真实 curl。
+# 记录 argv（证明 token 不在进程参数中；请求体经 stdin）。
+echo "CURL $*" >> "${SHIM_LOG:?}"
+args=()
+for a in "$@"; do
+  case "$a" in
+    https://firebot.youdaozd.com*) args+=("http://127.0.0.1:${SHIM_API_PORT:?}${a#https://firebot.youdaozd.com}") ;;
+    *) args+=("$a") ;;
+  esac
+done
+exec /usr/bin/curl "${args[@]}"

@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""systemctl 替身（G4-Fleet-R2 隔离验收专用）：单元状态存于 $SD_STATE；媒体单元真实拉起发布器进程。
+
+  firebot-media@<cam>     restart/start → 以 unit 同等参数真实启动发布器（Ubuntu 20.04 用户态 python）；
+                          stop/disable --now → SIGTERM（与 KillSignal 一致）；is-active 依据进程存活
+  firebot-vehicle-edge    enable --now → 用 enrollment 下发的 MQTT 凭证对隔离 broker 做真实 TLS 认证，
+                          结果写 runtime/status.json（替代 Bridge 进程本身：Bridge 硬编码生产主机名，
+                          沙箱不得解析到生产）；MainPID 为占位进程
+  其他单元                 纯状态（G1 readonly agent / control / bridge）
+所有调用记录到 $SD_STATE/calls.log。
+"""
+
+import json
+import os
+import signal
+import subprocess
+import sys
+import time
+import uuid
+
+S = os.environ["SD_STATE"]
+A = sys.argv[1:]
+with open(os.path.join(S, "calls.log"), "a", encoding="utf-8") as fh:
+    fh.write(" ".join(A) + "\n")
+
+
+def path(unit, key):
+    return os.path.join(S, "%s.%s" % (unit, key))
+
+
+def get(unit, key, default):
+    try:
+        return open(path(unit, key)).read().strip()
+    except OSError:
+        return default
+
+
+def put(unit, key, value):
+    with open(path(unit, key), "w") as fh:
+        fh.write(value + "\n")
+
+
+def pid_alive(pid):
+    try:
+        os.kill(pid, 0)
+        st = open("/proc/%d/stat" % pid).read().rsplit(")", 1)[1].split()[0]
+        return st != "Z"
+    except (OSError, ValueError):
+        return False
+
+
+def media_start(unit):
+    cam = unit.split("@", 1)[1]
+    old = int(get(unit, "pid", "0") or 0)
+    if old and pid_alive(old):
+        os.kill(old, signal.SIGTERM)
+        for _ in range(60):
+            if not pid_alive(old):
+                break
+            time.sleep(0.25)
+    edge = os.environ["FIREBOT_EDGE_HOME"]
+    env = dict(os.environ, PYTHONPATH=os.path.join(edge, "media", "current"))
+    env.pop("FIREBOT_MEDIA_LIBSRT", None)  # 与 unit 一致：使用 release 自带 libsrt
+    log = open(os.path.join(S, "%s.log" % unit), "ab")
+    p = subprocess.Popen([os.environ["SD_MEDIA_PYTHON"], "-m", "firebot_media", cam, "--edge-home", edge],
+                         env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+    put(unit, "pid", str(p.pid))
+    put(unit, "active", "active")
+
+
+def media_stop(unit):
+    pid = int(get(unit, "pid", "0") or 0)
+    if pid and pid_alive(pid):
+        os.kill(pid, signal.SIGTERM)
+        for _ in range(60):
+            if not pid_alive(pid):
+                break
+            time.sleep(0.25)
+    put(unit, "active", "inactive")
+
+
+def edge_start():
+    edge = os.environ["FIREBOT_EDGE_HOME"]
+    holder = subprocess.Popen(["sleep", "600"], start_new_session=True)
+    put("firebot-vehicle-edge", "pid", str(holder.pid))
+    connected = subprocess.run([os.environ["SD_PY"], os.environ["SD_MQTT_PROBE"], edge],
+                               capture_output=True, text=True, timeout=30).returncode == 0
+    sha = os.path.basename(os.readlink(os.path.join(edge, "current")))
+    rt = os.path.join(edge, "runtime")
+    os.makedirs(rt, exist_ok=True)
+    with open(os.path.join(rt, "status.json"), "w") as fh:
+        json.dump({"mqtt_connected": connected, "boot_id": str(uuid.uuid4()), "pid": holder.pid,
+                   "release_sha": sha, "status_updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}, fh)
+    put("firebot-vehicle-edge", "active", "active")
+    put("firebot-vehicle-edge", "enabled", "enabled")
+
+
+cmd = A[0] if A else ""
+units = [u for u in A[1:] if not u.startswith("-")]
+if cmd == "is-active":
+    u = units[0]
+    st = get(u, "active", "inactive")
+    if u.startswith("firebot-media@") and st == "active" and not pid_alive(int(get(u, "pid", "0") or 0)):
+        st = "failed"
+    print(st)
+    sys.exit(0 if st == "active" else 3)
+if cmd == "is-enabled":
+    st = get(units[0], "enabled", "disabled")
+    print(st)
+    sys.exit(0 if st == "enabled" else 1)
+if cmd == "show":
+    print(get(units[0], "pid", "0"))
+    sys.exit(0)
+if cmd == "daemon-reload":
+    sys.exit(0)
+now = "--now" in A
+for u in units:
+    if cmd in ("start", "restart") or (cmd == "enable" and now):
+        if u.startswith("firebot-media@"):
+            media_start(u)
+        elif u == "firebot-vehicle-edge":
+            edge_start()
+        else:
+            put(u, "active", "active")
+        if cmd == "enable":
+            put(u, "enabled", "enabled")
+    elif cmd == "enable":
+        put(u, "enabled", "enabled")
+    elif cmd in ("stop",) or (cmd == "disable" and now):
+        if u.startswith("firebot-media@"):
+            media_stop(u)
+        else:
+            put(u, "active", "inactive")
+        if cmd == "disable":
+            put(u, "enabled", "disabled")
+    elif cmd == "disable":
+        put(u, "enabled", "disabled")
+sys.exit(0)

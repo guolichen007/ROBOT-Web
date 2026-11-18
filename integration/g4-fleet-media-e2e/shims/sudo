@@ -1,0 +1,8 @@
+#!/bin/bash
+# sudo 替身：60-onboard-vehicle.sh 的 `sudo -n chown ubuntu:ubuntu passwords` 在隔离环境无意义 → 记录并成功。
+echo "SUDO $*" >> "${SHIM_LOG:?}"
+[ "${1:-}" = "-n" ] && shift
+case "${1:-}" in
+  chown) exit 0 ;;
+  *) echo "sudo-shim: refuse $*" >&2; exit 1 ;;
+esac
