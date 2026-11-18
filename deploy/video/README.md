@@ -47,5 +47,27 @@ web_control /web_control/task（ROS service，任务白名单，经 rosbridge �
   StartLimitIntervalSec=300s + StartLimitBurst=6（300 秒最多 6 次，防无限高频重启）、
   LogRateLimit 200 条/30s、User=firebot-video、NoNewPrivileges、PrivateTmp。
 - 安装启用前置：①两台相机物理接入 ②云端交付 SRT endpoint/streamid/token/passphrase
-  （凭证投递 `/etc/firebot/video/srt_{streamid,passphrase}`，0600 root:firebot-video，
-  值不进 argv/日志/聊天/Git）。未授权前不向生产服务器推送。
+  （凭证投递 `/etc/firebot/video/srt_{streamid,passphrase}`，0640 root:firebot-video，
+  值不进 argv/日志/聊天/Git）③创建 firebot-video 系统用户并加入 video 组。
+  未授权前不向生产服务器推送。
+
+## 5. 本机实测矩阵（2026-11-18，G4-Fleet-A2；供统一媒体模块引用）
+
+| 能力 | 实测结果 | 结论 |
+| --- | --- | --- |
+| ffmpeg 4.2.7 h264_nvenc（RTX 3050，驱动 595.71.05） | `-preset p1`/`ll`/`default`/裸参数全部报 `Cannot get the preset configuration: unsupported param (12)` | **不可用**（旧 ffmpeg 与新驱动 NVENC 枚举不兼容） |
+| ffmpeg 4.2.7 libx264 软编 1280x480@30 | 输出 h264+yuv420p+30fps 正常 | **可用（发布器当前默认）** |
+| ffmpeg 4.2.7 h264_vaapi（renderD128，iHD/i965 驱动均在） | `vaGetDriverNameByIndex failed`（root 同样失败） | **不可用**（libva 2.7 栈不支持 12 代 iGPU） |
+| h264_v4l2m2m | 无 /dev/media* 设备 | 不可用 |
+| srt-live-transmit 1.4.0 数据面（回环） | ffmpeg→UDP→SRT→UDP 全管道 `SRT target connected`，传输正常 | **可用** |
+| srt-live-transmit 1.4.0 URI `?passphrase=` | `failed to set options: passphrase` + #5003 | **不支持** |
+| libsrt 1.4.0 SRTO_PASSPHRASE setsockopt | rc=-1（LATENCY/STREAMID/PBKEYLEN 对照均 rc=0，加密后端 libcrypto+HaiCrypt 链接完好） | **加密选项设置失败** |
+| libsrt 1.4.0 `SRT_ENV_PASSPHRASE/STREAMID` 注入 | getsockflag 读回空（1.4.0 < 引入该特性的 1.4.4） | **不生效，凭证会静默失效** |
+| srt-live-transmit 断连行为 | 默认 autoreconnect=yes 无限重连不退出；`-a:no` 断开即退出（rc=0） | 发布器已改 `-a:no` + rc=0→1 转失败退出码，触发 systemd 有界退避 |
+| 凭证文件 0600 root:firebot-video | firebot-video 读被拒（`权限不够`） | **必须 0640 root:firebot-video**（或 0600 firebot-video:firebot-video） |
+| 进程 environ 凭证可见性 | G1 生产进程 /proc/PID/environ=0400 firebot:firebot，非属主 tl 读取被拒 | 凭证经 env 注入不泄漏给非属主 |
+| 发布器 fail-closed | 无 env/无设备/无凭证/无 endpoint 四例全部 rc=1 + 明确 FAIL 行 | 按设计 fail-closed |
+
+> 统一媒体模块落地前必须解决：libsrt 升级 ≥1.4.4（推荐 1.5.x）以恢复
+> SRT_ENV_PASSPHRASE/STREAMID 凭证注入，或改用其他不进 argv 的凭证投递方式；
+> 编码默认 libx264，NVENC/VAAPI 需升级 ffmpeg/驱动栈后启用。

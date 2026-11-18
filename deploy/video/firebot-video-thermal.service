@@ -1,5 +1,5 @@
 # firebot-001 真实热成像相机 SRT 发布（独立进程；与 rgb 互不影响）
-# 相机离线/SRT 断开 → 进程退出 → 有界退避重启；凭证经 0600 文件 → env，不进 argv。
+# 相机离线/SRT 断开 → 进程退出 → 有界退避重启；凭证经 0640 root:firebot-video 文件 → env，不进 argv。
 [Unit]
 Description=Firebot vehicle video publisher: real thermal camera -> SRT (NO_HARDWARE, camera only)
 Wants=network-online.target

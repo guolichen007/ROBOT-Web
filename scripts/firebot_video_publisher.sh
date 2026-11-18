@@ -6,7 +6,7 @@
 # 相机离线或 SRT 断开时进程退出，systemd 有界退避重启（StartLimit 限制高频重启）。
 #
 # 安全铁律：
-#   - SRT streamid/passphrase 只经 0600 受控文件读取后注入进程环境，
+#   - SRT streamid/passphrase 只经 0640 受控文件读取后注入进程环境，
 #     绝不进入命令行参数、日志、聊天或 GitHub；
 #   - 进程以专用低权限用户运行（默认 firebot-video）；
 #   - 输入源不可用直接退出（fail-closed），不用合成源冒充真实相机；
@@ -15,11 +15,27 @@
 #     已在运行并持有 /dev/videoN，本发布器不得直开同一设备——打不开设备即
 #     fail-closed 退出，绝不双开同一 USB 相机。
 #
+# 本机实测修正（2026-11-18，G4-Fleet-A2）：
+#   - 凭证文件权限必须 0640 root:firebot-video：0600 root:firebot-video 经实测
+#     firebot-video 用户不可读（0600 属主 root 只有 root 可读），会导致启动即
+#     "凭证未投递" 误判。
+#   - ffmpeg 4.2.7 的 h264_nvenc 与 NVIDIA 驱动 595.x 不兼容（"Cannot get the
+#     preset configuration: unsupported param (12)"，任意 preset 均失败），
+#     故本脚本默认使用 libx264 软编（实测 1280x480@30 OK）；升级 ffmpeg>=5.1
+#     后可将 ENC 参数切回 h264_nvenc -preset p1 -tune ll。VAAPI 亦不可用
+#     （libva 2.7 驱动栈不支持 12 代 iGPU）。
+#   - 本机 libsrt 1.4.0 实测 SRT_ENV_PASSPHRASE/SRT_ENV_STREAMID 不注入
+#     （getsockflag 读回空），且 srt-live-transmit 1.4.0 不支持 URI 里
+#     passphrase 参数（#5003）。生产启用加密前必须升级 libsrt>=1.4.4/1.5，
+#     否则凭证会静默失效（链路无加密、无 streamid）。
+#   - srt-live-transmit 默认 autoreconnect=yes（对端断开不退出、自动重连）；
+#     本脚本显式 -a:no，断连即整体退出，由 systemd 有界退避重启（长期故障恢复）。
+#
 # 前置（等云端交付后启用）：
 #   /etc/firebot/video/env            0640 root:firebot-video（非敏感配置）
-#   /etc/firebot/video/srt_passphrase 0600 root:firebot-video（SRT 加密 passphrase）
-#   /etc/firebot/video/srt_streamid   0600 root:firebot-video（streamid，含发布 token）
-#   /etc/firebot/video/rtsp_url_rgb   0600 root:firebot-video（RTSP 凭证时使用，UVC 不需要）
+#   /etc/firebot/video/srt_passphrase 0640 root:firebot-video（SRT 加密 passphrase）
+#   /etc/firebot/video/srt_streamid   0640 root:firebot-video（streamid，含发布 token）
+#   /etc/firebot/video/rtsp_url_rgb   0640 root:firebot-video（RTSP 凭证时使用，UVC 不需要）
 #
 # 用法：bash scripts/firebot_video_publisher.sh rgb|thermal
 set -euo pipefail
@@ -101,15 +117,20 @@ echo "VIDEO_PUBLISH=START mode=$MODE marker=$STREAM_MARKER REAL_CAMERA_SENSOR=RE
 if [ "$STREAM_COPY" = 1 ]; then
   ffmpeg -v warning -re -i "$SOURCE_IN" -c:v copy -an -f mpegts "udp://127.0.0.1:${UDP_PORT}?pkt_size=1316" &
 else
+  # 实测编码器矩阵（2026-11-18）：libx264 veryfast 可用；h264_nvenc 在
+  # ffmpeg 4.2.7+驱动 595 下任意 preset 均报 unsupported param(12)；
+  # h264_vaapi 因 libva 2.7 驱动栈不支持 12 代 iGPU 而失败。
   ffmpeg -v warning -f v4l2 -input_format "$CAM_PIXFMT" \
     -video_size "${CAM_WIDTH}x${CAM_HEIGHT}" -framerate "$CAM_FPS" -i "$CAM_DEV" \
-    -c:v h264_nvenc -preset p1 -tune ll -b:v 2M -g $((CAM_FPS * 2)) -an \
+    -c:v libx264 -preset veryfast -b:v 2M -g $((CAM_FPS * 2)) -an \
     -f mpegts "udp://127.0.0.1:${UDP_PORT}?pkt_size=1316" &
 fi
 FFMPEG_PID=$!
 sleep 2   # 等 ffmpeg 起流
 
-srt-live-transmit "udp://127.0.0.1:${UDP_PORT}" "srt://${SRT_HOST}:${SRT_PORT}" \
+# -a:no：SRT 对端断开即退出（默认 autoreconnect=yes 会无限重连不退出），
+# 断连后由 systemd 有界退避重启，避免掩盖长期故障。
+srt-live-transmit -a:no "udp://127.0.0.1:${UDP_PORT}" "srt://${SRT_HOST}:${SRT_PORT}" \
   -st:yes -chunk:1316 -linger:2 > "$STATE_DIR/$MODE-srt.out" 2> "$STATE_DIR/$MODE-srt.err" &
 SRT_PID=$!
 
@@ -117,4 +138,7 @@ SRT_PID=$!
 wait -n "$FFMPEG_PID" "$SRT_PID" 2>/dev/null || true
 EXIT_CODE=$?
 echo "VIDEO_PUBLISH=STOP mode=$MODE rc=$EXIT_CODE（systemd 将按有界退避处理）"
+# srt-live-transmit 断连时退出码为 0，但发布管道任一端退出都应触发
+# systemd Restart=on-failure 的有界退避重启，统一转成非 0。
+[ "$EXIT_CODE" = 0 ] && EXIT_CODE=1
 exit "$EXIT_CODE"
