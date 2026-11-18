@@ -26,10 +26,14 @@ def kv(path):
 ident = kv(os.path.join(edge, "config", "identity.env"))
 secret = kv(os.path.join(edge, "secrets", "mqtt.env"))
 result = {}
-c = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="probe-%d" % time.time(), protocol=mqtt.MQTTv5)
+c = mqtt.Client(
+    mqtt.CallbackAPIVersion.VERSION2, client_id="probe-%d" % time.time(), protocol=mqtt.MQTTv5
+)
 c.username_pw_set(ident["DEVICE_ID"], secret["FIREBOT_MQTT_PASSWORD"])
 c.tls_set(ca_certs=os.environ["SD_BROKER_CA"])
-c.on_connect = lambda cl, ud, flags, rc, props=None: result.setdefault("rc", rc.value if hasattr(rc, "value") else rc)
+c.on_connect = lambda cl, ud, flags, rc, props=None: result.setdefault(
+    "rc", rc.value if hasattr(rc, "value") else rc
+)
 try:
     c.connect("127.0.0.1", int(os.environ["SD_BROKER_PORT"]), 10)
     c.loop_start()

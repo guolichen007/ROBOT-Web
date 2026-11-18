@@ -34,10 +34,18 @@ MASTER = "g4fr2-isolated-media-master-0123456789abcdef"
 PASSPHRASE = "g4fr2-isolated-srt-passphrase"
 
 
+_ISSUED: set = set()
+
+
 def free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+    """分配本进程内不重复的空闲端口（避免先后分配到同一端口导致 bind 冲突）。"""
+    while True:
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        if port not in _ISSUED:
+            _ISSUED.add(port)
+            return port
 
 
 def wait_port(port: int, timeout: float = 20.0) -> bool:
