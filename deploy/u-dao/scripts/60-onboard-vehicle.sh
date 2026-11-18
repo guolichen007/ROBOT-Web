@@ -46,6 +46,26 @@ fail() { echo "ONBOARD=FAIL: $1" >&2; exit 1; }
 echo "$VEHICLE_ID" | grep -qE '^[A-Za-z0-9_-]+$' || fail "vehicle_id 含非法字符: $VEHICLE_ID"
 [ -d "$RUNTIME_ROOT/secrets" ] || fail "runtime secrets 不存在（先执行 02-gen-bootstrap-secrets.sh）"
 
+# G4-Fleet-R2：MQTT 凭证模式（默认/--apply/--force/--verify）只允许用于其批准 Transport Profile 的
+# provisioner 正是本脚本的车辆；001（r001-independent-v1，G1 独立签发）等无 provisioner 的车辆只允许
+# --media-only / --resync-srt（不生成/不轮换 U-Dao 主 Broker 上的 MQTT 凭证）。
+case "$MODE" in
+  --media-only|--resync-srt) : ;;
+  *)
+    REGISTRY="${FIREBOT_TRANSPORT_PROFILES:-$REPO_ROOT/deploy/u-dao/transport-profiles.json}"
+    if [ -f "$REGISTRY" ]; then
+      prov="$(python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8"))
+pid = d.get("vehicles", {}).get(sys.argv[2])
+prof = d.get("profiles", {}).get(pid) if pid else None
+prov = (prof or {}).get("credential_provisioner") or {}
+print("MAPPED_NO_PROVISIONER" if pid and not prov else "OK")
+' "$REGISTRY" "$VEHICLE_ID")" || fail "Transport Profile 注册表不可读"
+      [ "$prov" = "OK" ] || fail "$VEHICLE_ID 的批准 Transport Profile 无平台 MQTT provisioner：只允许 --media-only / --resync-srt（不生成/不轮换 MQTT 凭证）"
+    fi ;;
+esac
+
 detect_docker() {
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
     DOCKER=(docker)

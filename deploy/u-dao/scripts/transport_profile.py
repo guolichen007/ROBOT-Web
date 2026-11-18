@@ -29,11 +29,24 @@ DEFAULT_REGISTRY = ROOT / "deploy" / "u-dao" / "transport-profiles.json"
 VEHICLE_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 PROFILE_RE = re.compile(r"^[a-z0-9][a-z0-9.-]{0,63}$")
 BAD_HOST = re.compile(
-    r"(^|\.)(localhost)$|^127\.|^10\.|^192\.168\.|^172\.(1[6-9]|2[0-9]|3[01])\.|^100\.(64|68|110)\.|"
+    r"(^|\.)(localhost)$|^127\.|^10\.|^192\.168\.|^172\.(1[6-9]|2[0-9]|3[01])\.|^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.|^169\.254\.|"
     r"tailscale|example|REPLACE_|CHANGE_ME|<",
     re.I,
 )
 REQUIRED = ("host", "port", "protocol", "broker_ref", "ca", "adapter")
+# 批准的协议（服务器侧白名单；车端 Vehicle Edge 只承载 canonical-mqtt）
+APPROVED_PROTOCOLS = frozenset({"canonical-mqtt-1.3", "vehicle-agent-v1"})
+# 凭证签发器在代码中硬绑定：id → (实际写入的 Broker, 命令, 适用协议)。注册表只能引用这里已知的
+# provisioner，且 broker_ref/command/protocol 必须与硬绑定完全一致——防止新增 Profile 把凭证写进
+# U-Dao 主 Broker 却下发另一个 Broker 的端口（凭证写入错误 Broker）。
+PROVISIONERS = {
+    "u-dao-mosquitto-onboard": {
+        "broker_ref": "u-dao-firebot/mosquitto",
+        "command": "deploy/u-dao/scripts/60-onboard-vehicle.sh",
+        "protocol": "canonical-mqtt-1.3",
+        "port": 8883,
+    },
+}
 
 
 class ProfileError(Exception):
@@ -55,7 +68,27 @@ def load_registry(path: Path) -> dict:
         missing = [k for k in REQUIRED if k not in prof or prof[k] in (None, "")]
         if missing:
             raise ProfileError("REGISTRY_INVALID", f"profile {pid} 缺少字段 {missing}")
+        if prof["protocol"] not in APPROVED_PROTOCOLS:
+            raise ProfileError(
+                "PROTOCOL_NOT_APPROVED", f"profile {pid} protocol {prof['protocol']} 未批准"
+            )
         prov = prof.get("credential_provisioner")
+        if prov is not None:
+            bound = PROVISIONERS.get(prov.get("id", ""))
+            if bound is None:
+                raise ProfileError("PROVISIONER_UNKNOWN", f"profile {pid} 引用未知 provisioner")
+            if (
+                prov.get("command") != bound["command"]
+                or prov.get("broker_ref") != bound["broker_ref"]
+                or prof["broker_ref"] != bound["broker_ref"]
+                or prof["protocol"] != bound["protocol"]
+                or prof["port"] != bound["port"]
+            ):
+                raise ProfileError(
+                    "BROKER_MISMATCH",
+                    f"profile {pid} 与 provisioner {prov.get('id')} 的硬绑定"
+                    f"（broker/command/protocol/port）不一致",
+                )
         if prov is not None and prov.get("broker_ref") != prof["broker_ref"]:
             raise ProfileError(
                 "BROKER_MISMATCH",

@@ -127,6 +127,20 @@ def main() -> int:
           r.returncode != 0 and "TRANSPORT_PROTOCOL_NOT_EDGE" in r.stderr and not fx.wrote_anything(),
           r.stdout + r.stderr)
 
+    # 审查 SHOULD-FIX 6：服务器响应字段注入（换行注入 SUPPORTED_COMMANDS）→ 拒绝且零写入
+    for key, val in (("site_code", "S1\nSUPPORTED_COMMANDS=patrol"), ("mqtt_host", "evil host"),
+                     ("display_name", "x\nFIREBOT_SUPPORTED_COMMANDS=stop"),
+                     ("device_id", "firebot-vehicle-09")):
+        fx = Fx(base_resp(**{key: val}))
+        r = fx.run("--token-file", str(fx.tok))
+        check("ENV_INJECTION %s 非法 → FAIL 零写入" % key, r.returncode != 0 and not fx.wrote_anything(),
+              r.stdout + r.stderr)
+    media = base_resp()["media"]
+    media["vehicle_id"] = "firebot-vehicle-02"
+    fx = Fx(base_resp(media=media))
+    r = fx.run("--token-file", str(fx.tok))
+    check("MEDIA 身份不符 → 拒绝且 mqtt.env 等零写入（校验先于写盘）",
+          r.returncode != 0 and not fx.wrote_anything(), r.stdout + r.stderr)
     media = base_resp()["media"]
     media["media_publish_token"] = "MASTER"
     fx = Fx(base_resp(media=media))

@@ -129,3 +129,17 @@ def test_replay_after_success_rejected(robot):
     with TestClient(app) as c:
         assert c.post("/api/v1/enrollment/activate", json=body).status_code == 200
         assert c.post("/api/v1/enrollment/activate", json=body).status_code == 401
+
+
+def test_malformed_media_rolls_back_everything(robot):
+    """响应校验失败（media 缺字段）须在提交前发生：token 不消费、凭证不清、device token 不变。"""
+    cred = _cred()
+    cred["media"] = {k: v for k, v in cred["media"].items() if k != "srt_port"}
+    token = _issue(cred)
+    with TestClient(app) as c:
+        r = c.post("/api/v1/enrollment/activate", json={"device_id": VID, "token": token})
+    assert r.status_code == 409, r.text
+    with SessionLocal() as db:
+        row = db.scalar(select(EnrollmentToken).where(EnrollmentToken.device_id == VID))
+        assert row.consumed_at is None and row.credential_json
+    assert _hash(robot) == hashlib.sha256(OLD_DEVICE_TOKEN.encode()).hexdigest()

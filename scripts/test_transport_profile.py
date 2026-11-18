@@ -111,6 +111,31 @@ def test_registry_and_resolve(act: Path) -> None:
     tf = act.parent / "tampered.json"
     tf.write_text(json.dumps(tampered))
     expect("BROKER_MISMATCH", vehicle_id="firebot-vehicle-02", registry=tf, activation_env=act)
+    # 审查 SHOULD-FIX 4：新 Profile 指向 8884/r001-broker 却复用 60-onboard → 拒绝
+    evil = json.loads(REGISTRY.read_text())
+    evil["profiles"]["evil-v1"] = {
+        "host": "firebot.youdaozd.com",
+        "port": 8884,
+        "protocol": "canonical-mqtt-1.3",
+        "broker_ref": "u-dao-firebot-r001-prod/r001-broker",
+        "ca": {"server_path": "x", "vehicle_path": "y"},
+        "adapter": "mqtt-ingress",
+        "credential_provisioner": {
+            "id": "u-dao-mosquitto-onboard",
+            "broker_ref": "u-dao-firebot-r001-prod/r001-broker",
+            "command": "deploy/u-dao/scripts/60-onboard-vehicle.sh",
+        },
+        "assignable_to_new_vehicles": True,
+    }
+    ef = act.parent / "evil.json"
+    ef.write_text(json.dumps(evil))
+    expect("BROKER_MISMATCH", vehicle_id="firebot-vehicle-02", registry=ef, activation_env=act)
+    evil["profiles"].pop("evil-v1")
+    evil["profiles"]["u-dao-standard-v1"]["protocol"] = "mqtt-anything"
+    ef.write_text(json.dumps(evil))
+    expect(
+        "PROTOCOL_NOT_APPROVED", vehicle_id="firebot-vehicle-02", registry=ef, activation_env=act
+    )
 
 
 FAKE_DOCKER = r"""#!/bin/bash
@@ -212,6 +237,11 @@ def test_fleet_register() -> None:
         check(
             "FLEET_REGISTER_NEW 无 --transport-profile → REJECTED",
             r.returncode != 0 and "PROFILE_REQUIRED" in r.stderr and "ONBOARD" not in fx.calls(),
+        )
+        r = fx.run("firebot-vehicle-02")
+        check(
+            "FLEET_REGISTER_002 受保护车辆无 --confirm-protected → REJECTED（不触碰生产 Broker）",
+            r.returncode != 0 and "--confirm-protected" in r.stderr and "ONBOARD" not in fx.calls(),
         )
         r = fx.run("firebot-vehicle-02", "--transport-profile", "r001-independent-v1")
         check(

@@ -52,13 +52,16 @@ class SourceError(Exception):
         self.state = state
 
 
+try:  # 父进程预加载 libc：fork 后的 preexec_fn 内不得 dlopen（多线程 fork 死锁风险）
+    _LIBC = ctypes.CDLL("libc.so.6", use_errno=True)
+except OSError:  # pragma: no cover
+    _LIBC = None
+
+
 def _pdeathsig() -> None:
     os.setsid()
-    try:
-        libc = ctypes.CDLL("libc.so.6", use_errno=True)
-        libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0)
-    except OSError:
-        pass
+    if _LIBC is not None:
+        _LIBC.prctl(PR_SET_PDEATHSIG, signal.SIGKILL, 0, 0, 0)
 
 
 class Publisher:
@@ -113,6 +116,7 @@ class Publisher:
         codec = None
         if self.cfg.camera.provider == "rtsp":
             rtsp = RtspInput(self.cfg)
+            self.log.add_secrets([rtsp.url])
             codec = probe_rtsp_codec(rtsp)
             if codec is None:
                 rtsp.close()

@@ -18,7 +18,7 @@
 #
 # 用法（服务器上，ROBOT-Web 仓库根）：
 #   firebotctl fleet register <DEVICE_ID> [--transport-profile <ID>] [--token-out <FILE>]
-#                             [--media-srt-host <H>] [--media-srt-port <P>]
+#                             [--media-srt-host <H>] [--media-srt-port <P>] [--confirm-protected]
 set -euo pipefail
 
 DEVICE_ID="${1:-}"
@@ -31,12 +31,14 @@ PROFILE_ARG=""
 TOKEN_OUT=""
 MEDIA_SRT_HOST=""
 MEDIA_SRT_PORT=""
+CONFIRM_PROTECTED=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --transport-profile) PROFILE_ARG="${2:-}"; shift 2 ;;
     --token-out) TOKEN_OUT="${2:-}"; shift 2 ;;
     --media-srt-host) MEDIA_SRT_HOST="${2:-}"; shift 2 ;;
     --media-srt-port) MEDIA_SRT_PORT="${2:-}"; shift 2 ;;
+    --confirm-protected) CONFIRM_PROTECTED=1; shift ;;
     *) echo "ERROR: 未知参数 $1" >&2; exit 1 ;;
   esac
 done
@@ -76,6 +78,12 @@ case "$PROVISIONER_CMD" in
   *) echo "FLEET_REGISTER=REJECTED（未知 credential provisioner: $PROVISIONER_CMD）" >&2; exit 1 ;;
 esac
 echo "TRANSPORT_PROFILE=$TRANSPORT_PROFILE broker_ref=$BROKER_REF mqtt=$MQTT_HOST:$MQTT_PORT"
+# 受保护车辆（如实际 firebot-vehicle-02）：重跑 register 会改写生产 password_file 并 SIGHUP 主 Broker，
+# 必须由运维显式 --confirm-protected 确认（防误操作影响在线车辆）。
+if [ "$(tp protected)" = "True" ] && [ "$CONFIRM_PROTECTED" != 1 ]; then
+  echo "FLEET_REGISTER=REJECTED（$DEVICE_ID 为受保护车辆；确认影响后加 --confirm-protected）" >&2
+  exit 1
+fi
 
 # 媒体 SRT endpoint：显式参数 > activation（MEDIA_SRT_PUBLIC_HOSTNAME/PUBLIC_DOMAIN + MEDIA_SRT_PUBLIC_PORT）
 read_activation() {

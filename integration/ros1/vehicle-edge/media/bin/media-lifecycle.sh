@@ -147,12 +147,12 @@ cmd_install() {
     # 安装中断（任一步失败）→ staging 删除，current 不变
     trap 'rm -rf "'"$staging"'"' EXIT
     mkdir -p "$staging/lib"
-    cp -a "$MEDIA_SRC/firebot_media" "$staging/firebot_media"
+    cp -r --no-preserve=ownership "$MEDIA_SRC/firebot_media" "$staging/firebot_media"
     find "$staging" -name '__pycache__' -prune -exec rm -rf {} +
     if [ -n "$libsrt_pre" ]; then
       [ -f "$libsrt_pre/libsrt.so.1.4.4" ] && [ -f "$libsrt_pre/libsrt.so.1.4.4.sha256" ] || fail INSTALL "--libsrt-prebuilt 缺少 libsrt.so.1.4.4(.sha256)"
       [ "$(sha256sum "$libsrt_pre/libsrt.so.1.4.4" | awk '{print $1}')" = "$(cat "$libsrt_pre/libsrt.so.1.4.4.sha256")" ] || fail INSTALL "预构建 libsrt SHA256 不符"
-      cp -a "$libsrt_pre/." "$staging/lib/"
+      cp -r --no-preserve=ownership "$libsrt_pre/." "$staging/lib/"
     else
       bash "$MEDIA_SRC/bin/build-libsrt.sh" "$staging/lib" ${libsrt_src:+--source "$libsrt_src"} || fail INSTALL "libsrt 构建失败"
     fi
@@ -167,6 +167,7 @@ PY
     { echo "product=firebot-media"; echo "source_sha=$sha"; echo "hardware_profile=$hwp"; } > "$staging/MANIFEST"
     (cd "$staging" && find firebot_media lib MANIFEST -type f -print0 | sort -z | xargs -0 sha256sum > MANIFEST.sha256)
     chmod -R u=rwX,go=rX "$staging"
+    skip_chown || chown -R root:root "$staging"
     mv "$staging" "$rel"
     trap - EXIT
     echo "MEDIA_RELEASE=PASS sha=$sha"
@@ -344,9 +345,15 @@ cmd_start() {
 cmd_stop() {
   need_root STOP
   local c cams; cams="$(select_cams "${1:-}")"
+  local bad=""
   for c in $cams; do
     "$SYSTEMCTL" disable --now "firebot-media@$c" >/dev/null 2>&1 || true
+    case "$("$SYSTEMCTL" is-active "firebot-media@$c" 2>/dev/null | tail -n1 || true)" in
+      inactive|failed) : ;;
+      *) bad="$bad $c" ;;
+    esac
   done
+  [ -z "$bad" ] || fail STOP "仍在运行或状态未知:$bad"
   echo "MEDIA_STOP=PASS cameras=${cams// /,}"
 }
 

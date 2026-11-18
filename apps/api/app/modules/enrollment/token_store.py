@@ -30,6 +30,8 @@ def issue_token(
     token = secrets.token_hex(32)
     now = datetime.now(UTC)
     db.execute(delete(EnrollmentToken).where(EnrollmentToken.device_id == device_id))
+    # 过期未激活的签发记录（含 MQTT 密码 / device token / 媒体凭证）不在 DB 静置
+    db.execute(delete(EnrollmentToken).where(EnrollmentToken.expires_at < now))
     db.add(
         EnrollmentToken(
             device_id=device_id,

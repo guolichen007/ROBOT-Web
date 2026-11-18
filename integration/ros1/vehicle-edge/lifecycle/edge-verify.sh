@@ -92,7 +92,8 @@ grep -qE '^FIREBOT_EDGE_USER=[a-z_][a-z0-9_-]*$' "$EDGE_HOME/config/install.env"
 edge_state="$(unit_active_state firebot-vehicle-edge)"
 edge_enabled="$(unit_enabled_state firebot-vehicle-edge)"
 [ "$edge_state" = "inactive" ] && pass "EDGE_SERVICE_INACTIVE=yes" || fail "EDGE_SERVICE_INACTIVE=no（$edge_state）"
-[ "$edge_enabled" != "enabled" ] && pass "EDGE_SERVICE_DISABLED=yes" || fail "EDGE_SERVICE_DISABLED=no"
+unit_is_surely_disabled firebot-vehicle-edge && pass "EDGE_SERVICE_DISABLED=yes" \
+  || fail "EDGE_SERVICE_DISABLED=no_or_unknown（$edge_enabled）"
 
 # P1-4：ROS adapter 环境验证（若配置则文件必须存在；ROS Master 运行不是成功条件）
 ros_setup="$(grep -E '^FIREBOT_ROS_SETUP=' "$EDGE_HOME/config/install.env" 2>/dev/null | cut -d= -f2- || true)"

@@ -64,6 +64,17 @@ def main() -> int:
         r = subprocess.run(["bash", "-c", '. "$1"; unit_active_state x', "_", str(helper)],
                            env=env, capture_output=True, text=True)
         check("HELPER_UNKNOWN fail-closed", r.stdout.strip() == "unknown", r.stdout)
+        # 审查 SHOULD-FIX 5：unknown（bad / D-Bus 不可达）与 enabled-runtime 必须 fail-closed
+        (state / "c.enabled").write_text("enabled-runtime\n")
+        (state / "d.enabled").write_text("bad\n")
+        r = subprocess.run(
+            ["bash", "-c", '. "$1"; printf "[%s][%s]" "$(unit_enabled_state c)" "$(unit_enabled_state d)";'
+             ' unit_is_surely_disabled c && echo C-DIS; unit_is_surely_disabled d && echo D-DIS;'
+             ' unit_is_surely_stopped x && echo X-STOP; true', "_", str(helper)],
+            env=env, capture_output=True, text=True)
+        check("FAIL_CLOSED enabled-runtime→enabled、bad→unknown，二者均非“确定未启用”；unknown 非“确定已停”",
+              r.stdout.startswith("[enabled][unknown]") and "C-DIS" not in r.stdout
+              and "D-DIS" not in r.stdout and "X-STOP" not in r.stdout, r.stdout)
         r = subprocess.run(["bash", "-c", 'x="$("$SYSTEMCTL" is-active y 2>/dev/null || echo inactive)"; printf "%s" "$x"'],
                            env=env, capture_output=True, text=True)
         check("ANTIPATTERN_REPRO 旧写法在真实语义下得到两行", r.stdout == "inactive\ninactive", repr(r.stdout))
@@ -88,6 +99,26 @@ def main() -> int:
                            env=env, capture_output=True, text=True, timeout=60)
         check("ENROLL_REAL_SEMANTICS 全部 inactive → 不误拒（ENROLL=PASS）",
               r.returncode == 0 and "ENROLL=PASS" in r.stdout, r.stdout + r.stderr)
+
+    with tempfile.TemporaryDirectory() as t:
+        tmp = Path(t)
+        sc = tmp / "systemctl"
+        sc.write_text(REAL_SYSTEMCTL)
+        sc.chmod(0o755)
+        state = tmp / "state"
+        state.mkdir()
+        (state / "firebot-control.enabled").write_text("bad\n")
+        home = tmp / "edge"
+        (home / "config").mkdir(parents=True)
+        (home / "certs").mkdir()
+        env = dict(os.environ, FIREBOT_TEST_SYSTEMCTL=str(sc), FAKE_STATE=str(state),
+                   FIREBOT_EDGE_HOME=str(home), FIREBOT_TEST_SKIP_ROOT="1")
+        r = subprocess.run(["bash", str(EDGE / "lifecycle/readonly-start.sh")], env=env,
+                           capture_output=True, text=True, timeout=60)
+        check("FAIL_CLOSED readonly-start：Control 状态 unknown → REJECTED（不启动）",
+              r.returncode != 0 and "CONTROL_ENABLED=yes_or_unknown" in r.stdout
+              and "enable --now" not in (state / "calls").read_text() if (state / "calls").exists()
+              else r.returncode != 0 and "CONTROL_ENABLED=yes_or_unknown" in r.stdout, r.stdout[-300:])
 
     bad = []
     for f in list((EDGE / "lifecycle").glob("*.sh")) + [ROS1 / "firebotctl"]:

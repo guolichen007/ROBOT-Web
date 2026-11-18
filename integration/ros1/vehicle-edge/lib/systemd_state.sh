@@ -33,7 +33,24 @@ unit_enabled_state() {
   out="$("${SYSTEMCTL:-systemctl}" is-enabled "$1" 2>/dev/null || true)"
   out="$(printf '%s\n' "$out" | tail -n1)"
   case "$out" in
-    enabled|disabled|static|masked|indirect|generated|transient|linked|linked-runtime|alias|not-found) printf '%s\n' "$out" ;;
+    # enabled-runtime 视同 enabled（开机/运行时会被拉起）；bad/空/其他 → unknown（调用方必须 fail-closed）
+    enabled|enabled-runtime) printf '%s\n' "enabled" ;;
+    disabled|static|masked|indirect|generated|transient|linked|linked-runtime|alias|not-found) printf '%s\n' "$out" ;;
     *) printf '%s\n' "unknown" ;;
+  esac
+}
+
+# 便捷判定（fail-closed）：只有明确的 disabled 类状态才算“未启用”，只有 inactive/failed 才算“未运行”；
+# unknown（D-Bus 不可达 / bad / 未知输出）一律视为“可能启用/可能运行”。
+unit_is_surely_disabled() {
+  case "$(unit_enabled_state "$1")" in
+    disabled|static|masked|indirect|generated|transient|linked|linked-runtime|alias|not-found) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+unit_is_surely_stopped() {
+  case "$(unit_active_state "$1")" in
+    inactive|failed) return 0 ;;
+    *) return 1 ;;
   esac
 }

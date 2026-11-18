@@ -1078,8 +1078,8 @@ def phase_negatives(env: Env):
         env=dict(os.environ, PYTHONPATH=str(REPO / "apps/api")),
     )
     check(
-        "NEG 002 错误 Profile 登记 → 拒绝",
-        rs.returncode == 3 and "已批准映射" in rs.stderr,
+        "NEG 实际 002 经通用入口登记 → 拒绝（受保护车辆）",
+        rs.returncode == 3 and "受保护车辆" in rs.stderr,
         rs.stderr[-200:],
     )
     scan_secrets(env, [rig.MASTER, rig.PASSPHRASE, used_token, token], "NEG")

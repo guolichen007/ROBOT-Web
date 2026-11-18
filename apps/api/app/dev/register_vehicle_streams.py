@@ -54,7 +54,8 @@ GENERIC_RECEIPT_KIND = "firebot.media-stream-registration.v1"
 
 
 def _target_001() -> core.Target:
-    return core.Target(TARGET_VEHICLE, tuple(c for _, c in STREAMS), None)
+    # 001 专项入口：唯一允许对受保护车辆 001 登记的路径（目标/流写死）
+    return core.Target(TARGET_VEHICLE, tuple(c for _, c in STREAMS), None, allow_protected=True)
 
 
 def _snapshot_protected(db: Session) -> list[dict[str, Any]]:
@@ -112,6 +113,7 @@ def _generic(argv: list[str]) -> int:
     try:
         if args.vehicle_id == TARGET_VEHICLE:
             raise ToolError(EXIT_USAGE, f"{TARGET_VEHICLE} 使用 001 专项入口（无参数）")
+        # 受保护车辆（注册表 protected_vehicles，含实际 firebot-vehicle-02）由 Target 拒绝
         target = core.Target(
             args.vehicle_id, tuple(c for c in args.cameras.split(",") if c), args.transport_profile
         )

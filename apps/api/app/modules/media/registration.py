@@ -116,7 +116,14 @@ def resolve_profile(vehicle_id: str, profile: str | None, registry: dict[str, An
 
 # ---------------------------------------------------------------- core
 class Target:
-    def __init__(self, vehicle_id: str, cameras: tuple[str, ...], profile: str | None) -> None:
+    def __init__(
+        self,
+        vehicle_id: str,
+        cameras: tuple[str, ...],
+        profile: str | None,
+        *,
+        allow_protected: bool = False,
+    ) -> None:
         if not VEHICLE_RE.fullmatch(vehicle_id):
             raise ToolError(EXIT_USAGE, "vehicle_id 非法")
         if is_synthetic_namespace(vehicle_id) or vehicle_id in LEGACY_PROTECTED:
@@ -129,6 +136,11 @@ class Target:
         self.vehicle_id = vehicle_id
         self.cameras = cameras
         registry = load_registry()
+        if vehicle_id in registry.get("protected_vehicles", []) and not allow_protected:
+            # 001/002 等受保护真实车辆只能走各自专项入口（不得经通用入口新增/撤销流）
+            raise ToolError(
+                EXIT_PRECONDITION, f"{vehicle_id} 为受保护车辆：通用入口拒绝（使用专项入口）"
+            )
         self.transport_profile = resolve_profile(vehicle_id, profile, registry)
         self.protected = (LEGACY_PROTECTED | frozenset(registry.get("protected_vehicles", []))) - {
             vehicle_id

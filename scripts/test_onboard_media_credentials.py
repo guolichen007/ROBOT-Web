@@ -258,6 +258,18 @@ def test_negative_inputs() -> None:
         )
         res = run(SCRIPT, runtime, shim, "firebot-vehicle-02", "--resync-srt")
         check("--resync-srt 无凭据目录 → 拒绝", res.returncode != 0)
+        (runtime / "secrets/app/media_publish_token").write_text(MASTER + "\n")
+        for mode_ in ("--apply", "--force", ""):
+            res = run(SCRIPT, runtime, shim, "firebot-vehicle-01", *([mode_] if mode_ else []))
+            check(
+                f"001 MQTT 模式 {mode_ or '(default)'} → 拒绝（无 provisioner，不生成/不轮换）",
+                res.returncode != 0
+                and "无平台 MQTT provisioner" in res.stderr
+                and not (runtime / "secrets/vehicles/firebot-vehicle-01/mqtt_password").exists(),
+                res.stderr[-200:],
+            )
+        res = run(SCRIPT, runtime, shim, "firebot-vehicle-01", "--media-only")
+        check("001 --media-only 仍允许", res.returncode == 0, res.stderr[-200:])
 
 
 def legacy_counterproof(old_script: Path) -> int:

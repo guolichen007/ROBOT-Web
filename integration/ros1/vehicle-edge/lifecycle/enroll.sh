@@ -106,8 +106,15 @@ fi
 if [ -n "$TOKEN_FILE" ]; then
   TOKEN="$(tr -d '[:space:]' < "$TOKEN_FILE")"
 else
-  if [ -t 0 ]; then printf '请输入一次性 enrollment token（不回显）: ' >&2; IFS= read -rs TOKEN; echo >&2
-  else IFS= read -r TOKEN; fi
+  # 输入末尾无换行时 read 返回 1（set -e 下会静默退出）：以“读到内容”为成功判据
+  TOKEN=""
+  if [ -t 0 ]; then
+    printf '请输入一次性 enrollment token（不回显）: ' >&2
+    IFS= read -rs TOKEN || [ -n "$TOKEN" ] || true
+    echo >&2
+  else
+    IFS= read -r TOKEN || [ -n "$TOKEN" ] || true
+  fi
   TOKEN="$(printf '%s' "$TOKEN" | tr -d '[:space:]')"
 fi
 printf '%s' "$TOKEN" | grep -qE '^[0-9a-f]{64}$' || { echo "ENROLL=FAIL（token 格式异常；值不回显）" >&2; exit 1; }
@@ -144,37 +151,55 @@ chmod 0755 "$EDGE_HOME/config" 2>/dev/null || true
 chmod 0700 "$EDGE_HOME/secrets" 2>/dev/null || true
 [ -f "$EDGE_HOME/certs/mqtt-ca.crt" ] || { echo "ENROLL=FAIL（certs/mqtt-ca.crt 缺失；bootstrap 阶段未完成）" >&2; exit 1; }
 
-echo "$resp" | FIREBOT_EDGE_HOME="$EDGE_HOME" python3 -c '
-import json, os, sys
+echo "$resp" | FIREBOT_EDGE_HOME="$EDGE_HOME" FIREBOT_ENROLL_DEVICE_ID="$DEVICE_ID" python3 -c '
+import json, os, re, sys
 d = json.load(sys.stdin)
-did = d["device_id"]
-pid = d.get("profile_id", "firebot_ros1_standard_v1")
 home = os.environ["FIREBOT_EDGE_HOME"]
-display = d.get("display_name", "")
-open(home + "/config/identity.env", "w").write("DEVICE_ID=%s\nPROFILE_ID=%s\nDISPLAY_NAME=%s\n" % (did, pid, display))
-os.chmod(home + "/config/identity.env", 0o644)
-open(home + "/config/assignment.env", "w").write(
-    "TRANSPORT_PROFILE=%s\nTRANSPORT_PROTOCOL=%s\nMQTT_HOST=%s\nMQTT_PORT=%s\n"
-    "SITE_CODE=%s\nMAP_CODE=%s\nMAP_VERSION=%s\nMAP_CHECKSUM=%s\n"
-    % (d["transport_profile"], d["protocol"], d["mqtt_host"], int(d["mqtt_port"]),
-       d.get("site_code", ""), d.get("map_code", ""), d.get("map_version", ""),
-       d.get("map_checksum", ""))
-)
-os.chmod(home + "/config/assignment.env", 0o644)
-open(home + "/secrets/mqtt.env", "w").write("FIREBOT_MQTT_PASSWORD=%s\n" % d["mqtt_password"])
-os.chmod(home + "/secrets/mqtt.env", 0o600)
-open(home + "/secrets/device-token", "w").write(d.get("device_token", ""))
-os.chmod(home + "/secrets/device-token", 0o600)
+# ---- 全部校验在任何写盘之前完成（服务器响应不可信：拒绝换行/控制字符注入 env 文件）----
+SAFE = re.compile(r"[A-Za-z0-9_.:@+/-]*")
+def field(key, pattern=SAFE, required=False, maxlen=128):
+    v = d.get(key, "")
+    v = "" if v is None else str(v)
+    if (required and not v) or len(v) > maxlen or not pattern.fullmatch(v):
+        sys.exit("ENROLL=FAIL（服务器响应字段 %s 非法；不写任何文件）" % key)
+    return v
+did = field("device_id", re.compile(r"[A-Za-z0-9_-]{1,64}"), True)
+if did != os.environ["FIREBOT_ENROLL_DEVICE_ID"]:
+    sys.exit("ENROLL=FAIL（响应 device_id 与本机请求不一致；不写任何文件）")
+pid = field("profile_id", re.compile(r"[a-z0-9_]{0,64}")) or "firebot_ros1_standard_v1"
+display = field("display_name", re.compile(r"[^\x00-\x1f\x7f=]{0,128}"))
+tp = field("transport_profile", re.compile(r"[a-z0-9][a-z0-9.-]{0,63}"), True)
+proto = field("protocol", re.compile(r"canonical-mqtt-[0-9.]{1,16}"), True)
+host = field("mqtt_host", re.compile(r"[A-Za-z0-9.-]{1,253}"), True, 253)
+port = int(d["mqtt_port"])
+if not 1 <= port <= 65535:
+    sys.exit("ENROLL=FAIL（mqtt_port 非法）")
+site, mcode, mver, msum = (field(k) for k in ("site_code", "map_code", "map_version", "map_checksum"))
+pw = str(d.get("mqtt_password") or "")
+dtok = str(d.get("device_token") or "")
+if not pw or any(c in pw + dtok for c in "\r\n\x00"):
+    sys.exit("ENROLL=FAIL（凭证字段非法；不写任何文件）")
 media = d.get("media")
-if media:
-    if media.get("vehicle_id") != did or "media_publish_token" in media:
-        sys.exit("媒体凭证身份不符或含主密钥字段：拒绝")
-    p = home + "/secrets/media-bundle.json"
-    fd = os.open(p + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+if media is not None:
+    if not isinstance(media, dict) or media.get("vehicle_id") != did or "media_publish_token" in media:
+        sys.exit("ENROLL=FAIL（媒体凭证身份不符或含主密钥字段；不写任何文件）")
+def write(path, text, mode):
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
     with os.fdopen(fd, "w") as fh:
-        json.dump(media, fh)
-    os.replace(p + ".tmp", p)
-    os.chmod(p, 0o600)
+        fh.write(text)
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+# ---- 写盘（每个文件临时文件 + 原子 rename）----
+write(home + "/secrets/mqtt.env", "FIREBOT_MQTT_PASSWORD=%s\n" % pw, 0o600)
+write(home + "/secrets/device-token", dtok, 0o600)
+if media is not None:
+    write(home + "/secrets/media-bundle.json", json.dumps(media), 0o600)
+write(home + "/config/assignment.env",
+      "TRANSPORT_PROFILE=%s\nTRANSPORT_PROTOCOL=%s\nMQTT_HOST=%s\nMQTT_PORT=%d\n"
+      "SITE_CODE=%s\nMAP_CODE=%s\nMAP_VERSION=%s\nMAP_CHECKSUM=%s\n"
+      % (tp, proto, host, port, site, mcode, mver, msum), 0o644)
+write(home + "/config/identity.env", "DEVICE_ID=%s\nPROFILE_ID=%s\nDISPLAY_NAME=%s\n" % (did, pid, display), 0o644)
 print(did)
 print(pid)
 '

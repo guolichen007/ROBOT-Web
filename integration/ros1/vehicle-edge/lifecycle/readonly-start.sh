@@ -42,11 +42,11 @@ utcnow() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 # ---- 启动前只读铁律门 ----
 ctl_enabled="$(unit_enabled_state firebot-control)"
 ctl_active="$(unit_active_state firebot-control)"
-[ "$ctl_enabled" = "enabled" ] && fail "CONTROL_ENABLED=yes" || pass "CONTROL_ENABLED=NO"
-case "$ctl_active" in
-  active|activating|reloading) fail "CONTROL_ACTIVE=yes" ;;
-  *) pass "CONTROL_ACTIVE=NO" ;;
-esac
+# fail-closed：unknown（D-Bus 不可达 / bad）不得视为“未启用/未运行”
+if unit_is_surely_disabled firebot-control; then pass "CONTROL_ENABLED=NO"
+else fail "CONTROL_ENABLED=yes_or_unknown（$ctl_enabled）"; fi
+if unit_is_surely_stopped firebot-control; then pass "CONTROL_ACTIVE=NO"
+else fail "CONTROL_ACTIVE=yes_or_unknown（$ctl_active）"; fi
 
 sc="$(read_kv "$CONFIG/bridge.env" FIREBOT_SUPPORTED_COMMANDS)"
 [ -z "$sc" ] && pass "SUPPORTED_COMMANDS_EMPTY=yes" || fail "SUPPORTED_COMMANDS_NOT_EMPTY（$sc）"
@@ -147,7 +147,7 @@ if [ "$FAILED" -ne 0 ]; then
   "$SYSTEMCTL" disable --now firebot-vehicle-edge >/dev/null 2>&1 || true
   edge_after="$(unit_active_state firebot-vehicle-edge)"
   edge_enabled_after="$(unit_enabled_state firebot-vehicle-edge)"
-  if [ "$edge_after" = "inactive" ] && [ "$edge_enabled_after" != "enabled" ]; then
+  if [ "$edge_after" = "inactive" ] && unit_is_surely_disabled firebot-vehicle-edge; then
     echo "FAIL_CLOSED_BRIDGE_STOP=PASS"
   else
     echo "FAIL_CLOSED_BRIDGE_STOP=FAIL（active=$edge_after enabled=$edge_enabled_after）"

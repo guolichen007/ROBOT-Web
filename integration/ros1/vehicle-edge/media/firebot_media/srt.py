@@ -201,7 +201,8 @@ class SrtSender:
             self.close()
             if reason == REJ_VERSION:
                 raise SrtError("LIB", "SRT 对端拒绝版本（REJ_VERSION）：本机 libsrt 过低")
-            if reason in AUTH_REJECTS:
+            # 1000+ = 应用层拒绝（SRT_REJC_PREDEFINED/USERDEFINED，如 MediaMTX 鉴权拒绝 1401/1403）
+            if reason in AUTH_REJECTS or reason >= 1000:
                 raise SrtError("AUTH", "SRT 对端拒绝（reject=%d：鉴权或加密口令不匹配）" % reason)
             raise SrtError("NET", "SRT 连接失败（reject=%d）: %s" % (reason, err))
 

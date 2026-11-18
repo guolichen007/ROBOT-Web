@@ -25,8 +25,8 @@ SYSTEMCTL="${FIREBOT_TEST_SYSTEMCTL:-systemctl}"
 # ---- 0) Control 安全门（只检查，绝不自动处理）----
 ctl_enabled="$(unit_enabled_state firebot-control)"
 ctl_active="$(unit_active_state firebot-control)"
-if [ "$ctl_enabled" = "enabled" ] || [ "$ctl_active" = "active" ] || \
-   [ "$ctl_active" = "activating" ] || [ "$ctl_active" = "reloading" ]; then
+# fail-closed：Control 状态不可确定（unknown）同样拒绝
+if ! unit_is_surely_disabled firebot-control || ! unit_is_surely_stopped firebot-control; then
   echo "MIGRATION_STOP_LEGACY=REJECTED"
   echo "CONTROL_NOT_SAFE"
   echo "原因：firebot-control enabled=$ctl_enabled active=$ctl_active；不得自动处理，由人工确认。" >&2

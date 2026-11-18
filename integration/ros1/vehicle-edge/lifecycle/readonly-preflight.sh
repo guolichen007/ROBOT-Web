@@ -150,11 +150,11 @@ ntp_ok=no
 # ---- 控制面全关 + communication-owner 语义（VEHICLE_EDGE_PRE_CUTOVER_SEMANTICS_FIX）----
 ctl_enabled="$(unit_enabled_state firebot-control)"
 ctl_active="$(unit_active_state firebot-control)"
-[ "$ctl_enabled" = "enabled" ] && fail "CONTROL_ENABLED=yes" || pass "CONTROL_ENABLED=no"
-case "$ctl_active" in
-  active|activating|reloading) fail "CONTROL_ACTIVE=yes" ;;
-  *) pass "CONTROL_ACTIVE=no" ;;
-esac
+# fail-closed：unknown（D-Bus 不可达 / bad）不得视为“未启用/未运行”
+if unit_is_surely_disabled firebot-control; then pass "CONTROL_ENABLED=no"
+else fail "CONTROL_ENABLED=yes_or_unknown（$ctl_enabled）"; fi
+if unit_is_surely_stopped firebot-control; then pass "CONTROL_ACTIVE=no"
+else fail "CONTROL_ACTIVE=yes_or_unknown（$ctl_active）"; fi
 legacy_state="$(unit_active_state firebot-bridge)"
 edge_state="$(unit_active_state firebot-vehicle-edge)"
 # P0-1 phase-aware：bootstrap = pre-cutover（旧链路仍在线允许 legacy active）；

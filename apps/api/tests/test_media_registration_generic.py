@@ -117,10 +117,19 @@ def test_generic_requires_explicit_profile_and_existing_asset(capsys, assets):
         capsys, "generic", "--vehicle-id", NEW, "--transport-profile", "r001-independent-v1"
     )
     assert code == core.EXIT_PRECONDITION and "不允许分配" in err
-    code, _, err = _run(
-        capsys, "generic", "--vehicle-id", V002, "--transport-profile", "r001-independent-v1"
-    )
-    assert code == core.EXIT_PRECONDITION and "已批准映射" in err
+    for profile in ("r001-independent-v1", "u-dao-standard-v1"):
+        code, _, err = _run(
+            capsys, "generic", "--vehicle-id", V002, "--transport-profile", profile, "--apply"
+        )
+        # 实际 002 为受保护车辆：通用入口一律拒绝（即使给出其映射 Profile）
+        assert code == core.EXIT_PRECONDITION and "受保护车辆" in err, err
+    with SessionLocal() as db:
+        assert [
+            r.stream_id
+            for r in db.scalars(
+                select(StreamRegistry).where(StreamRegistry.robot_id == assets["v2"])
+            )
+        ] == [f"{V002}-roof_rgb"]
     code, _, err = _run(
         capsys,
         "generic",

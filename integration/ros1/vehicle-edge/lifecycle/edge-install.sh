@@ -132,7 +132,7 @@ bash "$VEHICLE_EDGE_SRC/install/release-manager.sh" switch "$REQUIRE_SHA" "$EDGE
 # ---- 安装后确认：inactive + disabled ----
 edge_now="$(unit_active_state firebot-vehicle-edge)"
 edge_enabled="$(unit_enabled_state firebot-vehicle-edge)"
-if [ "$edge_now" != "inactive" ] || [ "$edge_enabled" = "enabled" ]; then
+if [ "$edge_now" != "inactive" ] || ! unit_is_surely_disabled firebot-vehicle-edge; then
   echo "EDGE_INSTALL=FAIL（安装后 service 必须 inactive+disabled；实际 active=$edge_now enabled=$edge_enabled）" >&2
   exit 1
 fi
