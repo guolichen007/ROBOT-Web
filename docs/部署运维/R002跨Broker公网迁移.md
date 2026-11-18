@@ -71,8 +71,8 @@ backup 清单：
    → legacy bridge ACTIVE 允许（COMMUNICATION_OWNER=LEGACY）；新 Edge inactive 必须
    → READONLY_BOOTSTRAP_PREFLIGHT=PASS（bootstrap 不强制 HEAD==SHA：允许仍处于旧 release）
 5. 服务器（授权后）：
-   firebotctl fleet register firebot-vehicle-02
-   → 现场即时签发一次性 ENROLL_TOKEN
+   firebotctl fleet register firebot-vehicle-02 --confirm-protected   # 受保护车辆显式确认；Profile 由注册表映射
+   → 一次性 token 写入 0600 文件（ENROLL_TOKEN_FILE=…，不回显）
 ```
 
 **到这里旧 Bridge 仍允许在线（preflight 纯只读，绝不 stop/restart/disable 任何服务）。**
@@ -93,7 +93,7 @@ backup 清单：
 ### C. 新链路安装（Bridge/Edge 全程 inactive，只有 readonly-start 允许 active）
 
 ```text
-  firebotctl vehicle enroll firebot-vehicle-02 --token <TOKEN>
+  firebotctl vehicle enroll firebot-vehicle-02 --token-file <TOKEN_FILE>
      # fail-closed：Bridge/Edge active/activating/reloading → ENROLL=REJECTED / LEGACY_BRIDGE_STILL_ACTIVE
      # （不写任何文件、不消费 token——token 必须 Bridge 已停止后才允许消费）
      # Enrollment 输出到 Edge Home（config/identity、assignment、bridge；secrets/mqtt.env、device-token）
@@ -136,7 +136,7 @@ readonly-start 任一步失败，**不得继续试错**，立即执行：
 
 - 云端 `firebot-vehicle-02` Robot row / credential / 已消费的 enrollment token **不删除**：
   保持 OFFLINE、enabled=false、supported_commands=[]、DOWNLINK=false。
-- 重试：重新 `firebotctl fleet register firebot-vehicle-02`（credential ensure 语义不旋转，重新签发 token）。
+- 重试：重新 `firebotctl fleet register firebot-vehicle-02 --confirm-protected`（credential ensure 语义不旋转，重新签发 token）。
 
 ## 6. 只读铁律（迁移全程）
 

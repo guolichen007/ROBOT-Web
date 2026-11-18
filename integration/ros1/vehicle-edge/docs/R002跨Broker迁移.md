@@ -19,7 +19,7 @@ A. PRE-CUTOVER / OLD LINK ONLINE（旧链路仍在线，零停机）
       → legacy bridge ACTIVE 允许（COMMUNICATION_OWNER=LEGACY /
         PRE_CUTOVER_LEGACY_LINK_PRESERVED=YES）；新 Edge inactive 必须；
         Edge active → EDGE_STARTED_BEFORE_CUTOVER FAIL
-   5. 服务器：firebotctl fleet register firebot-vehicle-02（现场即时签发 token）
+   5. 服务器：firebotctl fleet register firebot-vehicle-02 --confirm-protected（token 写入 0600 文件）
 
 B. 正式进入 cutover（唯一切换点）
    firebotctl vehicle migration-stop-legacy
@@ -27,7 +27,7 @@ B. 正式进入 cutover（唯一切换点）
    → 此后任何失败一律 ROLLBACK_REQUIRED=YES（见回滚.md）
 
 C. 新链路安装（Bridge/Edge 全程 inactive，只有 readonly-start 允许 active）
-   firebotctl vehicle enroll firebot-vehicle-02 --token <TOKEN>
+   firebotctl vehicle enroll firebot-vehicle-02 --token-file <TOKEN_FILE>
    firebotctl vehicle edge-install --sha <FINAL_SHA>
    firebotctl vehicle edge-verify --sha <FINAL_SHA>
    firebotctl vehicle readonly-preflight --phase enrolled --expected-sha <FINAL_SHA>

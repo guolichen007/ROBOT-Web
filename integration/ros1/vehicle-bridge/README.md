@@ -45,7 +45,7 @@ vehicle-bridge/
 标准现场安装/验证**只走 `firebotctl`**：
 
 ```text
-firebotctl vehicle enroll <DEVICE_ID> --token <TOKEN>
+firebotctl vehicle enroll <DEVICE_ID> --token-file <TOKEN_FILE>
 firebotctl vehicle install --sha <FINAL_SHA>
 firebotctl vehicle verify
 ```
