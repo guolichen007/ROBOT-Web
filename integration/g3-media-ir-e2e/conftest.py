@@ -225,7 +225,69 @@ def _assert_sim_namespace(vehicle_id: str) -> None:
 
 
 # 本次会话创建的资源（只清理这些；预先存在的同名合成资产保留原状）
-CREATED: dict[str, set] = {"robots": set(), "streams": set()}
+# real_assets：G4-R1 E 按需准备的真实 001 测试资产（与合成 robots 分开记账，绝不混用）
+CREATED: dict[str, set] = {"robots": set(), "streams": set(), "real_assets": set()}
+
+# 真实车辆测试资产：G3 套件唯一允许按需准备的真实 ID（只在隔离测试库、目标守卫通过后）
+REAL_001 = "firebot-vehicle-01"
+
+
+@pytest.fixture(scope="session")
+def real_001_asset(g3):
+    """G4-R1 E：按需准备 firebot-vehicle-01 测试资产，消除对 G1 套件执行顺序的依赖。
+
+    - 已存在（CI 中由 G1 vehicle_asset 先建）→ 原样复用，不改任何字段、不登记归属、不清理；
+    - 不存在（新建隔离库上单独运行 G3）→ 以与 G1 vehicle_asset 相同的属性创建，
+      记入 CREATED["real_assets"]，会话结束只删除本 fixture 创建的这一行及其派生行。
+    依赖 g3（其中 assert_isolated_target 已校验隔离 DB/Redis），绝不触碰 R001/R002。
+    """
+    robot_id = _ensure_real_001()
+    try:
+        yield robot_id
+    finally:
+        _cleanup_real_001()
+
+
+def _ensure_real_001() -> str:
+    from app.db.models import Robot, Site
+    from app.db.session import SessionLocal
+    from sqlalchemy import select
+
+    with SessionLocal() as db:
+        robot = db.scalar(select(Robot).where(Robot.vehicle_id == REAL_001))
+        if robot is not None:
+            return robot.id
+        site = db.scalar(select(Site).order_by(Site.id).limit(1))
+        assert site is not None, "seed required before running G3 E2E"
+        robot = Robot(
+            vehicle_id=REAL_001,
+            name="firebot-001",
+            site_id=site.id,
+            agent_protocol="VEHICLE_AGENT_V1",
+            enabled=True,
+        )
+        db.add(robot)
+        db.commit()
+        CREATED["real_assets"].add(robot.id)
+        return robot.id
+
+
+def _cleanup_real_001() -> None:
+    """只删除本 fixture 创建的 001 行（按 id 精确匹配）；预先存在的 001 一律不动。"""
+    from app.db.models import Base, Robot
+    from app.db.session import SessionLocal
+    from sqlalchemy import delete, select
+
+    with SessionLocal() as db:
+        robot = db.scalar(select(Robot).where(Robot.vehicle_id == REAL_001))
+        if robot is None or robot.id not in CREATED["real_assets"]:
+            return
+        for table in reversed(Base.metadata.sorted_tables):
+            if "robot_id" in table.c and table.name != "robots":
+                db.execute(table.delete().where(table.c.robot_id == robot.id))
+        db.execute(delete(Robot).where(Robot.id == robot.id))
+        db.commit()
+        CREATED["real_assets"].discard(robot.id)
 
 
 def _ensure_sim_robot():

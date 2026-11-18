@@ -72,7 +72,7 @@ def _admin_credentials() -> tuple[str, str]:
 
 
 @pytest.fixture(scope="module")
-def web(g3):
+def web(g3, real_001_asset):
     dist = os.environ.get("WEB_DIST")
     chromium = os.environ.get("CHROMIUM_PATH")
     if not (mediamtx_binary() and shutil.which("ffmpeg") and chromium and dist):
