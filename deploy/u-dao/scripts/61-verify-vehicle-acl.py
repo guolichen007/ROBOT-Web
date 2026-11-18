@@ -154,10 +154,12 @@ def main() -> int:
             info.wait_for_publish(timeout=5)
         client.loop_stop()
         client.disconnect()
-        # PUBACK reason code 判定：Success(0)=ALLOW；Not authorized(135)=DENY；
-        # 未收到 PUBACK（连接被断/超时）=DENY。
+        # PUBACK reason code 判定（MQTT 5 §3.4.2.1：< 0x80 为成功类）：
+        #   Success(0) / No matching subscribers(16) = ALLOW（16 表示授权通过、仅当前无订阅者；
+        #   隔离环境或 ingress 短暂未订阅时出现，旧判定 rc==0 会误报 FAIL）；
+        #   Not authorized(135) 等 ≥ 0x80 = DENY；未收到 PUBACK（连接被断/超时）= DENY。
         rc_value = getattr(result["puback_rc"], "value", result["puback_rc"])
-        return rc_value == 0
+        return rc_value is not None and rc_value < 0x80
 
     # ---- 认证 ----
     check(f"{vehicle} 认证", connect_result(vehicle, vehicle_password) == 0)
