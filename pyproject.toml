@@ -10,6 +10,8 @@ ignore = ["B008"]
 [tool.ruff.lint.per-file-ignores]
 # G2：车端 ROS1 侧运行于 ROS Noetic 系统 Python 3.8（rospy），不得使用 3.11+ 的 datetime.UTC
 "services/vehicle_agent_v1_exec/ros/*.py" = ["UP017"]
+# G4-Fleet-R2：车端媒体组件运行于 Ubuntu 20.04 系统 python3.8（不得使用 3.10+ 语法/格式化建议）
+"integration/ros1/vehicle-edge/media/**/*.py" = ["UP"]
 
 [tool.mypy]
 python_version = "3.12"

@@ -1,0 +1,57 @@
+# Firebot 车端媒体发布（一路相机一个实例：firebot-media@roof_rgb / firebot-media@roof_thermal）
+# 由 firebotctl vehicle media install 渲染落位（@EDGE_HOME@ / @MEDIA_USER@）；安装 ≠ 启动。
+#
+# 生命周期（替代草稿 firebot-video-{rgb,thermal}.service）：
+#   - 可恢复故障（相机缺失/网络断开/云端拒绝）由发布器进程内指数退避自愈，进程不退出 →
+#     不会触发 StartLimit；长时间断网恢复后自动续推。
+#   - 永久配置错误：退出码 78 → RestartPreventExitStatus=78 不再重启（status 显示 CONFIG_ERROR）。
+#   - 未预期崩溃：Restart=always + RestartSec=10；StartLimitIntervalSec=0（永不进入 start-limit-hit
+#     的永久 failed 状态，避免长期断网后需人工介入；退避由 RestartSec 与进程内逻辑保证）。
+#   - 停止：SIGTERM → 发布器先停 ffmpeg 子进程（独立进程组 + PDEATHSIG）→ 关闭 SRT → 退出 0；
+#     KillMode=control-group 兜底，确保无孤儿。
+# 与 G1 readonly agent / firebot-vehicle-edge / ROS 业务栈完全独立：不 Requires/BindsTo/PartOf 任何它们。
+[Unit]
+Description=Firebot vehicle media publisher (%i) — camera -> H.264 -> SRT (no motion control)
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=@MEDIA_USER@
+Group=@MEDIA_USER@
+SupplementaryGroups=video render
+WorkingDirectory=@EDGE_HOME@/media/current
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONPATH=@EDGE_HOME@/media/current
+Environment=FIREBOT_EDGE_HOME=@EDGE_HOME@
+ExecStart=/usr/bin/python3 -m firebot_media %i --edge-home @EDGE_HOME@
+Restart=always
+RestartSec=10
+RestartPreventExitStatus=78
+KillMode=control-group
+KillSignal=SIGTERM
+TimeoutStopSec=15
+# 日志：只写 journald（无文件日志）；进程内 30 行/分钟限速 + journald 限速双重兜底
+StandardOutput=journal
+StandardError=journal
+LogRateLimitIntervalSec=60s
+LogRateLimitBurst=120
+SyslogIdentifier=firebot-media-%i
+# 加固（systemd 245 可用项）
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ReadWritePaths=@EDGE_HOME@/media/state
+ProtectHome=read-only
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryMax=768M
+CPUQuota=150%
+
+[Install]
+WantedBy=multi-user.target

@@ -1,51 +1,39 @@
-# 车端视频发布服务（R001/R002 同型通用，非 001 专用）
+# 车端视频发布（已并入 Vehicle Edge 媒体组件）
 
-> G4-Fleet-A 交付材料：局域网接口清单、视频源统一结论、R002 同型 Hardware Profile、
-> 配置模板。发布器脚本：`scripts/firebot_video_publisher.sh`（rgb|thermal 独立进程）。
+> 本目录原为车端 CC 草稿（`feature/r001-v1-readonly-g1@1c4bf74`：`scripts/firebot_video_publisher.sh`
+> + `firebot-video-{rgb,thermal}.service` + `env.template`）。G4-Fleet-R2 独立审查确认 10 项缺陷
+> 并在实际运行中闭环后，**草稿脚本与 unit 已移除**，唯一正式实现为：
+>
+> - 发布器：`integration/ros1/vehicle-edge/media/firebot_media/`
+> - systemd：`integration/ros1/vehicle-edge/media/systemd/firebot-media@.service.template`
+> - Hardware Profile：`integration/ros1/vehicle-edge/media/profiles/firebot_ros1_standard_v1.media.env`
+> - 生命周期：`firebotctl vehicle media install|credentials|preflight|start|status|stop|rollback|doctor`
+> - SOP：`docs/部署运维/车端接入标准SOP.md`
 
-## 1. 视频源统一结论
+## 草稿缺陷与处置（均有运行实证，见 `integration/g4-fleet-media-e2e/` 与 `media/tests/`）
 
-- 同型车（R001/R002）相机均为 **USB UVC**：RGB=双目模组（左右拼接 1280x480@30，
-  /dev/video0）、热成像=SV 机芯（640x480@25，/dev/video1）。旧 ROS 采集
-  provider：`camera_sdk`（/camera/color/image_raw）、`svusb_thermal`（/thermal/image），
-  局域网观看经 web_video_server :8080（MJPEG）。
-- V1 云端合同假设 **Camera RTSP** → 车端 FFmpeg 转封装 → SRT 8890 → MediaMTX。
-  实车是 UVC（非 RTSP），因此发布器输入为 **V4L2 直采 + NVENC 编码**（H.264+yuv420p
-  合同不变）；若相机换 RTSP 网络机，env 里填 `*_RTSP_URL` 即自动走 `-c copy` 转封装。
-- **设备占用铁律**：同一台车内，若 ROS 采集节点（camera_sdk / svusb_thermal）已在运行
-  （持有 /dev/videoN），发布器**不得**直开同一设备；发布器启动会做输入可用性检测，
-  打不开设备即 fail-closed 退出（systemd 有界退避），不双开同一 USB 相机。
-- 云端发布器与 ROS provider 是**两种取流路径**，同型车默认由发布器独立取流
-  （UVC 直开）；仅当车内已有 ROS 采集节点时切换为复用其 image 话题（后续需要时再增）。
+| # | 草稿缺陷 | 处置 |
+| --- | --- | --- |
+| 1 | RGB/thermal 共用 `srt_streamid` 文件 → 同一发布路径 | streamid 进程内按 `<vehicle_id>-<camera>` 生成；token 为单车派生，路径按相机独立 |
+| 2 | `wait -n … \|\| true` 使退出码恒为 0，`Restart=on-failure` 失效 | Python 主循环；可恢复故障进程内退避；配置错误 78（不重启）；崩溃非 0（Restart=always） |
+| 3 | 默认 UVC 直采与局域网 ROS provider（camera_sdk/svusb_thermal）互斥 | 默认 `http_mjpeg` 复用 web_video_server：单次采集、局域网与云多消费者；v4l2 改为可选 |
+| 4 | `0600 root` 凭证与低权限用户读取冲突 | 凭证落位 `media/secrets/`，`0600 <媒体用户>`；不可读即 CONFIG_ERROR（非静默） |
+| 5 | 默认 `/dev/video0` `/dev/video1` 不稳定 | v4l2 只接受 `/dev/v4l/by-id|by-path`，`/dev/videoN` 拒绝 |
+| 6 | RTSP 凭证进 argv（`rtsp://$URL`）且 FFmpeg/SRT 日志可能带凭证 | RTSP URL 经 0600 ffconcat 文件；日志统一脱敏 + 限速；无文件日志 |
+| 7 | RTSP 未验证实际编码即 `-c copy` | ffprobe 实测，仅 H.264+yuv420p 才 copy，否则转码 |
+| 8 | FFmpeg 4.2.7 不支持 `-preset p1 -tune ll`；`SRT_ENV_*` 在 srt-live-transmit 1.4.0 中不存在 | 4.2 可用参数 `-preset llhp -zerolatency 1`；SRT 改为进程内 libsrt（streamid/passphrase 只写 socket） |
+| 9 | StartLimit 耗尽后长期断网不自愈 | 进程内退避不退出；`StartLimitIntervalSec=0` |
+| 10 | SRT 文件日志无限额 | 无文件日志；进程 30 行/分钟 + journald 限速 |
 
-## 2. 服务运行架构（同型车标准）
+**额外发现（运行实证）**：Ubuntu 20.04 发行版 libsrt/srt-tools 为 1.4.0，MediaMTX 1.18（gosrt）要求
+对端 ≥ 1.4.1，握手必被 `REJ_VERSION` 拒绝——草稿即使修好其他问题也**无法**推流。媒体组件随 release
+携带受控构建的 libsrt 1.4.4（Ubuntu 20.04 工具链编译），见 SOP。
 
-```text
-浏览器 web_nav（车端 http 静态托管）── ws://<车端>:9090 ──> rosbridge_server ──> roscore
-web_video_server :8080（MJPEG 局域网观看：/camera/color/image_raw、/thermal/image）
-web_control /web_control/task（ROS service，任务白名单，经 rosbridge 调用）
-云端链路（V1）：相机 → firebot_video_publisher（ffmpeg→UDP 回环→srt-live-transmit）
-  → SRT 8890/udp → MediaMTX → WHEP/WebRTC 8189 → Web HMI
-```
+## 局域网接口事实（草稿 README 的有效部分，经 `车端局域网web/autocar-main` 源码复核）
 
-## 3. R002 同型 Hardware Profile（供桌面开发 CC）
-
-| 项 | 值 |
-|---|---|
-| 工控机 | x86_64，12 核 / 31G / NVMe 468G；Ubuntu 20.04 + ROS Noetic |
-| 网卡 | eno1=I219-V、enp3s0/enp4s0=I210×2、无线 8265（管理网）、Tailscale（回滚通道） |
-| 相机 | RGB 双目 USB UVC 1280x480@30（左右拼接，/dev/video0）；热成像 SV USB UVC 640x480@25（/dev/video1） |
-| 硬件编码 | nvenc_h264（NVIDIA 2582）+ h264_vaapi（/dev/dri/renderD128） |
-| 业务工作空间 | ~/firerobot_ws（ugv_sdk/battery_sdk/smog_detect/bbs_localizer/hipnuc_imu/rslidar_sdk/realsense2_camera/camera_sdk/svusb_thermal/navigation/web_control/web_nav 等） |
-| 业务 ROS 接口 | /battery/status、/smog/status、/thermal/image、/camera/color/image_raw、/odom、/cmd_vel、/move_base/goal、/e_stop、/web_control/task 等（见任务报告矩阵） |
-| 通信 Runtime | firebot-edge（firebotctl vehicle edge-*；R002 迁移流程见 docs/部署运维/R002跨Broker公网迁移.md） |
-
-## 4. systemd 单元（有界退避 + 日志限额 + 低权限）
-
-- `firebot-video-rgb.service` / `firebot-video-thermal.service`：各自独立进程，
-  单路故障不影响另一路；Restart=on-failure、RestartSec=10s、
-  StartLimitIntervalSec=300s + StartLimitBurst=6（300 秒最多 6 次，防无限高频重启）、
-  LogRateLimit 200 条/30s、User=firebot-video、NoNewPrivileges、PrivateTmp。
-- 安装启用前置：①两台相机物理接入 ②云端交付 SRT endpoint/streamid/token/passphrase
-  （凭证投递 `/etc/firebot/video/srt_{streamid,passphrase}`，0600 root:firebot-video，
-  值不进 argv/日志/聊天/Git）。未授权前不向生产服务器推送。
+- web_video_server :8080，`http://<车端>:8080/stream?topic=<话题>&type=mjpeg`（MJPEG multipart）。
+- RGB `/camera/color/image_raw` 由 **realsense2_camera**（单目彩色）发布——**不是**草稿所写
+  camera_sdk 双目 `/dev/video0` 1280x480 拼接（camera_sdk 发布的是 `/camera/left|right/image_raw`）。
+- thermal `/thermal/image`（rgb8 伪彩）由 svusb_thermal 经厂商 SDK 按 `device_index` 打开。
+- rosbridge :9090、web_control `/web_control/task`：媒体组件**不触碰**。
+- 实际分辨率/帧率/硬件编码可用性以 001/002 现场只读取证为准（`firebotctl vehicle media doctor`）。
