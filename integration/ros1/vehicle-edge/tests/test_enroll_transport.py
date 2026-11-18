@@ -67,7 +67,7 @@ class Fx:
                         "cat %s\n" % (self.log, self.log, resp_file))
         curl.chmod(0o755)
         sysctl = self.tmp / "systemctl"
-        sysctl.write_text("#!/bin/bash\necho inactive\nexit 0\n")
+        sysctl.write_text("#!/bin/bash\necho inactive\nexit 3\n")  # 真实 systemd 语义
         sysctl.chmod(0o755)
         self.env = dict(os.environ, FIREBOT_EDGE_HOME=str(self.home), FIREBOT_TEST_CURL=str(curl),
                         FIREBOT_TEST_SYSTEMCTL=str(sysctl), FIREBOT_TEST_SKIP_ROOT="1")

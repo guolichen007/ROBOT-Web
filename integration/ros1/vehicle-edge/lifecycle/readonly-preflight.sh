@@ -45,6 +45,9 @@ MQTT_HOST="firebot.youdaozd.com"
 MQTT_PORT="8883"   # bootstrap 阶段（尚未 enroll）只对标准 Broker 做 TLS 主机名探测
 
 SYSTEMCTL="${FIREBOT_TEST_SYSTEMCTL:-systemctl}"
+# 真实 systemd 语义：is-active/is-enabled 的 stdout 与 exit code 分离（见 lib/systemd_state.sh）
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/systemd_state.sh"
 CURL="${FIREBOT_TEST_CURL:-curl}"
 OPENSSL="${FIREBOT_TEST_OPENSSL:-openssl}"
 GETENT="${FIREBOT_TEST_GETENT:-getent}"
@@ -145,15 +148,15 @@ ntp_ok=no
 [ "$ntp_ok" = "yes" ] && pass "NTP_SANE=yes" || fail "NTP_SANE=no"
 
 # ---- 控制面全关 + communication-owner 语义（VEHICLE_EDGE_PRE_CUTOVER_SEMANTICS_FIX）----
-ctl_enabled="$("$SYSTEMCTL" is-enabled firebot-control 2>/dev/null || echo disabled)"
-ctl_active="$("$SYSTEMCTL" is-active firebot-control 2>/dev/null || echo inactive)"
+ctl_enabled="$(unit_enabled_state firebot-control)"
+ctl_active="$(unit_active_state firebot-control)"
 [ "$ctl_enabled" = "enabled" ] && fail "CONTROL_ENABLED=yes" || pass "CONTROL_ENABLED=no"
 case "$ctl_active" in
   active|activating|reloading) fail "CONTROL_ACTIVE=yes" ;;
   *) pass "CONTROL_ACTIVE=no" ;;
 esac
-legacy_state="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive)"
-edge_state="$("$SYSTEMCTL" is-active firebot-vehicle-edge 2>/dev/null || echo inactive)"
+legacy_state="$(unit_active_state firebot-bridge)"
+edge_state="$(unit_active_state firebot-vehicle-edge)"
 # P0-1 phase-aware：bootstrap = pre-cutover（旧链路仍在线允许 legacy active）；
 # 新 Edge 在 cutover 前绝不允许 active（EDGE_STARTED_BEFORE_CUTOVER）。
 case "$edge_state" in

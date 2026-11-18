@@ -211,6 +211,7 @@ jobs:
         run: |
           python3 scripts/test_transport_profile.py
           python3 integration/ros1/vehicle-edge/tests/test_enroll_transport.py
+          python3 integration/ros1/vehicle-edge/tests/test_real_systemd_semantics.py
       - name: 预登记与只读门合同（fleet preregister / readonly-preflight / readonly-start）
         run: python3 scripts/test_fleet_preregister_contract.py
       - name: 跨 Broker 切换事务合同（cutover boundary / rollback / exact SHA）

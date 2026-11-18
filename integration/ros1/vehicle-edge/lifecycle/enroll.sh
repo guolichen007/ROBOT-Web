@@ -30,6 +30,9 @@ VEHICLE_EDGE_SRC="$(cd "$SELF_DIR/.." && pwd)"
 PROFILE_DIR="${FIREBOT_PROFILE_DIR:-$VEHICLE_EDGE_SRC/config/profiles}"
 EDGE_HOME="${FIREBOT_EDGE_HOME:-/home/tl/firebot-edge}"
 SYSTEMCTL="${FIREBOT_TEST_SYSTEMCTL:-systemctl}"
+# 真实 systemd 语义：is-active/is-enabled 的 stdout 与 exit code 分离（见 lib/systemd_state.sh）
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/systemd_state.sh"
 CURL="${FIREBOT_TEST_CURL:-curl}"
 LEGACY_BOOTSTRAP="/etc/firebot/bootstrap.env"
 
@@ -85,8 +88,8 @@ if printf '%s' "$server_host" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$|^100\.(6
 fi
 
 # ---- cutover 门：token 必须 Bridge/Edge 已停止后才允许消费 ----
-legacy_state="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive)"
-edge_state="$("$SYSTEMCTL" is-active firebot-vehicle-edge 2>/dev/null || echo inactive)"
+legacy_state="$(unit_active_state firebot-bridge)"
+edge_state="$(unit_active_state firebot-vehicle-edge)"
 if [ "$legacy_state" != "inactive" ] || [ "$edge_state" != "inactive" ]; then
   echo "ENROLL=REJECTED"
   echo "LEGACY_BRIDGE_STILL_ACTIVE"

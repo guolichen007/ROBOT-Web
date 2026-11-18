@@ -13,6 +13,9 @@ set -euo pipefail
 
 EDGE_HOME="${FIREBOT_EDGE_HOME:-/home/tl/firebot-edge}"
 SYSTEMCTL="${FIREBOT_TEST_SYSTEMCTL:-systemctl}"
+# 真实 systemd 语义：is-active/is-enabled 的 stdout 与 exit code 分离（见 lib/systemd_state.sh）
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/systemd_state.sh"
 LEGACY_STATUS="${FIREBOT_TEST_LEGACY_STATUS:-/run/firebot-bridge/status.json}"
 LEGACY_BRIDGE_ENV="/etc/firebot/bridge.env"
 while [ $# -gt 0 ]; do
@@ -28,7 +31,7 @@ fi
 
 # 1) 停新 Edge（不删除 service/unit/release）
 "$SYSTEMCTL" disable --now firebot-vehicle-edge >/dev/null 2>&1 || true
-edge_state="$("$SYSTEMCTL" is-active firebot-vehicle-edge 2>/dev/null || echo inactive)"
+edge_state="$(unit_active_state firebot-vehicle-edge)"
 if [ "$edge_state" != "inactive" ]; then
   echo "LEGACY_ROLLBACK=FAIL（firebot-vehicle-edge 仍 $edge_state）" >&2
   exit 1
@@ -43,7 +46,7 @@ echo "EDGE_SERVICE_STOPPED=YES"
   echo "LEGACY_ROLLBACK=FAIL（firebot-bridge enable/start 失败）" >&2
   exit 1
 }
-legacy_state="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive)"
+legacy_state="$(unit_active_state firebot-bridge)"
 [ "$legacy_state" = "active" ] || { echo "LEGACY_ROLLBACK=FAIL（firebot-bridge 未 active）" >&2; exit 1; }
 
 # 4) 验证回连旧 Broker（只读 status.json；不发探测）

@@ -97,7 +97,10 @@ require_sha() {
 # P0-2/P0-3 公共门：firebot-bridge active/activating/reloading 时禁止 enroll/install。
 # fail-closed 语义：Bridge 未停前绝不写配置、绝不消费 token、绝不进入安装。
 bridge_active_state() {
-  "$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive
+  # 真实 systemd：inactive 时 stdout=inactive 且 exit 3；只取 stdout 最后一行（不得 || echo 叠加）
+  local out
+  out="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || true)"
+  printf '%s\n' "$out" | tail -n1
 }
 bridge_running() {
   case "$(bridge_active_state)" in
@@ -292,8 +295,8 @@ cmd_vehicle() {
       fi
       # P0-C 只读安全门：enabled 之外还必须 active 门（enabled/active/activating/reloading 均 FAIL）。
       local ctl_enabled ctl_active gate_fail=0
-      ctl_enabled="$("$SYSTEMCTL" is-enabled firebot-control 2>/dev/null || echo disabled)"
-      ctl_active="$("$SYSTEMCTL" is-active firebot-control 2>/dev/null || echo inactive)"
+      ctl_enabled="$("$SYSTEMCTL" is-enabled firebot-control 2>/dev/null || true)"; ctl_enabled="$(printf '%s\n' "$ctl_enabled" | tail -n1)"
+      ctl_active="$("$SYSTEMCTL" is-active firebot-control 2>/dev/null || true)"; ctl_active="$(printf '%s\n' "$ctl_active" | tail -n1)"
       case "$ctl_enabled" in enabled) gate_fail=1 ;; esac
       case "$ctl_active" in active|activating|reloading) gate_fail=1 ;; esac
       echo "DEVICE_ID=$(read_device_id)"

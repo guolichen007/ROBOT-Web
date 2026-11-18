@@ -19,6 +19,9 @@ set -euo pipefail
 
 EDGE_HOME="${FIREBOT_EDGE_HOME:-/home/tl/firebot-edge}"
 SYSTEMCTL="${FIREBOT_TEST_SYSTEMCTL:-systemctl}"
+# 真实 systemd 语义：is-active/is-enabled 的 stdout 与 exit code 分离（见 lib/systemd_state.sh）
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/systemd_state.sh"
 REPO_ROOT="${FIREBOT_REPO_ROOT:-/home/tl/ROBOT-Web}"
 # 测试可注入 legacy 路径 fixture（生产默认 /etc/firebot、/opt/firebot/vehicle-bridge）
 LEGACY_ETC="${FIREBOT_TEST_LEGACY_ETC:-/etc/firebot}"
@@ -36,8 +39,8 @@ if [ "${FIREBOT_TEST_SKIP_ROOT:-0}" != "1" ]; then
 fi
 
 # ---- 前置：记录 legacy 运行状态（零影响断言基线）----
-LEGACY_ACTIVE_BEFORE="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive)"
-LEGACY_ENABLED_BEFORE="$("$SYSTEMCTL" is-enabled firebot-bridge 2>/dev/null || echo disabled)"
+LEGACY_ACTIVE_BEFORE="$(unit_active_state firebot-bridge)"
+LEGACY_ENABLED_BEFORE="$(unit_enabled_state firebot-bridge)"
 LEGACY_MQTT_HOST_BEFORE="$(grep -E '^FIREBOT_MQTT_HOST=' "$LEGACY_ETC/bridge.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"'[:space:]' || echo UNKNOWN)"
 TAILSCALE_BEFORE="NOT_PRESENT"
 if command -v tailscale >/dev/null 2>&1; then
@@ -93,8 +96,8 @@ fi
 chmod -R go-rwx "$BACKUP_ROOT" 2>/dev/null || true
 
 # ---- 后置：零影响断言（P1-6）----
-LEGACY_ACTIVE_AFTER="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive)"
-LEGACY_ENABLED_AFTER="$("$SYSTEMCTL" is-enabled firebot-bridge 2>/dev/null || echo disabled)"
+LEGACY_ACTIVE_AFTER="$(unit_active_state firebot-bridge)"
+LEGACY_ENABLED_AFTER="$(unit_enabled_state firebot-bridge)"
 LEGACY_MQTT_HOST_AFTER="$(grep -E '^FIREBOT_MQTT_HOST=' "$LEGACY_ETC/bridge.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'"'"'[:space:]' || echo UNKNOWN)"
 if [ "$LEGACY_ACTIVE_BEFORE" = "$LEGACY_ACTIVE_AFTER" ] && [ "$LEGACY_ENABLED_BEFORE" = "$LEGACY_ENABLED_AFTER" ] \
    && [ "$LEGACY_MQTT_HOST_BEFORE" = "$LEGACY_MQTT_HOST_AFTER" ] && [ "$TAILSCALE_BEFORE" = "$(tailscale status --json 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("Self",{}).get("TailscaleIPs","") or d.get("BackendState",""))' 2>/dev/null || echo NOT_PRESENT)" ]; then

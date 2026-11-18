@@ -78,6 +78,10 @@ class Fixture:
         lifecycle_dst.mkdir(parents=True)
         for name in ("readonly-preflight.sh", "readonly-start.sh", "migration-stop-legacy.sh"):
             shutil.copy(SRC_DIR / "vehicle-edge" / "lifecycle" / name, lifecycle_dst / name)
+        # lifecycle 依赖的共享 systemd 状态 helper
+        lib_dst = ros1_fake / "vehicle-edge" / "lib"
+        lib_dst.mkdir(parents=True)
+        shutil.copy(SRC_DIR / "vehicle-edge" / "lib" / "systemd_state.sh", lib_dst / "systemd_state.sh")
         git(self.repo, "init", "-q")
         git(self.repo, "add", ".")
         git(self.repo, "commit", "-qm", "fixture")
@@ -235,7 +239,9 @@ class Fixture:
         (self.etc / "config" / "bridge.env").write_text("\n".join(lines) + "\n")
         (self.etc / "secrets" / "mqtt.env").write_text("FIREBOT_MQTT_PASSWORD=x\n")
         (self.etc / "secrets" / "mqtt.env").chmod(0o600)
-        (self.etc / "config" / "assignment.env").write_text("SUPPORTED_COMMANDS=\n")
+        (self.etc / "config" / "assignment.env").write_text(
+            "TRANSPORT_PROFILE=u-dao-standard-v1\nMQTT_HOST=firebot.youdaozd.com\n"
+            "MQTT_PORT=8883\nSUPPORTED_COMMANDS=\n")
 
     def run_preflight(self, phase: str, device_id: str = "firebot-vehicle-02") -> subprocess.CompletedProcess:
         return subprocess.run(

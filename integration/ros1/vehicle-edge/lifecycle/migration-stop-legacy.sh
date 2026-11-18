@@ -18,10 +18,13 @@ FIREBOT_ETC="${FIREBOT_TEST_ETC_ROOT:-/etc/firebot}"
 
 # 允许测试注入 fixture 命令（生产调用不设置，走真实命令）。
 SYSTEMCTL="${FIREBOT_TEST_SYSTEMCTL:-systemctl}"
+# 真实 systemd 语义：is-active/is-enabled 的 stdout 与 exit code 分离（见 lib/systemd_state.sh）
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../lib/systemd_state.sh"
 
 # ---- 0) Control 安全门（只检查，绝不自动处理）----
-ctl_enabled="$("$SYSTEMCTL" is-enabled firebot-control 2>/dev/null || echo disabled)"
-ctl_active="$("$SYSTEMCTL" is-active firebot-control 2>/dev/null || echo inactive)"
+ctl_enabled="$(unit_enabled_state firebot-control)"
+ctl_active="$(unit_active_state firebot-control)"
 if [ "$ctl_enabled" = "enabled" ] || [ "$ctl_active" = "active" ] || \
    [ "$ctl_active" = "activating" ] || [ "$ctl_active" = "reloading" ]; then
   echo "MIGRATION_STOP_LEGACY=REJECTED"
@@ -31,8 +34,8 @@ if [ "$ctl_enabled" = "enabled" ] || [ "$ctl_active" = "active" ] || \
 fi
 
 # ---- 1) 记录 legacy Bridge 当前状态 ----
-bridge_was_enabled="$("$SYSTEMCTL" is-enabled firebot-bridge 2>/dev/null || echo disabled)"
-bridge_was_active="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive)"
+bridge_was_enabled="$(unit_enabled_state firebot-bridge)"
+bridge_was_active="$(unit_active_state firebot-bridge)"
 [ "$bridge_was_enabled" = "enabled" ] && WAS_ENABLED=YES || WAS_ENABLED=NO
 case "$bridge_was_active" in
   active) WAS_ACTIVE=YES ;;
@@ -46,7 +49,7 @@ esac
 }
 
 # ---- 3) 确认 inactive ----
-bridge_now="$("$SYSTEMCTL" is-active firebot-bridge 2>/dev/null || echo inactive)"
+bridge_now="$(unit_active_state firebot-bridge)"
 if [ "$bridge_now" != "inactive" ]; then
   echo "MIGRATION_STOP_LEGACY=FAIL（firebot-bridge 仍 is-active=$bridge_now）" >&2
   exit 1
