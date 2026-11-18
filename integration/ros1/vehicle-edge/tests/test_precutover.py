@@ -55,7 +55,9 @@ def setup_preflight_env(fx: Fixture, legacy_active: bool, edge_active: bool, enr
             f"FIREBOT_MQTT_PORT=8883\nFIREBOT_CA_CERT={ca}\nFIREBOT_SUPPORTED_COMMANDS=\n")
         (fx.edge_home / "secrets" / "mqtt.env").write_text("FIREBOT_MQTT_PASSWORD=x\n")
         (fx.edge_home / "secrets" / "mqtt.env").chmod(0o600)
-        (fx.edge_home / "config" / "assignment.env").write_text("SUPPORTED_COMMANDS=\n")
+        (fx.edge_home / "config" / "assignment.env").write_text(
+            "TRANSPORT_PROFILE=u-dao-standard-v1\nMQTT_HOST=firebot.youdaozd.com\n"
+            "MQTT_PORT=8883\nSUPPORTED_COMMANDS=\n")
 
 
 def run_preflight(fx: Fixture, phase: str) -> object:

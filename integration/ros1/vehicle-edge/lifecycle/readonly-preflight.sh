@@ -42,7 +42,7 @@ SECRETS="$EDGE_HOME/secrets"
 CERTS="$EDGE_HOME/certs"
 SERVER_URL="https://firebot.youdaozd.com"
 MQTT_HOST="firebot.youdaozd.com"
-MQTT_PORT="8883"
+MQTT_PORT="8883"   # bootstrap 阶段（尚未 enroll）只对标准 Broker 做 TLS 主机名探测
 
 SYSTEMCTL="${FIREBOT_TEST_SYSTEMCTL:-systemctl}"
 CURL="${FIREBOT_TEST_CURL:-curl}"
@@ -213,8 +213,16 @@ if [ "$PHASE" = "enrolled" ]; then
 
   [ "$(read_kv "$CONFIG/bridge.env" FIREBOT_MQTT_HOST)" = "$MQTT_HOST" ] \
     && pass "MQTT_HOST=$MQTT_HOST" || fail "MQTT_HOST 必须 $MQTT_HOST"
-  [ "$(read_kv "$CONFIG/bridge.env" FIREBOT_MQTT_PORT)" = "$MQTT_PORT" ] \
-    && pass "MQTT_PORT=$MQTT_PORT" || fail "MQTT_PORT 必须 $MQTT_PORT"
+  # G4-Fleet-R2：enrolled 阶段端口以 enrollment 写入的 Transport Profile（assignment.env）为准，
+  # bridge.env 必须与之一致；assignment 缺 MQTT_PORT 即失败（不回退默认值）。
+  tp_port="$(read_kv "$CONFIG/assignment.env" MQTT_PORT)"
+  if [ -z "$tp_port" ]; then
+    fail "TRANSPORT_PORT_MISSING（assignment.env 无 MQTT_PORT；重新 enroll）"
+  elif [ "$(read_kv "$CONFIG/bridge.env" FIREBOT_MQTT_PORT)" = "$tp_port" ]; then
+    pass "MQTT_PORT=$tp_port（TRANSPORT_PROFILE=$(read_kv "$CONFIG/assignment.env" TRANSPORT_PROFILE)）"
+  else
+    fail "MQTT_PORT 与 Transport Profile 不一致（bridge=$(read_kv "$CONFIG/bridge.env" FIREBOT_MQTT_PORT) profile=$tp_port）"
+  fi
   [ "$(read_kv "$CONFIG/bridge.env" FIREBOT_CA_CERT)" = "$CERTS/mqtt-ca.crt" ] \
     && pass "MQTT_CA=$CERTS/mqtt-ca.crt" || fail "MQTT_CA 必须 $CERTS/mqtt-ca.crt"
 

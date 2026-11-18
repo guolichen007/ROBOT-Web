@@ -459,7 +459,9 @@ def _add_env_fixture_methods(cls: type) -> None:
         (self.etc / "secrets").mkdir(exist_ok=True)
         (self.etc / "secrets" / "mqtt.env").write_text("FIREBOT_MQTT_PASSWORD=x\n")
         (self.etc / "secrets" / "mqtt.env").chmod(0o600)
-        (self.etc / "config" / "assignment.env").write_text("SUPPORTED_COMMANDS=\n")
+        (self.etc / "config" / "assignment.env").write_text(
+            "TRANSPORT_PROFILE=u-dao-standard-v1\nMQTT_HOST=firebot.youdaozd.com\n"
+            "MQTT_PORT=8883\nSUPPORTED_COMMANDS=\n")
 
     cls._write_bootstrap_files = write_bootstrap_files
     cls._write_enrolled_files = write_enrolled_files
