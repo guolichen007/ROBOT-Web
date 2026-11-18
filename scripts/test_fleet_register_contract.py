@@ -130,9 +130,15 @@ def test_onboard_credential_no_argv() -> None:
         "NO_PASSWORD_COMMAND_SUBSTITUTION（可执行行不含 $(cat ...password...) 进 argv）",
         not any("$(cat" in ln and "password" in ln for ln in lines),
     )
+    # G4-R1 D：旧判据只匹配 `-hmac $`，漏掉了 --resync-srt 的 `-hmac "$MASTER_TOKEN"`
+    # （带引号）。改为：可执行行出现 -hmac 即失败；且不得把 master token 读入 shell 变量。
     check(
-        "NO_OPENSSL_HMAC_ARGV（master token 不经 -hmac 参数）",
-        not any("-hmac $" in ln for ln in lines),
+        "NO_OPENSSL_HMAC_ARGV（任何可执行行不得出现 -hmac；含带引号形式）",
+        not any(re.search(r"(^|\s)-hmac(\s|=|$)", ln) for ln in lines),
+    )
+    check(
+        "NO_MASTER_TOKEN_IN_SHELL_VAR（master token 不读入 shell 变量）",
+        not any("$(cat" in ln and "media_publish_token" in ln for ln in lines),
     )
     check(
         "HMAC_IN_PROCESS（python 进程内读取密钥文件计算 HMAC）",
