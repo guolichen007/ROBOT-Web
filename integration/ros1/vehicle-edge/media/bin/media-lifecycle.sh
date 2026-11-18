@@ -19,6 +19,7 @@
 # 子命令：
 #   install --sha <SHA> [--libsrt-source <tar.gz>] [--libsrt-prebuilt <dir>] [--hardware-profile <ID>]
 #   credentials import --vehicle-id <ID> --srt-host <H> --srt-port <P> --bundle-file <FILE>|--bundle-stdin
+#   credentials import --from-enrollment   （新车：enroll 下发的 secrets/media-bundle.json，含 endpoint）
 #   preflight                 配置/凭证/libsrt/编码器/源可达（不推流、不启动）
 #   start [<camera>|all]      enable --now firebot-media@<camera>
 #   stop  [<camera>|all]      disable --now
@@ -222,6 +223,14 @@ cmd_credentials() {
       --srt-port) port="${2:-}"; shift 2 ;;
       --bundle-file) file="${2:-}"; shift 2 ;;
       --bundle-stdin) from_stdin=1; shift ;;
+      --from-enrollment)
+        file="$EDGE_HOME/secrets/media-bundle.json"
+        [ -f "$file" ] || fail CREDENTIALS "未找到 enrollment 下发的 secrets/media-bundle.json（先 vehicle enroll）"
+        local ep
+        ep="$("$PYTHON" -c 'import json,sys;d=json.load(open(sys.argv[1]));print(d.get("vehicle_id",""),d.get("srt_host",""),d.get("srt_port",""))' "$file")" \
+          || fail CREDENTIALS "media-bundle.json 非法"
+        read -r vid host port <<<"$ep"
+        shift ;;
       --token|--passphrase|--srt-publish-token) fail CREDENTIALS "禁止经命令行参数传递凭证（使用 --bundle-file 或 --bundle-stdin）" 2 ;;
       *) fail CREDENTIALS "未知参数 $1" 2 ;;
     esac

@@ -40,11 +40,21 @@ def active_lines(text: str) -> list[str]:
 def test_fleet_register_host_source() -> None:
     script = read("integration/ros1/fleet-register.sh")
     check("U_DAO_FLEET_REGISTER_HOST 读取 public-activation.env", "public-activation.env" in script)
+    registry = read("deploy/u-dao/transport-profiles.json")
     check(
-        "U_DAO_FLEET_REGISTER_HOST=firebot.youdaozd.com 语义（MQTT_PUBLIC_HOSTNAME 优先）",
-        "MQTT_PUBLIC_HOSTNAME" in script and "PUBLIC_DOMAIN" in script,
+        "MQTT host 来自批准 Transport Profile（@activation:MQTT_PUBLIC_HOSTNAME|PUBLIC_DOMAIN）",
+        "transport_profile.py" in script
+        and "@activation:MQTT_PUBLIC_HOSTNAME|PUBLIC_DOMAIN" in registry,
     )
-    check("U_DAO_FLEET_REGISTER_PORT 默认 8883", "U_DAO_FLEET_REGISTER_PORT:-8883" in script)
+    # G4-Fleet-R2：端口不得有任何默认值（旧 U_DAO_FLEET_REGISTER_PORT:-8883 已移除）
+    check(
+        "NO_PORT_DEFAULT（fleet-register 可执行行无 8883/8884 字面默认）",
+        not any(re.search(r"\b888[34]\b", ln) for ln in active_lines(script)),
+    )
+    check(
+        "Profile 无 provisioner → REJECTED（--require-provisioner fail-closed）",
+        "--require-provisioner" in script and "FLEET_REGISTER=REJECTED" in script,
+    )
     # 可执行行不得含旧 IP/Tailscale 默认值（校验用的拒绝正则与注释声明除外）
     check(
         "NO_LEGACY_IP_DEFAULT（无 100.110/100.68/100.64 默认值）",
@@ -100,12 +110,20 @@ def test_fleet_register_secret_output_scan() -> None:
         not leaked,
         "; ".join(leaked),
     )
-    check("只输出 ENROLL_TOKEN 一次性交付", "ENROLL_TOKEN=$ENROLL_TOKEN" in script)
+    # G4-Fleet-R2：一次性 token 只写 0600 文件，绝不打印到 stdout/日志
+    check(
+        "ENROLL_TOKEN 只写 0600 文件（不回显）",
+        "ENROLL_TOKEN_FILE=" in script
+        and 'chmod 600 "$TOKEN_OUT"' in script
+        and not any(re.search(r"echo .*ENROLL_TOKEN=\$", ln) for ln in active_lines(script)),
+    )
     # G1-R1：凭证必须经 stdin 注入（heredoc PAYLOAD → json.load(sys.stdin)），
     # python -c 的代码字符串不得含任何 '$VAR' 凭证插值（进程 argv 零凭证）。
     check(
-        "凭证经 stdin 注入（json.load(sys.stdin) + PAYLOAD heredoc）",
-        "json.load(sys.stdin)" in script and "<<PAYLOAD" in script,
+        "凭证经 stdin 注入（host 侧 python 读 0600 文件组装 → 管道 → 容器 json.load(sys.stdin)）",
+        "json.load(sys.stdin)" in script
+        and "json.dump(payload, sys.stdout)" in script
+        and "<<PAYLOAD" not in script,
     )
     check(
         "NO_CREDENTIAL_IN_ARGV（python -c 代码不含 PASSWORD/DEVICE_TOKEN 插值）",
@@ -202,8 +220,9 @@ def test_mqtt_private_ca_path() -> None:
         '"/etc/firebot/mqtt-ca.crt"' in read("apps/api/app/modules/enrollment/router.py"),
     )
     check(
-        "MQTT_PRIVATE_CA_PATH（fleet-register 签发 ca_cert=mqtt-ca.crt）",
-        "/etc/firebot/mqtt-ca.crt" in read("integration/ros1/fleet-register.sh"),
+        "MQTT_PRIVATE_CA_PATH（fleet-register 经 Profile 签发 ca_vehicle_path=mqtt-ca.crt）",
+        "ca_vehicle_path" in read("integration/ros1/fleet-register.sh")
+        and "certs/mqtt-ca.crt" in read("deploy/u-dao/transport-profiles.json"),
     )
     cfg = read("integration/ros1/vehicle-bridge/firebot_bridge/config.py")
     check(

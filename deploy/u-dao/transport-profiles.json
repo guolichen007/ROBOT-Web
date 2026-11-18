@@ -1,0 +1,43 @@
+{
+  "schema": "firebot.transport-profiles.v1",
+  "comment": "批准的车辆接入 Transport Profile 注册表（非 secret；变更需 OWNER 批准并随版本发布）。host 可写 @activation:<KEY>，在服务器上从 runtime/env/public-activation.env 解析。",
+  "profiles": {
+    "u-dao-standard-v1": {
+      "description": "U-Dao 公网标准 Broker（主栈 mosquitto，canonical MQTT；R002 与新车默认）",
+      "host": "@activation:MQTT_PUBLIC_HOSTNAME|PUBLIC_DOMAIN",
+      "port": 8883,
+      "protocol": "canonical-mqtt-1.3",
+      "broker_ref": "u-dao-firebot/mosquitto",
+      "ca": {
+        "server_path": "secrets/mosquitto/certs/ca.crt",
+        "vehicle_path": "certs/mqtt-ca.crt"
+      },
+      "adapter": "mqtt-ingress",
+      "credential_provisioner": {
+        "id": "u-dao-mosquitto-onboard",
+        "broker_ref": "u-dao-firebot/mosquitto",
+        "command": "deploy/u-dao/scripts/60-onboard-vehicle.sh"
+      },
+      "assignable_to_new_vehicles": true
+    },
+    "r001-independent-v1": {
+      "description": "001 独立接入（r001-broker 8884，Vehicle Agent V1 只读 G1；凭证由 G1 受控流程签发，平台不重发）",
+      "host": "firebot.youdaozd.com",
+      "port": 8884,
+      "protocol": "vehicle-agent-v1",
+      "broker_ref": "u-dao-firebot-r001-prod/r001-broker",
+      "ca": {
+        "server_path": "r001/certs/ca.crt",
+        "vehicle_path": "/etc/firebot/vehicle-agent-v1-readonly/ca.crt"
+      },
+      "adapter": "vehicle-agent-adapter@r001-dedicated",
+      "credential_provisioner": null,
+      "assignable_to_new_vehicles": false
+    }
+  },
+  "vehicles": {
+    "firebot-vehicle-01": "r001-independent-v1",
+    "firebot-vehicle-02": "u-dao-standard-v1"
+  },
+  "protected_vehicles": ["firebot-vehicle-01", "firebot-vehicle-02"]
+}

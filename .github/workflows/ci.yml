@@ -207,6 +207,10 @@ jobs:
         run: python3 scripts/test_fleet_register_contract.py
       - name: 媒体凭证派生行为测试（master 零 argv / --media-only 不触碰 MQTT / 0600）
         run: python3 scripts/test_onboard_media_credentials.py
+      - name: Transport Profile 解析 + fleet register / enroll（无 8883 默认、provisioner fail-closed、token 不经 argv）
+        run: |
+          python3 scripts/test_transport_profile.py
+          python3 integration/ros1/vehicle-edge/tests/test_enroll_transport.py
       - name: 预登记与只读门合同（fleet preregister / readonly-preflight / readonly-start）
         run: python3 scripts/test_fleet_preregister_contract.py
       - name: 跨 Broker 切换事务合同（cutover boundary / rollback / exact SHA）

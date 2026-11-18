@@ -118,6 +118,9 @@ class Fixture:
         self.status_json = self.tmp / "status.json"
         self.syslog = self.tmp / "systemctl.log"
         self.curllog = self.tmp / "curl.log"
+        self.token_file = self.tmp / "enroll-token"
+        self.token_file.write_text("ab" * 32 + "\n")
+        self.token_file.chmod(0o600)
 
         self.fakebin = self.tmp / "fakebin"
         self.fakebin.mkdir()
@@ -128,7 +131,7 @@ class Fixture:
                 #!/usr/bin/env bash
                 echo "$*" >> "${FAKE_CURL_LOG:?}"
                 if [[ "$*" == *"-X POST"* ]]; then
-                  printf '{"device_id":"firebot-vehicle-02","profile_id":"firebot_ros1_standard_v1","mqtt_password":"x","device_token":"y","mqtt_host":"firebot.youdaozd.com","mqtt_port":8883}'
+                  printf '{"device_id":"firebot-vehicle-02","profile_id":"firebot_ros1_standard_v1","transport_profile":"u-dao-standard-v1","protocol":"canonical-mqtt-1.3","mqtt_password":"x","device_token":"y","mqtt_host":"firebot.youdaozd.com","mqtt_port":8883}'
                 fi
                 exit 0
                 """
@@ -245,7 +248,7 @@ def test_enroll_active_bridge_rejected_and_token_not_consumed() -> None:
         fx.set_bridge(active="active", enabled="enabled")
         r = fx.run_firebotctl(
             "vehicle", "enroll", "firebot-vehicle-02",
-            "--token", "TESTTOKEN", "--server", "https://firebot.youdaozd.com",
+            "--token-file", str(fx.token_file), "--server", "https://firebot.youdaozd.com",
         )
         check("ENROLL_ACTIVE_BRIDGE_REJECTED", r.returncode != 0 and "ENROLL=REJECTED" in r.stdout, r.stdout[-200:])
         check("输出 LEGACY_BRIDGE_STILL_ACTIVE", "LEGACY_BRIDGE_STILL_ACTIVE" in r.stdout)
@@ -272,7 +275,7 @@ def test_enroll_inactive_bridge_continues() -> None:
         fx.set_bridge(active="inactive", enabled="disabled")
         r = fx.run_firebotctl(
             "vehicle", "enroll", "firebot-vehicle-02",
-            "--token", "TESTTOKEN", "--server", "https://firebot.youdaozd.com",
+            "--token-file", str(fx.token_file), "--server", "https://firebot.youdaozd.com",
         )
         check("ENROLL inactive 正常继续", r.returncode == 0 and "ENROLL=PASS" in r.stdout, r.stdout[-300:])
         check("inactive 场景 token 被消费（POST 恰好 1 次）", fx.curllog.read_text().count("-X POST") == 1)

@@ -59,5 +59,8 @@ def consume_token(db, device_id: str, token: str) -> dict | None:
     if not secrets.compare_digest(row.token_hash, _hash(token)):
         return None
     row.consumed_at = datetime.now(UTC)
+    credential = dict(row.credential_json or {})
+    # 消费即清除：MQTT 密码 / device token / 媒体凭证不在 DB 中静置（调用方事务回滚时一并恢复）
+    row.credential_json = {}
     db.flush()
-    return dict(row.credential_json or {})
+    return credential
