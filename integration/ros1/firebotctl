@@ -627,14 +627,14 @@ cmd_fleet() {
     case "$sub" in
       register)
         [ -n "${1:-}" ] || { echo "用法: firebotctl fleet register <DEVICE_ID> [--transport-profile <ID>] [--token-out <F>]" >&2; exit 1; }
-        "$SCRIPT_DIR/fleet-register.sh" "$@" ;;
+        bash "$SCRIPT_DIR/fleet-register.sh" "$@" ;;
       sites)
         # 只读列出 Site（SITE_CODE/SITE_NAME/ACTIVE/ROBOT_COUNT），无数据库敏感信息。
-        "$SCRIPT_DIR/fleet-sites.sh" ;;
+        bash "$SCRIPT_DIR/fleet-sites.sh" ;;
       preregister)
         # 建立 Fleet stable identity（enabled=false 只读基线）；绝不生成 credential/token。
         [ -n "${1:-}" ] || { echo "用法: firebotctl fleet preregister <DEVICE_ID> --name <N> --site-code <S>" >&2; exit 1; }
-        "$SCRIPT_DIR/fleet-preregister.sh" "$@" ;;
+        bash "$SCRIPT_DIR/fleet-preregister.sh" "$@" ;;
       status)
         echo "FLEET_STATUS=见服务器 Robot/IntegrationProfile（firebotctl server verify）" ;;
       *) echo "firebotctl fleet <register|sites|preregister|status>" >&2; exit 1 ;;
