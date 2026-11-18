@@ -140,6 +140,32 @@ async function dualSample(labels, seconds) {
   return rows
 }
 
+
+// 完整视野几何：按 <video> 计算样式（object-fit）与内在尺寸推算实际渲染内容矩形，
+// 判断画面是否被裁切（cover 会使内容矩形超出元素盒），以及等比例（宽高比误差）。
+async function fovProbe(label) {
+  const v = card(label).locator('video')
+  return v.evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    const fit = getComputedStyle(el).objectFit
+    const vw = el.videoWidth, vh = el.videoHeight
+    if (!vw || !vh || !r.width || !r.height) return { fit, ok: false }
+    const sx = r.width / vw, sy = r.height / vh
+    const scale = fit === 'cover' ? Math.max(sx, sy) : fit === 'fill' ? null : Math.min(sx, sy)
+    const cw = scale ? vw * scale : r.width, ch = scale ? vh * scale : r.height
+    const cropped_x = Math.max(0, (cw - r.width) / cw), cropped_y = Math.max(0, (ch - r.height) / ch)
+    return {
+      fit, video: [vw, vh], box: [Math.round(r.width), Math.round(r.height)],
+      content: [Math.round(cw), Math.round(ch)],
+      cropped_fraction: [Number(cropped_x.toFixed(4)), Number(cropped_y.toFixed(4))],
+      aspect_error: Number(Math.abs(cw / ch - vw / vh).toFixed(4)),
+      full_fov: cropped_x < 0.001 && cropped_y < 0.001,
+      in_fullscreen: document.fullscreenElement !== null,
+      ok: true,
+    }
+  })
+}
+
 let clicks = 0
 async function connect(label) {
   clicks += 1
@@ -183,6 +209,42 @@ try {
     }
     Object.assign(out, await readKpis())
     await page.screenshot({ path: path.join(outDir, 'monitor-page.png'), fullPage: false })
+  } else if (phase === 'fov') {
+    // 完整视野 + 全屏：两路连接后测几何；再逐路点击 VideoCard 全屏按钮测全屏几何并截图
+    out.fov = {}
+    for (const [label, key] of [['监控相机', 'rgb'], ['红外热成像', 'thermal']]) {
+      await connect(label)
+      await page.waitForTimeout(1500)
+      out.fov[key] = { card: await fovProbe(label) }
+      await card(label).screenshot({ path: path.join(outDir, `fov-${key}-card.png`) })
+    }
+    for (const [label, key] of [['监控相机', 'rgb'], ['红外热成像', 'thermal']]) {
+      await card(label).hover()
+      await card(label).getByRole('button', { name: '全屏' }).click()
+      await page.waitForFunction(() => document.fullscreenElement !== null, null, { timeout: 5000 })
+      await page.waitForTimeout(800)
+      out.fov[key].fullscreen = await fovProbe(label)
+      out.fov[key].fullscreen.element = await page.evaluate(() => document.fullscreenElement?.className || null)
+      await page.screenshot({ path: path.join(outDir, `fov-${key}-fullscreen.png`) })
+      await page.evaluate(() => document.exitFullscreen())
+      await page.waitForFunction(() => document.fullscreenElement === null, null, { timeout: 5000 })
+      await page.waitForTimeout(500)
+      out.fov[key].after_exit = await fovProbe(label)
+      out.fov[key].live_after_exit = (await card(label).locator('.video-live-tag').count()) > 0
+    }
+    const vp = []
+    for (const [w, h] of [[1920, 1080], [1366, 768], [390, 844]]) {
+      await page.setViewportSize({ width: w, height: h })
+      await page.waitForTimeout(800)
+      vp.push({
+        viewport: `${w}x${h}`,
+        rgb: await fovProbe('监控相机'),
+        thermal: await fovProbe('红外热成像'),
+        scroll_w: await page.evaluate(() => document.documentElement.scrollWidth),
+      })
+      await page.screenshot({ path: path.join(outDir, `fov-page-${w}x${h}.png`), fullPage: w < 1100 })
+    }
+    out.fov_viewports = vp
   } else if (phase === 'kpis') {
     Object.assign(out, await readKpis(input.forbid_text))
     await page.locator('.hmi-kpis').screenshot({

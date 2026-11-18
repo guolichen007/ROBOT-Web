@@ -522,11 +522,27 @@
   background: #13171d;
   margin: 0 12px 12px;
 }
+/* 工业监控：完整视野、等比例（contain），不得裁切画面边缘——RGB 与热成像同规则；
+ * 宽高比不一致时以舞台底色 letterbox，不拉伸、不放大裁切。 */
 .video-stage video {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+  object-position: center;
+  background: #13171d;
   display: block;
+}
+/* 全屏（VideoCard 对 .video-stage 调用 requestFullscreen）：铺满屏幕、去圆角/外边距，仍为 contain */
+.video-stage:fullscreen {
+  margin: 0;
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  background: #000;
+}
+.video-stage:fullscreen video {
+  object-fit: contain;
+  background: #000;
 }
 .video-placeholder {
   height: 100%;

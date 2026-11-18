@@ -368,6 +368,27 @@ def test_production_videocard_rgb_and_thermal_decode(web):
     assert len(data["kpi_labels"]) == 4, data
 
 
+def test_video_full_fov_contain_and_fullscreen(web):
+    """视野保护：RGB / thermal 生产 VideoCard 完整视野等比例（object-fit: contain，零裁切），
+    卡片内与全屏一致；1920×1080 / 1366×768 / 390×844 不裁切、无横向溢出；退出全屏后仍实时。"""
+    data = _browser(web, "fov", timeout=150)
+    EVIDENCE["fov"] = {"cards": data["fov"], "viewports": data["fov_viewports"]}
+    for key in ("rgb", "thermal"):
+        for mode in ("card", "fullscreen", "after_exit"):
+            g = data["fov"][key][mode]
+            assert g["ok"] and g["fit"] == "contain", (key, mode, g)
+            assert g["full_fov"] is True and g["aspect_error"] < 0.01, (key, mode, g)
+        assert data["fov"][key]["fullscreen"]["in_fullscreen"] is True, key
+        assert "video-stage" in (data["fov"][key]["fullscreen"]["element"] or ""), key
+        assert data["fov"][key]["live_after_exit"] is True, key
+    for vp in data["fov_viewports"]:
+        width = int(vp["viewport"].split("x")[0])
+        assert vp["scroll_w"] <= width + 1, vp
+        for key in ("rgb", "thermal"):
+            g = vp[key]
+            assert g["full_fov"] is True and g["aspect_error"] < 0.01, (vp["viewport"], key)
+
+
 def test_no_temperature_card_without_sensor_and_with_legacy_data(web, g3):
     """G3-R2 TEMPERATURE_UI_DISABLED（真实生产构建 Web + 真实 API/Ingress）。
 
