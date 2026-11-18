@@ -25,6 +25,8 @@ RUN if [ -n "$PIP_INDEX_URL" ]; then \
 COPY apps/api /workspace/apps/api
 COPY services /workspace/services
 COPY packages /workspace/packages
+# G4-Fleet-R2：批准 Transport Profile 注册表（非 secret；媒体登记/enrollment 校验唯一来源）
+COPY deploy/u-dao/transport-profiles.json /workspace/deploy/u-dao/transport-profiles.json
 
 RUN addgroup -g 10001 -S firebot \
     && adduser -u 10001 -S -D -H -s /sbin/nologin -G firebot firebot \

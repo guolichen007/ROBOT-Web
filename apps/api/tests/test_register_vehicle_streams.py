@@ -94,9 +94,21 @@ def _publish(client, path, *, user="", password="", token=""):
 
 
 def test_missing_robot_is_not_created(capsys, monkeypatch):
-    monkeypatch.setattr(tool, "TARGET_VEHICLE", "firebot-vehicle-01-absent-probe")
+    from app.modules.media import registration as core
+
+    probe_id = "firebot-vehicle-01-absent-probe"
+    real_load = core.load_registry
+
+    def registry_with_probe():
+        data = real_load()
+        data["vehicles"] = {**data["vehicles"], probe_id: "r001-independent-v1"}
+        return data
+
+    monkeypatch.setattr(core, "load_registry", registry_with_probe)
+    monkeypatch.setattr(tool, "TARGET_VEHICLE", probe_id)
+    monkeypatch.setattr(tool, "STREAMS", ((f"{probe_id}-roof_rgb", "roof_rgb"),))
     code, _, err = _run(capsys, "--apply")
-    assert code == tool.EXIT_PRECONDITION and "不创建机器人" in err
+    assert code == tool.EXIT_PRECONDITION and "不创建机器人" in err, err
     with SessionLocal() as db:
         assert (
             db.scalar(select(Robot).where(Robot.vehicle_id == "firebot-vehicle-01-absent-probe"))
@@ -209,6 +221,10 @@ def test_conflicts_refused_with_zero_writes(vehicle, capsys, case):
 
 
 def test_rollback_only_removes_tool_created_rows(vehicle, capsys, monkeypatch):
+    # 撤销前发布会话门：本用例模拟 MediaMTX 确认“无活动发布”（会话门另有专项测试）
+    from app.modules.media import registration as core
+
+    monkeypatch.setattr(core, "mediamtx_publisher_probe", lambda ids: dict.fromkeys(ids, False))
     # RGB 预先存在（非本工具创建，source_ref 为空）→ apply 只新增 THERMAL
     with SessionLocal() as db:
         pre = StreamRegistry(stream_id=RGB, robot_id=vehicle, camera_type="roof_rgb")
