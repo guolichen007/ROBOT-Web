@@ -222,8 +222,28 @@ media_only() {
     } > "$VEHICLE_DIR/README.txt"
     chmod 600 "$VEHICLE_DIR/README.txt"
   fi
+  write_media_bundle
   echo "ONBOARD_MEDIA_ONLY=PASS vehicle=$VEHICLE_ID state=$state（仅媒体凭证；MQTT 未生成/未轮换；Broker 未 reload）"
-  echo "  files=$VEHICLE_DIR/{srt_publish_token,srt_publish_passphrase}"
+  echo "  files=$VEHICLE_DIR/{srt_publish_token,srt_publish_passphrase,media-bundle.json}"
+  echo "  车端导入：firebotctl vehicle media credentials import --vehicle-id $VEHICLE_ID --srt-host <SRT公网主机> --srt-port <端口> --bundle-file media-bundle.json"
+}
+
+# ---- 车端交付 bundle（firebot.media-credentials.v1；单车凭证，绝不含主密钥）----
+# python 进程内读取两个 0600 副本组装 JSON（值不经 argv / shell 变量），0600 原子落盘。
+write_media_bundle() {
+  local tmp
+  tmp="$(mktemp "$VEHICLE_DIR/.media-bundle.XXXXXX")"
+  python3 -c '
+import json, sys
+vid, d, out = sys.argv[1], sys.argv[2], sys.argv[3]
+tok = open(d + "/srt_publish_token", encoding="utf-8").read().strip()
+pp = open(d + "/srt_publish_passphrase", encoding="utf-8").read().strip()
+with open(out, "w", encoding="utf-8") as fh:
+    json.dump({"kind": "firebot.media-credentials.v1", "vehicle_id": vid,
+               "srt_publish_token": tok, "srt_publish_passphrase": pp}, fh)
+' "$VEHICLE_ID" "$VEHICLE_DIR" "$tmp"
+  chmod 600 "$tmp"
+  mv -f "$tmp" "$VEHICLE_DIR/media-bundle.json"
 }
 
 # ---- 激活：password_file 更新 → 卷同步 → SIGHUP → verify → live ACL verify ----

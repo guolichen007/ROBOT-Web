@@ -13,7 +13,10 @@
 #   firebotctl vehicle stop control                   # 只停 control
 #   firebotctl vehicle capability stop-only|patrol    # 受控能力提升（自动重启 Bridge）
 #   firebotctl vehicle location enable                # 受控开启 location（先验地图/AMCL/odom）
-#   firebotctl vehicle media-secret check             # 媒体 secret 落盘规范检查（值不回显）
+#   firebotctl vehicle media-secret check             # 旧媒体 secret 落盘规范检查（值不回显；已由 media 取代）
+#   firebotctl vehicle media install --sha <SHA>       # 媒体组件安装（不启动；不触碰 G1/edge/MQTT）
+#   firebotctl vehicle media credentials import ...    # 导入单车媒体凭证 bundle（文件/stdin；不经 argv）
+#   firebotctl vehicle media preflight|start|stop|status|rollback|doctor
 #   firebotctl vehicle profile-sync                   # 从 profile 重新生成 bridge.env
 #   firebotctl vehicle support-bundle                 # 脱敏诊断包
 #   firebotctl vehicle rollback                       # 回滚 previous
@@ -331,6 +334,10 @@ cmd_vehicle() {
     media-secret)
       [ "${1:-}" = "check" ] || { echo "用法: firebotctl vehicle media-secret check" >&2; exit 1; }
       check_media_secret ;;
+    media)
+      # 统一车端媒体（G4-Fleet-R2）：实现唯一 source of truth = vehicle-edge/media/bin/media-lifecycle.sh；
+      # 新车与已有车辆（001 增量补齐）共用同一实现，无车辆分支。
+      bash "$ROS1_DIR/vehicle-edge/media/bin/media-lifecycle.sh" "$@" ;;
     readonly-preflight)
       # 真实车辆只读接入前置检查（P0-D）：bootstrap（未 enroll）/ enrolled（已 enroll）。
       # 不得 MQTT publish、不得使用生产 credential 登录（MQTT 仅 TLS 握手）。
@@ -392,7 +399,7 @@ cmd_vehicle() {
       FIREBOT_REQUIRE_SHA="$sha" bash "$ROS1_DIR/vehicle-install.sh" all
       FIREBOT_REQUIRE_SHA="$sha" bash "$ROS1_DIR/vehicle-install.sh" verify ;;
     *)
-      echo "firebotctl vehicle <enroll|install|verify|status|start|stop|capability|location|profile-sync|support-bundle|rollback|upgrade|readonly-preflight|readonly-start|migration-stop-legacy|edge-init|edge-install|edge-verify|edge-backup-legacy>" >&2; exit 1 ;;
+      echo "firebotctl vehicle <enroll|install|verify|status|start|stop|capability|location|media|profile-sync|support-bundle|rollback|upgrade|readonly-preflight|readonly-start|migration-stop-legacy|edge-init|edge-install|edge-verify|edge-backup-legacy>" >&2; exit 1 ;;
   esac
 }
 
@@ -642,7 +649,9 @@ print_help() {
   echo "  firebotctl vehicle start base|navigation|control       模块化启动"
   echo "  firebotctl vehicle capability stop-only|patrol         能力提升"
   echo "  firebotctl vehicle location enable                     定位开启"
-  echo "  firebotctl vehicle media-secret check                  媒体 secret 落盘规范检查"
+  echo "  firebotctl vehicle media install --sha <SHA>           媒体组件安装（不启动）"
+  echo "  firebotctl vehicle media credentials import --vehicle-id <ID> --srt-host <H> --srt-port <P> --bundle-file <F>"
+  echo "  firebotctl vehicle media preflight|start|stop|status|rollback|doctor"
   echo "  firebotctl vehicle rollback / support-bundle           回滚 / 诊断包"
   echo "  firebotctl server deploy --sha <SHA> / verify / rollback  服务器部署/验收/回滚"
   echo "  firebotctl fleet sites                                 只读列出 Site"

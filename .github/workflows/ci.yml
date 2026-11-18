@@ -192,6 +192,15 @@ jobs:
           python3 tests/test_precutover.py
           cd ../../..
           python3 scripts/test_edge_contract.py
+      - name: 车端媒体组件（发布器 + 生命周期；Ubuntu 20.04 python3.8 语法兼容在本地 focal 运行时验证）
+        run: |
+          command -v ffmpeg >/dev/null || for attempt in 1 2 3; do
+            sudo apt-get update && sudo apt-get install -y ffmpeg && break
+            echo "ffmpeg install attempt $attempt failed; retry in 10s"; sleep 10
+          done
+          command -v ffmpeg >/dev/null
+          python3 integration/ros1/vehicle-edge/media/tests/test_media_publisher.py
+          python3 integration/ros1/vehicle-edge/media/tests/test_media_lifecycle.py
       - name: Control STOP 安全测试
         run: python3 integration/ros1/vehicle-control/tests/test_stop_motion_safety.py
       - name: 生产链路合同（fleet register / 车端 TLS 信任链 / 只读铁律）

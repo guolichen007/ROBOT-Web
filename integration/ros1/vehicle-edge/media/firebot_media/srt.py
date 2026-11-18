@@ -65,13 +65,15 @@ _LIB = None
 
 
 def load_lib(path: Optional[str] = None, edge_home: Optional[str] = None):
-    """加载 libsrt：显式路径 > Edge Home 受控安装（media/lib/libsrt.so.1.4）> 系统库。"""
+    """加载 libsrt：显式路径 > 本 release 自带（<release>/lib/libsrt.so.1.4）> Edge Home 当前 release > 系统库。"""
     global _LIB
     if _LIB is not None:
         return _LIB
     candidates = [path] if path else []
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    candidates.append(os.path.join(here, "lib", "libsrt.so.1.4"))
     if edge_home:
-        candidates.append(os.path.join(edge_home, "media", "lib", "libsrt.so.1.4"))
+        candidates.append(os.path.join(edge_home, "media", "current", "lib", "libsrt.so.1.4"))
     candidates += ["libsrt.so.1.4", "libsrt.so.1", "libsrt-gnutls.so.1.4", "libsrt-openssl.so.1.4"]
     found = ctypes.util.find_library("srt")
     if found:

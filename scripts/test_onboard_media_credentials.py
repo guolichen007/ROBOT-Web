@@ -173,6 +173,21 @@ def test_media_only() -> None:
             ),
         )
         check("无残留临时文件", not any(p.name.startswith(".") for p in vdir.iterdir()))
+        bundle_file = vdir / "media-bundle.json"
+        import json as _json
+
+        bundle = _json.loads(bundle_file.read_text()) if bundle_file.is_file() else {}
+        check(
+            "MEDIA_BUNDLE 车端交付文件（kind/vehicle_id/token 正确、0600）",
+            bundle.get("kind") == "firebot.media-credentials.v1"
+            and bundle.get("vehicle_id") == VEHICLE
+            and bundle.get("srt_publish_token") == expected_token(MASTER)
+            and mode(bundle_file) == "600",
+        )
+        check(
+            "MEDIA_BUNDLE 绝不含主密钥",
+            MASTER not in bundle_file.read_text() and "media_publish_token" not in bundle,
+        )
         # 幂等：再次执行 → REUSED，内容不变
         res2 = run(SCRIPT, runtime, shim, VEHICLE, "--media-only")
         check(
