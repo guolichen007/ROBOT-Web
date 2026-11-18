@@ -113,7 +113,14 @@ def test_dry_run_default_writes_nothing(vehicle, capsys):
     assert "STREAM_REGISTRATION=DRY_RUN" in err
     with SessionLocal() as db:
         assert _streams(db, RGB, THERMAL) == {}
-        assert db.scalar(select(AuditLog).where(AuditLog.action == tool.AUDIT_CREATE)) is None
+        assert (
+            db.scalar(
+                select(AuditLog).where(
+                    AuditLog.action == tool.AUDIT_CREATE, AuditLog.robot_id == vehicle
+                )
+            )
+            is None
+        )
     assert _protected_snapshot() == before
 
 
@@ -239,6 +246,43 @@ def test_rollback_only_removes_tool_created_rows(vehicle, capsys, monkeypatch):
         with SessionLocal() as db:
             assert set(_streams(db, RGB, THERMAL)) == {RGB, THERMAL}
             assert db.get(StreamRegistry, r001_row.id) is not None
+    # 只有审计证明能区分：同车、同 stream_id、source_ref=REAL_VEHICLE_SRT 但无 REGISTERED 审计
+    with SessionLocal() as db:
+        db.execute(delete(StreamRegistry).where(StreamRegistry.id == pre_id))
+        imposter = StreamRegistry(
+            id=pre_id,
+            stream_id=RGB,
+            robot_id=vehicle,
+            camera_type="roof_rgb",
+            source_ref=tool.REAL_SOURCE_REF,
+        )
+        db.add(imposter)
+        db.commit()
+    bad = {**receipt, "created": [*receipt["created"], {"id": pre_id, "stream_id": RGB}]}
+    code, _, err = _run(
+        capsys, "--rollback", "-", "--apply", stdin=json.dumps(bad), monkeypatch=monkeypatch
+    )
+    assert code == tool.EXIT_ROLLBACK and "审计" in err, err
+    with SessionLocal() as db:
+        assert set(_streams(db, RGB, THERMAL)) == {RGB, THERMAL}
+    # 结构非法 / 重复 id 的 receipt：受控拒绝（退出码 5），零删除
+    for created in (
+        "not-a-list",
+        ["not-a-dict"],
+        [{"id": 1, "stream_id": THERMAL}],
+        [*receipt["created"], *receipt["created"]],
+    ):
+        code, _, err = _run(
+            capsys,
+            "--rollback",
+            "-",
+            "--apply",
+            stdin=json.dumps({**receipt, "created": created}),
+            monkeypatch=monkeypatch,
+        )
+        assert code == tool.EXIT_ROLLBACK, (created, err)
+    with SessionLocal() as db:
+        assert set(_streams(db, RGB, THERMAL)) == {RGB, THERMAL}
     # dry-run receipt 不可用于撤销
     code, _, _ = _run(
         capsys,
@@ -258,7 +302,15 @@ def test_rollback_only_removes_tool_created_rows(vehicle, capsys, monkeypatch):
     with SessionLocal() as db:
         assert set(_streams(db, RGB, THERMAL)) == {RGB}
         assert db.get(StreamRegistry, pre_id) is not None
-        assert db.scalar(select(AuditLog).where(AuditLog.action == tool.AUDIT_DELETE)) is not None
+        assert (
+            db.scalar(
+                select(AuditLog).where(
+                    AuditLog.action == tool.AUDIT_DELETE,
+                    AuditLog.resource_id == receipt["created"][0]["id"],
+                )
+            )
+            is not None
+        )
     assert _protected_snapshot() == before
     # 撤销幂等
     code, again, err = _run(
@@ -278,3 +330,41 @@ def test_scope_is_hardcoded_to_001_two_streams():
     # CLI 无任何可指定其他车辆/流的参数
     assert tool.main(["--vehicle", "R002"]) == tool.EXIT_USAGE
     assert tool.main(["--stream", "R002-roof_rgb"]) == tool.EXIT_USAGE
+
+
+def test_onboard_script_token_accepted_by_authorize(vehicle, capsys, tmp_path, monkeypatch):
+    """跨组件对拍：60-onboard-vehicle.sh --media-only 实际产出的 token 能通过真实 authorize。
+
+    密钥文件采用生产格式（末尾换行，同 02-gen-bootstrap-secrets.sh）；API 侧从同一文件读取。
+    反证：派生端若按原始字节（含换行）作 HMAC 密钥，此处 401。
+    """
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    from app.core.config import get_settings
+
+    if shutil.which("python3") is None:
+        pytest.skip("python3 不可用")
+    repo = Path(__file__).resolve().parents[3]
+    runtime = tmp_path / "runtime"
+    (runtime / "secrets/app").mkdir(parents=True)
+    master_file = runtime / "secrets/app/media_publish_token"
+    master_file.write_text("g4r1-crosscheck-master-0123456789abcdef+/=\n")
+    (runtime / "secrets/app/srt_publish_passphrase").write_text("g4r1-pass\n")
+    res = subprocess.run(
+        ["bash", str(repo / "deploy/u-dao/scripts/60-onboard-vehicle.sh"), VEHICLE, "--media-only"],
+        env={"PATH": "/usr/bin:/bin", "U_DAO_RUNTIME_ROOT": str(runtime)},
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert res.returncode == 0, res.stderr[-300:]
+    token = (runtime / "secrets/vehicles" / VEHICLE / "srt_publish_token").read_text()
+    code, _, err = _run(capsys, "--apply")
+    assert code == 0, err
+    settings = get_settings()
+    monkeypatch.setattr(settings, "media_publish_token_file", str(master_file))
+    with TestClient(app) as client:
+        assert _publish(client, RGB, user=VEHICLE, password=token).status_code == 200
+        assert _publish(client, THERMAL, user=VEHICLE, password=token).status_code == 200

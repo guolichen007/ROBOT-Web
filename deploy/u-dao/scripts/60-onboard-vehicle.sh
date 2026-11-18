@@ -64,6 +64,9 @@ credentials_exist() {
 # G1-GO0 A / G4-R1 D：master token 绝不经 argv（openssl -hmac "$KEY" 会把密钥暴露在进程
 # 参数中，/proc/<pid>/cmdline 与 ps 对同机任意用户可见）。改由 python 进程内读取密钥文件
 # 计算 HMAC——argv 只有代码与文件路径；消息经 stdin；结果只经 stdout 返回。
+# 密钥读取语义必须与 API 端 Settings._read_secret 完全一致（UTF-8 + strip）：
+# 02-gen-bootstrap-secrets.sh 以 `openssl rand -base64 N >` 落盘，文件末尾带换行；
+# 若按原始字节作 HMAC 密钥，派生 token 与 authorize_publish 期望值不一致（401）。
 derive_srt_token() {
   [ -s "$RUNTIME_ROOT/secrets/app/media_publish_token" ] || fail "master media_publish_token 缺失或为空"
   printf 'vehicle-srt:%s' "$VEHICLE_ID" | python3 -c '
@@ -71,7 +74,9 @@ import hashlib
 import hmac
 import sys
 
-key = open(sys.argv[1], "rb").read()
+key = open(sys.argv[1], encoding="utf-8").read().strip().encode("utf-8")
+if not key:
+    sys.exit("empty master key")
 digest = hmac.new(key, sys.stdin.buffer.read(), hashlib.sha256).hexdigest()
 print(digest)
 ' "$RUNTIME_ROOT/secrets/app/media_publish_token"

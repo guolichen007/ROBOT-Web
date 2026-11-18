@@ -81,7 +81,8 @@ def make_runtime(base: Path, master: str = MASTER) -> Path:
     runtime = base / "runtime"
     (runtime / "secrets/app").mkdir(parents=True)
     (runtime / "secrets/mosquitto").mkdir(parents=True)
-    (runtime / "secrets/app/media_publish_token").write_text(master)
+    # 生产格式：02-gen-bootstrap-secrets.sh 用 `openssl rand -base64 N >` 落盘，末尾带换行
+    (runtime / "secrets/app/media_publish_token").write_text(master + "\n")
     (runtime / "secrets/app/srt_publish_passphrase").write_text(PASSPHRASE)
     (runtime / "secrets/mosquitto/passwords").write_text("R001:$7$existing-hash\n")
     for p in (runtime / "secrets/app").iterdir():
@@ -194,7 +195,7 @@ def test_resync_after_rotation() -> None:
         (vdir / "mqtt_password").chmod(0o600)
         (vdir / "srt_publish_token").write_text(expected_token(MASTER))
         # master 旋转
-        (runtime / "secrets/app/media_publish_token").write_text(MASTER2)
+        (runtime / "secrets/app/media_publish_token").write_text(MASTER2 + "\n")
         res = run(SCRIPT, runtime, shim, VEHICLE, "--resync-srt")
         check("RESYNC exit 0", res.returncode == 0, res.stderr[-400:])
         check(
@@ -232,10 +233,10 @@ def test_negative_inputs() -> None:
             res.returncode != 0 and not (runtime / "secrets/vehicles" / VEHICLE).exists(),
             res.stderr[-200:],
         )
-        (runtime / "secrets/app/media_publish_token").write_text("")
+        (runtime / "secrets/app/media_publish_token").write_text("  \n")
         res = run(SCRIPT, runtime, shim, VEHICLE, "--media-only")
         check(
-            "master 为空 → 拒绝且不写 token",
+            "master 为空/仅空白 → 拒绝且不写 token",
             res.returncode != 0
             and not (runtime / "secrets/vehicles" / VEHICLE / "srt_publish_token").exists(),
             res.stderr[-200:],
@@ -261,9 +262,37 @@ def legacy_counterproof(old_script: Path) -> int:
         return 1
 
 
+# 旧 --resync-srt 的最小复刻（8c3586f 第 170–172 行原样语义）：仅作探针自检，验证 argv
+# 记录器确实能检出“master 经 openssl -hmac 进入 argv”。不落盘到仓库、不用于任何部署。
+LEGACY_PATTERN = r"""#!/usr/bin/env bash
+set -euo pipefail
+MASTER_TOKEN="$(cat "$U_DAO_RUNTIME_ROOT/secrets/app/media_publish_token")"
+printf 'vehicle-srt:%s' "$1" | \
+  openssl dgst -sha256 -hmac "$MASTER_TOKEN" | awk '{print $2}' >/dev/null
+"""
+
+
+def test_probe_detects_legacy_pattern() -> None:
+    """探针自检（CI 常驻）：旧实现模式必须被 argv 记录器检出，否则本测试的 PASS 无意义。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        base = Path(tmp)
+        shim, log = make_shims(base)
+        runtime = make_runtime(base)
+        legacy = base / "legacy.sh"
+        legacy.write_text(LEGACY_PATTERN)
+        res = run(legacy, runtime, shim, VEHICLE)
+        hits = leaked(log, MASTER)
+        check(
+            "PROBE_SELFTEST 旧 openssl -hmac 模式被检出（master 出现在子进程 argv）",
+            res.returncode == 0 and "openssl" in hits,
+            f"rc={res.returncode} hits={hits} {res.stderr[-200:]}",
+        )
+
+
 def main() -> int:
     if len(sys.argv) == 3 and sys.argv[1] == "--legacy":
         return legacy_counterproof(Path(sys.argv[2]))
+    test_probe_detects_legacy_pattern()
     test_media_only()
     test_resync_after_rotation()
     test_negative_inputs()

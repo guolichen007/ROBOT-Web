@@ -261,15 +261,23 @@ def _rollback(receipt: dict[str, Any], *, apply: bool) -> dict[str, Any]:
     if receipt.get("mode") != "APPLY":
         raise ToolError(EXIT_ROLLBACK, "receipt 来自 dry-run，没有可撤销的记录")
     allowed_ids = {sid for sid, _ in STREAMS}
+    created = receipt.get("created")
+    if not isinstance(created, list) or not all(
+        isinstance(e, dict) and isinstance(e.get("id"), str) and isinstance(e.get("stream_id"), str)
+        for e in created
+    ):
+        raise ToolError(EXIT_ROLLBACK, "receipt.created 结构非法")
+    if len({e["id"] for e in created}) != len(created):
+        raise ToolError(EXIT_ROLLBACK, "receipt.created 含重复 id")
     with SessionLocal() as db, db.begin():
         robot = _target_robot(db, lock=apply)
         if receipt.get("robot_id") != robot.id:
             raise ToolError(EXIT_ROLLBACK, "receipt robot_id 与当前 001 不一致")
         protected_before = _snapshot_protected(db)
         actions: list[dict[str, Any]] = []
-        for entry in receipt.get("created", []):
-            row_id, stream_id = entry.get("id"), entry.get("stream_id")
-            row = db.get(StreamRegistry, row_id) if row_id else None
+        for entry in created:
+            row_id, stream_id = entry["id"], entry["stream_id"]
+            row = db.get(StreamRegistry, row_id)
             if stream_id not in allowed_ids:
                 raise ToolError(EXIT_ROLLBACK, f"receipt 含非本工具流 {stream_id!r}")
             if row is None:
