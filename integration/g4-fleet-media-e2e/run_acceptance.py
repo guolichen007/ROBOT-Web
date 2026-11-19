@@ -1013,7 +1013,10 @@ def phase_negatives(env: Env):
     first = os.readlink(edge / "media/current")
     bad = env.w / "badlib"
     shutil.copytree(LIBSRT_DIR, bad)
-    (bad / "libsrt.so.1.4.4.sha256").write_text("f" * 64)
+    # 篡改二进制本身（发布 Manifest 是信任根；离线包自带 .sha256 不参与信任）
+    os.chmod(bad / "libsrt.so.1.4.4", 0o644)
+    with open(bad / "libsrt.so.1.4.4", "ab") as fh:
+        fh.write(b"tampered")
     clone2 = env.w / "ROBOT-Web-2"
     subprocess.run(["git", "clone", "-q", f"file://{env.repo}", str(clone2)], check=True)
     (clone2 / "integration/ros1/vehicle-edge/media/firebot_media/__init__.py").open("a").write(
