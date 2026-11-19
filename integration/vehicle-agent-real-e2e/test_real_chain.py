@@ -109,6 +109,46 @@ def _stop_agent(proc: subprocess.Popen, *, sig: int = signal.SIGTERM) -> tuple[s
     return stdout, stderr
 
 
+def _wait_session_online(proc, stderr_sink: list, started_at, auth_headers, api_client, msg):
+    """就绪门绑定“本次进程 + 本次会话”（替代只看 online_state 的旧门），返回本会话 boot_id：
+
+    1) 本进程 stderr 出现 "connected as <vehicle>; availability=online published"：该日志在
+       SIGTERM/SIGINT 处理器注册之后、availability=online 获 broker PUBACK 之后才打印；
+    2) 云端 ONLINE 且 last_seen_at ≥ 本进程启动时刻（事实来自本次会话，不是上一会话残留）；
+    3) boot_id 非空（记录为本会话 boot，供调用方后续断言）。
+    旧门只等 online_state==ONLINE：上一会话残留 ONLINE（其 retained offline 尚未被 ingress
+    落库）会让门在 ~0.06s 内通过，SIGTERM 送达时 Agent 尚在导入/初始化、处理器未注册 →
+    默认动作终止 → returncode -15（Run 44261454370 test_real_chain.py:169）。
+    """
+    import selectors
+
+    sel = selectors.DefaultSelector()
+    sel.register(proc.stderr, selectors.EVENT_READ)
+    deadline = time.monotonic() + 30.0
+    marker = f"connected as {VEHICLE}; availability=online published"
+    seen = False
+    while time.monotonic() < deadline and not seen:
+        assert proc.poll() is None, f"agent exited early rc={proc.returncode}"
+        for _key, _ in sel.select(timeout=0.2):
+            line = proc.stderr.readline()
+            stderr_sink.append(line)
+            if marker in line:
+                seen = True
+    sel.unregister(proc.stderr)
+    assert seen, f"agent never confirmed its own online session ({msg})"
+
+    def fresh() -> bool:
+        state = _robot_state(auth_headers, api_client)
+        if state["online_state"] != "ONLINE" or not state["last_seen_at"]:
+            return False
+        return datetime.fromisoformat(state["last_seen_at"]) >= started_at
+
+    wait_until(fresh, 30.0, msg)
+    row = _robot_db_row()
+    assert row is not None and row.boot_id, "session boot_id missing"
+    return row.boot_id
+
+
 def _robot_state(auth_headers, api_client) -> dict:
     response = api_client.get(f"/api/v1/robots/{VEHICLE}", headers=auth_headers)
     assert response.status_code == 200, response.text
@@ -158,14 +198,15 @@ def test_graceful_sigterm_confirmed_offline(e2e_stack, vehicle_asset, api_client
     """5：SIGTERM → retained offline 获 broker PUBACK → API 转 OFFLINE。"""
     stack = e2e_stack
     config = _write_identity(stack["workdir"], stack["certs"], stack["mqtt_port"])
+    started_at = datetime.now(UTC)
     proc = _start_agent(config, stack["workdir"] / "run-sigterm")
+    early: list[str] = []
     try:
-        wait_until(
-            lambda: _robot_state(auth_headers, api_client)["online_state"] == "ONLINE",
-            30.0,
-            "ONLINE before SIGTERM",
+        session_boot = _wait_session_online(
+            proc, early, started_at, auth_headers, api_client, "this session ONLINE before SIGTERM"
         )
         stdout, stderr = _stop_agent(proc)
+        stderr = "".join(early) + stderr
         assert proc.returncode == 0
         assert "broker-confirmed" in stderr  # GRACEFUL_OFFLINE_CONFIRMED：日志只报确认送达
         wait_until(
@@ -176,6 +217,59 @@ def test_graceful_sigterm_confirmed_offline(e2e_stack, vehicle_asset, api_client
         state = _robot_state(auth_headers, api_client)
         assert (state["agent_state_json"] or {}).get("availability") == "offline"
         assert state["last_seen_at"] is None  # 离线即清空新鲜度
+        assert _robot_db_row().boot_id == session_boot  # OFFLINE 归属本会话（未被他会话覆盖）
+    finally:
+        if proc.poll() is None:
+            _stop_agent(proc)
+
+
+def test_sigterm_ready_gate_rejects_stale_previous_session(
+    e2e_stack, vehicle_asset, api_client, auth_headers
+):
+    """反证（Run 44261454370 失效条件的确定性复现）：上一会话残留 ONLINE + 旧 last_seen_at。
+
+    - 旧就绪门（只看 online_state==ONLINE）在 Agent 刚 spawn、尚未注册信号处理器时就已为真；
+    - 新就绪门必须等到本进程自报 online 已确认 + last_seen_at 属于本次启动之后；
+    - 经新门后 SIGTERM → 退出码 0 + broker-confirmed + OFFLINE（断言不放宽）。
+    """
+    from datetime import timedelta
+
+    from app.db.models import Robot
+    from app.db.session import SessionLocal
+    from sqlalchemy import select
+
+    stale_seen = datetime.now(UTC) - timedelta(minutes=5)
+    with SessionLocal() as db:
+        robot = db.scalar(select(Robot).where(Robot.vehicle_id == VEHICLE))
+        robot.online_state = "ONLINE"  # 上一会话残留（offline 尚未落库）
+        robot.last_seen_at = stale_seen
+        db.commit()
+    stack = e2e_stack
+    config = _write_identity(stack["workdir"], stack["certs"], stack["mqtt_port"])
+    started_at = datetime.now(UTC)
+    proc = _start_agent(config, stack["workdir"] / "run-stale-gate")
+    early: list[str] = []
+    try:
+        # 旧门在进程刚启动时即“通过”——这正是 -15 的成因（不发送信号，只证明门无效）
+        assert _robot_state(auth_headers, api_client)["online_state"] == "ONLINE"
+        assert proc.poll() is None
+        session_boot = _wait_session_online(
+            proc, early, started_at, auth_headers, api_client, "fresh session after stale ONLINE"
+        )
+        assert (
+            datetime.fromisoformat(_robot_state(auth_headers, api_client)["last_seen_at"])
+            >= started_at
+            > stale_seen
+        )
+        _stdout, stderr = _stop_agent(proc)
+        assert proc.returncode == 0
+        assert "broker-confirmed" in "".join(early) + stderr
+        wait_until(
+            lambda: _robot_state(auth_headers, api_client)["online_state"] == "OFFLINE",
+            20.0,
+            "OFFLINE after SIGTERM (stale-gate counter-proof)",
+        )
+        assert _robot_db_row().boot_id == session_boot
     finally:
         if proc.poll() is None:
             _stop_agent(proc)
