@@ -12,7 +12,8 @@ __pycache__/
 .test-deps/
 .coverage
 htmlcov/
-node_modules/
+# 依赖目录及同名符号链接（node_modules/ 只匹配目录；本地 symlink 依赖链接曾被误提交）
+node_modules
 dist/
 playwright-report/
 test-results/

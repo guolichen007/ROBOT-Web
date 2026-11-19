@@ -97,11 +97,40 @@ for path in files():
             if marker in text:
                 stale_state_hits.append(f"{relative}:{marker}")
 
-if latest_hits or marker_hits or unpinned_actions or migration_metadata_hits or stale_state_hits:
+# G4-Fleet-R2-Final：依赖目录与本地依赖符号链接不得进入 Git。
+# .gitignore 的 `node_modules/` 只匹配目录，同名 symlink（mode 120000）曾被 git add -A 收入。
+FORBIDDEN_PATH_PARTS = {"node_modules", ".venv", "__pycache__"}
+dependency_hits: list[str] = []
+external_symlink_hits: list[str] = []
+for entry in (
+    subprocess.check_output(["git", "ls-files", "-s", "-z"], cwd=ROOT).decode().split("\0")
+):
+    if not entry:
+        continue
+    meta, rel = entry.split("\t", 1)
+    mode, sha = meta.split()[:2]
+    if FORBIDDEN_PATH_PARTS & set(Path(rel).parts):
+        dependency_hits.append(rel)
+    if mode == "120000":
+        target = subprocess.check_output(["git", "cat-file", "-p", sha], cwd=ROOT).decode()
+        resolved = ((ROOT / rel).parent / target).resolve()
+        if target.startswith("/") or ROOT.resolve() not in (resolved, *resolved.parents):
+            external_symlink_hits.append(f"{rel} -> {target}")
+
+if (
+    latest_hits
+    or marker_hits
+    or unpinned_actions
+    or migration_metadata_hits
+    or stale_state_hits
+    or dependency_hits
+    or external_symlink_hits
+):
     raise SystemExit(
         "repository policy failed "
         f"latest={latest_hits} markers={marker_hits} unpinned={unpinned_actions} "
-        f"migration_metadata={migration_metadata_hits} stale_state={stale_state_hits}"
+        f"migration_metadata={migration_metadata_hits} stale_state={stale_state_hits} "
+        f"tracked_dependencies={dependency_hits} external_symlinks={external_symlink_hits}"
     )
 print(
     "repository policy OK: no latest, no production markers, actions pinned, no stale state markers"
