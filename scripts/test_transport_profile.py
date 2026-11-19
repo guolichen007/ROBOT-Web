@@ -148,7 +148,8 @@ case "$*" in
      in="$(cat)"; printf 'STDIN %s\n' "$in" >> "$L"
      case "$in" in
        firebot-vehicle-0[1-3]) echo YES ;;
-       \{*) printf '%s' "$in" > "$FAKE_PAYLOAD"; echo "f00d$(printf %060d 0)" ;;
+       \{*) [ -f "$FAKE_PAYLOAD.fail-once" ] && { rm -f "$FAKE_PAYLOAD.fail-once"; exit 1; }
+           printf '%s' "$in" > "$FAKE_PAYLOAD"; echo "f00d$(printf %060d 0)" ;;
        *) echo NO ;;
      esac; exit 0 ;;
 esac
@@ -291,6 +292,26 @@ def test_fleet_register() -> None:
             (tok.is_file() and oct(stat.S_IMODE(tok.stat().st_mode)), r.stdout[-300:]),
         )
         check("无残留临时 token 文件", not list(tok.parent.glob(".enroll-token*")))
+        # 注册途中中断（token 签发阶段失败）→ 无半截 token；续跑成功且 MQTT 不旋转
+        pw_before = (fx.runtime / "secrets/vehicles/firebot-vehicle-03/mqtt_password").read_bytes()
+        tok.unlink()
+        Path(str(fx.payload) + ".fail-once").write_text("1")
+        r = fx.run("firebot-vehicle-03", "--transport-profile", "u-dao-standard-v1")
+        check(
+            "RESUME 签发阶段中断 → FAIL、无 token 文件、无临时文件",
+            r.returncode != 0 and not tok.exists() and not list(tok.parent.glob(".enroll-token*")),
+            r.stdout[-200:] + r.stderr[-200:],
+        )
+        r = fx.run("firebot-vehicle-03", "--transport-profile", "u-dao-standard-v1")
+        check(
+            "RESUME 续跑 PASS 且 MQTT 凭证不旋转（ensure 语义）",
+            r.returncode == 0
+            and tok.is_file()
+            and (fx.runtime / "secrets/vehicles/firebot-vehicle-03/mqtt_password").read_bytes()
+            == pw_before
+            and "firebot-vehicle-03_EXISTING_CREDENTIAL_REUSED=PASS" in r.stdout,
+            r.stdout[-300:] + r.stderr[-300:],
+        )
     finally:
         shutil.rmtree(fx.tmp, ignore_errors=True)
 

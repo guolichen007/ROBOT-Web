@@ -94,6 +94,10 @@ def test_dual_stream_identity():
         )
         check("D3 thermal 话题 = /thermal/image", "topic=/thermal/image" in th.camera.http_url)
         check("repr 不含 secret", TOKEN not in repr(rgb) and PASS not in repr(rgb))
+        # passphrase 对拍：文件带换行/空白（bundle 写入、人工投递）→ 读取后与平台值逐字节一致
+        (home / "media/secrets/srt_publish_passphrase").write_text("  " + PASS + "\n\n")
+        os.chmod(home / "media/secrets/srt_publish_passphrase", 0o600)
+        check("PASSPHRASE_STRIP 读取值 == 平台值", C.load_config(str(home), "roof_rgb").passphrase == PASS)
 
 
 def test_secret_permissions():

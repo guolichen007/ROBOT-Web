@@ -97,6 +97,8 @@ class Fx:
         self.libsrt = self._libsrt()
 
     def _libsrt(self) -> Path:
+        """真实预构建（与仓库发布 Manifest 一致）或 stub（另写测试 Manifest，仅 SKIP_ROOT 下生效）。"""
+        self.manifest = None
         pre = os.environ.get("FIREBOT_MEDIA_LIBSRT_PREBUILT")
         if pre and Path(pre, "libsrt.so.1.4.4").is_file():
             return Path(pre)
@@ -119,6 +121,11 @@ class Fx:
             ["sha256sum", str(d / "libsrt.so.1.4.4")], capture_output=True, text=True
         ).stdout.split()[0]
         (d / "libsrt.so.1.4.4.sha256").write_text(h)
+        self.manifest = self.tmp / "test-artifacts.json"
+        self.manifest.write_text(
+            json.dumps({"schema": "firebot.media-artifacts.v1",
+                        "artifacts": {"libsrt.so.1.4.4": {"sha256": h}}})
+        )
         return d
 
     def set_unit(self, unit, active, enabled):
@@ -146,7 +153,10 @@ class Fx:
             FIREBOT_TEST_SKIP_CHOWN="1",
             FAKE_SD_STATE=str(self.sd),
             FIREBOT_MEDIA_PYTHON=os.environ.get("FIREBOT_MEDIA_TEST_PYTHON", sys.executable),
+            FIREBOT_G1_IDENTITY_FILE=str(self.tmp / "g1-device_identity.json"),
         )
+        if self.manifest is not None:
+            e["FIREBOT_TEST_ARTIFACT_MANIFEST"] = str(self.manifest)
         e.update(extra)
         return e
 
@@ -198,10 +208,23 @@ def main() -> int:
     try:
         g1_before = fx.unit("firebot-vehicle-agent-v1-readonly")
         # -------- install interrupted: bad libsrt prebuilt sha
+        # 篡改的二进制 + 自洽的本地 .sha256：不在受信任发布 Manifest 中 → 拒绝
         bad = fx.tmp / "bad-libsrt"
         shutil.copytree(fx.libsrt, bad)
-        (bad / "libsrt.so.1.4.4.sha256").write_text("0" * 64)
+        os.chmod(bad / "libsrt.so.1.4.4", 0o644)
+        with open(bad / "libsrt.so.1.4.4", "ab") as fh:
+            fh.write(b"tampered")
+        import hashlib
+
+        (bad / "libsrt.so.1.4.4.sha256").write_text(
+            hashlib.sha256((bad / "libsrt.so.1.4.4").read_bytes()).hexdigest()
+        )
         r = fx.ctl("install", "--sha", fx.sha, "--libsrt-prebuilt", str(bad))
+        check(
+            "ARTIFACT_MANIFEST 本地 .sha256 自洽但不在发布 Manifest → 拒绝",
+            r.returncode != 0 and "受信任发布 Manifest" in r.stderr,
+            r.stderr[-300:],
+        )
         rel = fx.edge / "media" / "releases"
         check("INSTALL_INTERRUPTED 失败返回非 0", r.returncode != 0, r.stdout + r.stderr)
         check(
@@ -343,6 +366,20 @@ def main() -> int:
         )
         check("CREDENTIAL 与 Enrollment 身份不一致被拒", r.returncode != 0 and "不一致" in r.stderr)
         (fx.edge / "config/identity.env").write_text("DEVICE_ID=%s\n" % VID)
+        # -------- 现役 G1：媒体身份必须等于 G1 canonical 身份
+        g1 = fx.tmp / "g1-device_identity.json"
+        g1.write_text(json.dumps({"vehicle_id": "firebot-vehicle-07", "mqtt_password": "G1-SECRET-PW"}))
+        g1.chmod(0o600)
+        r = fx.ctl(
+            "credentials", "import", "--vehicle-id", VID, "--srt-host", "media.example.test",
+            "--srt-port", "8890", "--bundle-stdin", stdin=b.read_text(),
+        )
+        check(
+            "G1_IDENTITY 媒体身份 ≠ 运行中 G1 身份 → 拒绝（不回显 G1 凭证）",
+            r.returncode != 0 and "G1 canonical" in r.stderr and "G1-SECRET-PW" not in r.stdout + r.stderr,
+            r.stderr[-300:],
+        )
+        g1.write_text(json.dumps({"vehicle_id": VID, "mqtt_password": "G1-SECRET-PW"}))
         # -------- credentials: stdin ok
         r = fx.ctl(
             "credentials",
@@ -361,6 +398,12 @@ def main() -> int:
             "CREDENTIAL stdin 导入 PASS",
             r.returncode == 0 and "IMPORTED" in r.stdout,
             r.stdout + r.stderr,
+        )
+        check("G1_IDENTITY 一致 → MEDIA_IDENTITY_MATCHES_G1=YES", "MEDIA_IDENTITY_MATCHES_G1=YES" in r.stdout)
+        # passphrase 对拍：bundle 内值带换行 → 落盘值 strip 后与平台值一致（发布器同样 strip 读取）
+        check(
+            "PASSPHRASE_STRIP bundle → 车端文件值一致",
+            (fx.edge / "media/secrets/srt_publish_passphrase").read_text().strip() == PASSPHRASE,
         )
         check(
             "CREDENTIAL 文件 0600",

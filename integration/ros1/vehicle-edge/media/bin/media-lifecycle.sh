@@ -36,10 +36,17 @@ SYSTEMD_DIR="${FIREBOT_TEST_SYSTEMD_DIR:-/etc/systemd/system}"
 PYTHON="${FIREBOT_MEDIA_PYTHON:-/usr/bin/python3}"
 MEDIA_USER_DEFAULT="firebot-media"
 UNIT_TEMPLATE="$MEDIA_SRC/systemd/firebot-media@.service.template"
+ARTIFACT_MANIFEST="$MEDIA_SRC/release/libsrt-artifacts.json"
+# 仅 CI fixture（stub 共享库）：FIREBOT_TEST_ARTIFACT_MANIFEST 与 FIREBOT_TEST_SKIP_ROOT=1 同时设置才生效
+if [ "${FIREBOT_TEST_SKIP_ROOT:-0}" = "1" ] && [ -n "${FIREBOT_TEST_ARTIFACT_MANIFEST:-}" ]; then
+  ARTIFACT_MANIFEST="$FIREBOT_TEST_ARTIFACT_MANIFEST"
+fi
 MEDIA_HOME="$EDGE_HOME/media"
 CFG="$EDGE_HOME/config"
 SECRETS="$MEDIA_HOME/secrets"
 STATE="$MEDIA_HOME/state"
+# G1 readonly agent 的唯一身份源（canonical vehicle_id；只读取 vehicle_id，不读凭证字段）
+G1_IDENTITY="${FIREBOT_G1_IDENTITY_FILE:-/etc/firebot/vehicle-agent-v1-readonly/device_identity.json}"
 PROTECTED_UNITS="firebot-vehicle-agent-v1-readonly firebot-vehicle-edge firebot-bridge firebot-control"
 
 fail() { echo "MEDIA_$1=FAIL（$2）" >&2; exit "${3:-1}"; }
@@ -101,6 +108,18 @@ layout() {
   fi
 }
 
+# 现役 G1 车辆（如 001，未 enroll 到 Edge）：媒体身份必须等于正在运行的 G1 canonical 身份。
+# 由 root 执行（G1 身份文件 0600 且含 MQTT 密码）；只取 vehicle_id，不读取、不输出凭证字段。
+# 发布器（低权限媒体用户）不读取该文件。
+check_g1_identity() { # check_g1_identity <vehicle_id> <OP>
+  [ -f "$G1_IDENTITY" ] || return 0
+  local g1
+  g1="$("$PYTHON" -c 'import json,sys;print(json.load(open(sys.argv[1])).get("vehicle_id",""))' "$G1_IDENTITY" 2>/dev/null || true)"
+  [ -n "$g1" ] || fail "$2" "G1 身份文件不可读：$G1_IDENTITY"
+  [ "$g1" = "$1" ] || fail "$2" "媒体 vehicle_id（$1）与运行中 G1 canonical 身份（$g1）不一致"
+  echo "MEDIA_IDENTITY_MATCHES_G1=YES vehicle_id=$1"
+}
+
 # ------------------------------------------------------------------ install
 cmd_install() {
   local sha="" libsrt_src="" libsrt_pre="" hwp="firebot_ros1_standard_v1"
@@ -150,9 +169,17 @@ cmd_install() {
     cp -r --no-preserve=ownership "$MEDIA_SRC/firebot_media" "$staging/firebot_media"
     find "$staging" -name '__pycache__' -prune -exec rm -rf {} +
     if [ -n "$libsrt_pre" ]; then
-      [ -f "$libsrt_pre/libsrt.so.1.4.4" ] && [ -f "$libsrt_pre/libsrt.so.1.4.4.sha256" ] || fail INSTALL "--libsrt-prebuilt 缺少 libsrt.so.1.4.4(.sha256)"
-      [ "$(sha256sum "$libsrt_pre/libsrt.so.1.4.4" | awk '{print $1}')" = "$(cat "$libsrt_pre/libsrt.so.1.4.4.sha256")" ] || fail INSTALL "预构建 libsrt SHA256 不符"
-      cp -r --no-preserve=ownership "$libsrt_pre/." "$staging/lib/"
+      [ -f "$libsrt_pre/libsrt.so.1.4.4" ] && [ ! -L "$libsrt_pre/libsrt.so.1.4.4" ] || fail INSTALL "--libsrt-prebuilt 缺少 libsrt.so.1.4.4（或为符号链接）"
+      # 信任根 = 本精确 SHA release 内的发布 Manifest（不是离线包自带的 .sha256）
+      local trusted actual
+      trusted="$("$PYTHON" -c 'import json,sys;print(json.load(open(sys.argv[1]))["artifacts"]["libsrt.so.1.4.4"]["sha256"])' "$ARTIFACT_MANIFEST")" \
+        || fail INSTALL "发布 Manifest 不可读：$ARTIFACT_MANIFEST"
+      actual="$(sha256sum "$libsrt_pre/libsrt.so.1.4.4" | awk '{print $1}')"
+      [ "$actual" = "$trusted" ] || fail INSTALL "预构建 libsrt 与受信任发布 Manifest 不符（actual=$actual trusted=$trusted）"
+      echo "MEDIA_ARTIFACT_VERIFIED libsrt.so.1.4.4 sha256=$actual（release/libsrt-artifacts.json）"
+      cp --no-preserve=ownership "$libsrt_pre/libsrt.so.1.4.4" "$staging/lib/libsrt.so.1.4.4"
+      printf '%s\n' "$actual" > "$staging/lib/libsrt.so.1.4.4.sha256"
+      [ -f "$libsrt_pre/LICENSE.libsrt.MPL-2.0" ] && cp --no-preserve=ownership "$libsrt_pre/LICENSE.libsrt.MPL-2.0" "$staging/lib/"
     else
       bash "$MEDIA_SRC/bin/build-libsrt.sh" "$staging/lib" ${libsrt_src:+--source "$libsrt_src"} || fail INSTALL "libsrt 构建失败"
     fi
@@ -245,6 +272,7 @@ cmd_credentials() {
     local enrolled; enrolled="$(grep -E '^DEVICE_ID=' "$CFG/identity.env" | cut -d= -f2- || true)"
     [ -z "$enrolled" ] || [ "$enrolled" = "$vid" ] || fail CREDENTIALS "vehicle_id 与 Enrollment 身份（$enrolled）不一致"
   fi
+  check_g1_identity "$vid" CREDENTIALS
   local u; u="$(media_user)"
   layout
   local tmpdir; tmpdir="$(mktemp -d "$SECRETS/.import.XXXXXX")"
@@ -319,6 +347,8 @@ run_py() { # run_py <camera> [args] — 以媒体 release 运行发布器（pref
 cmd_preflight() {
   local c rc=0 cams out; cams="$(cameras)"
   [ -n "$cams" ] || fail PREFLIGHT "未配置 FIREBOT_MEDIA_CAMERAS"
+  local mvid; mvid="$(grep -E '^FIREBOT_MEDIA_VEHICLE_ID=' "$CFG/media.env" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+  [ -n "$mvid" ] && check_g1_identity "$mvid" PREFLIGHT
   for c in $cams; do
     if out="$(run_py "$c" --check 2>&1)"; then :; else rc=1; fi
     printf '%s\n' "$out" | sed "s/^/  [$c] /"

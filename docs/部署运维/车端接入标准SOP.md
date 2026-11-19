@@ -102,11 +102,50 @@
 002 同理（Profile `u-dao-standard-v1`；若已 enroll 新版可用 `--from-enrollment`，否则同 001 用 `--media-only`）。
 受保护车辆的流登记由 OWNER 审批后通过专项流程执行，通用入口拒绝。
 
+## 4A. 中断续跑与受控恢复
+
+| 中断点 | 状态 | 续跑方式（全部幂等，可原样重跑同一命令） |
+| --- | --- | --- |
+| `fleet preregister` 中断 | Robot 行单事务：要么不存在，要么完整 | 重跑；完全一致 → `EXISTS`，不一致 → `CONFLICT`（人工核对，不自动改） |
+| `fleet register` 凭证准备后、token 签发前中断 | MQTT 凭证已在 Broker；无 token 文件、无临时文件 | 重跑同一命令：`*_EXISTING_CREDENTIAL_REUSED=PASS`（不旋转），重新签发 token |
+| 媒体登记（`register_vehicle_streams`）中断 | 单事务：零行或全部行 | 重跑 `--apply`：已存在 → `REUSE`，缺失 → `CREATE`；receipt 以最后一次成功输出为准 |
+| `media install` 中断 | staging 删除，`current` 不变 | 重跑；同 SHA 已完整 → `EXISTS_VERIFIED`；残缺 → 拒绝覆盖，人工删除该 release 后重跑 |
+| `media credentials import` 中断 | 临时文件在 0700 目录内，原子 rename | 重跑 |
+
+**Enrollment 已消费、但 HTTP 响应丢失**（车端无 `identity.env` / `mqtt.env`，或 `ENROLL=FAIL（API 不可达）` 而服务器侧 token 已消费）：
+
+1. 车端确认未写入：`config/identity.env`、`secrets/mqtt.env` 不存在（enroll 在写盘前完成全部校验，写盘为原子 rename）。
+2. 不要重试旧 token（已消费 → 401；签发记录在消费时已清除，凭证不会再次下发）。
+3. 服务器重新签发：`firebotctl fleet register <ID> --transport-profile <同一 Profile>`（受保护车辆加
+   `--confirm-protected`）。MQTT 凭证 ensure 语义不旋转；生成新的一次性 token 文件。
+4. 车端用新 token 文件重新 `vehicle enroll`。丢失响应里的 device token 虽已在服务器生效，但车端从未持有；
+   新 activate 成功时以新 device token 替换，旧值随之作废。
+5. 校验：`readonly-preflight --phase enrolled` PASS。整个过程无需人工改 DB、无需轮换 MQTT 密码。
+
+## 4B. 现役 001 的身份一致性
+
+- G1 readonly agent 的唯一身份源：`/etc/firebot/vehicle-agent-v1-readonly/device_identity.json` 的 `vehicle_id`
+  （MQTT username == vehicle_id）。
+- `media credentials import` 与 `media preflight` 由 root 读取该文件的 `vehicle_id`（不读取、不输出凭证字段），
+  与媒体 bundle 的 `vehicle_id` 不一致 → 拒绝；一致 → `MEDIA_IDENTITY_MATCHES_G1=YES`。
+- 云端媒体流 `firebot-vehicle-01-roof_*` 归属同一 Robot 行（`vehicle_id=firebot-vehicle-01`），由 001 专项登记入口写入。
+
+## 4C. 「G1 进程 active」≠「MQTT 在线」
+
+| 观测 | 含义 | 处置 |
+| --- | --- | --- |
+| `systemctl is-active firebot-vehicle-agent-v1-readonly` = active | 进程在运行（会在断网期间按退避自动重连） | 不代表云端在线 |
+| Web/API `online_state=OFFLINE` 且 `availability=offline` | 云端收到 broker LWT 或 graceful offline：车端与 Broker 的 MQTT 会话已断 | 查车端网络 / Broker 可达性；**不要**重启或重新 enroll G1 |
+| 网络恢复后 | Agent 同进程重连 → 新会话（新 boot_id）→ ONLINE | 只读确认 `last_seen_at` 刷新 |
+
+媒体组件与 G1 完全独立：断网期间 `media status` 显示 `NETWORK_DOWN`，网络恢复同进程自愈；G1 的 active 状态
+既不触发也不阻止媒体发布。验收时两者分别判定，不得用 `is-active` 代替在线判定。
+
 ## 5. 安装 / 启动 / 诊断 / 升级 / 回滚
 
 | 动作 | 命令 | 语义 |
 | --- | --- | --- |
-| 安装 | `media install --sha <SHA> [--libsrt-source <tar.gz>]` | 精确 SHA + 干净仓库；车端编译 libsrt 1.4.4（钉死源码 SHA256；离线用 `--libsrt-source`）；release 自检后原子切换；失败 staging 清理、current 不变 |
+| 安装 | `media install --sha <SHA> [--libsrt-source <tar.gz> \| --libsrt-prebuilt <dir>]` | 精确 SHA + 干净仓库；libsrt 1.4.4 三选一：在线车端编译 / 离线源码包（`build-libsrt.sh` 校验源码 SHA256）/ 离线预构建（必须与仓库发布 Manifest `media/release/libsrt-artifacts.json` 的 sha256 完全一致，离线包自带 `.sha256` 不作信任根）；release 自检后原子切换；失败 staging 清理、current 不变 |
 | 凭证 | `media credentials import …` | 只接受 0600 bundle 文件 / stdin；错误身份、含主密钥字段、argv 传值一律拒绝 |
 | 预检 | `media preflight` | 配置、凭证权限、libsrt 版本、编码器 1 帧实测、媒体身份 = Enrollment 身份 |
 | 启动 | `media start [camera\|all]` | 预检通过才 enable --now；受保护单元前后快照一致 |
@@ -151,3 +190,23 @@
 - enroll：`python3 integration/ros1/vehicle-edge/tests/test_enroll_transport.py`
 - 真实 systemd 语义：`python3 integration/ros1/vehicle-edge/tests/test_real_systemd_semantics.py`
 - 隔离标准化验收（新车 / 001 增量 / 负测 / 长断网）：`bash integration/g4-fleet-media-e2e/run_all.sh`
+
+## 9. 实际安装命令（工控机，root；以封板 SHA 为准）
+
+```text
+# 0) 交付源：ROBOT-Web 检出到封板 SHA（clean）
+cd /home/tl/ROBOT-Web && git fetch origin && git checkout --detach <SEAL_SHA> && git status --porcelain   # 必须为空
+# 1) 依赖（Ubuntu 20.04）
+apt-get install -y python3 ffmpeg            # 在线编译 libsrt 时另需：cmake build-essential libssl-dev
+# 2) libsrt 1.4.4 —— 离线预构建包（来自交付目录 libsrt-1.4.4-focal/，按发布 Manifest 校验）
+firebotctl vehicle media install --sha <SEAL_SHA> --libsrt-prebuilt /path/to/libsrt-1.4.4-focal
+#    或离线源码包：--libsrt-source /path/to/srt-1.4.4.tar.gz（SHA256 93f5f371…094114）
+# 3) 001：导入媒体 bundle（服务器 60-onboard --media-only 产出，0600 经安全通道传输）
+firebotctl vehicle media credentials import --vehicle-id firebot-vehicle-01 \
+    --srt-host <SRT 公网主机> --srt-port <端口> --bundle-file /root/media-bundle.json
+shred -u /root/media-bundle.json
+# 4) 预检 → 启动 → 状态
+firebotctl vehicle media preflight
+firebotctl vehicle media start
+firebotctl vehicle media status
+```

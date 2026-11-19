@@ -143,3 +143,35 @@ def test_malformed_media_rolls_back_everything(robot):
         row = db.scalar(select(EnrollmentToken).where(EnrollmentToken.device_id == VID))
         assert row.consumed_at is None and row.credential_json
     assert _hash(robot) == hashlib.sha256(OLD_DEVICE_TOKEN.encode()).hexdigest()
+
+
+def test_response_lost_after_consume_controlled_recovery(robot):
+    """Enrollment 已消费但响应丢失 → 受控恢复：重新签发（MQTT 不旋转）→ 车端重新 enroll。
+
+    - 已消费 token 重放 → 401（不会二次下发）；签发记录已清除（凭证不在 DB 静置）；
+    - 丢失响应中的 device token 已生效但车端没拿到 → 以新签发的 device token 替换；
+    - 新签发 activate 成功：MQTT 密码与原签发一致（provisioner ensure 语义，不旋转）。
+    """
+    first = _issue(_cred(device_token="lost-device-token"))
+    with TestClient(app) as c:
+        assert (
+            c.post(
+                "/api/v1/enrollment/activate", json={"device_id": VID, "token": first}
+            ).status_code
+            == 200
+        )  # 响应在网络中丢失：车端什么也没写
+        assert (
+            c.post(
+                "/api/v1/enrollment/activate", json={"device_id": VID, "token": first}
+            ).status_code
+            == 401
+        )
+    with SessionLocal() as db:
+        row = db.scalar(select(EnrollmentToken).where(EnrollmentToken.device_id == VID))
+        assert row.credential_json == {}
+    second = _issue(_cred(device_token="recovered-device-token"))
+    with TestClient(app) as c:
+        r = c.post("/api/v1/enrollment/activate", json={"device_id": VID, "token": second})
+    assert r.status_code == 200
+    assert r.json()["mqtt_password"] == _cred()["mqtt_password"]
+    assert _hash(robot) == hashlib.sha256(b"recovered-device-token").hexdigest()

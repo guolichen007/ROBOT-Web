@@ -1,0 +1,15 @@
+{
+  "schema": "firebot.media-artifacts.v1",
+  "comment": "受信任发布 Manifest：随仓库精确 SHA 发布（审查+CI 后不可变）。--libsrt-prebuilt 只接受与此处 sha256 完全一致的文件；不一致一律拒绝。离线包内的 .sha256 仅作传输校验，不作为信任根。",
+  "artifacts": {
+    "libsrt.so.1.4.4": {
+      "version": "1.4.4",
+      "sha256": "62d78fd28d4ef7418aad198477658b8d42c0ade5415075bd0a585493131d96d3",
+      "source": "https://github.com/Haivision/srt/archive/refs/tags/v1.4.4.tar.gz",
+      "source_sha256": "93f5f3715bd5bd522b8d65fc0d086ef2ad49db6a41ad2d7b35df2e8bd7094114",
+      "toolchain": "Ubuntu 20.04 gcc-9.4.0 / glibc 2.31 / OpenSSL 1.1.1f（media/bin/build-libsrt.sh, cmake Release, ENABLE_APPS=OFF）",
+      "abi": "max GLIBC_2.29, GLIBCXX_3.4.26; NEEDED libcrypto.so.1.1 libstdc++.so.6 libpthread.so.0",
+      "license": "MPL-2.0"
+    }
+  }
+}
