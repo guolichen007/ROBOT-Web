@@ -406,7 +406,7 @@ for svc in ("api", "mqtt-ingress", "command-dispatcher", "task-worker", "web", "
         }
 # 第三方镜像不可变性（R2-22）：exact Git SHA 不单独宣称为完整 runtime reproducibility
 for image in ("postgres:18.4-alpine", "redis:8.4.5-alpine", "eclipse-mosquitto:2.1.2-alpine",
-              "nginx:1.30.4-alpine", "busybox:1.37.0-musl"):
+              "nginx:1.30.7-alpine3.24", "busybox:1.37.0-musl"):
     manifest["third_party_images"][image] = inspect(
         docker_cmd + ["image", "inspect", "--format", "{{.Id}} {{index .RepoDigests 0}}", image])
 print(json.dumps(manifest, ensure_ascii=False))

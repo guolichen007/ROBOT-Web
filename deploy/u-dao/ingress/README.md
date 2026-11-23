@@ -33,7 +33,7 @@ compose（project `u-dao-ingress`）：
 name: u-dao-ingress
 services:
   nginx:
-    image: nginx:1.30.4-alpine
+    image: nginx:1.30.7-alpine3.24@sha256:caf4e1e032a20f9c3c5e28fc7f25ffd768ad8677b4975c54193075997b3a97e3
     restart: unless-stopped
     ports:
       - "127.0.0.1:18000:18000"

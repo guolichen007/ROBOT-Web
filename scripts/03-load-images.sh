@@ -9,7 +9,7 @@ if [ -f "$checksums" ]; then
 fi
 docker load -i "$archive"
 docker image inspect \
-  python:3.12.13-alpine3.24 node:24.19.0-alpine3.24 nginx:1.30.4-alpine \
+  python:3.12.13-alpine3.24 node:24.19.0-alpine3.24 nginx:1.30.7-alpine3.24 \
   busybox:1.37.0-musl postgres:18.4-alpine redis:8.4.5-alpine \
   eclipse-mosquitto:2.1.2-alpine bluenviron/mediamtx:1.18.2 >/dev/null
 echo "固定版本镜像已加载并验证。"

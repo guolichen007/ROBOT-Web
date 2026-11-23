@@ -232,7 +232,7 @@ services:
       retries: 12
 
   nginx:
-    image: nginx:1.30.4-alpine
+    image: nginx:1.30.7-alpine3.24@sha256:caf4e1e032a20f9c3c5e28fc7f25ffd768ad8677b4975c54193075997b3a97e3
     ports: ["${SERVER_HTTP_PORT:-80}:80", "${SERVER_HTTPS_PORT:-443}:443"]
     volumes:
       - ./infra/nginx/nginx.server.conf:/etc/nginx/nginx.conf:ro
