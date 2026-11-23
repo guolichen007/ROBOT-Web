@@ -47,7 +47,7 @@ def _encode(subject: str, token_type: str, secret: str, expires: timedelta, **ex
     return jwt.encode(payload, secret, algorithm="HS256")
 
 
-def create_access_token(user_id: str, permissions: list[str]) -> str:
+def create_access_token(user_id: str, permissions: list[str], token_version: int = 0) -> str:
     settings = get_settings()
     return _encode(
         user_id,
@@ -55,6 +55,7 @@ def create_access_token(user_id: str, permissions: list[str]) -> str:
         settings.effective_jwt_secret,
         timedelta(minutes=settings.access_token_minutes),
         permissions=permissions,
+        tv=int(token_version),
     )
 
 

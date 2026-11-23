@@ -53,7 +53,7 @@ def bind_protocol(
     db: DbSession,
     auth: AuthContext = Depends(require_permission("settings.manage")),
 ) -> dict:
-    found = find_robot(db, robot_id)
+    found = find_robot(db, robot_id, auth)
     robot = db.scalar(select(Robot).where(Robot.id == found.id).with_for_update())
     assert robot is not None
     if robot.agent_protocol == payload.protocol:
@@ -160,14 +160,14 @@ def bind_protocol(
 def command_history(
     robot_id: str,
     db: DbSession,
-    _: AuthContext = Depends(require_permission("robot.read")),
+    auth: AuthContext = Depends(require_permission("robot.read")),
     limit: int = 20,
 ) -> list[dict]:
     """当前车辆的 vehicle_agent 命令历史（服务端事实，含任何用户/API 发起的合法命令）。
 
     只读；下行关闭时仍可查看。按 issued_at 倒序，limit 1..100。
     """
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     rows = db.scalars(
         select(Command)
         .where(Command.robot_id == robot.id)
@@ -200,7 +200,7 @@ def command(
     )
     if permission not in auth.permissions:
         raise PlatformError("PERMISSION_DENIED", "当前用户没有执行此操作的权限", status_code=403)
-    found = find_robot(db, robot_id)
+    found = find_robot(db, robot_id, auth)
     robot = db.scalar(select(Robot).where(Robot.id == found.id).with_for_update())
     assert robot is not None
     endpoint = f"/robots/{robot.id}/agent/commands/{action}"

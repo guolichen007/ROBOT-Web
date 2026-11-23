@@ -43,9 +43,16 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  /** 会话被服务端撤销（停用 / 权限变更）：只清理本地状态，不再调用 logout 接口。 */
+  function invalidate(): void {
+    clearAccessToken()
+    user.value = null
+    ready.value = true
+  }
+
   function can(permission?: string): boolean {
     return !permission || Boolean(user.value?.permissions.includes(permission))
   }
 
-  return { user, ready, loading, authenticated, login, restore, logout, can }
+  return { user, ready, loading, authenticated, login, restore, logout, invalidate, can }
 })

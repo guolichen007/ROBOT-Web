@@ -204,8 +204,13 @@ def test_playback_ticket_expired_cross_stream_cross_vehicle():
         admin = db.scalar(select(User).where(User.username == "admin"))
         r001 = db.scalar(select(Robot).where(Robot.vehicle_id == "R001"))
         r002 = db.scalar(select(Robot).where(Robot.vehicle_id == "R002"))
+        # WEB-R1-MIN：媒体票据绑定账号 token_version（权限/状态变化后旧票据失效）。
         good = encode_media_ticket(
-            user_id=admin.id, robot_id=r001.id, camera="roof_rgb", stream_id="R001-roof_rgb"
+            user_id=admin.id,
+            robot_id=r001.id,
+            camera="roof_rgb",
+            stream_id="R001-roof_rgb",
+            token_version=admin.token_version,
         )
         read = {"action": "read", "protocol": "webrtc"}
         ok = client.post(
@@ -219,7 +224,11 @@ def test_playback_ticket_expired_cross_stream_cross_vehicle():
             )
             assert denied.status_code == 403, path
         forged = encode_media_ticket(
-            user_id=admin.id, robot_id=r001.id, camera="roof_rgb", stream_id="R002-roof_rgb"
+            user_id=admin.id,
+            robot_id=r001.id,
+            camera="roof_rgb",
+            stream_id="R002-roof_rgb",
+            token_version=admin.token_version,
         )
         denied = client.post(
             "/api/v1/media/authorize", json={**read, "path": "R002-roof_rgb", "token": forged}

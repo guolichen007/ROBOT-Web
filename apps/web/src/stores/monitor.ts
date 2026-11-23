@@ -45,6 +45,8 @@ export const useMonitorStore = defineStore('monitor', () => {
   const connected = ref(false)
   const resyncing = ref(false)
   const lastStreamId = ref('0-0')
+  // WEB-R1-MIN：服务端撤销会话（账号停用 / 权限变更 / 密码重置）后置 true，停止重连。
+  const sessionRevoked = ref(false)
   let socket: WebSocket | null = null
   let reconnectTimer = 0
   let reconnectAttempt = 0
@@ -284,18 +286,29 @@ export const useMonitorStore = defineStore('monitor', () => {
       }
       socket.onmessage = async (message) => {
         const event = JSON.parse(message.data)
-        if (event.event_type === 'resync_required') {
+        if (event.event_type === 'session_revoked') {
+          sessionRevoked.value = true
+          disconnect(false)
+        } else if (event.event_type === 'resync_required') {
           await loadSnapshot()
           await connect()
         } else if (event.stream_id) applyEvent(event)
       }
       socket.onerror = () => socket?.close()
-      socket.onclose = () => {
+      socket.onclose = (event?: CloseEvent) => {
         connected.value = false
+        if (event?.code === 4401) {
+          sessionRevoked.value = true
+          return
+        }
         scheduleReconnect()
       }
-    } catch {
+    } catch (error: any) {
       connected.value = false
+      if (error?.response?.status === 401) {
+        sessionRevoked.value = true
+        return
+      }
       scheduleReconnect()
     } finally {
       connecting = false
@@ -325,6 +338,7 @@ export const useMonitorStore = defineStore('monitor', () => {
   }
 
   async function start(): Promise<void> {
+    sessionRevoked.value = false
     if (!starting) {
       starting = (async () => {
         await loadSnapshot()
@@ -352,6 +366,7 @@ export const useMonitorStore = defineStore('monitor', () => {
     connected,
     resyncing,
     lastStreamId,
+    sessionRevoked,
     start,
     disconnect,
     loadSnapshot,

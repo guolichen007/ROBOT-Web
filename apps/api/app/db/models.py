@@ -68,6 +68,11 @@ class User(Base):
     failed_attempts: Mapped[int] = mapped_column(Integer, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # WEB-R1-MIN：权限 / 状态 / 密码变化时递增；访问令牌、WS 票据、媒体票据携带该值，
+    # 不一致即失效（旧会话不可继续越权使用）。
+    token_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    deactivated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deactivated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
@@ -477,6 +482,20 @@ class PatrolPlan(Base):
         String(36), ForeignKey("trajectories.id"), nullable=True
     )
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # WEB-R1-MIN：Web 新建计划一律 PREVIEW_ONLY（服务端强制，DB CHECK 禁止 enabled=true）；
+    # 历史计划保持 LEGACY_EXECUTABLE，行为不变。
+    execution_mode: Mapped[str] = mapped_column(
+        String(24), default="LEGACY_EXECUTABLE", server_default="LEGACY_EXECUTABLE"
+    )
+    status: Mapped[str] = mapped_column(String(16), default="ACTIVE", server_default="ACTIVE")
+    # 右侧作业配置：仅记录与展示，不进入导航 / 机械控制链路。
+    work_side: Mapped[str] = mapped_column(String(8), default="RIGHT", server_default="RIGHT")
+    target_lateral_min_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_lateral_max_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    schedule_json: Mapped[dict[str, Any]] = mapped_column(JsonType, default=dict)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -759,9 +778,14 @@ class FireEvent(Base):
     robot_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("robots.id"), nullable=True, index=True
     )
-    parking_slot_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("parking_slots.id"), index=True
+    # WEB-R1-MIN：车端上报未知车位时火警仍保留（parking_slot_id=NULL, UNMATCHED）。
+    parking_slot_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("parking_slots.id"), nullable=True, index=True
     )
+    location_state: Mapped[str] = mapped_column(
+        String(16), default="MATCHED", server_default="MATCHED"
+    )
+    reported_slot_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
     detection_method: Mapped[str] = mapped_column(String(16))
     fire_type: Mapped[str] = mapped_column(String(16))
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)

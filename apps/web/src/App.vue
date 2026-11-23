@@ -16,6 +16,7 @@ import {
   TaskIcon,
   VehicleIcon,
 } from 'tdesign-icons-vue-next'
+import AlarmCenter from '@/components/AlarmCenter.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useMonitorStore } from '@/stores/monitor'
 import { useSystemClock } from '@/composables/useSystemClock'
@@ -209,6 +210,18 @@ const monitorAllowed = computed(
   () => auth.ready && auth.authenticated && !isLogin.value && auth.user?.must_change_password !== true,
 )
 
+// WEB-R1-MIN：账号被停用 / 权限变更 / 密码被重置后，服务端关闭 WS（session_revoked）。
+// 此时不再无限重连，而是清理本地会话并回到登录页。
+watch(
+  () => monitor.sessionRevoked,
+  async (revoked) => {
+    if (!revoked) return
+    monitor.disconnect()
+    auth.invalidate()
+    await router.push({ path: '/login', query: { reason: 'session_revoked' } })
+  },
+)
+
 watch(
   monitorAllowed,
   (allowed) => {
@@ -333,6 +346,7 @@ function onUserMenuClick(data: { value?: unknown }): void {
             <span v-if="isMonitor" class="hmi-link-state" :data-connected="monitor.connected"
               >● {{ monitor.connected ? '已连接' : '未连接' }}</span
             >
+            <AlarmCenter />
             <time>{{ clock }}</time>
             <t-dropdown
               :options="[{ content: '退出登录', value: 'logout' }]"

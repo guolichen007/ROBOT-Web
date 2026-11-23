@@ -195,7 +195,7 @@ def test_enable_endpoint_does_not_promote_readiness(monkeypatch) -> None:
 
     db = Db()
     audit: dict = {}
-    monkeypatch.setattr(rr, "find_robot", lambda db, rid: robot)
+    monkeypatch.setattr(rr, "find_robot", lambda db, rid, auth=None: robot)
     monkeypatch.setattr(rr, "request_meta", lambda request: {})
     monkeypatch.setattr(rr, "write_audit", lambda db, **kw: audit.update(kw))
     monkeypatch.setattr(rr, "append_event", lambda event_type, payload: None)
@@ -227,7 +227,7 @@ def test_disable_endpoint_audit_records_real_before_value(monkeypatch) -> None:
 
     db = Db()
     audit: dict = {}
-    monkeypatch.setattr(rr, "find_robot", lambda db, rid: robot)
+    monkeypatch.setattr(rr, "find_robot", lambda db, rid, auth=None: robot)
     monkeypatch.setattr(rr, "request_meta", lambda request: {})
     monkeypatch.setattr(rr, "write_audit", lambda db, **kw: audit.update(kw))
     monkeypatch.setattr(rr, "append_event", lambda event_type, payload: None)

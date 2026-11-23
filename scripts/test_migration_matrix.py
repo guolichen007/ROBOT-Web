@@ -46,7 +46,7 @@ def main() -> None:
             engine = create_engine(url)
             with engine.connect() as connection:
                 revision = connection.scalar(text("SELECT version_num FROM alembic_version"))
-                assert revision == "20261021_0009", (name, revision)
+                assert revision == "20261122_0010", (name, revision)
                 default = connection.scalar(
                     text(
                         "SELECT column_default FROM information_schema.columns "

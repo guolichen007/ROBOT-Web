@@ -13,6 +13,7 @@ from sqlalchemy import or_, select
 from app.core.config import get_settings
 from app.core.dependencies import AuthContext, DbSession, load_permissions, require_permission
 from app.core.errors import PlatformError
+from app.core.scope import robot_visible, scoped_robot_ids
 from app.core.serialization import serialize_model
 from app.db.models import Robot, StreamRegistry, User
 
@@ -73,7 +74,9 @@ def synthetic_media_publish_token(stream_id: str) -> str:
     ).hexdigest()
 
 
-def encode_media_ticket(*, user_id: str, robot_id: str, camera: str, stream_id: str) -> str:
+def encode_media_ticket(
+    *, user_id: str, robot_id: str, camera: str, stream_id: str, token_version: int = 0
+) -> str:
     settings = get_settings()
     now = datetime.now(UTC)
     return jwt.encode(
@@ -83,6 +86,7 @@ def encode_media_ticket(*, user_id: str, robot_id: str, camera: str, stream_id: 
             "robot_id": robot_id,
             "camera": camera,
             "stream_id": stream_id,
+            "tv": int(token_version),
             "iat": now,
             "exp": now + timedelta(seconds=settings.media_ticket_seconds),
             "jti": str(uuid4()),
@@ -112,15 +116,18 @@ def decode_media_ticket(token: str) -> dict:
 @router.get("/streams")
 def streams(
     db: DbSession,
-    _: AuthContext = Depends(require_permission("robot.read")),
+    auth: AuthContext = Depends(require_permission("robot.read")),
     robot_id: str | None = None,
 ) -> list[dict]:
     query = select(StreamRegistry).order_by(StreamRegistry.camera_type)
+    visible = scoped_robot_ids(db, auth.permissions)
+    if visible is not None:
+        query = query.where(StreamRegistry.robot_id.in_(visible or {""}))
     if robot_id:
         robot = db.scalar(
             select(Robot).where(or_(Robot.id == robot_id, Robot.vehicle_id == robot_id))
         )
-        if not robot:
+        if not robot or not robot_visible(db, auth.permissions, robot):
             raise PlatformError("RESOURCE_NOT_FOUND", "机器人不存在", status_code=404)
         query = query.where(StreamRegistry.robot_id == robot.id)
     return [serialize_model(x) for x in db.scalars(query).all()]
@@ -133,13 +140,15 @@ def media_ticket(
     auth: AuthContext = Depends(require_permission("robot.read")),
 ) -> dict:
     stream = db.scalar(select(StreamRegistry).where(StreamRegistry.stream_id == payload.stream_id))
-    if not stream:
+    owner = db.get(Robot, stream.robot_id) if stream else None
+    if not stream or not owner or not robot_visible(db, auth.permissions, owner):
         raise PlatformError("RESOURCE_NOT_FOUND", "媒体流不存在", status_code=404)
     token = encode_media_ticket(
         user_id=auth.user.id,
         robot_id=stream.robot_id,
         camera=stream.camera_type,
         stream_id=stream.stream_id,
+        token_version=int(auth.user.token_version or 0),
     )
     return {
         "ticket": token,
@@ -163,7 +172,13 @@ def authorize_media(payload: MediaAuthRequest, db: DbSession) -> dict:
     # reverse-proxy access logs and referrers and are intentionally unsupported.
     claims = decode_media_ticket(payload.token)
     user = db.get(User, claims["sub"])
-    if not user or user.status != "ACTIVE" or "robot.read" not in load_permissions(db, user.id):
+    permissions = load_permissions(db, user.id) if user else set()
+    if (
+        not user
+        or user.status != "ACTIVE"
+        or "robot.read" not in permissions
+        or int(claims.get("tv", 0)) != int(user.token_version or 0)
+    ):
         raise PlatformError("PERMISSION_DENIED", "媒体票据所属用户已无查看权限", status_code=403)
     if claims["stream_id"] != payload.path:
         raise PlatformError("PERMISSION_DENIED", "媒体票据与流路径不匹配", status_code=403)
@@ -174,6 +189,9 @@ def authorize_media(payload: MediaAuthRequest, db: DbSession) -> dict:
         or stream.camera_type != claims["camera"]
     ):
         raise PlatformError("PERMISSION_DENIED", "媒体票据绑定对象不匹配", status_code=403)
+    owner = db.get(Robot, stream.robot_id)
+    if not owner or not robot_visible(db, permissions, owner):
+        raise PlatformError("PERMISSION_DENIED", "媒体流不在账号站点范围内", status_code=403)
     return {"authorized": True, "action": payload.action, "stream_id": stream.stream_id}
 
 

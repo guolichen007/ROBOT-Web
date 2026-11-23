@@ -19,6 +19,7 @@ from app.core.dependencies import (
 )
 from app.core.errors import PlatformError
 from app.core.events import append_event, current_watermark, get_redis, queue_redis_delete
+from app.core.scope import robot_visible, scoped_robot_ids
 from app.core.serialization import serialize_model
 from app.db.models import (
     ManualControlSession,
@@ -34,9 +35,16 @@ from app.modules.commands.service import assert_robot_can_execute
 router = APIRouter(prefix="/api/v1/robots", tags=["robots"])
 
 
-def find_robot(db, robot_id: str) -> Robot:
+def find_robot(db, robot_id: str, auth: AuthContext | None = None) -> Robot:
+    """按 id 或 vehicle_id 查找车辆。
+
+    WEB-R1-MIN：传入 ``auth`` 时同时校验站点访问范围；越权与不存在一致返回 404。
+    仅车端 device-token 端点（不代表 Web 用户）调用时不传 auth。
+    """
     robot = db.scalar(select(Robot).where(or_(Robot.id == robot_id, Robot.vehicle_id == robot_id)))
     if not robot:
+        raise HTTPException(404, "机器人不存在")
+    if auth is not None and not robot_visible(db, auth.permissions, robot):
         raise HTTPException(404, "机器人不存在")
     return robot
 
@@ -44,20 +52,22 @@ def find_robot(db, robot_id: str) -> Robot:
 @router.get("")
 def list_robots(
     db: DbSession,
-    _: AuthContext = Depends(require_permission("robot.read")),
+    auth: AuthContext = Depends(require_permission("robot.read")),
 ) -> list[dict]:
-    return [
-        serialize_model(row) for row in db.scalars(select(Robot).order_by(Robot.vehicle_id)).all()
-    ]
+    query = select(Robot).order_by(Robot.vehicle_id)
+    visible = scoped_robot_ids(db, auth.permissions)
+    if visible is not None:
+        query = query.where(Robot.id.in_(visible or {""}))
+    return [serialize_model(row) for row in db.scalars(query).all()]
 
 
 @router.get("/{robot_id}")
 def robot_detail(
     robot_id: str,
     db: DbSession,
-    _: AuthContext = Depends(require_permission("robot.read")),
+    auth: AuthContext = Depends(require_permission("robot.read")),
 ) -> dict:
-    return serialize_model(find_robot(db, robot_id))
+    return serialize_model(find_robot(db, robot_id, auth))
 
 
 def build_robot_assignment(db, robot) -> dict:
@@ -121,9 +131,9 @@ def build_robot_assignment(db, robot) -> dict:
 def robot_assignment(
     robot_id: str,
     db: DbSession,
-    _: AuthContext = Depends(require_permission("robot.read")),
+    auth: AuthContext = Depends(require_permission("robot.read")),
 ) -> dict:
-    return build_robot_assignment(db, find_robot(db, robot_id))
+    return build_robot_assignment(db, find_robot(db, robot_id, auth))
 
 
 @router.get("/{robot_id}/assignment/device")
@@ -284,7 +294,7 @@ def set_platform_enabled(
     does not stop a moving vehicle, does not cancel tasks, and does not delete
     history. Telemetry/MQTT uplink and history remain intact.
     """
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     before_enabled = robot.enabled
     if payload.enabled:
         robot.enabled = True
@@ -314,9 +324,9 @@ def set_platform_enabled(
 def robot_latest(
     robot_id: str,
     db: DbSession,
-    _: AuthContext = Depends(require_permission("robot.read")),
+    auth: AuthContext = Depends(require_permission("robot.read")),
 ) -> dict:
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     raw = get_redis().get(f"robot:{robot.vehicle_id}:latest")
     latest = (
         json.loads(raw)
@@ -339,9 +349,9 @@ def robot_trajectory(
     robot_id: str,
     db: DbSession,
     limit: int = 600,
-    _: AuthContext = Depends(require_permission("robot.read")),
+    auth: AuthContext = Depends(require_permission("robot.read")),
 ) -> list[dict]:
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     rows = db.scalars(
         select(TelemetrySample)
         .where(TelemetrySample.robot_id == robot.id)
@@ -355,9 +365,9 @@ def robot_trajectory(
 def connection_history(
     robot_id: str,
     db: DbSession,
-    _: AuthContext = Depends(require_permission("robot.read")),
+    auth: AuthContext = Depends(require_permission("robot.read")),
 ) -> list[dict]:
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     rows = db.scalars(
         select(RobotConnectionLog)
         .where(RobotConnectionLog.robot_id == robot.id)
@@ -371,9 +381,9 @@ def connection_history(
 def capabilities(
     robot_id: str,
     db: DbSession,
-    _: AuthContext = Depends(require_permission("robot.read")),
+    auth: AuthContext = Depends(require_permission("robot.read")),
 ) -> dict:
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     row = db.get(RobotCapability, robot.id)
     if not row:
         return {"robot_id": robot.id, "protocol_version": None, "supported_commands_json": []}
@@ -397,7 +407,7 @@ def acquire_lease(
     db: DbSession,
     auth: AuthContext = Depends(require_permission("robot.control.manual")),
 ) -> dict:
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     assert_robot_can_execute(db, robot, "manual_control")
     redis = get_redis()
     lease_id = str(uuid4())
@@ -474,7 +484,7 @@ def release_lease(
     db: DbSession,
     auth: CurrentAuth,
 ) -> Response:
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     redis = get_redis()
     lease = active_lease(redis, robot)
     if not lease:
@@ -503,7 +513,7 @@ def force_release_lease(
     db: DbSession,
     auth: AuthContext = Depends(require_permission("robot.control.force_release")),
 ) -> dict:
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     redis = get_redis()
     lease = active_lease(redis, robot)
     if not lease:

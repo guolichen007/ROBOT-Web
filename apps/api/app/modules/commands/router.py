@@ -51,7 +51,7 @@ def manual(
     db: DbSession,
     auth: AuthContext = Depends(require_permission("robot.control.manual")),
 ) -> dict:
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     assert_robot_can_execute(db, robot, "manual_control")
     profile = db.get(RobotMotionProfile, robot.id)
     if (
@@ -186,7 +186,7 @@ def stop_motion(
     auth: AuthContext = Depends(require_permission("robot.control.stop")),
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ) -> dict:
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     return safety_command(
         robot=robot,
         cmd="stop_motion",
@@ -208,7 +208,7 @@ def emergency_stop(
     auth: AuthContext = Depends(require_permission("robot.control.estop")),
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ) -> dict:
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     return safety_command(
         robot=robot,
         cmd="emergency_stop",
@@ -230,7 +230,7 @@ def reset_estop(
     auth: AuthContext = Depends(require_permission("robot.control.reset_estop")),
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ) -> dict:
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     if robot.online_state in {"STALE", "OFFLINE"}:
         raise PlatformError(f"ROBOT_{robot.online_state}", "离线或陈旧机器人不能复位软件急停")
     return safety_command(
@@ -255,7 +255,7 @@ def return_dock(
     auth: AuthContext = Depends(require_permission("robot.control.task")),
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ) -> dict:
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     endpoint = f"/robots/{robot.id}/commands/return-dock"
     body = payload.model_dump()
     cached = lookup(

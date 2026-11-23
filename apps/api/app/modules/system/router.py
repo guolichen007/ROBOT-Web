@@ -21,6 +21,7 @@ from app.core.metrics import (
     mqtt_out_of_order_total,
     robot_online_total,
 )
+from app.core.scope import alarm_scope_clause, operating_site, scoped_robot_ids, unrestricted
 from app.core.serialization import serialize_model
 from app.db.models import (
     Command,
@@ -346,9 +347,15 @@ def assemble_robot_state(robot: Robot, raw: str | None) -> dict:
 
 @router.get("/api/v1/monitor/snapshot")
 def monitor_snapshot(
-    db: DbSession, _: AuthContext = Depends(require_permission("robot.read"))
+    db: DbSession, auth: AuthContext = Depends(require_permission("robot.read"))
 ) -> dict:
-    site = db.scalar(select(Site).where(Site.active.is_(True)).order_by(Site.code))
+    # WEB-R1-MIN：地图站点与普通账号可见范围使用同一个“运营站点”定义。
+    site = (
+        db.scalar(select(Site).where(Site.active.is_(True)).order_by(Site.code))
+        if unrestricted(auth.permissions)
+        else operating_site(db)
+    )
+    visible = scoped_robot_ids(db, auth.permissions)
     map_row = (
         db.scalar(select(Map).where(Map.site_id == site.id).order_by(Map.code)) if site else None
     )
@@ -358,7 +365,10 @@ def monitor_snapshot(
         else None
     )
     version_id = version.id if version else None
-    robots = db.scalars(select(Robot).order_by(Robot.vehicle_id)).all()
+    robot_query = select(Robot).order_by(Robot.vehicle_id)
+    if visible is not None:
+        robot_query = robot_query.where(Robot.id.in_(visible or {""}))
+    robots = db.scalars(robot_query).all()
     latest = []
     for robot in robots:
         raw = get_redis().get(f"robot:{robot.vehicle_id}:latest")
@@ -418,16 +428,27 @@ def monitor_snapshot(
         (FireEvent.state == "CONFIRMED", 2),
         else_=1,
     )
-    alarms = db.scalars(
+    alarm_query = (
         select(FireEvent)
         .where(FireEvent.state.not_in({"RESOLVED", "CLOSED", "DISMISSED"}))
         .order_by(severity_order.desc(), state_order.desc(), FireEvent.last_seen_at.desc())
-    ).all()
-    tasks = db.scalars(
+    )
+    alarm_clause = alarm_scope_clause(db, auth.permissions)
+    if alarm_clause is not None:
+        alarm_query = alarm_query.where(alarm_clause)
+    alarms = db.scalars(alarm_query).all()
+    task_query = (
         select(Task)
         .where(Task.status.not_in({"SUCCEEDED", "FAILED", "CANCELLED"}))
         .order_by(Task.created_at.desc())
-    ).all()
+    )
+    command_query = select(Command).order_by(Command.issued_at.desc()).limit(200)
+    stream_query = select(StreamRegistry).order_by(StreamRegistry.camera_type)
+    if visible is not None:
+        task_query = task_query.where(Task.robot_id.in_(visible or {""}))
+        command_query = command_query.where(Command.robot_id.in_(visible or {""}))
+        stream_query = stream_query.where(StreamRegistry.robot_id.in_(visible or {""}))
+    tasks = db.scalars(task_query).all()
 
     def version_rows(model):
         if not version_id:
@@ -450,16 +471,10 @@ def monitor_snapshot(
         "robots": latest,
         "alarms": [serialize_model(x) for x in alarms],
         "tasks": [serialize_model(x) for x in tasks],
-        "commands": [
-            serialize_model(x)
-            for x in db.scalars(select(Command).order_by(Command.issued_at.desc()).limit(200)).all()
-        ],
+        "commands": [serialize_model(x) for x in db.scalars(command_query).all()],
         "operation_context": build_operation_context(db, robots[0]) if robots else None,
         "operation_contexts": {
             robot.vehicle_id: build_operation_context(db, robot) for robot in robots
         },
-        "streams": [
-            serialize_model(x)
-            for x in db.scalars(select(StreamRegistry).order_by(StreamRegistry.camera_type)).all()
-        ],
+        "streams": [serialize_model(x) for x in db.scalars(stream_query).all()],
     }

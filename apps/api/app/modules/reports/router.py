@@ -12,6 +12,7 @@ from sqlalchemy import select
 from app.core.config import get_settings
 from app.core.dependencies import AuthContext, DbSession, require_permission
 from app.core.errors import PlatformError
+from app.core.scope import scoped_robot_ids
 from app.core.serialization import serialize_model
 from app.db.models import Asset, InspectionObservation, PatrolReport, Robot, Task, TaskEvent
 
@@ -34,12 +35,21 @@ def safe_file(name: str) -> Path:
 
 @router.get("")
 def list_reports(
-    db: DbSession, _: AuthContext = Depends(require_permission("patrol.report.read"))
+    db: DbSession, auth: AuthContext = Depends(require_permission("patrol.report.read"))
 ) -> list[dict]:
-    return [
-        serialize_model(row)
-        for row in db.scalars(select(PatrolReport).order_by(PatrolReport.created_at.desc())).all()
-    ]
+    query = select(PatrolReport).order_by(PatrolReport.created_at.desc())
+    visible = scoped_robot_ids(db, auth.permissions)
+    if visible is not None:
+        query = query.join(Task, Task.id == PatrolReport.task_id).where(
+            Task.robot_id.in_(visible or {""})
+        )
+    return [serialize_model(row) for row in db.scalars(query).all()]
+
+
+def _assert_task_in_scope(db, auth: AuthContext, task: Task | None) -> None:
+    visible = scoped_robot_ids(db, auth.permissions)
+    if task is not None and visible is not None and task.robot_id not in visible:
+        raise PlatformError("RESOURCE_NOT_FOUND", "任务不存在", status_code=404)
 
 
 @router.post("/tasks/{task_id}", status_code=201)
@@ -57,6 +67,7 @@ def generate_report(
     from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
     task = db.get(Task, task_id)
+    _assert_task_in_scope(db, auth, task)
     if not task or task.type != "PATROL":
         raise PlatformError("RESOURCE_NOT_FOUND", "巡检任务不存在", status_code=404)
     existing = db.scalar(select(PatrolReport).where(PatrolReport.task_id == task.id))
@@ -226,11 +237,12 @@ def download_report(
     report_id: str,
     format_name: str,
     db: DbSession,
-    _: AuthContext = Depends(require_permission("patrol.report.read")),
+    auth: AuthContext = Depends(require_permission("patrol.report.read")),
 ) -> FileResponse:
     row = db.get(PatrolReport, report_id)
     if not row or row.status != "READY":
         raise PlatformError("RESOURCE_NOT_FOUND", "报告尚未生成", status_code=404)
+    _assert_task_in_scope(db, auth, db.get(Task, row.task_id))
     mapping = {
         "html": (row.html_object_name, "text/html; charset=utf-8"),
         "pdf": (row.pdf_object_name, "application/pdf"),

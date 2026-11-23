@@ -49,6 +49,9 @@ def get_auth_context(
     user = db.get(User, str(payload["sub"]))
     if not user or user.status != "ACTIVE":
         raise PlatformError("AUTH_REQUIRED", "用户不可用", status_code=401)
+    # WEB-R1-MIN：权限/状态/密码变化后 token_version 递增，旧访问令牌立即失效。
+    if int(payload.get("tv", 0)) != int(user.token_version or 0):
+        raise PlatformError("AUTH_REQUIRED", "账号权限已变更，请重新登录", status_code=401)
     allowed_during_password_change = {
         "/api/v1/auth/me",
         "/api/v1/auth/change-password",

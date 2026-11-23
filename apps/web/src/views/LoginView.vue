@@ -19,6 +19,8 @@ const remember = ref(false)
 const error = ref('')
 
 onMounted(() => {
+  if (route.query.reason === 'session_revoked')
+    error.value = '当前会话已失效（账号被停用、权限变更或密码被重置），请重新登录'
   const saved = localStorage.getItem(REMEMBER_KEY)
   if (saved) {
     username.value = saved

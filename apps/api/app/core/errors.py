@@ -83,5 +83,11 @@ async def validation_error_handler(request: Request, exc: Exception) -> JSONResp
         code="INVALID_REQUEST",
         message="请求参数校验失败",
         status_code=422,
-        details={"errors": exc.errors()},
+        # 只回传 type/loc/msg：去掉 input（可能回显密码等敏感原文）与 ctx（含不可序列化异常对象）。
+        details={
+            "errors": [
+                {"type": e.get("type"), "loc": list(e.get("loc", ())), "msg": e.get("msg")}
+                for e in exc.errors()
+            ]
+        },
     )

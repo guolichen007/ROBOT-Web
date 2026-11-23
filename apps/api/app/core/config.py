@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     enable_api_docs: bool = True
 
     seed_demo: bool = True
+    # WEB-R1-MIN 单组织单站点：普通账号只能访问该站点的车辆/告警/任务/媒体/历史。
+    # 留空 = 按 code 排序的第一个 active Site（与监控快照选择规则一致）。
+    operating_site_code: str = ""
     mock_enabled: bool = True
     log_level: str = "INFO"
     asset_root: Path = Path("/data/assets")

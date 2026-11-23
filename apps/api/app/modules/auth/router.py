@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import jwt
 from fastapi import APIRouter, Cookie, Header, HTTPException, Request, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
@@ -38,6 +38,13 @@ class LoginRequest(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str = Field(min_length=12, max_length=256)
+
+    @field_validator("new_password")
+    @classmethod
+    def _password_strength(cls, value: str) -> str:
+        from app.modules.admin.router import _validate_password
+
+        return _validate_password(value)
 
 
 def user_payload(db: Session, user: User) -> dict:
@@ -101,7 +108,7 @@ def issue_session(
     set_refresh_cookies(response, refresh_token, csrf_token)
     permissions = sorted(load_permissions(db, user.id))
     return {
-        "access_token": create_access_token(user.id, permissions),
+        "access_token": create_access_token(user.id, permissions, user.token_version or 0),
         "token_type": "bearer",
         "expires_in": settings.access_token_minutes * 60,
         "user": user_payload(db, user),
@@ -141,7 +148,17 @@ def login(payload: LoginRequest, request: Request, response: Response, db: DbSes
             db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
     if user.status != "ACTIVE":
-        raise HTTPException(status_code=403, detail="账号不可用")
+        write_audit(
+            db,
+            action="AUTH_LOGIN",
+            resource_type="USER",
+            user_id=user.id,
+            resource_id=user.id,
+            result="DENIED_DISABLED",
+            **request_meta(request),
+        )
+        db.commit()
+        raise HTTPException(status_code=403, detail="账号已停用，请联系管理员")
     redis.delete(key)
     user.failed_attempts = 0
     user.locked_until = None
@@ -248,8 +265,11 @@ def change_password(
 ) -> dict:
     if not verify_password(payload.current_password, auth.user.password_hash):
         raise HTTPException(status_code=400, detail="当前密码错误")
+    if payload.new_password == payload.current_password:
+        raise HTTPException(status_code=400, detail="新密码不能与当前密码相同")
     auth.user.password_hash = hash_password(payload.new_password)
     auth.user.must_change_password = False
+    auth.user.token_version = int(auth.user.token_version or 0) + 1
     db.execute(
         update(RefreshSession)
         .where(RefreshSession.user_id == auth.user.id)
@@ -277,6 +297,12 @@ def ws_ticket(request: Request, auth: CurrentAuth) -> dict:
     get_redis().setex(
         f"ws-ticket:{ticket}",
         get_settings().ws_ticket_seconds,
-        json.dumps({"user_id": auth.user.id, "permissions": sorted(auth.permissions)}),
+        json.dumps(
+            {
+                "user_id": auth.user.id,
+                "permissions": sorted(auth.permissions),
+                "token_version": int(auth.user.token_version or 0),
+            }
+        ),
     )
     return {"ticket": ticket, "expires_in": get_settings().ws_ticket_seconds}
