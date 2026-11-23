@@ -445,6 +445,7 @@ onMounted(() => Promise.all([load(), loadOptions(), loadReports()]))
           type="submit"
           data-testid="plan-save"
           :disabled="busy || Boolean(formBlocker)"
+          :title="formBlocker || '保存草稿（仅预演，不发送车辆指令）'"
         >
           {{ busy ? '保存中…' : '保存草稿' }}
         </button>

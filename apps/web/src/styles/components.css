@@ -831,8 +831,13 @@ tbody tr:hover {
   gap: 10px;
   justify-content: flex-end;
   flex-wrap: wrap;
-  padding-top: 8px;
+  padding: 10px 0 12px;
   border-top: 1px solid var(--yd-border-soft);
+  /* 长表单时保存 / 取消始终可见（PC 1366×768 也无需滚动到底部）。 */
+  position: sticky;
+  bottom: 0;
+  background: var(--yd-surface);
+  z-index: 1;
 }
 .safety-note {
   padding: 10px 12px;
@@ -948,7 +953,8 @@ tbody tr:hover {
   position: fixed;
   right: 20px;
   bottom: 20px;
-  z-index: 400;
+  /* 高于页面内容，低于抽屉 / 弹窗（300）：正在编辑的表单操作按钮不被遮挡；顶栏火警入口仍可见。 */
+  z-index: 290;
   width: min(380px, calc(100vw - 24px));
   background: var(--yd-surface);
   border: 2px solid var(--yd-danger);
@@ -1008,4 +1014,8 @@ fieldset.weekday-picker legend {
 .unmatched {
   color: #8a5a12;
   font-weight: 600;
+}
+
+body.has-alarm-popup .page:not(.page--monitor) {
+  padding-bottom: 240px;
 }

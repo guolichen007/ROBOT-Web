@@ -87,7 +87,13 @@
   }
   .yd-monitor-core {
     grid-template-columns: minmax(0, 1.5fr) minmax(330px, 0.95fr);
+    /* WEB-R1-MIN-FINAL：DOM 为 地图 / 视频 / 控制栏 三块，原两列规则使控制栏落到第二行左侧、
+     * 右下空置，地图仅约 230px 高（1366×768 标签重叠）。地图跨两行，视频与控制栏叠放右侧。 */
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
     gap: 8px;
+  }
+  .yd-monitor-core > .operations-map-panel {
+    grid-row: span 2;
   }
   .yd-monitor-side {
     grid-template-rows: minmax(190px, 1.3fr) minmax(120px, 0.6fr) minmax(160px, 0.7fr);

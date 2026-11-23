@@ -67,8 +67,22 @@ function valueAt(row: Record<string, any>, key: string): unknown {
     </div>
     <nav v-if="!loading && !error && rows.length > pageSize" class="table-pager" aria-label="分页">
       <span>共 {{ rows.length }} 条 · 第 {{ page }} / {{ pageCount }} 页</span>
-      <button type="button" class="table-button" :disabled="page <= 1" @click="page -= 1">上一页</button>
-      <button type="button" class="table-button" :disabled="page >= pageCount" @click="page += 1">
+      <button
+        type="button"
+        class="table-button"
+        :disabled="page <= 1"
+        :title="page <= 1 ? '已是第一页' : '上一页'"
+        @click="page -= 1"
+      >
+        上一页
+      </button>
+      <button
+        type="button"
+        class="table-button"
+        :disabled="page >= pageCount"
+        :title="page >= pageCount ? '已是最后一页' : '下一页'"
+        @click="page += 1"
+      >
         下一页
       </button>
     </nav>
