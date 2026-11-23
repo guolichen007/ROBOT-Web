@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from app.core.audit import write_audit
 from app.core.config import get_settings
+from app.core.errors import PlatformError
 from app.core.events import EVENT_STREAM, decode_stream_event, get_redis
 from app.core.metrics import ws_connection_total, ws_resync_total
 from app.core.scope import allowed_site_ids
@@ -72,7 +73,10 @@ def session_identity_valid(user_id: str, token_version: int) -> tuple[bool, WsSc
         permissions = load_permissions(db, user.id)
         if "robot.read" not in permissions and "alarm.read" not in permissions:
             return False, None
-        sites = allowed_site_ids(db, permissions)
+        try:
+            sites = allowed_site_ids(db, permissions)
+        except PlatformError:
+            return False, None  # 运营站点配置错误：普通账号实时连接 fail-closed
         if sites is None:
             return True, WsScope(None, None)
         robots = db.execute(

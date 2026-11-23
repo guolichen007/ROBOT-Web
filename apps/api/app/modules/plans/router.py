@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 from croniter import croniter
 from fastapi import APIRouter, Depends, Header, Request
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -480,6 +480,23 @@ def update_plan(
     if duplicate:
         raise PlatformError("PLAN_NAME_EXISTS", "该车辆已存在同名巡检计划", status_code=409)
     before = plan_view(db, plan)
+    # P1-01 原子乐观锁：以“WHERE revision = 期望值”的条件更新作为提交点。
+    # PostgreSQL 下并发的第二个事务会在行锁上等待，待第一个提交后重新求值 WHERE，
+    # 命中 0 行 → 409；不存在“先比较、后写入”的竞态窗口。
+    claimed = db.execute(
+        update(PatrolPlan)
+        .where(PatrolPlan.id == plan.id, PatrolPlan.revision == payload.revision)
+        .values(revision=PatrolPlan.revision + 1)
+        .execution_options(synchronize_session=False)
+    ).rowcount
+    if claimed != 1:
+        db.rollback()
+        raise PlatformError(
+            "PLAN_REVISION_CONFLICT",
+            "计划已被其他人修改，请刷新后再保存",
+            status_code=409,
+        )
+    db.refresh(plan)
     plan.name = payload.name.strip()
     plan.description = payload.description or None
     plan.robot_id = robot.id
@@ -489,7 +506,6 @@ def update_plan(
     plan.target_lateral_max_m = payload.target_lateral_max_m
     plan.schedule_json = payload.schedule.model_dump()
     plan.updated_by = auth.user.id
-    plan.revision = plan.revision + 1
     plan.enabled = False
     _upsert_schedule(db, plan, payload.schedule, auth.user.id)
     db.flush()

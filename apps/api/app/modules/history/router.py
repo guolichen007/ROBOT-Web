@@ -211,6 +211,16 @@ def alarm_rows(
     return rows
 
 
+def audit_scope_filters(db, auth: AuthContext) -> list:
+    """P1-02 审计范围：持 settings.manage 的管理员看全部；其他 audit.read 账号只看
+    (a) 本站点车辆关联的记录，(b) 自己本人的操作记录。
+    robot_id 为空的全局人员 / 认证 / 导出审计（他人的 USER_* / AUTH_* 等）不再放行。"""
+    visible = scoped_robot_ids(db, auth.permissions)
+    if visible is None:
+        return []
+    return [AuditLog.robot_id.in_(visible or {""}) | (AuditLog.user_id == auth.user.id)]
+
+
 OPERATION_PREFIXES = ("USER_", "AUTH_", "PATROL_PLAN", "ALARM_", "TASK_", "EXPORT_")
 
 
@@ -239,9 +249,7 @@ def audit_rows(
         query = query.where(AuditLog.action.ilike(f"%{action}%"))
     if result:
         query = query.where(AuditLog.result == result)
-    visible = scoped_robot_ids(db, auth.permissions)
-    if visible is not None:
-        query = query.where(AuditLog.robot_id.is_(None) | AuditLog.robot_id.in_(visible or {""}))
+    query = query.where(*audit_scope_filters(db, auth))
     query = range_filter(query, AuditLog.created_at, start, end).limit(min(limit, EXPORT_MAX_ROWS))
     robots, users = _names(db)
     rows = []

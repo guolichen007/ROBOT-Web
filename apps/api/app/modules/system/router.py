@@ -21,7 +21,13 @@ from app.core.metrics import (
     mqtt_out_of_order_total,
     robot_online_total,
 )
-from app.core.scope import alarm_scope_clause, operating_site, scoped_robot_ids, unrestricted
+from app.core.scope import (
+    alarm_scope_clause,
+    operating_site,
+    operating_site_status,
+    scoped_robot_ids,
+    unrestricted,
+)
 from app.core.serialization import serialize_model
 from app.db.models import (
     Command,
@@ -202,6 +208,7 @@ def system_status(db: DbSession, auth: CurrentAuth) -> dict:
     except Exception as exc:
         media = {"ok": False, "error": type(exc).__name__}
     status["checks"]["mediamtx"] = media
+    status["checks"]["operating_site"] = operating_site_status(db)
     status["server_deployed"] = False
     status["server_deployment_ready"] = True
     return status

@@ -521,7 +521,11 @@ def _other_site_robot() -> tuple[str, str]:
         return robot.id, original
 
 
-def test_cross_site_api_ws_media_and_export_blocked(client: TestClient) -> None:
+def test_cross_site_api_ws_media_and_export_blocked(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # 两个启用站点时必须显式配置运营站点（P1-03）。
+    monkeypatch.setattr(get_settings(), "operating_site_code", "DEMO_PARKING")
     token = admin_token(client)
     make_user(client, token, "siteop", ["operator"])
     op_token = activate(client, f"{PREFIX}siteop")
@@ -985,3 +989,188 @@ def test_operating_site_selection_is_stable() -> None:
         first_active = db.scalar(select(Site).where(Site.active.is_(True)).order_by(Site.code))
         assert site is not None and first_active is not None and site.id == first_active.id
         assert db.scalar(select(Map).where(Map.site_id == site.id)) is not None
+
+
+# ---------------------------------------------------------------- WEB-R1-MIN-FINAL 定点修复
+
+
+def test_new_user_without_roles_defaults_to_viewer_only(client: TestClient) -> None:
+    """P0-02 后端侧：不传 role_codes 时只获得 viewer 权限。"""
+    token = admin_token(client)
+    created = client.post(
+        "/api/v1/admin/users",
+        json={"username": f"{PREFIX}dflt", "display_name": "默认", "password": PASSWORD},
+        headers=bearer(token),
+    )
+    assert created.status_code == 201 and created.json()["roles"] == ["viewer"]
+    user_token = activate(client, f"{PREFIX}dflt")
+    me = client.get("/api/v1/auth/me", headers=bearer(user_token)).json()
+    assert me["roles"] == ["viewer"]
+    assert set(me["permissions"]) == {"robot.read", "alarm.read", "map.read", "patrol.report.read"}
+    empty = client.post(
+        "/api/v1/admin/users",
+        json={
+            "username": f"{PREFIX}none",
+            "display_name": "空",
+            "password": PASSWORD,
+            "role_codes": [],
+        },
+        headers=bearer(token),
+    )
+    assert empty.status_code == 422
+
+
+def test_concurrent_plan_update_same_revision_only_one_wins(client: TestClient) -> None:
+    """P1-01：两个会话基于同一 revision 并发保存，只有一个成功，另一个 409。"""
+    import threading
+
+    token = admin_token(client)
+    robot_id, trajectory_id = route_for()
+    plan = client.post(
+        "/api/v1/plans",
+        json=plan_body(f"并发-{uuid4().hex[:4]}", robot_id, trajectory_id),
+        headers=bearer(token, **{"Idempotency-Key": str(uuid4())}),
+    ).json()
+    barrier = threading.Barrier(2)
+    results: list[int] = []
+
+    def save(name: str) -> None:
+        with TestClient(app) as own:
+            body = {**plan_body(name, robot_id, trajectory_id), "revision": plan["revision"]}
+            barrier.wait()
+            results.append(
+                own.put(f"/api/v1/plans/{plan['id']}", json=body, headers=bearer(token)).status_code
+            )
+
+    threads = [
+        threading.Thread(target=save, args=(f"并发A-{uuid4().hex[:4]}",)),
+        threading.Thread(target=save, args=(f"并发B-{uuid4().hex[:4]}",)),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(30)
+    assert sorted(results) == [200, 409], results
+    with SessionLocal() as db:
+        row = db.get(PatrolPlan, plan["id"])
+        assert row and row.revision == 2
+
+
+def test_plan_revision_conditional_update_rejects_stale_writer() -> None:
+    """P1-01 确定性反证：读取后被他人提交，再提交必须 409（不依赖线程调度）。"""
+    from app.core.dependencies import AuthContext, load_permissions
+    from app.core.errors import PlatformError
+    from app.modules.plans.router import PlanUpdateInput, update_plan
+    from starlette.requests import Request
+
+    with SessionLocal() as db:
+        plan = db.scalar(select(PatrolPlan).where(PatrolPlan.execution_mode == "PREVIEW_ONLY"))
+        admin = db.scalar(select(User).where(User.username == "admin"))
+        assert plan and admin
+        stale_revision = plan.revision
+        body = {
+            **plan_body(plan.name, plan.robot_id, plan.trajectory_id or ""),
+            "revision": stale_revision,
+        }
+        plan_id = plan.id
+    with SessionLocal.begin() as other:  # 另一用户先提交
+        row = other.get(PatrolPlan, plan_id)
+        assert row
+        row.revision = row.revision + 1
+    scope = {
+        "type": "http",
+        "headers": [],
+        "client": ("127.0.0.1", 1),
+        "path": "/",
+        "query_string": b"",
+    }
+    with SessionLocal() as db:
+        admin = db.scalar(select(User).where(User.username == "admin"))
+        assert admin
+        auth = AuthContext(user=admin, permissions=load_permissions(db, admin.id))
+        with pytest.raises(PlatformError) as caught:
+            update_plan(plan_id, PlanUpdateInput(**body), Request(scope), db, auth)
+        assert caught.value.code == "PLAN_REVISION_CONFLICT"
+
+
+def test_site_auditor_cannot_read_global_people_and_auth_audit(client: TestClient) -> None:
+    """P1-02：普通审计权限（auditor）看不到他人的全局人员 / 认证审计；管理员可见。"""
+    token = admin_token(client)
+    victim = make_user(client, token, "auditvictim", ["viewer"])
+    make_user(client, token, "siteauditor", ["auditor"])
+    auditor_token = activate(client, f"{PREFIX}siteauditor")
+    for path in ("/api/v1/history/audit", "/api/v1/admin/audit"):
+        rows = client.get(path, headers=bearer(auditor_token)).json()
+        assert all(r["resource_id"] != victim["id"] for r in rows), path
+        assert (
+            all(r["robot_id"] is not None or r["user_id"] == rows[0]["user_id"] for r in rows)
+            or not rows
+        )
+        foreign_global = [
+            r for r in rows if r["robot_id"] is None and r["action"].startswith(("USER_", "AUTH_"))
+        ]
+        me = client.get("/api/v1/auth/me", headers=bearer(auditor_token)).json()
+        assert all(r["user_id"] == me["id"] for r in foreign_global), path
+    exported = client.get("/api/v1/history/export/audit", headers=bearer(auditor_token))
+    assert exported.status_code == 200 and victim["id"] not in exported.text
+    admin_rows = client.get(
+        "/api/v1/history/audit", params={"action": "USER_CREATE"}, headers=bearer(token)
+    ).json()
+    assert any(r["resource_id"] == victim["id"] for r in admin_rows)
+
+
+def test_operating_site_misconfiguration_fails_closed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P1-03：多个启用站点且未设置 OPERATING_SITE_CODE → 普通账号 503，不静默落到第一个站点。"""
+    token = admin_token(client)
+    make_user(client, token, "cfgop", ["operator"])
+    op_token = activate(client, f"{PREFIX}cfgop")
+    monkeypatch.setattr(get_settings(), "operating_site_code", "")
+    with SessionLocal.begin() as db:
+        db.add(Site(code="R1MIN_OTHER", name="第二启用站点", active=True))
+    try:
+        for path in ("/api/v1/robots", "/api/v1/alarms", "/api/v1/monitor/snapshot"):
+            response = client.get(path, headers=bearer(op_token))
+            assert response.status_code == 503, path
+            assert response.json()["error"]["code"] == "OPERATING_SITE_MISCONFIGURED"
+        ticket = client.post("/api/v1/auth/ws-ticket", headers=bearer(op_token)).json()["ticket"]
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect(f"/ws/v1/monitor?ticket={ticket}") as ws:
+                ws.receive_json()
+        # 管理员不受影响，可以修复配置
+        assert client.get("/api/v1/robots", headers=bearer(token)).status_code == 200
+        status = client.get("/api/v1/system/status", headers=bearer(token)).json()
+        assert status["checks"]["operating_site"]["ok"] is False
+        # 显式配置不存在的站点同样拒绝
+        monkeypatch.setattr(get_settings(), "operating_site_code", "NO_SUCH_SITE")
+        assert client.get("/api/v1/robots", headers=bearer(op_token)).status_code == 503
+        # 显式配置正确站点 → 恢复
+        monkeypatch.setattr(get_settings(), "operating_site_code", "DEMO_PARKING")
+        assert client.get("/api/v1/robots", headers=bearer(op_token)).status_code == 200
+    finally:
+        with SessionLocal.begin() as db:
+            db.execute(delete(Site).where(Site.code == "R1MIN_OTHER"))
+
+
+def test_legacy_plan_audit_is_read_only_and_classifies_plans() -> None:
+    """P0-04：只读核查脚本只 SELECT；READ ONLY 事务内写入被数据库拒绝；Web 计划全部 blocked。"""
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+
+    audit_mod = load_service(
+        "firebot_r1min_legacy_audit", "scripts/web-r1-min/legacy_plan_audit.py"
+    )
+    before = downlink_counts()
+    result = audit_mod.audit()
+    assert result["read_only"] is True
+    assert downlink_counts() == before
+    for row in result["plans"]:
+        if row["execution_mode"] == "PREVIEW_ONLY":
+            assert row["blocked_by_server"] and not row["manual_start_possible"]
+            assert not row["auto_dispatch_possible"]
+    with SessionLocal() as db:
+        db.execute(text("SET TRANSACTION READ ONLY"))
+        with pytest.raises(DBAPIError):
+            db.execute(text("UPDATE patrol_plans SET name = name"))
+        db.rollback()

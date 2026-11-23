@@ -24,11 +24,52 @@ if TYPE_CHECKING:
 UNRESTRICTED_PERMISSION = "settings.manage"
 
 
+class OperatingSiteMisconfigured(PlatformError):
+    """P1-03：存在多个启用站点但未显式配置 OPERATING_SITE_CODE（或配置的站点不存在/未启用）。"""
+
+    def __init__(self, reason: str, details: dict | None = None) -> None:
+        super().__init__(
+            "OPERATING_SITE_MISCONFIGURED",
+            "运营站点配置错误："
+            + reason
+            + "，普通账号授权已停止，请管理员设置 OPERATING_SITE_CODE",
+            status_code=503,
+            details=details or {},
+        )
+
+
 def operating_site(db) -> Site | None:
+    """运营站点。fail-closed：绝不在多站点时静默选择第一个站点。
+
+    - 显式配置 OPERATING_SITE_CODE：必须存在且启用，否则报错；
+    - 未配置且只有 1 个启用站点：使用该站点；
+    - 未配置且没有启用站点：返回 None（普通账号范围为空）；
+    - 未配置且有多个启用站点：报错（503）。
+    """
     code = get_settings().operating_site_code.strip()
     if code:
-        return db.scalar(select(Site).where(Site.code == code))
-    return db.scalar(select(Site).where(Site.active.is_(True)).order_by(Site.code))
+        site = db.scalar(select(Site).where(Site.code == code))
+        if not site or not site.active:
+            raise OperatingSiteMisconfigured(
+                "OPERATING_SITE_CODE 指向的站点不存在或未启用", {"operating_site_code": code}
+            )
+        return site
+    active = db.scalars(select(Site).where(Site.active.is_(True)).order_by(Site.code)).all()
+    if len(active) > 1:
+        raise OperatingSiteMisconfigured(
+            "存在多个启用站点但未设置 OPERATING_SITE_CODE",
+            {"active_sites": [row.code for row in active]},
+        )
+    return active[0] if active else None
+
+
+def operating_site_status(db) -> dict:
+    """启动 / 就绪检查用：不抛异常，返回配置状态。"""
+    try:
+        site = operating_site(db)
+    except OperatingSiteMisconfigured as exc:
+        return {"ok": False, "code": exc.code, "message": exc.message, **exc.details}
+    return {"ok": True, "site_code": site.code if site else None}
 
 
 def unrestricted(permissions: set[str] | list[str]) -> bool:

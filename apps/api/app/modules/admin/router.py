@@ -485,10 +485,16 @@ def permissions(
 def audit(
     db: DbSession, auth: AuthContext = Depends(require_permission("audit.read")), limit: int = 500
 ) -> list[dict]:
+    # P1-02：与 /history/audit 使用同一范围规则，避免旁路读取全局审计。
+    from app.modules.history.router import audit_scope_filters
+
     return [
         serialize_model(x)
         for x in db.scalars(
-            select(AuditLog).order_by(AuditLog.created_at.desc()).limit(min(limit, 2000))
+            select(AuditLog)
+            .where(*audit_scope_filters(db, auth))
+            .order_by(AuditLog.created_at.desc())
+            .limit(min(limit, 2000))
         ).all()
     ]
 

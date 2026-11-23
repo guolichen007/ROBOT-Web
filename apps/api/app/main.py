@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
 
@@ -40,12 +42,36 @@ settings = get_settings()
 configure_logging("api")
 logger = logging.getLogger(__name__)
 
+
+def check_operating_site() -> None:
+    """P1-03：启动即检查运营站点配置；错误配置时显式告警（普通账号请求同时 fail-closed 503）。"""
+    from app.core.scope import operating_site_status
+    from app.db.session import SessionLocal
+
+    try:
+        with SessionLocal() as db:
+            status = operating_site_status(db)
+    except Exception:  # 数据库尚未迁移等：交由 readiness 处理
+        return
+    if not status["ok"]:
+        logger.error("operating site misconfigured", extra={"status": status})
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    check_operating_site()
+    yield
+
+
 app = FastAPI(
+    lifespan=lifespan,
     title=settings.app_name,
     version="2.0.0-baseline",
     docs_url="/api/docs" if settings.enable_api_docs else None,
     openapi_url="/api/openapi.json" if settings.enable_api_docs else None,
 )
+
+
 app.add_exception_handler(PlatformError, platform_error_handler)
 app.add_exception_handler(HTTPException, http_error_handler)
 app.add_exception_handler(RequestValidationError, validation_error_handler)
@@ -53,7 +79,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=[
         "Authorization",
         "Content-Type",
