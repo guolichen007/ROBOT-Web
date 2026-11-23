@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onUnmounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { NotificationIcon } from 'tdesign-icons-vue-next'
 import { api, errorMessage } from '@/lib/api'
 import {
@@ -27,7 +27,22 @@ const message = ref('')
 const alarms = computed(() => monitor.snapshot.alarms || [])
 const active = computed(() => alarms.value.filter(isActiveAlarm))
 const unacked = computed(() => alarms.value.filter(isUnacknowledged))
-const current = computed(() => popupQueue(alarms.value, dismissed.value)[0])
+// 监控首页已有本车火警横幅 + 主火警面板（含“确认收到”）：当前车辆的火警不再重复弹窗遮挡控制区；
+// 站点级 / 其它车辆火警仍弹出，避免漏报。
+const route = useRoute()
+const current = computed(
+  () =>
+    popupQueue(alarms.value, dismissed.value).filter(
+      (alarm) => !(route.path === '/monitor' && monitor.robot?.id && alarm.robot_id === monitor.robot.id),
+    )[0],
+)
+// 弹窗出现时给页面底部留白，避免固定弹窗永久遮挡表格最后几行 / 操作按钮。
+watch(
+  () => Boolean(auth.can('alarm.read') && current.value),
+  (visible) => document.body.classList.toggle('has-alarm-popup', visible),
+  { immediate: true },
+)
+onUnmounted(() => document.body.classList.remove('has-alarm-popup'))
 const dataState = computed(() => detectionDataState(monitor.snapshot.robots || [], active.value.length))
 
 function closeHint(): void {
@@ -85,6 +100,8 @@ async function view(): Promise<void> {
     role="alertdialog"
     aria-live="assertive"
     data-testid="alarm-popup"
+    :data-alarm-id="current.id"
+    :data-event-code="current.event_code"
   >
     <h3>火警：{{ alarmTypeLabel(current.fire_type) }} · {{ severityLabel(current.severity) }}</h3>
     <p>

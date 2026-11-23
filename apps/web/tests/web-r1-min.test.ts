@@ -198,3 +198,31 @@ describe('任务页', () => {
     expect(apiPost).not.toHaveBeenCalledWith('/tasks/patrol', expect.anything(), expect.anything())
   })
 })
+
+describe('新账号默认角色（P0-02）', () => {
+  it('打开“新增账号”且不选择其他角色，提交的 role_codes 只有 viewer', async () => {
+    setActivePinia(createPinia())
+    apiGet.mockImplementation(() => Promise.resolve({ data: [] }))
+    apiPost.mockReset()
+    apiPost.mockResolvedValue({ data: {} })
+    const { default: UsersView } = await import('@/views/UsersView.vue')
+    const wrapper = mount(UsersView)
+    await flushPromises()
+    await wrapper.get('[data-testid="user-create"]').trigger('click')
+    const checked = wrapper
+      .findAll('[data-testid="role-picker"] input[type="checkbox"]')
+      .filter((input) => (input.element as HTMLInputElement).checked)
+      .map((input) => (input.element as HTMLInputElement).value)
+    expect(checked).toEqual(['viewer'])
+    await wrapper.get('input[name="username"]').setValue('new_user')
+    await wrapper.get('input[name="display_name"]').setValue('新用户')
+    await wrapper.get('input[name="password"]').setValue('Viewer-Default-2026!')
+    await wrapper.get('[data-testid="user-drawer"]').trigger('submit')
+    await flushPromises()
+    expect(apiPost).toHaveBeenCalledWith(
+      '/admin/users',
+      expect.objectContaining({ role_codes: ['viewer'] }),
+      expect.anything(),
+    )
+  })
+})

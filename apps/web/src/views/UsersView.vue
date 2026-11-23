@@ -35,7 +35,7 @@ const form = reactive({
   username: '',
   display_name: '',
   password: '',
-  role_codes: ['operator'] as string[],
+  role_codes: ['viewer'] as string[], // WEB-R1-MIN-FINAL P0-02：新账号默认只读，其他角色必须显式选择
   reason: '',
 })
 let createKey = ''
@@ -59,7 +59,7 @@ function open(next: Mode, row?: UserRow): void {
   form.display_name = row?.display_name || ''
   form.password = ''
   form.reason = ''
-  form.role_codes = row ? [...row.roles] : ['operator']
+  form.role_codes = row ? [...row.roles] : ['viewer']
   if (next === 'create') createKey = newUuid()
 }
 
@@ -83,6 +83,7 @@ async function submit(): Promise<void> {
   busy.value = true
   try {
     if (mode.value === 'create') {
+      if (!form.role_codes.length) throw new Error('至少选择一个角色')
       await api.post(
         '/admin/users',
         {
