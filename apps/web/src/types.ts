@@ -141,9 +141,9 @@ export interface MapVersion {
 
 export interface Alarm {
   id: string
-  robot_id: string
+  robot_id: string | null
   event_code: string
-  parking_slot_id?: string
+  parking_slot_id?: string | null
   state: string
   severity: string
   fire_type: string
@@ -160,6 +160,13 @@ export interface Alarm {
   sensor_snapshot_json?: Record<string, unknown>
   media_snapshot_json?: Record<string, unknown>
   note?: string | null
+  // WEB-R1-MIN：未匹配车位的火警同样保留（UNMATCHED，parking_slot_id 为空）
+  location_state?: 'MATCHED' | 'UNMATCHED'
+  reported_slot_code?: string | null
+  location_label?: string
+  parking_slot_code?: string | null
+  robot_vehicle_id?: string | null
+  ack_by_name?: string | null
 }
 
 export interface Task {

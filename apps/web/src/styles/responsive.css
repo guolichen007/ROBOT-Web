@@ -200,3 +200,150 @@
     font-size: 17px;
   }
 }
+
+/* --- WEB-R1-MIN：移动端（≤ 760px）基础可用布局 ---
+ * 侧边栏收为顶部横向导航；顶栏状态区可横向滚动；表格行转为卡片；抽屉 / 弹窗全宽。
+ * 只影响窄屏，不改变桌面监控首页布局。 */
+@media (max-width: 760px) {
+  .app-shell {
+    display: block;
+  }
+  .sidebar {
+    position: static;
+    width: 100%;
+    height: auto;
+    flex-direction: column;
+    border-right: 0;
+    border-bottom: 1px solid var(--yd-border);
+  }
+  .sidebar .brand {
+    height: 52px;
+    padding: 8px 14px;
+  }
+  .sidebar .brand-logo {
+    width: 112px;
+  }
+  .sidebar nav {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 4px;
+    padding: 0 10px 8px;
+  }
+  .sidebar nav .nav-item,
+  .sidebar nav .nav-sub-item {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 0;
+    height: 34px;
+    padding: 0 10px;
+    white-space: nowrap;
+  }
+  .sidebar nav .nav-arrow {
+    display: none;
+  }
+  .tabs {
+    overflow-x: auto;
+  }
+  .tabs button {
+    min-width: 76px;
+    flex: 0 0 auto;
+  }
+  .sidebar nav .nav-group {
+    display: flex;
+    flex: 0 0 auto;
+    gap: 4px;
+  }
+  .sidebar nav .nav-sub {
+    display: flex !important;
+    gap: 4px;
+  }
+  .sidebar-wave,
+  .sidebar-foot {
+    display: none;
+  }
+  .workspace {
+    height: auto;
+    overflow: visible;
+  }
+  .topbar {
+    height: auto;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    gap: 8px;
+  }
+  .status-area {
+    order: 2;
+    width: 100%;
+    overflow-x: auto;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .user-side {
+    order: 1;
+    width: 100%;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .user-side time {
+    display: none;
+  }
+  .page {
+    padding: 12px !important;
+  }
+  .page-title-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .table-wrap table,
+  .table-wrap thead,
+  .table-wrap tbody,
+  .table-wrap tr,
+  .table-wrap td {
+    display: block;
+  }
+  .table-wrap thead {
+    display: none;
+  }
+  .table-wrap tr {
+    border-bottom: 1px solid var(--yd-border);
+    padding: 8px 0;
+  }
+  .table-wrap td {
+    height: auto;
+    max-width: none;
+    padding: 4px 12px;
+    border: 0;
+    white-space: normal;
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    gap: 8px;
+  }
+  .table-wrap td::before {
+    content: attr(data-label);
+    color: var(--yd-text-3);
+    font-size: 12px;
+  }
+  .filter-bar label,
+  .filter-bar input,
+  .filter-bar select {
+    width: 100%;
+  }
+  .filter-bar .filter-actions {
+    margin-left: 0;
+    width: 100%;
+  }
+  .drawer-card {
+    width: 100vw;
+  }
+  .detail-grid {
+    grid-template-columns: 92px 1fr;
+  }
+  .alarm-popup {
+    right: 12px;
+    left: 12px;
+    bottom: 12px;
+    width: auto;
+  }
+}

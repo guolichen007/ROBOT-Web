@@ -668,24 +668,48 @@ def process_internal_compat(topic: str, payload: bytes, received: datetime) -> b
     return True
 
 
+ALARM_TERMINAL_STATES = {"RESOLVED", "CLOSED", "DISMISSED"}
+
+
 def handle_alarm(db, robot: Robot, msg: dict, received: datetime) -> None:
+    """车端火警入库。
+
+    WEB-R1-MIN 修复：
+    - 未匹配车位：不再丢弃。保存为 location_state=UNMATCHED（parking_slot_id=NULL，
+      reported_slot_code 记录车端原值），照常产生 alarm.created，Web 弹窗提示“位置未知”。
+    - 已解决火警的重复事件归属：同一 event_id / 指纹若命中的旧事件已处于
+      RESOLVED / CLOSED / DISMISSED 终态，不再把新上报计入旧事件（否则新火情被静默吞掉），
+      而是创建新的 FireEvent。
+    """
     by_message = db.scalar(
         select(FireEvent).where(FireEvent.source_message_id == msg["message_id"])
     )
     if by_message:
         return
-    slot = db.scalar(select(ParkingSlot).where(ParkingSlot.code == msg.get("parking_slot_code")))
+    reported_code = msg.get("parking_slot_code")
+    slot = (
+        db.scalar(select(ParkingSlot).where(ParkingSlot.code == reported_code))
+        if reported_code
+        else None
+    )
     if not slot:
         logger.warning(
-            "alarm refers to unknown parking slot", extra={"vehicle_id": robot.vehicle_id}
+            "alarm refers to unknown parking slot; stored as UNMATCHED",
+            extra={"vehicle_id": robot.vehicle_id},
         )
-        return
+    location_key = slot.id if slot else f"UNMATCHED:{reported_code or '-'}"
     by_event = db.scalar(
-        select(FireEvent).where(
-            FireEvent.robot_id == robot.id, FireEvent.source_event_id == msg.get("event_id")
+        select(FireEvent)
+        .where(
+            FireEvent.robot_id == robot.id,
+            FireEvent.source_event_id == msg.get("event_id"),
+            FireEvent.state.not_in(ALARM_TERMINAL_STATES),
         )
+        .order_by(FireEvent.last_seen_at.desc())
     )
-    fingerprint = hashlib.sha256(f"{robot.id}:{slot.id}:{msg['fire_type']}".encode()).hexdigest()
+    fingerprint = hashlib.sha256(
+        f"{robot.id}:{location_key}:{msg['fire_type']}".encode()
+    ).hexdigest()
     if by_event:
         by_event.last_seen_at = received
         by_event.occurrence_count += 1
@@ -693,10 +717,13 @@ def handle_alarm(db, robot: Robot, msg: dict, received: datetime) -> None:
         queue_event(db, "alarm.updated", serialize_model(by_event))
         return
     row = db.scalar(
-        select(FireEvent).where(
+        select(FireEvent)
+        .where(
             FireEvent.fingerprint == fingerprint,
             FireEvent.last_seen_at >= received - timedelta(minutes=5),
+            FireEvent.state.not_in(ALARM_TERMINAL_STATES),
         )
+        .order_by(FireEvent.last_seen_at.desc())
     )
     if row:
         row.last_seen_at = received
@@ -707,7 +734,9 @@ def handle_alarm(db, robot: Robot, msg: dict, received: datetime) -> None:
     row = FireEvent(
         event_code=f"FE-{received:%Y%m%d%H%M%S}-{str(uuid4())[:6]}",
         robot_id=robot.id,
-        parking_slot_id=slot.id,
+        parking_slot_id=slot.id if slot else None,
+        location_state="MATCHED" if slot else "UNMATCHED",
+        reported_slot_code=reported_code,
         detection_method="AUTO",
         fire_type=msg["fire_type"],
         confidence=msg.get("confidence"),

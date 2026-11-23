@@ -20,6 +20,21 @@ from app.db.models import (
 from app.modules.commands.service import create_durable_command, task_code
 from app.modules.navigation.route_builder import build_resumed_cruise_waypoints
 
+PREVIEW_ONLY = "PREVIEW_ONLY"
+
+
+def assert_plan_executable(plan: PatrolPlan) -> None:
+    """WEB-R1-MIN 服务端硬阻断：PREVIEW_ONLY 计划永远不能生成 Task / Command。
+
+    放在唯一的巡检领域构建入口，HMI、外部 API、task-worker 调度三条入口共用。
+    """
+    if plan.execution_mode == PREVIEW_ONLY or plan.status in {"DRAFT", "PAUSED"}:
+        raise PlatformError(
+            "PATROL_PLAN_PREVIEW_ONLY",
+            "该巡检计划为仅预演草稿，禁止生成真实任务或车辆命令",
+            details={"patrol_plan_id": plan.id, "execution_mode": plan.execution_mode},
+        )
+
 
 def build_patrol_task(
     db,
@@ -33,6 +48,7 @@ def build_patrol_task(
 ) -> tuple[Task, str]:
     """Single patrol domain builder shared by HMI and scheduler entry points."""
 
+    assert_plan_executable(plan)
     version = db.get(MapVersion, plan.map_version_id)
     if not version or not plan.enabled:
         raise PlatformError("PATROL_PLAN_INVALID", "巡检计划或地图版本无效")
@@ -134,6 +150,7 @@ def build_resumed_patrol_task(
     The new trajectory starts at the robot's current pose and continues the
     remaining canonical waypoints; it never re-runs REMOTE_WAITING or A-27.
     """
+    assert_plan_executable(plan)
     version = db.get(MapVersion, plan.map_version_id)
     trajectory = db.get(Trajectory, plan.trajectory_id) if plan.trajectory_id else None
     if not version or not plan.enabled:

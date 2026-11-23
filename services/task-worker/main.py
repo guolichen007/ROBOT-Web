@@ -486,6 +486,16 @@ def _dispatch_schedule_occurrence(db, occurrence: PatrolScheduleOccurrence) -> b
     plan = db.get(PatrolPlan, schedule.patrol_plan_id) if schedule else None
     robot = db.get(Robot, plan.robot_id) if plan else None
     version = db.get(MapVersion, plan.map_version_id) if plan else None
+    if plan is not None and (
+        plan.execution_mode == "PREVIEW_ONLY" or plan.status in {"DRAFT", "PAUSED"}
+    ):
+        # WEB-R1-MIN：仅预演计划在调度器侧同样硬阻断（不进入 build_patrol_task）。
+        occurrence.state = "REJECTED"
+        occurrence.reason_code = "PREVIEW_ONLY"
+        if schedule is not None:
+            schedule.enabled = False
+            schedule.next_run_at = None
+        return False
     if not schedule or not plan or not robot or not version or not plan.enabled:
         occurrence.state = "REJECTED"
         occurrence.reason_code = "CONFIGURATION_INVALID"
@@ -563,10 +573,14 @@ def run_patrol_scheduler(db, now: datetime) -> None:
         _dispatch_schedule_occurrence(db, occurrence)
 
     schedules = db.scalars(
-        select(PatrolSchedule).where(
+        select(PatrolSchedule)
+        .join(PatrolPlan, PatrolPlan.id == PatrolSchedule.patrol_plan_id)
+        .where(
             PatrolSchedule.enabled.is_(True),
             PatrolSchedule.next_run_at.is_not(None),
             PatrolSchedule.next_run_at <= now,
+            # WEB-R1-MIN：PREVIEW_ONLY 计划的调度永不被选中。
+            PatrolPlan.execution_mode != "PREVIEW_ONLY",
         )
     ).all()
     for schedule in schedules:

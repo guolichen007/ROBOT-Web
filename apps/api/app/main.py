@@ -30,6 +30,7 @@ from app.modules.history.router import router as history_router
 from app.modules.maps.router import router as maps_router
 from app.modules.media.router import router as media_router
 from app.modules.operations.router import router as operations_router
+from app.modules.plans.router import router as plans_router
 from app.modules.reports.router import router as reports_router
 from app.modules.robots.router import router as robots_router
 from app.modules.system.router import router as system_router
@@ -105,6 +106,7 @@ for router in (
     operations_router,
     reports_router,
     enrollment_router,
+    plans_router,
 ):
     app.include_router(router)
 

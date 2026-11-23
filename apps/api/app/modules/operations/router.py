@@ -16,6 +16,7 @@ from app.core.dependencies import AuthContext, DbSession, request_meta, require_
 from app.core.errors import PlatformError
 from app.core.events import append_event, get_redis
 from app.core.idempotency import lookup, store
+from app.core.scope import robot_visible, scoped_robot_ids
 from app.core.serialization import serialize_model
 from app.db.models import (
     Command,
@@ -25,6 +26,7 @@ from app.db.models import (
     PatrolPlan,
     PatrolPlanPoint,
     PatrolSchedule,
+    Robot,
     RobotDataChannel,
     RobotExternalAlias,
     RobotIntegrationProfile,
@@ -126,7 +128,7 @@ class PatrolPlanInput(BaseModel):
     robot_id: str
     map_version_id: str
     trajectory_id: str | None = None
-    enabled: bool = True
+    enabled: bool = False
     points: list[PatrolPlanPointInput] = Field(default_factory=list)
 
 
@@ -221,7 +223,7 @@ def navigate_to_preset(
 ) -> dict:
     """Navigate through canonical 1.2 patrol semantics and verify final pose server-side."""
 
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     endpoint = f"/robots/{robot.id}/navigate-preset"
     body = payload.model_dump()
     cached = lookup(db, actor_id=auth.user.id, endpoint=endpoint, key=idempotency_key, payload=body)
@@ -315,9 +317,9 @@ def navigate_to_preset(
 def sensor_profiles(
     robot_id: str,
     db: DbSession,
-    _: AuthContext = Depends(require_permission("robot.read")),
+    auth: AuthContext = Depends(require_permission("robot.read")),
 ) -> list[dict]:
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     return [
         serialize_model(row)
         for row in db.scalars(
@@ -335,7 +337,7 @@ def update_sensor_profile(
     db: DbSession,
     auth: AuthContext = Depends(require_permission("settings.manage")),
 ) -> dict:
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     if payload.channel != channel:
         raise PlatformError("CHANNEL_MISMATCH", "URL 与请求体通道不一致")
     row = db.scalar(
@@ -477,9 +479,9 @@ def _sector_is_on_vehicle_right(
 def detection_coverage(
     robot_id: str,
     db: DbSession,
-    _: AuthContext = Depends(require_permission("robot.read")),
+    auth: AuthContext = Depends(require_permission("robot.read")),
 ) -> dict:
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     profile = db.scalar(
         select(RobotSensorProfile).where(
             RobotSensorProfile.robot_id == robot.id,
@@ -535,9 +537,9 @@ def detection_coverage(
 def integration_status(
     robot_id: str,
     db: DbSession,
-    _: AuthContext = Depends(require_permission("robot.read")),
+    auth: AuthContext = Depends(require_permission("robot.read")),
 ) -> dict:
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     profile = db.get(RobotIntegrationProfile, robot.id)
     channels = db.scalars(
         select(RobotDataChannel).where(RobotDataChannel.robot_id == robot.id)
@@ -560,7 +562,7 @@ def update_integration(
     db: DbSession,
     auth: AuthContext = Depends(require_permission("settings.manage")),
 ) -> dict:
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     row = db.get(RobotIntegrationProfile, robot.id)
     before = serialize_model(row) if row else None
     values = payload.model_dump()
@@ -607,9 +609,9 @@ def update_integration(
 def motion_profile(
     robot_id: str,
     db: DbSession,
-    _: AuthContext = Depends(require_permission("robot.read")),
+    auth: AuthContext = Depends(require_permission("robot.read")),
 ) -> dict | None:
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     row = db.get(RobotMotionProfile, robot.id)
     return serialize_model(row) if row else None
 
@@ -622,7 +624,7 @@ def update_motion_profile(
     db: DbSession,
     auth: AuthContext = Depends(require_permission("settings.manage")),
 ) -> dict:
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     row = db.get(RobotMotionProfile, robot.id)
     before = serialize_model(row) if row else None
     values = payload.model_dump()
@@ -665,7 +667,7 @@ def confirm_alias(
     db: DbSession,
     auth: AuthContext = Depends(require_permission("settings.manage")),
 ) -> dict:
-    robot = find_robot(db, payload.robot_id)
+    robot = find_robot(db, payload.robot_id, auth)
     existing = db.scalar(
         select(RobotExternalAlias).where(RobotExternalAlias.external_id == payload.external_id)
     )
@@ -709,10 +711,14 @@ def discoveries(
 
 @router.get("/patrol-plans")
 def list_patrol_plans(
-    db: DbSession, _: AuthContext = Depends(require_permission("robot.read"))
+    db: DbSession, auth: AuthContext = Depends(require_permission("robot.read"))
 ) -> list[dict]:
     rows = []
-    for plan in db.scalars(select(PatrolPlan).order_by(PatrolPlan.code)).all():
+    query = select(PatrolPlan).order_by(PatrolPlan.code)
+    visible = scoped_robot_ids(db, auth.permissions)
+    if visible is not None:
+        query = query.where(PatrolPlan.robot_id.in_(visible or {""}))
+    for plan in db.scalars(query).all():
         item = serialize_model(plan)
         item["points"] = [
             serialize_model(point)
@@ -733,19 +739,29 @@ def create_patrol_plan(
     db: DbSession,
     auth: AuthContext = Depends(require_permission("map.edit")),
 ) -> dict:
-    robot = find_robot(db, payload.robot_id)
+    robot = find_robot(db, payload.robot_id, auth)
     version = db.get(MapVersion, payload.map_version_id)
     if not version:
         raise PlatformError("RESOURCE_NOT_FOUND", "地图版本不存在", status_code=404)
     if payload.trajectory_id and not db.get(Trajectory, payload.trajectory_id):
         raise PlatformError("RESOURCE_NOT_FOUND", "轨迹不存在", status_code=404)
+    # WEB-R1-MIN：本期所有新建计划服务端强制 PREVIEW_ONLY（与 /plans 一致），
+    # 旧接口同样不再能创建可执行计划；enabled=true 显式拒绝而不是静默降级。
+    if payload.enabled:
+        raise PlatformError(
+            "PLAN_EXECUTION_FORBIDDEN",
+            "本期巡检计划仅支持保存草稿与时间预演，禁止启用真实执行",
+            status_code=409,
+        )
     row = PatrolPlan(
         code=payload.code,
         name=payload.name,
         robot_id=robot.id,
         map_version_id=version.id,
         trajectory_id=payload.trajectory_id,
-        enabled=payload.enabled,
+        enabled=False,
+        execution_mode="PREVIEW_ONLY",
+        status="DRAFT",
         created_by=auth.user.id,
     )
     db.add(row)
@@ -776,10 +792,24 @@ def create_schedule(
     db: DbSession,
     auth: AuthContext = Depends(require_permission("patrol.create")),
 ) -> dict:
-    if not db.get(PatrolPlan, payload.patrol_plan_id):
+    plan = db.get(PatrolPlan, payload.patrol_plan_id)
+    if not plan:
         raise PlatformError("RESOURCE_NOT_FOUND", "巡检计划不存在", status_code=404)
+    owner = db.get(Robot, plan.robot_id)
+    if not owner or not robot_visible(db, auth.permissions, owner):
+        raise PlatformError("RESOURCE_NOT_FOUND", "巡检计划不存在", status_code=404)
+    if plan.execution_mode == "PREVIEW_ONLY" and payload.enabled:
+        raise PlatformError(
+            "PLAN_EXECUTION_FORBIDDEN",
+            "仅预演计划不能创建启用的调度",
+            status_code=409,
+        )
     values = payload.model_dump()
-    values["next_run_at"] = next_schedule_run(payload.cron_expression, payload.timezone)
+    values["next_run_at"] = (
+        None
+        if plan.execution_mode == "PREVIEW_ONLY"
+        else next_schedule_run(payload.cron_expression, payload.timezone)
+    )
     row = PatrolSchedule(**values, created_by=auth.user.id)
     db.add(row)
     db.flush()
@@ -805,7 +835,7 @@ def stop_current_operation(
     auth: AuthContext = Depends(require_permission("robot.control.stop")),
     idempotency_key: str = Header(alias="Idempotency-Key"),
 ) -> dict:
-    robot = find_robot(db, robot_id)
+    robot = find_robot(db, robot_id, auth)
     endpoint = f"/robots/{robot.id}/stop-operation"
     body: dict[str, Any] = {}
     cached = lookup(db, actor_id=auth.user.id, endpoint=endpoint, key=idempotency_key, payload=body)

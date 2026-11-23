@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -10,7 +11,6 @@ from sqlalchemy import select
 from app.core.audit import write_audit
 from app.core.dependencies import (
     AuthContext,
-    CurrentAuth,
     DbSession,
     request_meta,
     require_permission,
@@ -18,8 +18,10 @@ from app.core.dependencies import (
 from app.core.errors import PlatformError
 from app.core.events import append_event, get_redis
 from app.core.idempotency import lookup, store
+from app.core.scope import scoped_robot_ids
 from app.core.serialization import serialize_model
 from app.db.models import (
+    Command,
     ExtinguishPoint,
     FireEvent,
     MapVersion,
@@ -32,7 +34,11 @@ from app.db.models import (
 )
 from app.modules.commands.service import create_durable_command, task_code
 from app.modules.robots.router import find_robot
-from app.modules.tasks.patrol import build_patrol_task, build_resumed_patrol_task
+from app.modules.tasks.patrol import (
+    assert_plan_executable,
+    build_patrol_task,
+    build_resumed_patrol_task,
+)
 from app.modules.tasks.return_dock import build_return_task
 
 router = APIRouter(prefix="/api/v1/tasks", tags=["tasks"])
@@ -127,7 +133,7 @@ def create_task(
     cached = lookup(db, actor_id=auth.user.id, endpoint=endpoint, key=key, payload=body)
     if cached:
         return cached.response_json
-    robot = find_robot(db, payload.robot_id)
+    robot = find_robot(db, payload.robot_id, auth)
     if task_type == "EXTINGUISH":
         mode = payload.parameters.get("extinguish_mode")
         if mode not in EXTINGUISH_MODES:
@@ -201,28 +207,83 @@ def create_task(
     return response
 
 
+def task_view(db, row: Task, robots: dict[str, Robot] | None = None) -> dict:
+    data = serialize_model(row)
+    robot = (robots or {}).get(row.robot_id) or db.get(Robot, row.robot_id)
+    data["robot_vehicle_id"] = robot.vehicle_id if robot else None
+    params = row.parameters_json or {}
+    data["source"] = params.get("source")
+    data["patrol_plan_id"] = params.get("patrol_plan_id")
+    return data
+
+
 @router.get("")
-def list_tasks(db: DbSession, auth: CurrentAuth, limit: int = 300) -> list[dict]:
-    return [
-        serialize_model(x)
-        for x in db.scalars(
-            select(Task).order_by(Task.created_at.desc()).limit(min(limit, 1000))
-        ).all()
-    ]
+def list_tasks(
+    db: DbSession,
+    auth: AuthContext = Depends(require_permission("robot.read")),
+    limit: int = 300,
+    robot_id: str | None = None,
+    status: str | None = None,
+    type: str | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> list[dict]:
+    query = select(Task).order_by(Task.created_at.desc()).limit(min(limit, 1000))
+    visible = scoped_robot_ids(db, auth.permissions)
+    if visible is not None:
+        query = query.where(Task.robot_id.in_(visible or {""}))
+    if robot_id:
+        query = query.where(Task.robot_id == find_robot(db, robot_id, auth).id)
+    if status:
+        query = query.where(Task.status == status)
+    if type:
+        query = query.where(Task.type == type)
+    if start:
+        query = query.where(Task.created_at >= start)
+    if end:
+        query = query.where(Task.created_at <= end)
+    rows = db.scalars(query).all()
+    robots = {r.id: r for r in db.scalars(select(Robot)).all()}
+    return [task_view(db, x, robots) for x in rows]
 
 
 @router.get("/{task_id}")
-def task_detail(task_id: str, db: DbSession, auth: CurrentAuth) -> dict:
+def task_detail(
+    task_id: str,
+    db: DbSession,
+    auth: AuthContext = Depends(require_permission("robot.read")),
+) -> dict:
     row = db.get(Task, task_id)
-    if not row:
+    visible = scoped_robot_ids(db, auth.permissions)
+    if not row or (visible is not None and row.robot_id not in visible):
         raise HTTPException(404, "任务不存在")
-    result = serialize_model(row)
+    result = task_view(db, row)
     result["events"] = [
         serialize_model(x)
         for x in db.scalars(
             select(TaskEvent).where(TaskEvent.task_id == row.id).order_by(TaskEvent.created_at)
         ).all()
     ]
+    result["commands"] = [
+        {
+            "command_id": c.command_id,
+            "cmd": c.cmd,
+            "lifecycle_status": c.lifecycle_status,
+            "issued_at": c.issued_at.isoformat() if c.issued_at else None,
+            "ack_status": c.ack_status,
+            "ack_reason": c.ack_reason,
+        }
+        for c in db.scalars(
+            select(Command).where(Command.task_id == row.id).order_by(Command.issued_at)
+        ).all()
+    ]
+    plan_id = (row.parameters_json or {}).get("patrol_plan_id")
+    plan = db.get(PatrolPlan, plan_id) if plan_id else None
+    result["plan"] = (
+        {"id": plan.id, "code": plan.code, "name": plan.name, "execution_mode": plan.execution_mode}
+        if plan
+        else None
+    )
     return result
 
 
@@ -245,7 +306,7 @@ def patrol(
     )
     if cached:
         return cached.response_json
-    robot = find_robot(db, payload.robot_id)
+    robot = find_robot(db, payload.robot_id, auth)
     plan = db.scalar(
         select(PatrolPlan)
         .where(PatrolPlan.robot_id == robot.id, PatrolPlan.enabled.is_(True))
@@ -297,10 +358,12 @@ def patrol_plan_task(
     cached = lookup(db, actor_id=auth.user.id, endpoint=endpoint, key=idempotency_key, payload=body)
     if cached:
         return cached.response_json
-    robot = find_robot(db, payload.robot_id)
+    robot = find_robot(db, payload.robot_id, auth)
     plan = db.get(PatrolPlan, payload.patrol_plan_id)
     if not plan or plan.robot_id != robot.id:
         raise PlatformError("PATROL_PLAN_INVALID", "巡检计划不存在或不属于当前机器人")
+    # WEB-R1-MIN：PREVIEW_ONLY 先于位置 / 恢复检查拒绝，错误原因直指“仅预演”。
+    assert_plan_executable(plan)
 
     # Server-side hard guards: never allow a fresh full patrol from an
     # arbitrary pose, and never allow it while a patrol is resumable.
@@ -389,7 +452,7 @@ def return_dock(
     cached = lookup(db, actor_id=auth.user.id, endpoint=endpoint, key=idempotency_key, payload=body)
     if cached:
         return cached.response_json
-    robot = find_robot(db, payload.robot_id)
+    robot = find_robot(db, payload.robot_id, auth)
     # Resume context is cleared by a successful return: find the latest
     # cancelled patrol so we can reverse its route cursor back home.
     previous = db.scalar(
@@ -471,7 +534,8 @@ def cancel_task(
     if cached:
         return cached.response_json
     row = db.get(Task, task_id)
-    if not row:
+    visible = scoped_robot_ids(db, auth.permissions)
+    if not row or (visible is not None and row.robot_id not in visible):
         raise HTTPException(404, "任务不存在")
     if row.status in {"SUCCEEDED", "FAILED", "CANCELLED"}:
         raise HTTPException(409, "任务已处于终态")

@@ -117,7 +117,8 @@ export const situationLabel = map(
     FIRE_CRITICAL: '严重火情',
     ESTOP_ACTIVE: '软件急停已生效',
     DEGRADED: '系统降级',
-    NORMAL: '正常',
+    // 只表示车辆链路 / 定位 / 急停数据有效，不代表火情监测正常。
+    NORMAL: '车辆状态有效',
     OFFLINE_UNKNOWN: '现场态势未知',
   },
   '系统异常',
@@ -159,6 +160,22 @@ export const auditActionLabel = (v?: string): string =>
     MAP_PUBLISH: '发布地图版本',
     MAP_ARCHIVE: '归档地图版本',
     USER_CREATE: '创建用户',
+    USER_PROFILE_UPDATE: '修改用户资料',
+    USER_ROLES_UPDATE: '分配角色',
+    USER_DISABLE: '停用账号',
+    USER_ENABLE: '启用账号',
+    USER_PASSWORD_RESET: '管理员重置密码',
+    AUTH_CHANGE_PASSWORD: '修改密码',
+    PATROL_PLAN_DRAFT_CREATE: '新建巡检计划草稿',
+    PATROL_PLAN_UPDATE: '编辑巡检计划',
+    PATROL_PLAN_PAUSE: '暂停巡检计划',
+    PATROL_PLAN_RESUME_DRAFT: '恢复巡检计划草稿',
+    PATROL_PLAN_PREVIEW: '巡检计划时间预演',
+    PATROL_PLAN_ENABLE_REJECTED: '拒绝启用预演计划',
+    ALARM_DISMISSED: '排除报警',
+    ALARM_CLOSED: '关闭火情',
+    EXPORT_RECORDS: '导出记录',
+    EXPORT_DENIED: '导出被拒绝',
   })[String(v || '').toUpperCase()] || String(v || '')
 
 export const resourceTypeLabel = (v?: string): string =>
@@ -173,6 +190,7 @@ export const resourceTypeLabel = (v?: string): string =>
     MAP: '地图',
     MAP_VERSION: '地图版本',
     MEDIA: '媒体',
+    EXPORT: '导出',
   })[String(v || '').toUpperCase()] || String(v || '')
 
 // Generic chip label covering the common fleet/alarm/map/user/audit states.
@@ -221,6 +239,15 @@ const CHIP_LABELS: Record<string, string> = {
   GOOD: '良好',
   VALID: '有效',
   VALID_SOURCE: '有效',
+  PAUSED: '已暂停',
+  PREVIEW: '预演',
+  REJECTED: '已拒绝',
+  SKIPPED: '已跳过',
+  SUCCESS: '成功',
+  DENIED: '已拒绝',
+  DENIED_DISABLED: '停用拒绝',
+  MATCHED: '已匹配',
+  UNMATCHED: '位置未匹配',
 }
 
 export function stateChipLabel(value: string): string {
