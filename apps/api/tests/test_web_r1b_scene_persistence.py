@@ -410,3 +410,28 @@ def test_whole_version_delete_cascades_with_routes(client, auth) -> None:
             {"v": scene["scene_id"]},
         )
     assert left == 0
+
+
+def test_draft_import_never_displaces_the_operating_map_in_monitor(client, auth) -> None:
+    """Regression: importing into the operating site (code sorting first) kept the monitor map."""
+    before = client.get("/api/v1/monitor/snapshot", headers=auth).json()
+    assert before["map_version"], "seeded operating map present"
+    site_id = before["site"]["id"]
+    r = client.post(
+        "/api/v1/scenes/import",
+        data={"site_id": site_id, "map_code": "AAA_FIRST", "version": f"d{uuid4().hex[:6]}"},
+        files={
+            "yaml_file": ("sim_r002_gz.yaml", YAML.encode(), "text/yaml"),
+            "image_file": ("sim_r002_gz.pgm", PGM, "application/octet-stream"),
+        },
+        headers=auth,
+    )
+    assert r.status_code == 201, r.text
+    try:
+        after = client.get("/api/v1/monitor/snapshot", headers=auth).json()
+        assert after["map_version"]["id"] == before["map_version"]["id"]
+        assert len(after["parking_slots"]) == len(before["parking_slots"])
+    finally:
+        with SessionLocal.begin() as db:
+            db.execute(delete(MapVersion).where(MapVersion.id == r.json()["scene_id"]))
+            db.execute(delete(Map).where(Map.id == r.json()["map_id"]))

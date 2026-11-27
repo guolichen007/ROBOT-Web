@@ -1,4 +1,4 @@
-/* global process, console, Buffer, Event */
+/* global process, console, Buffer, Event, URL */
 // Firebot V2.1 WEB-2 — scene editor real-browser flow with hard assertions.
 // usage: node scripts/v21-editor-flow.mjs <outDir>
 // Loopback only. Generates a SYNTHETIC SIM map (not R002 field data, not DEMO_PARKING).
@@ -191,6 +191,41 @@ for (const [w, h] of [
   assert.match(issues, /可通行性待真实规划验证/)
   assert.doesNotMatch(issues, /缺少返航点/)
   check(`${tag} VALIDATE_PENDING_TRAVERSABILITY`, () => {})
+
+  // --- R1B persistence: save -> reload restores -> concurrent edit conflicts (no silent overwrite)
+  await page.getByTestId('se-save').click()
+  await page.getByTestId('se-persist').filter({ hasText: 'rev 2' }).waitFor()
+  const sceneId = new URL(page.url()).searchParams.get('scene')
+  assert.ok(sceneId, 'scene id in URL after server import')
+  // compare in WORLD metres (inspector), not screen pixels: the canvas may reflow after reload
+  const worldOf = async (code) => {
+    await page.locator(`[data-testid="se-point-${code}"] circle`).click()
+    return [await page.getByTestId('se-x').inputValue(), await page.getByTestId('se-y').inputValue()]
+  }
+  const insp03 = await worldOf('INSP-03')
+  await page.reload({ waitUntil: 'networkidle' })
+  await page.getByTestId('se-point-HOME-01').waitFor()
+  await page.getByText(/R-\d+ · 2 点/).waitFor()
+  assert.deepEqual(await worldOf('INSP-03'), insp03, 'INSP-03 world pose restored')
+  await page.locator('[data-testid="se-point-INSP-02"] circle').click()
+  assert.equal(await page.getByTestId('se-x').inputValue(), '1.25')
+  check(`${tag} PERSIST_RELOAD_RESTORES`, () => {})
+  const bearer = { Authorization: `Bearer ${(await login.json()).access_token}` }
+  const server = await (await page.request.get(`/api/v1/scenes/${sceneId}`, { headers: bearer })).json()
+  const other = await page.request.put(`/api/v1/scenes/${sceneId}`, {
+    headers: bearer,
+    data: { expected_revision: server.revision, points: server.points, routes: server.routes },
+  })
+  assert.equal(other.status(), 200, 'other client saved first')
+  await page.getByTestId('se-x').fill('2.5')
+  await page.getByTestId('se-x').press('Enter')
+  await page.getByTestId('se-save').click()
+  await page.getByTestId('se-error').filter({ hasText: 'REVISION_CONFLICT' }).waitFor()
+  const after = await (await page.request.get(`/api/v1/scenes/${sceneId}`, { headers: bearer })).json()
+  assert.equal(after.revision, server.revision + 1, 'only the other client advanced the revision')
+  assert.equal(after.points.find((p) => p.code === 'INSP-02').x, 1.25, 'stale edit did not overwrite')
+  check(`${tag} PERSIST_CONFLICT_NO_SILENT_OVERWRITE`, () => {})
+  await page.getByTestId('se-error-dismiss').click()
 
   const popup = page.getByTestId('alarm-popup')
   await popup.waitFor({ timeout: 8000 })

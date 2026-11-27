@@ -47,7 +47,7 @@ PUBLISHED --> ARCHIVED（不可再被新任务引用）
 
 ## 4. 原始地图导入安全（WEB-2 实施约束）
 
-YAML 只用 `yaml.safe_load`；YAML ≤ 64 KiB、图像 ≤ 20 MiB、像素宽高各 ≤ 8192 且总像素 ≤ 32M；`image:` 只允许与上传包同目录的文件名（拒绝绝对路径、`..`、URL、符号链接）；`resolution`>0 且 ≤1、`origin` 三元有限数、`occupied_thresh`>`free_thresh`、`negate`∈{0,1}；拒绝 NaN/Infinity、重复键、YAML 别名炸弹。前端解析仅用于预览，服务端必须重复校验。
+YAML 用严格白名单解析（不使用通用 YAML 解析器；前后端同规则：`apps/web/src/lib/nav-map.ts`、`apps/api/app/modules/scenes/navmap.py`）；YAML ≤ 64 KiB、图像 ≤ 10 MiB（R1B 与 API 上传上限统一，取得真实地图后再评估）、像素宽高各 ≤ 8192 且总像素 ≤ 32M；`image:` 只允许与上传包同目录的文件名（拒绝绝对路径、`..`、URL、符号链接）；`resolution`>0 且 ≤1、`origin` 三元有限数、`occupied_thresh`>`free_thresh`、`negate`∈{0,1}；拒绝 NaN/Infinity、重复键、YAML 别名炸弹。前端解析仅用于预览，服务端必须重复校验。
 
 ## 5. 字段映射（复用现有表）
 

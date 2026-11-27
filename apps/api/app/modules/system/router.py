@@ -364,7 +364,15 @@ def monitor_snapshot(
     )
     visible = scoped_robot_ids(db, auth.permissions)
     map_row = (
-        db.scalar(select(Map).where(Map.site_id == site.id).order_by(Map.code)) if site else None
+        # WEB-R1B: a map with an active (published) version wins; a draft-only V2.1 import
+        # must never displace the operating map just because its code sorts first.
+        db.scalar(
+            select(Map)
+            .where(Map.site_id == site.id)
+            .order_by(Map.active_version_id.is_(None), Map.code)
+        )
+        if site
+        else None
     )
     version = (
         db.get(MapVersion, map_row.active_version_id)

@@ -12,7 +12,8 @@ import type { MapGeometry, Point } from '@/lib/map-adapter'
 
 export const NAV_MAP_LIMITS = {
   yamlMaxBytes: 64 * 1024,
-  imageMaxBytes: 20 * 1024 * 1024,
+  // WEB-R1B: unified with the API upload limit (settings.upload_max_bytes = 10 MiB)
+  imageMaxBytes: 10 * 1024 * 1024,
   maxSidePx: 8192,
   maxPixels: 32_000_000,
   maxResolution: 1,

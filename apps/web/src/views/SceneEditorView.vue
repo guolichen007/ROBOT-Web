@@ -4,8 +4,9 @@
       <div class="se-title">
         <h1>地图场景编辑器</h1>
         <span class="se-status" :data-status="editor?.scene.status ?? 'NONE'">{{ statusText }}</span>
-        <span v-if="editor" class="se-note"
-          >本地草稿 · 未保存到服务器 · 发布与车端加载需服务端（待审查）· 发布≠运动授权</span
+        <span v-if="editor" class="se-note" data-testid="se-persist"
+          >{{ sceneId ? `服务器草稿 rev ${serverRevision}` : '本地草稿 · 未保存到服务器' }} ·
+          发布与车端加载待后续批次 · 发布≠运动授权</span
         >
       </div>
       <div class="se-actions">
@@ -35,6 +36,14 @@
         >
           重做
         </button>
+        <button
+          type="button"
+          :disabled="!editor || !sceneId || saving || editor.scene.status !== 'DRAFT'"
+          data-testid="se-save"
+          @click="save"
+        >
+          {{ saving ? '保存中…' : '保存草稿' }}
+        </button>
         <button type="button" :disabled="!editor" data-testid="se-validate" @click="runValidate">
           发布前校验
         </button>
@@ -59,7 +68,10 @@
         导入 ROS map_server 导出的 YAML 与同名 PGM/PNG
         后开始编辑。文件只在浏览器内解析预览，服务端将重复校验。
       </p>
-      <p>限制：YAML ≤ 64 KiB，图像 ≤ 20 MiB，单边 ≤ 8192 px；YAML 只允许引用同时上传的同名图像。</p>
+      <p>
+        限制：YAML ≤ 64 KiB，图像 ≤ 10 MiB（与 API 上传上限一致），单边 ≤ 8192 px；YAML
+        只允许引用同时上传的同名图像。导入后服务端复检并保存为草稿。
+      </p>
     </div>
 
     <div v-else class="se-body">
@@ -271,6 +283,9 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, triggerRef, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { api } from '@/lib/api'
+import { apiErrorCode, importScene, loadNavImage, loadScene, saveScene, toEditorState } from '@/lib/scene-api'
 import { MapAdapter, type Point } from '@/lib/map-adapter'
 import {
   NavMapGrid,
@@ -289,6 +304,12 @@ import {
   type PointKind,
   type ScenePoint,
 } from '@/lib/scene-editor'
+
+const route = useRoute()
+const router = useRouter()
+const sceneId = ref<string | null>(null)
+const serverRevision = ref(0)
+const saving = ref(false)
 
 const kindLabel: Record<PointKind, string> = {
   INSPECTION: '巡检点',
@@ -555,8 +576,67 @@ async function onImport(e: Event): Promise<void> {
     )
     selectedId.value = null
     issues.value = []
+    // local preview passed -> server validates again and becomes the authority
+    const sites = (await api.get('/sites')).data as { id: string }[]
+    if (!sites.length) throw new Error('没有可用站点')
+    const created = await importScene(
+      sites[0].id,
+      mapCode.slice(0, 64) || 'NAV_MAP',
+      `d${Date.now().toString(36)}`,
+      yamlFile,
+      imageFile,
+    )
+    await openServerScene(created.scene_id, imageFile)
+    await router.replace({ query: { ...route.query, scene: created.scene_id } })
   } catch (err) {
-    error.value = `导入被拒绝：${(err as Error).message}`
+    const code = apiErrorCode(err)
+    error.value = `导入被拒绝：${code || (err as Error).message}`
+  }
+}
+
+async function openServerScene(id: string, localImage?: File): Promise<void> {
+  const s = await loadScene(id)
+  const bytes = localImage ? new Uint8Array(await localImage.arrayBuffer()) : await loadNavImage(s)
+  const name = localImage?.name ?? (bytes[0] === 0x89 ? 'nav.png' : 'nav.pgm')
+  const raster = parseRaster(name, bytes)
+  const m: NavMapMeta = {
+    image: name,
+    resolution: s.nav_map.resolution_m_per_px,
+    origin: { x: s.nav_map.origin.x, y: s.nav_map.origin.y, yaw: s.nav_map.origin.yaw ?? 0 },
+    negate: s.nav_map.negate,
+    occupied_thresh: s.nav_map.occupied_thresh,
+    free_thresh: s.nav_map.free_thresh,
+    mode: 'trinary',
+  }
+  const g = new NavMapGrid(m, raster.width, raster.height)
+  meta.value = m
+  grid.value = g
+  adapter.setMap(g.geometry())
+  adapter.reset()
+  preview.value = await rasterPreview(raster, localImage ?? new File([new Uint8Array(bytes)], name))
+  editor.value = new SceneEditor(toEditorState(s), g)
+  sceneId.value = s.scene_id
+  serverRevision.value = s.revision
+  selectedId.value = null
+}
+
+async function save(): Promise<void> {
+  if (!editor.value || !sceneId.value) return
+  saving.value = true
+  try {
+    const saved = await saveScene(sceneId.value, serverRevision.value, editor.value.scene)
+    serverRevision.value = saved.revision
+    editor.value.markSaved()
+    error.value = ''
+    triggerRef(editor)
+  } catch (err) {
+    const code = apiErrorCode(err)
+    error.value =
+      code === 'REVISION_CONFLICT'
+        ? '保存被拒绝：REVISION_CONFLICT · 场景已被他人修改，本地修改未覆盖服务器；请重新加载后再编辑'
+        : `保存被拒绝：${code || (err as Error).message}`
+  } finally {
+    saving.value = false
   }
 }
 
@@ -568,6 +648,12 @@ function onKey(e: KeyboardEvent): void {
 
 onMounted(() => {
   window.addEventListener('keydown', onKey)
+  const id = typeof route.query.scene === 'string' ? route.query.scene : ''
+  if (id) {
+    openServerScene(id).catch((err) => {
+      error.value = `加载场景失败：${apiErrorCode(err) || (err as Error).message}`
+    })
+  }
   observer = new ResizeObserver(([entry]) => {
     vp.width = Math.max(320, Math.floor(entry.contentRect.width))
     vp.height = Math.max(320, Math.floor(entry.contentRect.height))
