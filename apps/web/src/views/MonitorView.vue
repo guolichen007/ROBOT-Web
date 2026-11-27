@@ -11,6 +11,7 @@ import VehicleAgentKpis from '@/components/monitor/VehicleAgentKpis.vue'
 import PrimaryAlarmPanel from '@/components/monitor/PrimaryAlarmPanel.vue'
 import OperationsCommandDock from '@/components/monitor/OperationsCommandDock.vue'
 import ConsoleStatusBar from '@/components/monitor/ConsoleStatusBar.vue'
+import { useOperationReadiness } from '@/composables/useOperationReadiness'
 import ManualControl from '@/components/ManualControl.vue'
 import DeviceSnapshot from '@/components/monitor/DeviceSnapshot.vue'
 import ProgressRingGate4 from '@/components/monitor/ProgressRingGate4.vue'
@@ -93,15 +94,30 @@ const trajectory = computed(() => {
 const readOnly = computed(
   () => robot.value?.integration?.source_kind === 'ROS_COMPAT' || robot.value?.enabled === false,
 )
-const patrolReady = computed(() => robot.value?.autonomous_task_ready?.patrol === true)
-const returnReady = computed(() => robot.value?.autonomous_task_ready?.return_dock === true)
-const stopReady = computed(() => robot.value?.safety_command_ready?.stop_motion === true)
-const estopReady = computed(() => robot.value?.safety_command_ready?.emergency_stop === true)
-const resetEstopReady = computed(() => robot.value?.safety_command_ready?.reset_estop === true)
+// WEB-R1B: OperationReadiness is the single authority (legacy keys only when the server lacks it;
+// a stale/unavailable answer disables everything).
+const ops = useOperationReadiness(robot)
+const opsReadiness = ops.readiness
+const opsAuthority = ops.authority
+const patrolReady = computed(() =>
+  ops.allowed('patrol_start', robot.value?.autonomous_task_ready?.patrol === true),
+)
+const returnReady = computed(() =>
+  ops.allowed('return_home', robot.value?.autonomous_task_ready?.return_dock === true),
+)
+const stopReady = computed(() =>
+  ops.allowed('stop_motion', robot.value?.safety_command_ready?.stop_motion === true),
+)
+const estopReady = computed(() =>
+  ops.allowed('emergency_stop', robot.value?.safety_command_ready?.emergency_stop === true),
+)
+const resetEstopReady = computed(() =>
+  ops.allowed('reset_estop', robot.value?.safety_command_ready?.reset_estop === true),
+)
 // WEB-1：保护停车只呈现服务端资格（OperationReadiness.actions.protective_stop）。
 // 当前服务端尚未提供该动作 → 恒为不可用并显示原因，绝不在前端推导或伪造。
 const protectiveStop = computed(() => {
-  const entry = robot.value?.operation_readiness?.actions?.protective_stop
+  const entry = ops.readiness.value?.actions?.protective_stop
   if (!entry) return { allowed: false, reason: '服务端尚未提供保护停车能力（未实现）' }
   return {
     allowed: false,
@@ -128,6 +144,11 @@ const controlReason = computed(
     '控制链路未验证',
 )
 const dockReason = computed(() => {
+  if (ops.authority.value === 'STALE') return '服务端控制资格未及时更新，全部操作暂不可用'
+  const r = ops.readiness.value
+  if (ops.authority.value === 'SERVER' && r?.control_frozen) {
+    return `控制已冻结：${r.freeze_reasons.map((code) => reasonCodeLabel(code) || code).join('、')}`
+  }
   if (readOnly.value) return '当前为只读接入，控制未开放'
   if (readinessText.value) return readinessText.value
   const disabled = robot.value?.control_disabled_reason
@@ -550,7 +571,7 @@ onUnmounted(() => {
 <template>
   <main class="yd-monitor-view console-v21" :class="{ 'is-alarm': Boolean(primaryAlarm) }">
     <header class="console-head">
-      <ConsoleStatusBar />
+      <ConsoleStatusBar :readiness="opsReadiness" :readiness-authority="opsAuthority" />
       <VehicleAgentKpis />
     </header>
     <div v-if="notice" class="toast">{{ notice }}</div>

@@ -1,40 +1,56 @@
 <script setup lang="ts">
 /**
- * WEB-1 compact console status bar (DESIGN.md §3.1 / §4).
- * Four independent dimensions — 通信 / 设备 / 任务 / 安全 — never merged into one colour.
- * Everything not positively known from the server is shown as 未知 (never 0, never inferred).
+ * WEB-1 compact console status bar (DESIGN.md §3.1 / §4), WEB-R1B semantics:
+ * - 平台 (browser↔platform WebSocket) and 车辆链路 (vehicle↔platform data age) are separate.
+ * - 在线 ≠ 就绪: "控制就绪" comes only from the server OperationReadiness.
+ * - 无活动任务记录 ≠ 空闲: "空闲" only when the vehicle itself reports IDLE on live data.
+ * - 部署环境 (server deployment) and 车辆来源 (vehicle namespace / simulation) are separate badges.
+ * - future-dated data is an anomaly, never "live".
+ * Anything not positively known from the server is shown as 未知 (never 0, never inferred).
  */
 import { computed } from 'vue'
 import { useMonitorStore } from '@/stores/monitor'
 import { useSystemClock } from '@/composables/useSystemClock'
+import type { OperationReadiness } from '@/types'
 
+const props = withDefaults(
+  defineProps<{ readiness?: OperationReadiness | null; readinessAuthority?: string }>(),
+  { readiness: null, readinessAuthority: 'LEGACY' },
+)
 const monitor = useMonitorStore()
 const { now } = useSystemClock()
 const robot = computed(() => monitor.robot)
 
 type Level = 'ok' | 'warn' | 'bad' | 'unknown'
 interface Dim {
-  key: 'link' | 'device' | 'task' | 'safety'
+  key: 'platform' | 'link' | 'ready' | 'task' | 'safety'
   label: string
   value: string
   level: Level
 }
 
 const SIM_NAMESPACE = /^firebot-sim-[a-z0-9]+(?:-[a-z0-9]+)*$/
-const environment = computed<'SIM' | 'REAL' | null>(() => {
+const FUTURE_SKEW_S = 2
+const vehicleSource = computed<'SIM' | 'REAL' | null>(() => {
   const r = robot.value
   if (!r) return null
   return r.simulation?.simulated === true || SIM_NAMESPACE.test(r.vehicle_id) ? 'SIM' : 'REAL'
 })
+const deployment = computed(() => {
+  const d = robot.value?.deployment_environment
+  return d === 'REAL' || d === 'SIM' ? d : null
+})
+const fixture = computed(() => robot.value?.integration?.source_kind === 'MOCK')
 
 const ageSeconds = computed(() => {
   const at = robot.value?.server_received_at
   if (!at) return null
-  return Math.max(0, ((now.value?.getTime() ?? Date.now()) - Date.parse(at)) / 1000)
+  return ((now.value?.getTime() ?? Date.now()) - Date.parse(at)) / 1000
 })
-const dataQuality = computed<'LIVE' | 'STALE' | 'OFFLINE' | 'UNKNOWN'>(() => {
+const dataQuality = computed<'LIVE' | 'STALE' | 'OFFLINE' | 'UNKNOWN' | 'FUTURE'>(() => {
   const age = ageSeconds.value
-  if (age === null) return 'UNKNOWN'
+  if (age === null || Number.isNaN(age)) return 'UNKNOWN'
+  if (age < -FUTURE_SKEW_S) return 'FUTURE'
   const stale = robot.value?.integration?.stale_seconds ?? 3
   const offline = robot.value?.integration?.offline_seconds ?? 10
   if (age >= offline) return 'OFFLINE'
@@ -57,25 +73,31 @@ const taskLabel: Record<string, string> = {
 
 const dims = computed<Dim[]>(() => {
   const r = robot.value
-  const link: Dim = !monitor.connected
-    ? { key: 'link', label: '通信', value: '平台连接中断', level: 'bad' }
-    : dataQuality.value === 'LIVE'
-      ? { key: 'link', label: '通信', value: '实时', level: 'ok' }
-      : dataQuality.value === 'STALE'
-        ? { key: 'link', label: '通信', value: `陈旧 ${ageSeconds.value?.toFixed(0)}s`, level: 'warn' }
-        : dataQuality.value === 'OFFLINE'
-          ? { key: 'link', label: '通信', value: '车辆离线', level: 'bad' }
-          : { key: 'link', label: '通信', value: '未知', level: 'unknown' }
-  const online = r?.online_state
-  const device: Dim =
-    online === 'ONLINE'
-      ? { key: 'device', label: '设备', value: '在线', level: 'ok' }
-      : online === 'STALE'
-        ? { key: 'device', label: '设备', value: '陈旧', level: 'warn' }
-        : online === 'OFFLINE'
-          ? { key: 'device', label: '设备', value: '离线', level: 'bad' }
-          : { key: 'device', label: '设备', value: '未知', level: 'unknown' }
+  const platform: Dim = monitor.connected
+    ? { key: 'platform', label: '平台', value: '已连接', level: 'ok' }
+    : { key: 'platform', label: '平台', value: '连接中断', level: 'bad' }
+  const q = dataQuality.value
+  const link: Dim =
+    q === 'FUTURE'
+      ? { key: 'link', label: '车辆链路', value: '时间异常（超前）', level: 'bad' }
+      : q === 'LIVE'
+        ? { key: 'link', label: '车辆链路', value: '实时', level: 'ok' }
+        : q === 'STALE'
+          ? { key: 'link', label: '车辆链路', value: `陈旧 ${ageSeconds.value?.toFixed(0)}s`, level: 'warn' }
+          : q === 'OFFLINE'
+            ? { key: 'link', label: '车辆链路', value: '离线', level: 'bad' }
+            : { key: 'link', label: '车辆链路', value: '未知', level: 'unknown' }
+  const ops = props.readiness
+  const ready: Dim =
+    props.readinessAuthority !== 'SERVER' || !ops
+      ? { key: 'ready', label: '控制就绪', value: '未知', level: 'unknown' }
+      : ops.control_frozen
+        ? { key: 'ready', label: '控制就绪', value: '已冻结', level: 'warn' }
+        : ops.actions.stop_motion?.allowed
+          ? { key: 'ready', label: '控制就绪', value: '就绪', level: 'ok' }
+          : { key: 'ready', label: '控制就绪', value: '未就绪', level: 'warn' }
   const t = activeTask.value
+  const mode = (r?.current_mode ?? r?.mode) as string | undefined
   const task: Dim = t
     ? {
         key: 'task',
@@ -83,19 +105,17 @@ const dims = computed<Dim[]>(() => {
         value: `${taskLabel[t.type] ?? t.type} · ${Math.round(Number(t.progress) || 0)}%`,
         level: 'ok',
       }
-    : r
-      ? { key: 'task', label: '任务', value: '空闲', level: 'ok' }
-      : { key: 'task', label: '任务', value: '未知', level: 'unknown' }
+    : q === 'LIVE' && mode === 'IDLE'
+      ? { key: 'task', label: '任务', value: '空闲（车端上报）', level: 'ok' }
+      : { key: 'task', label: '任务', value: '无任务记录 · 车端状态未知', level: 'unknown' }
   const estopSupport = r?.data_channels?.estop?.support_state
-  // 安全方向：车端报告“急停已锁存”永远直接显示，绝不因通道未确认而降级为“未知”；
-  // 只有“未急停”在急停通道未 CONNECTED 时才降级为“未知”（不能证明未急停）。
   const safety: Dim =
     r?.estop_active === true
       ? { key: 'safety', label: '安全', value: '软件急停锁存', level: 'bad' }
       : estopSupport === 'CONNECTED' && r?.estop_active === false
         ? { key: 'safety', label: '安全', value: '未急停', level: 'ok' }
         : { key: 'safety', label: '安全', value: '急停状态未知', level: 'unknown' }
-  return [link, device, task, safety]
+  return [platform, link, ready, task, safety]
 })
 
 const pose = computed(() => {
@@ -140,16 +160,23 @@ function select(event: Event): void {
     </label>
     <span
       class="console-env"
-      :data-env="environment ?? 'UNKNOWN'"
+      :data-env="deployment ?? 'UNKNOWN'"
+      data-testid="console-deploy"
+      title="平台部署环境（服务端 FIREBOT_DEPLOYMENT_ENV）"
+      >部署 {{ deployment ?? '未知' }}</span
+    >
+    <span
+      class="console-env"
+      :data-env="vehicleSource ?? 'UNKNOWN'"
       data-testid="console-env"
       :title="
-        environment === 'SIM'
-          ? '模拟环境：数据与控制均与真实车辆隔离'
-          : environment === 'REAL'
-            ? '真实车辆'
-            : '环境未知'
+        vehicleSource === 'SIM'
+          ? '模拟车辆：数据与控制均与真实车辆隔离'
+          : vehicleSource === 'REAL'
+            ? '真实车辆身份'
+            : '车辆来源未知'
       "
-      >{{ environment ?? '环境未知' }}</span
+      >{{ vehicleSource ? `车辆 ${vehicleSource}` : '车辆来源未知' }}{{ fixture ? ' · 演示数据' : '' }}</span
     >
     <ul class="console-dims">
       <li v-for="dim in dims" :key="dim.key" :data-dim="dim.key" :data-level="dim.level">

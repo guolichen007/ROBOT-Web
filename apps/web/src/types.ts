@@ -16,9 +16,8 @@ export interface RobotState {
   // G3：服务端登记的模拟来源（SIMULATED_VEHICLE_IDS）；真实车辆为 null
   simulation?: { simulated: true; label: 'SIMULATED'; source: string } | null
   /** Contract 2.1 OperationReadiness (server-only source of truth); absent until the API provides it. */
-  operation_readiness?: {
-    actions?: Record<string, { allowed: boolean; reasons: string[]; required_permission?: string }>
-  } | null
+  operation_readiness?: OperationReadiness | null
+  deployment_environment?: 'REAL' | 'SIM' | string
   agent_state?: AgentState
   id?: string
   vehicle_id: string
@@ -343,4 +342,21 @@ export interface RealtimeEvent {
   stream_id: string
   event_type: string
   data: Record<string, any>
+}
+
+/** Contract 2.1.0-draft.3 OperationReadiness — the console's single control authority. */
+export interface OperationReadiness {
+  vehicle_id: string
+  environment: 'REAL' | 'SIM'
+  evaluated_at: string
+  valid_until: string
+  boot_id: string | null
+  source: 'SERVER_OPERATION_READINESS' | 'LEGACY_ROBOT_READINESS'
+  control_frozen: boolean
+  freeze_scope: 'ALL' | 'ALL_EXCEPT_STOP_MOTION' | null
+  freeze_reasons: string[]
+  actions: Record<
+    string,
+    { allowed: boolean; reasons: string[]; required_permission?: string; permitted_for_user?: boolean }
+  >
 }

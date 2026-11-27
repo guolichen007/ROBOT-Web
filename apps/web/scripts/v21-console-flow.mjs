@@ -19,6 +19,7 @@ if (!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(base)) {
   process.exit(2)
 }
 const out = process.argv[2] || '/tmp/console-flow'
+const VEHICLE = process.env.CONSOLE_VEHICLE || 'R001'
 const only = (process.env.CONSOLE_STATES || 'normal,task,fault').split(',')
 mkdirSync(out, { recursive: true })
 const VIEWPORTS = [
@@ -61,7 +62,7 @@ const api = async (method, path, data) => {
 }
 const robotState = async () => {
   const snap = (await api('GET', '/monitor/snapshot')).body
-  const r = snap.robots.find((x) => x.vehicle_id === 'R001')
+  const r = snap.robots.find((x) => x.vehicle_id === VEHICLE)
   return {
     online_state: r?.online_state,
     estop_active: r?.estop_active,
@@ -81,7 +82,7 @@ const robotState = async () => {
 
 async function robotRowId() {
   const snap = (await api('GET', '/monitor/snapshot')).body
-  return snap.robots.find((x) => x.vehicle_id === 'R001')?.id
+  return snap.robots.find((x) => x.vehicle_id === VEHICLE)?.id
 }
 
 async function geometry(tag, w, h, expect) {
@@ -138,7 +139,7 @@ async function geometry(tag, w, h, expect) {
     const text = await page.locator(`[data-dim="${k}"]`).innerText()
     assert.match(text, v, `${tag} dim ${k}: ${text}`)
   }
-  const file = `r1a_console_${tag}_${w}x${h}.png`
+  const file = `r1b_console_${VEHICLE}_${tag}_${w}x${h}.png`
   await page.screenshot({ path: join(out, file) })
   results.push(`${tag}_${w}x${h}`)
   return {
@@ -167,13 +168,31 @@ async function waitFor(fn, label, ms = 20000) {
   throw new Error(`timeout: ${label}`)
 }
 
-await waitFor(async () => (await robotState()).online_state === 'ONLINE', 'R001 online')
+await waitFor(async () => (await robotState()).online_state === 'ONLINE', `${VEHICLE} online`)
 await page.goto('/monitor', { waitUntil: 'networkidle' })
-if ((await page.getByTestId('console-vehicle').inputValue()) !== 'R001') {
-  await page.getByTestId('console-vehicle').selectOption('R001')
+if ((await page.getByTestId('console-vehicle').inputValue()) !== VEHICLE) {
+  await page.getByTestId('console-vehicle').selectOption(VEHICLE)
 }
 
-if (only.includes('normal')) await stateRun('normal', { link: /实时/, device: /在线/, task: /空闲/ })
+if (only.includes('normal'))
+  await stateRun('normal', {
+    platform: /已连接/,
+    link: /实时/,
+    ready: /就绪/,
+    task: /空闲（车端上报）|车端状态未知/,
+  })
+
+// Server says frozen (e.g. REAL vehicle under the default freeze, or wrong deployment env):
+// the console must show it and every motion button must be disabled — no front-end override.
+if (only.includes('frozen')) {
+  await stateRun('frozen', { platform: /已连接/, ready: /已冻结/ })
+  const dock = page.locator('.operations-command-dock')
+  for (const name of [/开始巡检|继续巡检/, /停止/, /返回等待区|已在等待区|继续返回/]) {
+    assert.equal(await dock.getByRole('button', { name }).first().isDisabled(), true, `${name} disabled`)
+  }
+  assert.match(await dock.innerText(), /控制已冻结/)
+  results.push('frozen_buttons_disabled')
+}
 
 if (only.includes('task')) {
   // a patrol (legacy executable plan in the test seed) runs long enough to observe; return-dock
@@ -182,7 +201,7 @@ if (only.includes('task')) {
   const rid = await robotRowId()
   const plan = plans.find((p) => p.robot_id === rid && p.execution_mode !== 'PREVIEW_ONLY')
   const created = plan
-    ? await api('POST', '/tasks/patrol-plan', { robot_id: 'R001', patrol_plan_id: plan.id })
+    ? await api('POST', '/tasks/patrol-plan', { robot_id: VEHICLE, patrol_plan_id: plan.id })
     : { status: 0, body: 'no executable patrol plan in seed' }
   results.push(`task_create_http_${created.status}`)
   if (created.status < 300) {
@@ -196,7 +215,7 @@ if (only.includes('task')) {
 }
 
 if (only.includes('fault')) {
-  const estop = await api('POST', '/robots/R001/commands/emergency-stop', {})
+  const estop = await api('POST', `/robots/${VEHICLE}/commands/emergency-stop`, {})
   results.push(`estop_http_${estop.status}`)
   await waitFor(async () => (await robotState()).estop_active === true, 'estop latched by vehicle', 15000)
   await stateRun('fault', { safety: /软件急停锁存/ })
@@ -213,7 +232,7 @@ if (only.includes('offline')) {
     30000,
   )
   await page.waitForTimeout(11000)
-  await stateRun('offline', { link: /离线|陈旧|中断/, device: /离线|陈旧/ })
+  await stateRun('offline', { link: /离线|陈旧/, ready: /未就绪|已冻结|未知/ })
   const posed = await page.getByTestId('console-pose').innerText()
   assert.match(posed, /未知|旧数据/, 'offline pose must be unknown or marked old')
 }
@@ -221,7 +240,7 @@ if (only.includes('offline')) {
 assert.deepEqual(pageErrors, [], 'no page errors')
 await browser.close()
 writeFileSync(
-  join(out, `console-states-${only.join('-')}.json`),
+  join(out, `console-states-${VEHICLE}-${only.join('-')}.json`),
   JSON.stringify({ results, states }, null, 2),
 )
 console.log(`CONSOLE_FLOW PASS ${results.length} :: ${results.join(' ')}`)

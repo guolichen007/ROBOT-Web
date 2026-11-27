@@ -1,0 +1,117 @@
+{
+  "results": [
+    "normal_1366x768",
+    "normal_1920x1080",
+    "estop_http_202",
+    "fault_1366x768",
+    "fault_1920x1080"
+  ],
+  "states": [
+    {
+      "state": "normal",
+      "server": {
+        "online_state": "ONLINE",
+        "estop_active": false,
+        "boot_id": "8af162df-64a3-4e82-93c5-235935500ea6",
+        "x": 1.2,
+        "y": 1.2,
+        "theta": 1.5707963267948966,
+        "server_received_at": "2026-11-27T05:10:33.090275+00:00",
+        "safety_command_ready": {
+          "stop_motion": true,
+          "emergency_stop": true,
+          "reset_estop": true
+        },
+        "autonomous_task_ready": {
+          "patrol": true,
+          "extinguish": true,
+          "return_dock": true,
+          "cancel_task": true
+        },
+        "manual_control_ready": true,
+        "active_tasks": []
+      },
+      "shots": [
+        {
+          "viewport": "1366x768",
+          "file": "r1b_console_firebot-sim-r002-01_normal_1366x768.png",
+          "map": {
+            "w": 752,
+            "h": 392
+          },
+          "action_bar_bottom": 758,
+          "protective_stop": 758,
+          "popup_overlap": null,
+          "status": "车辆\nfirebot-sim-r002-01\nR001\nR002\n部署 SIM\n车辆 SIM · 演示数据\n平台\n已连接\n车辆链路\n实时\n控制就绪\n就绪\n任务\n空闲（车端上报）\n安全\n急停状态未知\n\nX 1.20\nY 1.20\nyaw 90.0°\n定位 OK\n13:10:35"
+        },
+        {
+          "viewport": "1920x1080",
+          "file": "r1b_console_firebot-sim-r002-01_normal_1920x1080.png",
+          "map": {
+            "w": 1183,
+            "h": 685
+          },
+          "action_bar_bottom": 1066,
+          "protective_stop": 1066,
+          "popup_overlap": null,
+          "status": "车辆\nfirebot-sim-r002-01\nR001\nR002\n部署 SIM\n车辆 SIM · 演示数据\n平台\n已连接\n车辆链路\n实时\n控制就绪\n就绪\n任务\n空闲（车端上报）\n安全\n急停状态未知\n\nX 1.20\nY 1.20\nyaw 90.0°\n定位 OK\n13:10:38"
+        }
+      ]
+    },
+    {
+      "state": "fault",
+      "server": {
+        "online_state": "ONLINE",
+        "estop_active": true,
+        "boot_id": "8af162df-64a3-4e82-93c5-235935500ea6",
+        "x": 1.2,
+        "y": 1.2,
+        "theta": 1.5707963267948966,
+        "server_received_at": "2026-11-27T05:10:38.902010+00:00",
+        "safety_command_ready": {
+          "stop_motion": true,
+          "emergency_stop": true,
+          "reset_estop": true
+        },
+        "autonomous_task_ready": {
+          "patrol": false,
+          "extinguish": false,
+          "return_dock": false,
+          "cancel_task": false
+        },
+        "manual_control_ready": false,
+        "active_tasks": []
+      },
+      "shots": [
+        {
+          "viewport": "1366x768",
+          "file": "r1b_console_firebot-sim-r002-01_fault_1366x768.png",
+          "map": {
+            "w": 752,
+            "h": 392
+          },
+          "action_bar_bottom": 758,
+          "protective_stop": 758,
+          "popup_overlap": null,
+          "status": "车辆\nfirebot-sim-r002-01\nR001\nR002\n部署 SIM\n车辆 SIM · 演示数据\n平台\n已连接\n车辆链路\n实时\n控制就绪\n就绪\n任务\n无任务记录 · 车端状态未知\n安全\n软件急停锁存\n\nX 1.20\nY 1.20\nyaw 90.0°\n定位 OK\n13:10:41"
+        },
+        {
+          "viewport": "1920x1080",
+          "file": "r1b_console_firebot-sim-r002-01_fault_1920x1080.png",
+          "map": {
+            "w": 1183,
+            "h": 674
+          },
+          "action_bar_bottom": 1066,
+          "protective_stop": 1066,
+          "popup_overlap": null,
+          "status": "车辆\nfirebot-sim-r002-01\nR001\nR002\n部署 SIM\n车辆 SIM · 演示数据\n平台\n已连接\n车辆链路\n实时\n控制就绪\n就绪\n任务\n无任务记录 · 车端状态未知\n安全\n软件急停锁存\n\nX 1.20\nY 1.20\nyaw 90.0°\n定位 OK\n13:10:44"
+        }
+      ],
+      "estop_command": {
+        "lifecycle": "CREATED",
+        "cmd": "emergency_stop"
+      }
+    }
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "results": [
+    "offline_1366x768",
+    "offline_1920x1080"
+  ],
+  "states": [
+    {
+      "state": "offline",
+      "server": {
+        "online_state": "OFFLINE",
+        "estop_active": false,
+        "boot_id": "6ecb2f31-8f33-4393-8600-4ddb785b9ff5",
+        "x": 1.2,
+        "y": 1.2,
+        "theta": 1.5707963267948966,
+        "server_received_at": "2026-11-27T05:12:10.072026+00:00",
+        "safety_command_ready": {
+          "stop_motion": false,
+          "emergency_stop": false,
+          "reset_estop": false
+        },
+        "autonomous_task_ready": {
+          "patrol": false,
+          "extinguish": false,
+          "return_dock": false,
+          "cancel_task": false
+        },
+        "manual_control_ready": false,
+        "active_tasks": [
+          {
+            "type": "PATROL",
+            "status": "ACCEPTED",
+            "progress": 0
+          }
+        ]
+      },
+      "shots": [
+        {
+          "viewport": "1366x768",
+          "file": "r1b_console_R001_offline_1366x768.png",
+          "map": {
+            "w": 752,
+            "h": 471
+          },
+          "action_bar_bottom": 758,
+          "protective_stop": 758,
+          "popup_overlap": null,
+          "status": "车辆\nR001\nR002\n部署 REAL\n车辆 REAL · 演示数据\n平台\n已连接\n车辆链路\n离线\n控制就绪\n未就绪\n任务\n巡检 · 0%\n安全\n急停状态未知\n\n位姿 未知"
+        },
+        {
+          "viewport": "1920x1080",
+          "file": "r1b_console_R001_offline_1920x1080.png",
+          "map": {
+            "w": 1183,
+            "h": 726
+          },
+          "action_bar_bottom": 1066,
+          "protective_stop": 1066,
+          "popup_overlap": null,
+          "status": "车辆\nR001\nR002\n部署 REAL\n车辆 REAL · 演示数据\n平台\n已连接\n车辆链路\n离线\n控制就绪\n未就绪\n任务\n巡检 · 0%\n安全\n急停状态未知\n\n位姿 未知"
+        }
+      ]
+    }
+  ]
+}

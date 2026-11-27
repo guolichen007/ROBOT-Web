@@ -66,7 +66,9 @@ export function useVehicleOperationState(input: {
   const atWaitingArea = computed(() => {
     const robot = input.robot.value
     if (!robot || robot.x == null || robot.y == null) return false
-    // REMOTE_WAITING_AREA on the demo map.
+    // REMOTE_WAITING_AREA exists only on the DEMO_PARKING fixture map. WEB-R1B: never derive it
+    // for a real vehicle (e.g. R002) — the server decides waiting-area admission.
+    if (robot.integration?.source_kind !== 'MOCK') return false
     return Math.hypot(robot.x - 1.2, robot.y - 1.2) < 0.6
   })
 

@@ -48,6 +48,7 @@ from app.db.models import (
     Task,
     Trajectory,
 )
+from app.modules.commands.operation_readiness import operation_readiness
 from app.modules.commands.readiness import robot_readiness
 from app.modules.robots.channel_freshness import effective_channel_state
 
@@ -352,6 +353,23 @@ def assemble_robot_state(robot: Robot, raw: str | None) -> dict:
     return state
 
 
+@router.get("/api/v1/robots/{robot_id}/operation-readiness")
+def robot_operation_readiness(
+    robot_id: str, db: DbSession, auth: AuthContext = Depends(require_permission("robot.read"))
+) -> dict:
+    """WEB-R1B: polled by the console (valid ~2 s). Scoped like every robot read."""
+    from app.modules.robots.router import find_robot
+
+    robot = find_robot(db, robot_id, auth)
+    return operation_readiness(
+        robot,
+        robot_readiness(db, robot),
+        settings=get_settings(),
+        permissions=set(auth.permissions),
+        now=datetime.now(UTC),
+    )
+
+
 @router.get("/api/v1/monitor/snapshot")
 def monitor_snapshot(
     db: DbSession, auth: AuthContext = Depends(require_permission("robot.read"))
@@ -396,6 +414,15 @@ def monitor_snapshot(
         state["integration"] = serialize_model(integration) if integration else None
         readiness = robot_readiness(db, robot)
         state.update(readiness)
+        # WEB-R1B: the single console authority; legacy keys above stay for compatibility only
+        state["operation_readiness"] = operation_readiness(
+            robot,
+            readiness,
+            settings=get_settings(),
+            permissions=set(auth.permissions),
+            now=datetime.now(UTC),
+        )
+        state["deployment_environment"] = get_settings().firebot_deployment_env
         # G3：模拟来源标识只由服务端登记决定（SIMULATED_VEHICLE_IDS），不从 source_kind=MOCK
         # 推断，也不接受车端自报——Web 据此显示 SIMULATED，真实车辆永远为 None。
         state["simulation"] = (
