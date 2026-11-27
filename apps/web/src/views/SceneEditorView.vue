@@ -5,8 +5,11 @@
         <h1>地图场景编辑器</h1>
         <span class="se-status" :data-status="editor?.scene.status ?? 'NONE'">{{ statusText }}</span>
         <span v-if="editor" class="se-note" data-testid="se-persist"
-          >{{ sceneId ? `服务器草稿 rev ${serverRevision}` : '本地草稿 · 未保存到服务器' }} ·
-          发布与车端加载待后续批次 · 发布≠运动授权</span
+          >{{
+            sceneId ? `服务器 ${editor.scene.status} rev ${serverRevision}` : '本地草稿 · 未保存到服务器'
+          }}
+          <template v-if="digest"> · 摘要 {{ digest.slice(0, 12) }}…</template> · 可通行性：待验证 ·
+          发布≠加载≠运动授权</span
         >
       </div>
       <div class="se-actions">
@@ -47,6 +50,15 @@
         <button type="button" :disabled="!editor" data-testid="se-validate" @click="runValidate">
           发布前校验
         </button>
+        <button
+          type="button"
+          :disabled="!editor || !sceneId || busy || editor.scene.status !== 'DRAFT' || editor.dirty"
+          :title="editor?.dirty ? '请先保存草稿' : '原子发布：校验、计算摘要并冻结为不可变资产'"
+          data-testid="se-publish"
+          @click="publish"
+        >
+          发布
+        </button>
       </div>
     </header>
 
@@ -63,6 +75,22 @@
       </button>
     </p>
 
+    <section v-if="!editor" class="se-list" data-testid="se-scene-list">
+      <h2>已保存场景</h2>
+      <p v-if="!scenes.length" class="se-meta">暂无已保存场景；导入导航地图后保存即可在此重新打开。</p>
+      <button
+        v-for="item in scenes"
+        :key="item.scene_id"
+        type="button"
+        class="se-item"
+        :data-testid="`se-open-${item.version}`"
+        @click="reopen(item.scene_id)"
+      >
+        {{ item.map_code }} · {{ item.version }} · {{ item.status }} rev {{ item.revision }} ·
+        {{ item.points }} 点 / {{ item.routes }} 路线
+        <span v-if="item.scene_digest" class="num">· {{ item.scene_digest.slice(0, 8) }}</span>
+      </button>
+    </section>
     <div v-if="!editor" class="se-empty">
       <p>
         导入 ROS map_server 导出的 YAML 与同名 PGM/PNG
@@ -116,7 +144,82 @@
             <button type="button" class="link" @click="act(() => editor!.reverseRoute(r.route_id))">
               反向
             </button>
+            <ol class="se-waypoints" :data-testid="`se-route-${r.code}`">
+              <li v-for="(ref, i) in r.point_refs" :key="i">
+                {{ pointCode(ref) }}
+                <button
+                  type="button"
+                  class="link"
+                  :data-testid="`se-arrival-${r.code}-${i}`"
+                  :aria-pressed="r.arrivals[i] === 'STOP'"
+                  @click="
+                    act(() =>
+                      editor!.setArrival(r.route_id, i, r.arrivals[i] === 'STOP' ? 'PASS_THROUGH' : 'STOP'),
+                    )
+                  "
+                >
+                  {{ r.arrivals[i] === 'STOP' ? '停靠' : '经过' }}
+                </button>
+              </li>
+            </ol>
           </div>
+        </div>
+        <div class="se-group">
+          <div class="se-group-head">
+            <span>车位（{{ editor.scene.parking_slots.length }}）</span>
+            <button type="button" data-testid="se-add-slot" :disabled="!selected" @click="addSlotAtSelected">
+              以选中点建车位
+            </button>
+          </div>
+          <div v-for="x in editor.scene.parking_slots" :key="x.slot_id" class="se-item static">
+            {{ x.code }}
+            <button type="button" class="link" @click="act(() => editor!.deleteSlot(x.slot_id))">删除</button>
+          </div>
+        </div>
+        <div class="se-group">
+          <div class="se-group-head">
+            <span>右车道走廊（{{ editor.scene.corridors.length }}）</span>
+            <button
+              type="button"
+              data-testid="se-add-corridor"
+              :disabled="routeCandidates.length < 2"
+              @click="addCorridor"
+            >
+              沿巡检点生成
+            </button>
+          </div>
+          <div v-for="co in editor.scene.corridors" :key="co.corridor_id" class="se-item static">
+            {{ co.code }} · {{ co.width_m }} m
+          </div>
+        </div>
+        <div class="se-group" data-testid="se-teach">
+          <div class="se-group-head"><span>当前位置示教</span></div>
+          <label class="se-meta"
+            >车辆 <input v-model="teachVehicle" data-testid="se-teach-vehicle" placeholder="vehicle_id"
+          /></label>
+          <button
+            type="button"
+            :disabled="!sceneId || busy || editor.dirty"
+            data-testid="se-teach-go"
+            @click="teach"
+          >
+            以车辆实时位姿建巡检点
+          </button>
+          <p class="se-meta">
+            服务端读取车辆实时位姿（在线、定位 OK、≤2 s、同一导航地图），不使用浏览器坐标。
+          </p>
+        </div>
+        <div class="se-group" data-testid="se-checksum">
+          <div class="se-group-head"><span>导航地图校验和</span></div>
+          <input v-model="checksumInput" data-testid="se-checksum-input" placeholder="车端 map_checksum" />
+          <button
+            type="button"
+            :disabled="!sceneId || busy || editor.dirty || editor.scene.status !== 'DRAFT'"
+            data-testid="se-checksum-save"
+            @click="saveChecksum"
+          >
+            登记
+          </button>
         </div>
       </aside>
 
@@ -285,7 +388,20 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, triggerRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { api } from '@/lib/api'
-import { apiErrorCode, importScene, loadNavImage, loadScene, saveScene, toEditorState } from '@/lib/scene-api'
+import {
+  apiErrorCode,
+  importScene,
+  listScenes,
+  loadNavImage,
+  loadScene,
+  publishScene,
+  saveScene,
+  setNavMapChecksum,
+  teachPoint,
+  toEditorState,
+  type SceneListItem,
+  type ServerScene,
+} from '@/lib/scene-api'
 import { MapAdapter, type Point } from '@/lib/map-adapter'
 import {
   NavMapGrid,
@@ -310,6 +426,11 @@ const router = useRouter()
 const sceneId = ref<string | null>(null)
 const serverRevision = ref(0)
 const saving = ref(false)
+const busy = ref(false)
+const scenes = ref<SceneListItem[]>([])
+const digest = ref<string | null>(null)
+const teachVehicle = ref('')
+const checksumInput = ref('')
 
 const kindLabel: Record<PointKind, string> = {
   INSPECTION: '巡检点',
@@ -614,9 +735,8 @@ async function openServerScene(id: string, localImage?: File): Promise<void> {
   adapter.setMap(g.geometry())
   adapter.reset()
   preview.value = await rasterPreview(raster, localImage ?? new File([new Uint8Array(bytes)], name))
-  editor.value = new SceneEditor(toEditorState(s), g)
+  applyServer(s)
   sceneId.value = s.scene_id
-  serverRevision.value = s.revision
   selectedId.value = null
 }
 
@@ -627,6 +747,7 @@ async function save(): Promise<void> {
     const saved = await saveScene(sceneId.value, serverRevision.value, editor.value.scene)
     serverRevision.value = saved.revision
     editor.value.markSaved()
+    digest.value = saved.scene_digest ?? null
     error.value = ''
     triggerRef(editor)
   } catch (err) {
@@ -640,6 +761,81 @@ async function save(): Promise<void> {
   }
 }
 
+function pointCode(id: string): string {
+  return editor.value?.scene.points.find((p) => p.point_id === id)?.code ?? '?'
+}
+function applyServer(s: ServerScene): void {
+  const g = grid.value ?? undefined
+  editor.value = new SceneEditor(toEditorState(s), g)
+  serverRevision.value = s.revision
+  digest.value = s.scene_digest ?? null
+  checksumInput.value = s.nav_map.map_checksum ?? checksumInput.value
+}
+async function guarded(label: string, fn: () => Promise<ServerScene>): Promise<void> {
+  busy.value = true
+  try {
+    applyServer(await fn())
+    error.value = ''
+  } catch (err) {
+    error.value = `${label}被拒绝：${apiErrorCode(err) || (err as Error).message}`
+  } finally {
+    busy.value = false
+    triggerRef(editor)
+  }
+}
+function publish(): Promise<void> {
+  return guarded('发布', () => publishScene(sceneId.value!, serverRevision.value))
+}
+function saveChecksum(): Promise<void> {
+  return guarded('登记校验和', () =>
+    setNavMapChecksum(sceneId.value!, serverRevision.value, checksumInput.value.trim()),
+  )
+}
+function teach(): Promise<void> {
+  const n = (editor.value?.scene.points.length ?? 0) + 1
+  return guarded('示教', () =>
+    teachPoint(sceneId.value!, serverRevision.value, {
+      vehicle_id: teachVehicle.value.trim(),
+      point_id: newSceneId(),
+      code: `T${n}`,
+      kind: 'INSPECTION',
+    }),
+  )
+}
+function addSlotAtSelected(): void {
+  const p = selected.value
+  if (!p) return
+  const { x, y, yaw } = p.pose
+  const n = (editor.value?.scene.parking_slots.length ?? 0) + 1
+  act(() => {
+    editor.value!.addSlot(
+      `S-${String(n).padStart(2, '0')}`,
+      [
+        { x: x - 1.2, y: y - 2.5 },
+        { x: x + 1.2, y: y - 2.5 },
+        { x: x + 1.2, y: y + 2.5 },
+        { x: x - 1.2, y: y + 2.5 },
+      ],
+      makePose(x, y, yaw),
+    )
+  })
+}
+function addCorridor(): void {
+  const pts = routeCandidates.value.map((p) => ({ x: p.pose.x, y: p.pose.y }))
+  const n = (editor.value?.scene.corridors.length ?? 0) + 1
+  act(() => {
+    editor.value!.addCorridor(`LANE-${n}`, pts, 1.2)
+  })
+}
+async function reopen(id: string): Promise<void> {
+  try {
+    await openServerScene(id)
+    await router.replace({ query: { ...route.query, scene: id } })
+  } catch (err) {
+    error.value = `加载场景失败：${apiErrorCode(err) || (err as Error).message}`
+  }
+}
+
 function onKey(e: KeyboardEvent): void {
   if (!editor.value || (e.target as HTMLElement)?.tagName === 'INPUT') return
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z')
@@ -649,6 +845,9 @@ function onKey(e: KeyboardEvent): void {
 onMounted(() => {
   window.addEventListener('keydown', onKey)
   const id = typeof route.query.scene === 'string' ? route.query.scene : ''
+  listScenes()
+    .then((items) => (scenes.value = items))
+    .catch(() => (scenes.value = []))
   if (id) {
     openServerScene(id).catch((err) => {
       error.value = `加载场景失败：${apiErrorCode(err) || (err as Error).message}`
@@ -978,5 +1177,23 @@ input:focus-visible {
   .se-body {
     grid-template-columns: 200px minmax(0, 1fr) 240px;
   }
+}
+.se-list {
+  display: grid;
+  gap: 6px;
+  max-width: 720px;
+}
+.se-list h2 {
+  margin: 0;
+  font-size: 15px;
+}
+.se-waypoints {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+.se-waypoints button[aria-pressed='true'] {
+  color: var(--yd-danger);
+  font-weight: 700;
 }
 </style>

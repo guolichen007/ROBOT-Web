@@ -16,6 +16,36 @@ export interface ServerPoint {
   xy_tolerance_m?: number | null
   yaw_tolerance_rad?: number | null
   taught_from: 'MANUAL_INPUT' | 'MAP_CLICK' | 'VEHICLE_POSE'
+  slot_id?: string | null
+}
+export interface ServerSlot {
+  slot_id: string
+  code: string
+  polygon: { x: number; y: number }[]
+  center_x: number
+  center_y: number
+  center_yaw: number
+  enabled: boolean
+}
+export interface ServerCorridor {
+  corridor_id: string
+  code: string
+  kind: 'RIGHT_LANE'
+  centerline: { x: number; y: number }[]
+  width_m: number
+}
+export interface SceneListItem {
+  scene_id: string
+  map_code: string
+  version: string
+  status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED'
+  revision: number
+  scene_digest: string | null
+  traversability: string
+  created_at: string | null
+  published_at: string | null
+  points: number
+  routes: number
 }
 export interface ServerScene {
   scene_id: string
@@ -25,6 +55,11 @@ export interface ServerScene {
   storage_version: 2
   revision: number
   traversability: string
+  scene_digest?: string | null
+  published_at?: string | null
+  manifest_url?: string | null
+  parking_slots?: ServerSlot[]
+  corridors?: ServerCorridor[]
   nav_map: {
     resolution_m_per_px: number
     origin: { x: number; y: number; yaw: number | null }
@@ -44,6 +79,7 @@ export interface ServerScene {
     code: string
     closed: boolean
     points: { point_id: string; arrival: 'PASS_THROUGH' | 'STOP' }[]
+    corridor_ids?: string[]
   }[]
 }
 
@@ -106,18 +142,24 @@ export function toEditorState(s: ServerScene): SceneState {
       ...(p.xy_tolerance_m ? { xy_tolerance_m: p.xy_tolerance_m } : {}),
       ...(p.yaw_tolerance_rad ? { yaw_tolerance_rad: p.yaw_tolerance_rad } : {}),
       taught_from: p.taught_from,
-      parking_slot_code: null,
+      parking_slot_code: (s.parking_slots ?? []).find((x) => x.slot_id === p.slot_id)?.code ?? null,
     })),
-    parking_slots: [],
+    parking_slots: (s.parking_slots ?? []).map((x) => ({
+      slot_id: x.slot_id,
+      code: x.code,
+      polygon: x.polygon,
+      center: makePose(x.center_x, x.center_y, x.center_yaw),
+      enabled: x.enabled,
+    })),
     routes: s.routes.map((r) => ({
       route_id: r.route_id,
       code: r.code,
       closed: r.closed,
       point_refs: r.points.map((x) => x.point_id),
       arrivals: r.points.map((x) => x.arrival),
-      corridor_refs: [],
+      corridor_refs: r.corridor_ids ?? [],
     })),
-    corridors: [],
+    corridors: (s.corridors ?? []).map((c) => ({ ...c })),
   }
 }
 
@@ -139,7 +181,18 @@ export async function saveScene(
         xy_tolerance_m: p.xy_tolerance_m ?? null,
         yaw_tolerance_rad: p.yaw_tolerance_rad ?? null,
         taught_from: p.taught_from ?? 'MANUAL_INPUT',
+        slot_id: s.parking_slots.find((x) => x.code === p.parking_slot_code)?.slot_id ?? null,
       })),
+      parking_slots: s.parking_slots.map((x) => ({
+        slot_id: x.slot_id,
+        code: x.code,
+        polygon: x.polygon,
+        center_x: x.center.x,
+        center_y: x.center.y,
+        center_yaw: x.center.yaw,
+        enabled: x.enabled ?? true,
+      })),
+      corridors: s.corridors.map((c) => ({ ...c })),
       routes: s.routes.map((r) => ({
         route_id: r.route_id,
         code: r.code,
@@ -149,9 +202,29 @@ export async function saveScene(
           // never re-derived from position: an intermediate STOP stays STOP (WEB-R1C)
           arrival: r.arrivals[i],
         })),
+        corridor_ids: r.corridor_refs,
       })),
     })
   ).data
+}
+
+export async function listScenes(): Promise<SceneListItem[]> {
+  return (await api.get('/scenes')).data
+}
+export async function setNavMapChecksum(id: string, rev: number, checksum: string): Promise<ServerScene> {
+  return (await api.put(`/scenes/${id}/nav-map-checksum`, { expected_revision: rev, map_checksum: checksum }))
+    .data
+}
+export async function publishScene(id: string, rev: number): Promise<ServerScene> {
+  return (await api.post(`/scenes/${id}/publish`, { expected_revision: rev })).data
+}
+/** 当前位置示教: the server reads the vehicle's live pose itself. */
+export async function teachPoint(
+  id: string,
+  rev: number,
+  body: { vehicle_id: string; point_id: string; code: string; kind: string },
+): Promise<ServerScene> {
+  return (await api.post(`/scenes/${id}/teach`, { expected_revision: rev, ...body })).data
 }
 
 /** Machine code of an API error, e.g. REVISION_CONFLICT; '' when absent. */
