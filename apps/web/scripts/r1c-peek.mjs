@@ -3,9 +3,7 @@ import { chromium } from '@playwright/test'
 import { login } from './r1c-login.mjs'
 const base = process.env.CAPTURE_BASE_URL
 const out = process.argv[2]
-const sizes = (process.env.SIZES || '1366x768')
-  .split(',')
-  .map((s) => s.split('x').map(Number))
+const sizes = (process.env.SIZES || '1366x768,1680x900,1920x1080')
   .split(',')
   .map((s) => s.split('x').map(Number))
 const b = await chromium.launch({ executablePath: process.env.CHROME_PATH, args: ['--no-sandbox'] })

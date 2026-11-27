@@ -160,6 +160,8 @@ const homeDisabled = computed(
     <div v-else-if="hint" class="dock-status dock-hint" data-testid="dock-hint">
       <span>{{ hint }}</span>
     </div>
+    <!-- the status line is always reserved: a reason appearing later never shifts the layout -->
+    <div v-else class="dock-status dock-status--empty" aria-hidden="true"></div>
     <div class="dock-rows">
       <div class="dock-task" role="group" aria-label="任务操作" data-testid="console-task-group">
         <slot v-if="slots.task" name="task" />

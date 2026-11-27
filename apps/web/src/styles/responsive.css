@@ -436,6 +436,10 @@
   padding: 8px 10px;
   gap: 4px;
 }
+.console-action-bar .dock-status {
+  min-height: 16px;
+  line-height: 16px;
+}
 .console-action-bar .dock-hint {
   color: var(--yd-text-2);
   font-weight: 400;

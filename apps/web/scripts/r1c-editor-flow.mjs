@@ -124,6 +124,8 @@ for (const [w, h] of [
 await page.goto('/maps/editor')
 const list = page.getByTestId('se-scene-list')
 await list.waitFor()
+// the list is fetched after mount: wait for an entry instead of reading the empty placeholder
+await list.locator('button').first().waitFor({ timeout: 10000 })
 const listText = await list.innerText()
 assert.match(listText, /PUBLISHED/)
 ok('list_shows_published')
