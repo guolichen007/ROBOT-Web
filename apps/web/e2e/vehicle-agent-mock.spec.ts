@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { CONSOLE_VIEWPORTS, assertConsoleLayout } from './helpers/console-layout'
 
 test.skip(process.env.VEHICLE_AGENT_MOCK_E2E !== '1', 'requires isolated vehicle_agent mock runtime')
 
@@ -25,33 +26,17 @@ test('Browser → API → Outbox → adapter → mock → ACK/status → WS and 
   await expect(page.getByRole('heading', { name: '红外热成像', exact: true })).toBeVisible()
   await expect(page.locator('.video-tabs')).toHaveCount(0)
 
-  for (const viewport of [
-    { width: 1920, height: 1080 },
-    { width: 1680, height: 900 },
-  ]) {
+  // WEB-V2.1 approved layout (replaces the pre-V2.1 horizontal three-column contract with stricter
+  // geometry: dominance, column stacking, fixed stop entries, occlusion, no overlap) at 3 viewports.
+  for (const viewport of CONSOLE_VIEWPORTS) {
     await page.setViewportSize(viewport)
-    const map = (await page.locator('.operations-map-panel').boundingBox())!
-    const video = (await page.locator('.video-surveillance').boundingBox())!
-    const control = (await page.locator('.hmi-control-rail').boundingBox())!
-    expect(map.x + map.width).toBeLessThanOrEqual(video.x)
-    expect(video.x + video.width).toBeLessThanOrEqual(control.x)
-    expect(Math.abs(map.y - video.y)).toBeLessThan(2)
-    expect(Math.abs(map.y - control.y)).toBeLessThan(2)
-    expect(control.x + control.width).toBeLessThanOrEqual(viewport.width)
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
-      viewport.width,
-    )
-    const kpis = await page.locator('.hmi-kpi').all()
-    for (let i = 1; i < kpis.length; i++) {
-      const previous = (await kpis[i - 1].boundingBox())!
-      const current = (await kpis[i].boundingBox())!
-      expect(previous.x + previous.width).toBeLessThanOrEqual(current.x)
-    }
+    await assertConsoleLayout(page, viewport)
     await page.screenshot({
       path: `artifacts/vehicle-agent-hmi-${viewport.width}x${viewport.height}.png`,
       fullPage: true,
     })
   }
+  await page.setViewportSize({ width: 1920, height: 1080 })
 
   const dropdown = page.getByRole('combobox', { name: '停车位', exact: true })
   await dropdown.selectOption({ index: 1 })
