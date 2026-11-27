@@ -1,0 +1,144 @@
+{
+  "valid": [
+    {
+      "name": "blocked",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "NavigationDiagnostics",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 50,
+        "observed_at": "2026-11-26T09:00:05+08:00",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "goal_id": "move_base-1732582800-7",
+        "planner_state": "BLOCKED",
+        "localization": {
+          "state": "OK",
+          "xy_std_m": 0.05,
+          "yaw_std_rad": 0.02
+        },
+        "obstacle": {
+          "blocked": true,
+          "nearest_m": 0.6,
+          "since": "2026-11-26T09:00:00+08:00"
+        },
+        "distance_to_goal_m": 3.1,
+        "recovery_count": 1,
+        "cmd_vel_source": "NAV"
+      }
+    },
+    {
+      "name": "idle_unknown_obstacle",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "NavigationDiagnostics",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 50,
+        "observed_at": "2026-11-26T09:00:05+08:00",
+        "mission_id": null,
+        "goal_id": null,
+        "planner_state": "IDLE",
+        "localization": {
+          "state": "OK",
+          "xy_std_m": 0.05,
+          "yaw_std_rad": 0.02
+        },
+        "obstacle": {
+          "blocked": null,
+          "nearest_m": null,
+          "since": null
+        },
+        "distance_to_goal_m": null,
+        "recovery_count": 0,
+        "cmd_vel_source": "NAV"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "blocked_but_not_blocked",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "NavigationDiagnostics",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 50,
+        "observed_at": "2026-11-26T09:00:05+08:00",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "goal_id": "move_base-1732582800-7",
+        "planner_state": "BLOCKED",
+        "localization": {
+          "state": "OK",
+          "xy_std_m": 0.05,
+          "yaw_std_rad": 0.02
+        },
+        "obstacle": {
+          "blocked": false,
+          "nearest_m": 0.6,
+          "since": "2026-11-26T09:00:00+08:00"
+        },
+        "distance_to_goal_m": 3.1,
+        "recovery_count": 1,
+        "cmd_vel_source": "NAV"
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "negative_distance",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "NavigationDiagnostics",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 50,
+        "observed_at": "2026-11-26T09:00:05+08:00",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "goal_id": "move_base-1732582800-7",
+        "planner_state": "BLOCKED",
+        "localization": {
+          "state": "OK",
+          "xy_std_m": 0.05,
+          "yaw_std_rad": 0.02
+        },
+        "obstacle": {
+          "blocked": true,
+          "nearest_m": 0.6,
+          "since": "2026-11-26T09:00:00+08:00"
+        },
+        "distance_to_goal_m": -1,
+        "recovery_count": 1,
+        "cmd_vel_source": "NAV"
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "missing_localization",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "NavigationDiagnostics",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 50,
+        "observed_at": "2026-11-26T09:00:05+08:00",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "goal_id": "move_base-1732582800-7",
+        "planner_state": "BLOCKED",
+        "obstacle": {
+          "blocked": true,
+          "nearest_m": 0.6,
+          "since": "2026-11-26T09:00:00+08:00"
+        },
+        "distance_to_goal_m": 3.1,
+        "recovery_count": 1,
+        "cmd_vel_source": "NAV"
+      },
+      "expect": "SCHEMA_INVALID"
+    }
+  ]
+}

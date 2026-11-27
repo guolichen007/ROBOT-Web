@@ -12,6 +12,11 @@ const routes: RouteRecordRaw[] = [
   },
   { path: '/robots', component: () => import('@/views/RobotsView.vue'), meta: { permission: 'robot.read' } },
   { path: '/maps', component: () => import('@/views/MapsView.vue'), meta: { permission: 'map.read' } },
+  {
+    path: '/maps/editor',
+    component: () => import('@/views/SceneEditorView.vue'),
+    meta: { permission: 'map.edit' },
+  },
   { path: '/parking', component: () => import('@/views/ParkingView.vue'), meta: { permission: 'map.read' } },
   { path: '/tasks', component: () => import('@/views/TasksView.vue'), meta: { permission: 'robot.read' } },
   { path: '/patrol', component: () => import('@/views/PatrolView.vue'), meta: { permission: 'map.read' } },

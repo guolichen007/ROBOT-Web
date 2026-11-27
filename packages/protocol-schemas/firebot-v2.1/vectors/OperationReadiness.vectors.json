@@ -1,0 +1,870 @@
+{
+  "valid": [
+    {
+      "name": "real_default_deny",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "OperationReadiness",
+        "vehicle_id": "firebot-vehicle-02",
+        "environment": "REAL",
+        "evaluated_at": "2026-11-26T09:00:05+08:00",
+        "valid_until": "2026-11-26T09:00:30+08:00",
+        "boot_id": null,
+        "control_frozen": true,
+        "freeze_reasons": [
+          "REAL_CONTROL_NOT_AUTHORIZED",
+          "ROBOT_BOOT_SESSION_UNKNOWN"
+        ],
+        "control_owner": null,
+        "actions": {
+          "stop_motion": {
+            "allowed": false,
+            "reasons": [
+              "ROBOT_OFFLINE"
+            ],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "protective_stop": {
+            "allowed": false,
+            "reasons": [
+              "PROTECTIVE_STOP_NOT_IMPLEMENTED"
+            ],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "emergency_stop": {
+            "allowed": false,
+            "reasons": [
+              "ROBOT_OFFLINE"
+            ],
+            "required_permission": "robot.control.estop",
+            "permitted_for_user": false,
+            "confirm": "HOLD"
+          },
+          "patrol_start": {
+            "allowed": false,
+            "reasons": [
+              "REAL_CONTROL_NOT_AUTHORIZED",
+              "SCENE_NOT_LOADED_ON_VEHICLE"
+            ],
+            "required_permission": "patrol.create",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "navigate_to_point": {
+            "allowed": false,
+            "reasons": [
+              "REAL_CONTROL_NOT_AUTHORIZED"
+            ],
+            "required_permission": "patrol.create",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "return_home": {
+            "allowed": false,
+            "reasons": [
+              "REAL_CONTROL_NOT_AUTHORIZED"
+            ],
+            "required_permission": "patrol.create",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "manual_control": {
+            "allowed": false,
+            "reasons": [
+              "REAL_CONTROL_NOT_AUTHORIZED"
+            ],
+            "required_permission": "robot.control.manual",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "fire_shield_open": {
+            "allowed": false,
+            "reasons": [
+              "DEVICE_FEEDBACK_CONTRACT_NOT_VERIFIED"
+            ],
+            "required_permission": "robot.control.device",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          }
+        }
+      }
+    },
+    {
+      "name": "sim_ready",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "OperationReadiness",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "evaluated_at": "2026-11-26T09:00:05+08:00",
+        "valid_until": "2026-11-26T09:00:30+08:00",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "control_frozen": false,
+        "freeze_reasons": [],
+        "control_owner": {
+          "user_id": "11111111-2222-4333-8444-555555555555",
+          "display_name": "SIM 操作员",
+          "lease_id": "f2000000-0000-4000-8000-000000000001",
+          "expires_at": "2026-11-26T09:00:30+08:00",
+          "is_current_user": true
+        },
+        "actions": {
+          "stop_motion": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": true,
+            "confirm": "CLICK"
+          },
+          "protective_stop": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": true,
+            "confirm": "CLICK"
+          },
+          "emergency_stop": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.estop",
+            "permitted_for_user": true,
+            "confirm": "HOLD"
+          },
+          "patrol_start": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "patrol.create",
+            "permitted_for_user": true,
+            "confirm": "DOUBLE"
+          },
+          "patrol_pause": {
+            "allowed": false,
+            "reasons": [
+              "NO_ACTIVE_MISSION"
+            ],
+            "required_permission": "patrol.create",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "manual_control": {
+            "allowed": false,
+            "reasons": [
+              "CONTROL_LEASE_REQUIRED"
+            ],
+            "required_permission": "robot.control.manual",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          }
+        }
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "allowed_with_reasons",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "OperationReadiness",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "evaluated_at": "2026-11-26T09:00:05+08:00",
+        "valid_until": "2026-11-26T09:00:30+08:00",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "control_frozen": false,
+        "freeze_reasons": [],
+        "control_owner": {
+          "user_id": "11111111-2222-4333-8444-555555555555",
+          "display_name": "SIM 操作员",
+          "lease_id": "f2000000-0000-4000-8000-000000000001",
+          "expires_at": "2026-11-26T09:00:30+08:00",
+          "is_current_user": true
+        },
+        "actions": {
+          "stop_motion": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": true,
+            "confirm": "CLICK"
+          },
+          "protective_stop": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": true,
+            "confirm": "CLICK"
+          },
+          "emergency_stop": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.estop",
+            "permitted_for_user": true,
+            "confirm": "HOLD"
+          },
+          "patrol_start": {
+            "allowed": true,
+            "reasons": [
+              "X_Y"
+            ],
+            "required_permission": "patrol.create",
+            "permitted_for_user": true,
+            "confirm": "DOUBLE"
+          },
+          "patrol_pause": {
+            "allowed": false,
+            "reasons": [
+              "NO_ACTIVE_MISSION"
+            ],
+            "required_permission": "patrol.create",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "manual_control": {
+            "allowed": false,
+            "reasons": [
+              "CONTROL_LEASE_REQUIRED"
+            ],
+            "required_permission": "robot.control.manual",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          }
+        }
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "denied_without_reason",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "OperationReadiness",
+        "vehicle_id": "firebot-vehicle-02",
+        "environment": "REAL",
+        "evaluated_at": "2026-11-26T09:00:05+08:00",
+        "valid_until": "2026-11-26T09:00:30+08:00",
+        "boot_id": null,
+        "control_frozen": true,
+        "freeze_reasons": [
+          "REAL_CONTROL_NOT_AUTHORIZED",
+          "ROBOT_BOOT_SESSION_UNKNOWN"
+        ],
+        "control_owner": null,
+        "actions": {
+          "stop_motion": {
+            "allowed": false,
+            "reasons": [
+              "ROBOT_OFFLINE"
+            ],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "protective_stop": {
+            "allowed": false,
+            "reasons": [
+              "PROTECTIVE_STOP_NOT_IMPLEMENTED"
+            ],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "emergency_stop": {
+            "allowed": false,
+            "reasons": [
+              "ROBOT_OFFLINE"
+            ],
+            "required_permission": "robot.control.estop",
+            "permitted_for_user": false,
+            "confirm": "HOLD"
+          },
+          "patrol_start": {
+            "allowed": false,
+            "reasons": [],
+            "required_permission": "patrol.create",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "navigate_to_point": {
+            "allowed": false,
+            "reasons": [
+              "REAL_CONTROL_NOT_AUTHORIZED"
+            ],
+            "required_permission": "patrol.create",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "return_home": {
+            "allowed": false,
+            "reasons": [
+              "REAL_CONTROL_NOT_AUTHORIZED"
+            ],
+            "required_permission": "patrol.create",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "manual_control": {
+            "allowed": false,
+            "reasons": [
+              "REAL_CONTROL_NOT_AUTHORIZED"
+            ],
+            "required_permission": "robot.control.manual",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "fire_shield_open": {
+            "allowed": false,
+            "reasons": [
+              "DEVICE_FEEDBACK_CONTRACT_NOT_VERIFIED"
+            ],
+            "required_permission": "robot.control.device",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          }
+        }
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "stop_entry_missing",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "OperationReadiness",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "evaluated_at": "2026-11-26T09:00:05+08:00",
+        "valid_until": "2026-11-26T09:00:30+08:00",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "control_frozen": false,
+        "freeze_reasons": [],
+        "control_owner": {
+          "user_id": "11111111-2222-4333-8444-555555555555",
+          "display_name": "SIM 操作员",
+          "lease_id": "f2000000-0000-4000-8000-000000000001",
+          "expires_at": "2026-11-26T09:00:30+08:00",
+          "is_current_user": true
+        },
+        "actions": {
+          "stop_motion": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": true,
+            "confirm": "CLICK"
+          },
+          "emergency_stop": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.estop",
+            "permitted_for_user": true,
+            "confirm": "HOLD"
+          },
+          "patrol_start": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "patrol.create",
+            "permitted_for_user": true,
+            "confirm": "DOUBLE"
+          },
+          "patrol_pause": {
+            "allowed": false,
+            "reasons": [
+              "NO_ACTIVE_MISSION"
+            ],
+            "required_permission": "patrol.create",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "manual_control": {
+            "allowed": false,
+            "reasons": [
+              "CONTROL_LEASE_REQUIRED"
+            ],
+            "required_permission": "robot.control.manual",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          }
+        }
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "unknown_action",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "OperationReadiness",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "evaluated_at": "2026-11-26T09:00:05+08:00",
+        "valid_until": "2026-11-26T09:00:30+08:00",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "control_frozen": false,
+        "freeze_reasons": [],
+        "control_owner": {
+          "user_id": "11111111-2222-4333-8444-555555555555",
+          "display_name": "SIM 操作员",
+          "lease_id": "f2000000-0000-4000-8000-000000000001",
+          "expires_at": "2026-11-26T09:00:30+08:00",
+          "is_current_user": true
+        },
+        "actions": {
+          "stop_motion": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": true,
+            "confirm": "CLICK"
+          },
+          "protective_stop": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": true,
+            "confirm": "CLICK"
+          },
+          "emergency_stop": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.estop",
+            "permitted_for_user": true,
+            "confirm": "HOLD"
+          },
+          "patrol_start": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "patrol.create",
+            "permitted_for_user": true,
+            "confirm": "DOUBLE"
+          },
+          "patrol_pause": {
+            "allowed": false,
+            "reasons": [
+              "NO_ACTIVE_MISSION"
+            ],
+            "required_permission": "patrol.create",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "manual_control": {
+            "allowed": false,
+            "reasons": [
+              "CONTROL_LEASE_REQUIRED"
+            ],
+            "required_permission": "robot.control.manual",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "drive_anywhere": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.read",
+            "permitted_for_user": true,
+            "confirm": "CLICK"
+          }
+        }
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "frozen_without_reason",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "OperationReadiness",
+        "vehicle_id": "firebot-vehicle-02",
+        "environment": "REAL",
+        "evaluated_at": "2026-11-26T09:00:05+08:00",
+        "valid_until": "2026-11-26T09:00:30+08:00",
+        "boot_id": null,
+        "control_frozen": true,
+        "freeze_reasons": [],
+        "control_owner": null,
+        "actions": {
+          "stop_motion": {
+            "allowed": false,
+            "reasons": [
+              "ROBOT_OFFLINE"
+            ],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "protective_stop": {
+            "allowed": false,
+            "reasons": [
+              "PROTECTIVE_STOP_NOT_IMPLEMENTED"
+            ],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "emergency_stop": {
+            "allowed": false,
+            "reasons": [
+              "ROBOT_OFFLINE"
+            ],
+            "required_permission": "robot.control.estop",
+            "permitted_for_user": false,
+            "confirm": "HOLD"
+          },
+          "patrol_start": {
+            "allowed": false,
+            "reasons": [
+              "REAL_CONTROL_NOT_AUTHORIZED",
+              "SCENE_NOT_LOADED_ON_VEHICLE"
+            ],
+            "required_permission": "patrol.create",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "navigate_to_point": {
+            "allowed": false,
+            "reasons": [
+              "REAL_CONTROL_NOT_AUTHORIZED"
+            ],
+            "required_permission": "patrol.create",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "return_home": {
+            "allowed": false,
+            "reasons": [
+              "REAL_CONTROL_NOT_AUTHORIZED"
+            ],
+            "required_permission": "patrol.create",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "manual_control": {
+            "allowed": false,
+            "reasons": [
+              "REAL_CONTROL_NOT_AUTHORIZED"
+            ],
+            "required_permission": "robot.control.manual",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "fire_shield_open": {
+            "allowed": false,
+            "reasons": [
+              "DEVICE_FEEDBACK_CONTRACT_NOT_VERIFIED"
+            ],
+            "required_permission": "robot.control.device",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          }
+        }
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "frozen_but_patrol_allowed",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "OperationReadiness",
+        "vehicle_id": "firebot-vehicle-02",
+        "environment": "REAL",
+        "evaluated_at": "2026-11-26T09:00:05+08:00",
+        "valid_until": "2026-11-26T09:00:30+08:00",
+        "boot_id": null,
+        "control_frozen": true,
+        "freeze_reasons": [
+          "REAL_CONTROL_NOT_AUTHORIZED",
+          "ROBOT_BOOT_SESSION_UNKNOWN"
+        ],
+        "control_owner": null,
+        "actions": {
+          "stop_motion": {
+            "allowed": false,
+            "reasons": [
+              "ROBOT_OFFLINE"
+            ],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "protective_stop": {
+            "allowed": false,
+            "reasons": [
+              "PROTECTIVE_STOP_NOT_IMPLEMENTED"
+            ],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "emergency_stop": {
+            "allowed": false,
+            "reasons": [
+              "ROBOT_OFFLINE"
+            ],
+            "required_permission": "robot.control.estop",
+            "permitted_for_user": false,
+            "confirm": "HOLD"
+          },
+          "patrol_start": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "patrol.create",
+            "permitted_for_user": true,
+            "confirm": "CLICK"
+          },
+          "navigate_to_point": {
+            "allowed": false,
+            "reasons": [
+              "REAL_CONTROL_NOT_AUTHORIZED"
+            ],
+            "required_permission": "patrol.create",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "return_home": {
+            "allowed": false,
+            "reasons": [
+              "REAL_CONTROL_NOT_AUTHORIZED"
+            ],
+            "required_permission": "patrol.create",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "manual_control": {
+            "allowed": false,
+            "reasons": [
+              "REAL_CONTROL_NOT_AUTHORIZED"
+            ],
+            "required_permission": "robot.control.manual",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "fire_shield_open": {
+            "allowed": false,
+            "reasons": [
+              "DEVICE_FEEDBACK_CONTRACT_NOT_VERIFIED"
+            ],
+            "required_permission": "robot.control.device",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          }
+        }
+      },
+      "expect": "FROZEN_BUT_ACTION_ALLOWED"
+    },
+    {
+      "name": "boot_unknown_but_navigate_allowed",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "OperationReadiness",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "evaluated_at": "2026-11-26T09:00:05+08:00",
+        "valid_until": "2026-11-26T09:00:30+08:00",
+        "boot_id": null,
+        "control_frozen": false,
+        "freeze_reasons": [],
+        "control_owner": {
+          "user_id": "11111111-2222-4333-8444-555555555555",
+          "display_name": "SIM 操作员",
+          "lease_id": "f2000000-0000-4000-8000-000000000001",
+          "expires_at": "2026-11-26T09:00:30+08:00",
+          "is_current_user": true
+        },
+        "actions": {
+          "stop_motion": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": true,
+            "confirm": "CLICK"
+          },
+          "protective_stop": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": true,
+            "confirm": "CLICK"
+          },
+          "emergency_stop": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.estop",
+            "permitted_for_user": true,
+            "confirm": "HOLD"
+          },
+          "patrol_start": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "patrol.create",
+            "permitted_for_user": true,
+            "confirm": "DOUBLE"
+          },
+          "patrol_pause": {
+            "allowed": false,
+            "reasons": [
+              "NO_ACTIVE_MISSION"
+            ],
+            "required_permission": "patrol.create",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "manual_control": {
+            "allowed": false,
+            "reasons": [
+              "CONTROL_LEASE_REQUIRED"
+            ],
+            "required_permission": "robot.control.manual",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "navigate_to_point": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "patrol.create",
+            "permitted_for_user": true,
+            "confirm": "CLICK"
+          }
+        }
+      },
+      "expect": "BOOT_UNKNOWN_BUT_ACTION_ALLOWED"
+    },
+    {
+      "name": "valid_until_before_evaluated",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "OperationReadiness",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "evaluated_at": "2026-11-26T09:00:05+08:00",
+        "valid_until": "2026-11-26T09:00:00+08:00",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "control_frozen": false,
+        "freeze_reasons": [],
+        "control_owner": {
+          "user_id": "11111111-2222-4333-8444-555555555555",
+          "display_name": "SIM 操作员",
+          "lease_id": "f2000000-0000-4000-8000-000000000001",
+          "expires_at": "2026-11-26T09:00:30+08:00",
+          "is_current_user": true
+        },
+        "actions": {
+          "stop_motion": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": true,
+            "confirm": "CLICK"
+          },
+          "protective_stop": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": true,
+            "confirm": "CLICK"
+          },
+          "emergency_stop": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.estop",
+            "permitted_for_user": true,
+            "confirm": "HOLD"
+          },
+          "patrol_start": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "patrol.create",
+            "permitted_for_user": true,
+            "confirm": "DOUBLE"
+          },
+          "patrol_pause": {
+            "allowed": false,
+            "reasons": [
+              "NO_ACTIVE_MISSION"
+            ],
+            "required_permission": "patrol.create",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "manual_control": {
+            "allowed": false,
+            "reasons": [
+              "CONTROL_LEASE_REQUIRED"
+            ],
+            "required_permission": "robot.control.manual",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          }
+        }
+      },
+      "expect": "READINESS_VALID_UNTIL_BEFORE_EVALUATED"
+    },
+    {
+      "name": "allowed_but_user_lacks_permission",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "OperationReadiness",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "evaluated_at": "2026-11-26T09:00:05+08:00",
+        "valid_until": "2026-11-26T09:00:30+08:00",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "control_frozen": false,
+        "freeze_reasons": [],
+        "control_owner": {
+          "user_id": "11111111-2222-4333-8444-555555555555",
+          "display_name": "SIM 操作员",
+          "lease_id": "f2000000-0000-4000-8000-000000000001",
+          "expires_at": "2026-11-26T09:00:30+08:00",
+          "is_current_user": true
+        },
+        "actions": {
+          "stop_motion": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": true,
+            "confirm": "CLICK"
+          },
+          "protective_stop": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": true,
+            "confirm": "CLICK"
+          },
+          "emergency_stop": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.estop",
+            "permitted_for_user": true,
+            "confirm": "HOLD"
+          },
+          "patrol_start": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "patrol.create",
+            "permitted_for_user": false,
+            "confirm": "DOUBLE"
+          },
+          "patrol_pause": {
+            "allowed": false,
+            "reasons": [
+              "NO_ACTIVE_MISSION"
+            ],
+            "required_permission": "patrol.create",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "manual_control": {
+            "allowed": false,
+            "reasons": [
+              "CONTROL_LEASE_REQUIRED"
+            ],
+            "required_permission": "robot.control.manual",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          }
+        }
+      },
+      "expect": "SCHEMA_INVALID"
+    }
+  ]
+}

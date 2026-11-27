@@ -1,0 +1,2700 @@
+{
+  "valid": [
+    {
+      "name": "sim_draft",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "DRAFT",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": null,
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": null,
+        "published_by": null
+      }
+    },
+    {
+      "name": "sim_published_pending_traversability",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "PUBLISHED",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": "2026-11-26T09:00:05+08:00",
+        "published_by": "11111111-2222-4333-8444-555555555555"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "published_without_digest",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "PUBLISHED",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": null,
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": "2026-11-26T09:00:05+08:00",
+        "published_by": "11111111-2222-4333-8444-555555555555"
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "published_digest_tampered",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "PUBLISHED",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.5,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": "2026-11-26T09:00:05+08:00",
+        "published_by": "11111111-2222-4333-8444-555555555555"
+      },
+      "expect": "SCENE_DIGEST_MISMATCH"
+    },
+    {
+      "name": "published_route_ref_missing",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "PUBLISHED",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000005"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": "aea6840060a269b0eb104c108e14e3a5f400f7ce113b2ea8baf228c979f7ebc4",
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": "2026-11-26T09:00:05+08:00",
+        "published_by": "11111111-2222-4333-8444-555555555555"
+      },
+      "expect": "SCENE_REFERENCE_INVALID"
+    },
+    {
+      "name": "published_dangling_corridor",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "PUBLISHED",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "b1000000-0000-4000-8000-000000000005"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": "c5d5b56e0299207ff6ea65bf20b658cd7dc08bb35f4d44e7266366db62b93819",
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": "2026-11-26T09:00:05+08:00",
+        "published_by": "11111111-2222-4333-8444-555555555555"
+      },
+      "expect": "SCENE_REFERENCE_INVALID"
+    },
+    {
+      "name": "published_without_return_home",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "PUBLISHED",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": "75170bab66134211f613a1fd116b91d8a9b0ae5fc99350c3258fdc57ed3ec8ea",
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": "2026-11-26T09:00:05+08:00",
+        "published_by": "11111111-2222-4333-8444-555555555555"
+      },
+      "expect": "SCENE_REFERENCE_INVALID"
+    },
+    {
+      "name": "published_traversability_failed",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "PUBLISHED",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "FAILED",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": "2026-11-26T09:00:05+08:00",
+        "published_by": "11111111-2222-4333-8444-555555555555"
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "verified_without_evidence",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "DRAFT",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "VERIFIED",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": null,
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": null,
+        "published_by": null
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "route_single_point",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "DRAFT",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": null,
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": null,
+        "published_by": null
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "polygon_two_vertices",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "DRAFT",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 0,
+                "y": 0
+              },
+              {
+                "x": 1,
+                "y": 1
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": null,
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": null,
+        "published_by": null
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "resolution_zero",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "DRAFT",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": null,
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": null,
+        "published_by": null
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "image_too_large",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "DRAFT",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 20000,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": null,
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": null,
+        "published_by": null
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "thresholds_inverted",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "DRAFT",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.9,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": null,
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": null,
+        "published_by": null
+      },
+      "expect": "NAV_MAP_THRESHOLDS_INVALID"
+    },
+    {
+      "name": "point_coord_absurd",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "DRAFT",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 1000000000.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": null,
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": null,
+        "published_by": null
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "corridor_kind_left",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "DRAFT",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "LEFT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": null,
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": null,
+        "published_by": null
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "published_before_created",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "PUBLISHED",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": "2026-11-25T00:00:00+08:00",
+        "published_by": "11111111-2222-4333-8444-555555555555"
+      },
+      "expect": "PUBLISHED_BEFORE_CREATED"
+    }
+  ]
+}

@@ -13,6 +13,7 @@ from sqlalchemy import select
 from app.core.audit import write_audit
 from app.core.config import get_settings
 from app.core.dependencies import AuthContext, DbSession, request_meta, require_permission
+from app.core.errors import PlatformError
 from app.core.events import append_event
 from app.core.serialization import serialize_model
 from app.db.models import (
@@ -70,6 +71,22 @@ def draft(db, version_id: str) -> MapVersion:
     if version.status != "DRAFT":
         raise HTTPException(409, "Published/Archived 地图不可原地修改，请创建新版本")
     return version
+
+
+def same_version(row_version_id: str, requested_version_id: str) -> None:
+    """WEB-V2.1: child resources never move between map versions (incl. into PUBLISHED)."""
+    if requested_version_id != row_version_id:
+        raise PlatformError(
+            "CROSS_VERSION_MOVE_FORBIDDEN",
+            "地图子资源不可在版本间迁移；请在目标版本中新建",
+            status_code=409,
+        )
+
+
+def slot_in_version(db, slot_id: str, version_id: str) -> None:
+    slot = db.get(ParkingSlot, slot_id)
+    if slot is None or slot.map_version_id != version_id:
+        raise PlatformError("SLOT_VERSION_MISMATCH", "车位不属于该地图版本", status_code=422)
 
 
 @router.get("/sites")
@@ -238,6 +255,7 @@ def update_slot(
     if not row:
         raise HTTPException(404, "车位不存在")
     draft(db, row.map_version_id)
+    same_version(row.map_version_id, payload.map_version_id)
     for key, value in payload.model_dump().items():
         setattr(row, key, value)
     db.commit()
@@ -251,6 +269,15 @@ def delete_slot(
     row = db.get(ParkingSlot, row_id)
     if row:
         draft(db, row.map_version_id)
+        in_use = db.scalar(
+            select(InspectionPoint.id).where(InspectionPoint.parking_slot_id == row.id).limit(1)
+        ) or db.scalar(
+            select(ExtinguishPoint.id).where(ExtinguishPoint.parking_slot_id == row.id).limit(1)
+        )
+        if in_use:
+            raise PlatformError(
+                "SLOT_IN_USE", "车位仍被巡检点/灭火点引用，请先移除引用", status_code=409
+            )
         db.delete(row)
         db.commit()
     return Response(status_code=204)
@@ -303,6 +330,7 @@ def create_inspection(
     auth: AuthContext = Depends(require_permission("map.edit")),
 ) -> dict:
     draft(db, payload.map_version_id)
+    slot_in_version(db, payload.parking_slot_id, payload.map_version_id)
     row = InspectionPoint(**payload.model_dump())
     db.add(row)
     db.commit()
@@ -320,6 +348,8 @@ def update_inspection(
     if not row:
         raise HTTPException(404, "巡检点不存在")
     draft(db, row.map_version_id)
+    same_version(row.map_version_id, payload.map_version_id)
+    slot_in_version(db, payload.parking_slot_id, row.map_version_id)
     for key, value in payload.model_dump().items():
         setattr(row, key, value)
     db.commit()
@@ -342,6 +372,7 @@ def create_extinguish(
     auth: AuthContext = Depends(require_permission("map.edit")),
 ) -> dict:
     draft(db, payload.map_version_id)
+    slot_in_version(db, payload.parking_slot_id, payload.map_version_id)
     row = ExtinguishPoint(**payload.model_dump())
     db.add(row)
     db.commit()
@@ -359,6 +390,8 @@ def update_extinguish(
     if not row:
         raise HTTPException(404, "灭火点不存在")
     draft(db, row.map_version_id)
+    same_version(row.map_version_id, payload.map_version_id)
+    slot_in_version(db, payload.parking_slot_id, row.map_version_id)
     for key, value in payload.model_dump().items():
         setattr(row, key, value)
     db.commit()
@@ -398,6 +431,7 @@ def update_trajectory(
     if not row:
         raise HTTPException(404, "轨迹不存在")
     draft(db, row.map_version_id)
+    same_version(row.map_version_id, payload.map_version_id)
     for key, value in payload.model_dump().items():
         setattr(row, key, value)
     db.commit()

@@ -1,0 +1,184 @@
+{
+  "valid": [
+    {
+      "name": "open_request",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "DeviceOperation",
+        "message": "REQUEST",
+        "operation_id": "f2000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "device": "FIRE_SHIELD",
+        "action": "OPEN",
+        "control_mode": "MANUAL",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:05+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      }
+    },
+    {
+      "name": "open_completed_with_limit_switch",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "DeviceOperation",
+        "message": "RESULT",
+        "operation_id": "f2000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "device": "FIRE_SHIELD",
+        "action": "OPEN",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 40,
+        "result": {
+          "state": "COMPLETED",
+          "position": "OPEN",
+          "limit_open": true,
+          "limit_closed": false,
+          "observed_at": "2026-11-26T09:00:05+08:00",
+          "reason_code": null
+        }
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "auto_mode_deferred",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "DeviceOperation",
+        "message": "REQUEST",
+        "operation_id": "f2000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "device": "FIRE_SHIELD",
+        "action": "OPEN",
+        "control_mode": "AUTO",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:05+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "completed_without_limit_switch",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "DeviceOperation",
+        "message": "RESULT",
+        "operation_id": "f2000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "device": "FIRE_SHIELD",
+        "action": "OPEN",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 40,
+        "result": {
+          "state": "COMPLETED",
+          "position": "OPEN",
+          "limit_open": null,
+          "limit_closed": false,
+          "observed_at": "2026-11-26T09:00:05+08:00",
+          "reason_code": null
+        }
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "completed_but_position_unknown",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "DeviceOperation",
+        "message": "RESULT",
+        "operation_id": "f2000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "device": "FIRE_SHIELD",
+        "action": "OPEN",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 40,
+        "result": {
+          "state": "COMPLETED",
+          "position": "UNKNOWN",
+          "limit_open": null,
+          "limit_closed": false,
+          "observed_at": "2026-11-26T09:00:05+08:00",
+          "reason_code": null
+        }
+      },
+      "expect": "DEVICE_COMPLETED_WITHOUT_LIMIT_CONFIRMATION"
+    },
+    {
+      "name": "failed_without_reason",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "DeviceOperation",
+        "message": "RESULT",
+        "operation_id": "f2000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "device": "FIRE_SHIELD",
+        "action": "OPEN",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 40,
+        "result": {
+          "state": "FAILED",
+          "position": "INTERMEDIATE",
+          "limit_open": true,
+          "limit_closed": false,
+          "observed_at": "2026-11-26T09:00:05+08:00",
+          "reason_code": null
+        }
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "request_carrying_result",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "DeviceOperation",
+        "message": "REQUEST",
+        "operation_id": "f2000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "device": "FIRE_SHIELD",
+        "action": "OPEN",
+        "control_mode": "MANUAL",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:05+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555",
+        "result": {
+          "state": "COMPLETED",
+          "position": "OPEN",
+          "limit_open": true,
+          "limit_closed": false,
+          "observed_at": "2026-11-26T09:00:05+08:00",
+          "reason_code": null
+        }
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "unknown_device",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "DeviceOperation",
+        "message": "REQUEST",
+        "operation_id": "f2000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "device": "NOZZLE",
+        "action": "OPEN",
+        "control_mode": "MANUAL",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:05+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      },
+      "expect": "SCHEMA_INVALID"
+    }
+  ]
+}

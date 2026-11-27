@@ -1,0 +1,86 @@
+[
+  {
+    "route": "/monitor",
+    "viewport": "1366x768",
+    "file": "baseline_monitor_1366x768.png",
+    "url": "http://127.0.0.1:4173/monitor",
+    "pageErrors": []
+  },
+  {
+    "route": "/maps",
+    "viewport": "1366x768",
+    "file": "baseline_maps_1366x768.png",
+    "url": "http://127.0.0.1:4173/maps",
+    "pageErrors": []
+  },
+  {
+    "route": "/parking",
+    "viewport": "1366x768",
+    "file": "baseline_parking_1366x768.png",
+    "url": "http://127.0.0.1:4173/parking",
+    "pageErrors": []
+  },
+  {
+    "route": "/patrol",
+    "viewport": "1366x768",
+    "file": "baseline_patrol_1366x768.png",
+    "url": "http://127.0.0.1:4173/patrol",
+    "pageErrors": []
+  },
+  {
+    "route": "/tasks",
+    "viewport": "1366x768",
+    "file": "baseline_tasks_1366x768.png",
+    "url": "http://127.0.0.1:4173/tasks",
+    "pageErrors": []
+  },
+  {
+    "route": "/alarms",
+    "viewport": "1366x768",
+    "file": "baseline_alarms_1366x768.png",
+    "url": "http://127.0.0.1:4173/alarms",
+    "pageErrors": []
+  },
+  {
+    "route": "/monitor",
+    "viewport": "1920x1080",
+    "file": "baseline_monitor_1920x1080.png",
+    "url": "http://127.0.0.1:4173/monitor",
+    "pageErrors": []
+  },
+  {
+    "route": "/maps",
+    "viewport": "1920x1080",
+    "file": "baseline_maps_1920x1080.png",
+    "url": "http://127.0.0.1:4173/maps",
+    "pageErrors": []
+  },
+  {
+    "route": "/parking",
+    "viewport": "1920x1080",
+    "file": "baseline_parking_1920x1080.png",
+    "url": "http://127.0.0.1:4173/parking",
+    "pageErrors": []
+  },
+  {
+    "route": "/patrol",
+    "viewport": "1920x1080",
+    "file": "baseline_patrol_1920x1080.png",
+    "url": "http://127.0.0.1:4173/patrol",
+    "pageErrors": []
+  },
+  {
+    "route": "/tasks",
+    "viewport": "1920x1080",
+    "file": "baseline_tasks_1920x1080.png",
+    "url": "http://127.0.0.1:4173/tasks",
+    "pageErrors": []
+  },
+  {
+    "route": "/alarms",
+    "viewport": "1920x1080",
+    "file": "baseline_alarms_1920x1080.png",
+    "url": "http://127.0.0.1:4173/alarms",
+    "pageErrors": []
+  }
+]

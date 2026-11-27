@@ -1,0 +1,549 @@
+{
+  "valid": [
+    {
+      "name": "sim_patrol",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "idempotency_key": "web-v21-sim-0001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "mission_kind": "PATROL",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "route_snapshot": {
+          "route_id": "d1000000-0000-4000-8000-000000000001",
+          "start_index": 0,
+          "waypoints": [
+            {
+              "index": 0,
+              "point_id": "b1000000-0000-4000-8000-000000000001",
+              "pose": {
+                "x": 0.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            },
+            {
+              "index": 1,
+              "point_id": "b1000000-0000-4000-8000-000000000002",
+              "pose": {
+                "x": 4.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            },
+            {
+              "index": 2,
+              "point_id": "b1000000-0000-4000-8000-000000000003",
+              "pose": {
+                "x": 8.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            }
+          ]
+        },
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:30+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      }
+    },
+    {
+      "name": "sim_return_home",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "idempotency_key": "web-v21-sim-0002",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "mission_kind": "RETURN_HOME",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:30+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555",
+        "target": {
+          "point_id": "b1000000-0000-4000-8000-000000000001",
+          "pose": {
+            "x": 0.0,
+            "y": 0.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          }
+        }
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "patrol_without_route",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "idempotency_key": "web-v21-sim-0001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "mission_kind": "PATROL",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:30+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "return_home_with_route",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "idempotency_key": "web-v21-sim-0002",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "mission_kind": "RETURN_HOME",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:30+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555",
+        "target": {
+          "point_id": "b1000000-0000-4000-8000-000000000001",
+          "pose": {
+            "x": 0.0,
+            "y": 0.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          }
+        },
+        "route_snapshot": {
+          "route_id": "d1000000-0000-4000-8000-000000000001",
+          "start_index": 0,
+          "waypoints": [
+            {
+              "index": 0,
+              "point_id": "b1000000-0000-4000-8000-000000000001",
+              "pose": {
+                "x": 0.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            },
+            {
+              "index": 1,
+              "point_id": "b1000000-0000-4000-8000-000000000002",
+              "pose": {
+                "x": 4.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            },
+            {
+              "index": 2,
+              "point_id": "b1000000-0000-4000-8000-000000000003",
+              "pose": {
+                "x": 8.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            }
+          ]
+        }
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "missing_target_boot",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "idempotency_key": "web-v21-sim-0001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "mission_kind": "PATROL",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "route_snapshot": {
+          "route_id": "d1000000-0000-4000-8000-000000000001",
+          "start_index": 0,
+          "waypoints": [
+            {
+              "index": 0,
+              "point_id": "b1000000-0000-4000-8000-000000000001",
+              "pose": {
+                "x": 0.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            },
+            {
+              "index": 1,
+              "point_id": "b1000000-0000-4000-8000-000000000002",
+              "pose": {
+                "x": 4.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            },
+            {
+              "index": 2,
+              "point_id": "b1000000-0000-4000-8000-000000000003",
+              "pose": {
+                "x": 8.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            }
+          ]
+        },
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:30+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "real_vehicle_in_sim",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "idempotency_key": "web-v21-sim-0001",
+        "vehicle_id": "firebot-vehicle-02",
+        "environment": "SIM",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "mission_kind": "PATROL",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "route_snapshot": {
+          "route_id": "d1000000-0000-4000-8000-000000000001",
+          "start_index": 0,
+          "waypoints": [
+            {
+              "index": 0,
+              "point_id": "b1000000-0000-4000-8000-000000000001",
+              "pose": {
+                "x": 0.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            },
+            {
+              "index": 1,
+              "point_id": "b1000000-0000-4000-8000-000000000002",
+              "pose": {
+                "x": 4.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            },
+            {
+              "index": 2,
+              "point_id": "b1000000-0000-4000-8000-000000000003",
+              "pose": {
+                "x": 8.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            }
+          ]
+        },
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:30+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "waypoint_index_gap",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "idempotency_key": "web-v21-sim-0001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "mission_kind": "PATROL",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "route_snapshot": {
+          "route_id": "d1000000-0000-4000-8000-000000000001",
+          "start_index": 0,
+          "waypoints": [
+            {
+              "index": 0,
+              "point_id": "b1000000-0000-4000-8000-000000000001",
+              "pose": {
+                "x": 0.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            },
+            {
+              "index": 1,
+              "point_id": "b1000000-0000-4000-8000-000000000002",
+              "pose": {
+                "x": 4.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            },
+            {
+              "index": 5,
+              "point_id": "b1000000-0000-4000-8000-000000000003",
+              "pose": {
+                "x": 8.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            }
+          ]
+        },
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:30+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      },
+      "expect": "ROUTE_SNAPSHOT_INDEX_GAP"
+    },
+    {
+      "name": "start_out_of_range",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "idempotency_key": "web-v21-sim-0001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "mission_kind": "PATROL",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "route_snapshot": {
+          "route_id": "d1000000-0000-4000-8000-000000000001",
+          "start_index": 3,
+          "waypoints": [
+            {
+              "index": 0,
+              "point_id": "b1000000-0000-4000-8000-000000000001",
+              "pose": {
+                "x": 0.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            },
+            {
+              "index": 1,
+              "point_id": "b1000000-0000-4000-8000-000000000002",
+              "pose": {
+                "x": 4.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            },
+            {
+              "index": 2,
+              "point_id": "b1000000-0000-4000-8000-000000000003",
+              "pose": {
+                "x": 8.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            }
+          ]
+        },
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:30+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      },
+      "expect": "ROUTE_SNAPSHOT_START_OUT_OF_RANGE"
+    },
+    {
+      "name": "expires_before_issued",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "idempotency_key": "web-v21-sim-0001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "mission_kind": "PATROL",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "route_snapshot": {
+          "route_id": "d1000000-0000-4000-8000-000000000001",
+          "start_index": 0,
+          "waypoints": [
+            {
+              "index": 0,
+              "point_id": "b1000000-0000-4000-8000-000000000001",
+              "pose": {
+                "x": 0.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            },
+            {
+              "index": 1,
+              "point_id": "b1000000-0000-4000-8000-000000000002",
+              "pose": {
+                "x": 4.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            },
+            {
+              "index": 2,
+              "point_id": "b1000000-0000-4000-8000-000000000003",
+              "pose": {
+                "x": 8.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            }
+          ]
+        },
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T08:00:00+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      },
+      "expect": "MISSION_EXPIRES_BEFORE_ISSUED"
+    },
+    {
+      "name": "pixel_pose_frame",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "idempotency_key": "web-v21-sim-0002",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "mission_kind": "RETURN_HOME",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:30+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555",
+        "target": {
+          "point_id": "b1000000-0000-4000-8000-000000000001",
+          "pose": {
+            "x": 0.0,
+            "y": 0.0,
+            "yaw": 0.0,
+            "frame_id": "screen"
+          }
+        }
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "short_idempotency_key",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "idempotency_key": "k",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "mission_kind": "PATROL",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "route_snapshot": {
+          "route_id": "d1000000-0000-4000-8000-000000000001",
+          "start_index": 0,
+          "waypoints": [
+            {
+              "index": 0,
+              "point_id": "b1000000-0000-4000-8000-000000000001",
+              "pose": {
+                "x": 0.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            },
+            {
+              "index": 1,
+              "point_id": "b1000000-0000-4000-8000-000000000002",
+              "pose": {
+                "x": 4.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            },
+            {
+              "index": 2,
+              "point_id": "b1000000-0000-4000-8000-000000000003",
+              "pose": {
+                "x": 8.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              }
+            }
+          ]
+        },
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:30+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      },
+      "expect": "SCHEMA_INVALID"
+    }
+  ]
+}

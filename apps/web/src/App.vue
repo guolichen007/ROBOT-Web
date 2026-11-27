@@ -69,6 +69,7 @@ const nav: NavItem[] = [
       { label: '车辆配置', path: '/robots', permission: 'robot.read' },
       { label: '地图版本', path: '/maps', permission: 'map.read' },
       { label: '地图与点位', path: '/parking', permission: 'map.read' },
+      { label: '场景编辑器', path: '/maps/editor', permission: 'map.edit' },
     ],
   },
   { label: '告警中心', path: '/alarms', icon: AlarmIcon, permission: 'alarm.read' },

@@ -1,0 +1,550 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://firebot.local/schemas/firebot-web-v2.1.contracts.schema.json",
+  "title": "Firebot Web V2.1 Contracts (DRAFT, NOT FROZEN)",
+  "description": "contract_version=2.1.0-draft.1. Platform-level contracts for R002 Web V2.1. Not a replacement of Canonical MQTT 1.3 (firebot-message-1.3.schema.json); see docs/技术合同/web-v2.1/R002_*_CONTRACT.md for wire mapping. Parsers MUST reject NaN/Infinity literals (RFC 8259) before schema validation.",
+  "$defs": {
+    "contractVersion": { "const": "2.1.0-draft.1" },
+    "uuid": { "type": "string", "format": "uuid", "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$" },
+    "ts": { "type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$" },
+    "vehicleId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+    "environment": { "enum": ["REAL", "SIM"] },
+    "code": { "type": "string", "pattern": "^[A-Za-z0-9_.-]{1,64}$" },
+    "reasonCode": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,63}$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "coord": { "type": "number", "minimum": -100000, "maximum": 100000 },
+    "yaw": { "type": "number", "minimum": -3.1415927, "maximum": 3.1415927, "description": "radians, frame map, 0=+X, CCW positive (地图坐标合同.md). Wire 1.3 name: theta." },
+    "xy": {
+      "type": "object", "additionalProperties": false, "required": ["x", "y"],
+      "properties": { "x": { "$ref": "#/$defs/coord" }, "y": { "$ref": "#/$defs/coord" } }
+    },
+    "pose": {
+      "type": "object", "additionalProperties": false, "required": ["x", "y", "yaw", "frame_id"],
+      "properties": {
+        "x": { "$ref": "#/$defs/coord" }, "y": { "$ref": "#/$defs/coord" }, "yaw": { "$ref": "#/$defs/yaw" },
+        "frame_id": { "const": "map" }
+      }
+    },
+    "quality": {
+      "enum": ["LIVE", "STALE", "UNKNOWN", "NOT_CONNECTED", "ERROR", "UNSUPPORTED"],
+      "description": "LIVE/STALE carry a value + observed_at; the others MUST carry value=null (never 0). Maps to web DataSupportState CONNECTED/STALE/NOT_CONNECTED/ERROR/UNSUPPORTED; UNKNOWN = no observation yet."
+    },
+    "observed": {
+      "type": "object", "required": ["value", "quality", "observed_at"],
+      "properties": {
+        "value": {}, "quality": { "$ref": "#/$defs/quality" },
+        "observed_at": { "anyOf": [{ "$ref": "#/$defs/ts" }, { "type": "null" }] }
+      },
+      "allOf": [
+        { "if": { "properties": { "quality": { "enum": ["LIVE", "STALE"] } } },
+          "then": { "properties": { "value": { "not": { "type": "null" } }, "observed_at": { "$ref": "#/$defs/ts" } } },
+          "else": { "properties": { "value": { "type": "null" } } } }
+      ]
+    },
+    "observedNumber": {
+      "allOf": [{ "$ref": "#/$defs/observed" }],
+      "properties": { "value": { "type": ["number", "null"] }, "quality": true, "observed_at": true, "unit": true },
+      "unevaluatedProperties": false
+    },
+    "smokeReading": {
+      "description": "烟雾单位未经车端/传感器文档证实前禁止标 ppm。unit_verified=false 时 unit 必须是 UNVERIFIED，Web 只能显示原始值+“单位待验证”，不得套用 300ppm 阈值。",
+      "allOf": [{ "$ref": "#/$defs/observed" }],
+      "properties": {
+        "value": { "type": ["number", "null"], "minimum": 0 },
+        "quality": true, "observed_at": true,
+        "unit": { "enum": ["ppm", "UNVERIFIED"] },
+        "unit_verified": { "type": "boolean" },
+        "raw_source_field": { "type": "string" }
+      },
+      "required": ["unit", "unit_verified"],
+      "if": { "properties": { "unit": { "const": "ppm" } } },
+      "then": { "properties": { "unit_verified": { "const": true } } },
+      "else": { "properties": { "unit_verified": { "const": false } } },
+      "unevaluatedProperties": false
+    },
+    "envBinding": {
+      "description": "SIM/REAL hard isolation: SIM vehicles live only in the firebot-sim-* namespace; REAL vehicles never do.",
+      "if": { "properties": { "environment": { "const": "SIM" } }, "required": ["environment"] },
+      "then": { "properties": { "vehicle_id": { "pattern": "^firebot-sim-[A-Za-z0-9_-]{1,52}$" } } },
+      "else": { "properties": { "vehicle_id": { "not": { "pattern": "^firebot-sim-" } } } }
+    },
+    "deviceHealth": {
+      "type": "object", "additionalProperties": false,
+      "required": ["device", "state", "observed_at", "quality"],
+      "properties": {
+        "device": { "enum": ["CHASSIS", "LIDAR", "IMU", "RGB_CAMERA", "THERMAL_CAMERA", "SMOKE_SENSOR", "FIRE_SHIELD", "BATTERY", "BRIDGE", "NAV_STACK", "EDGE_AGENT"] },
+        "state": { "enum": ["OK", "DEGRADED", "FAULT", "OFFLINE", "UNKNOWN", "NOT_INSTALLED"] },
+        "quality": { "$ref": "#/$defs/quality" },
+        "observed_at": { "anyOf": [{ "$ref": "#/$defs/ts" }, { "type": "null" }] },
+        "fault_code": { "anyOf": [{ "$ref": "#/$defs/reasonCode" }, { "type": "null" }] },
+        "detail": { "type": "string", "maxLength": 512 }
+      },
+      "if": { "properties": { "state": { "const": "FAULT" } } },
+      "then": { "required": ["fault_code"], "properties": { "fault_code": { "$ref": "#/$defs/reasonCode" } } }
+    },
+    "action": {
+      "enum": [
+        "start_vehicle", "shutdown_vehicle",
+        "patrol_start", "patrol_pause", "patrol_resume", "navigate_to_point", "return_home", "cancel_mission",
+        "manual_control", "stop_motion", "protective_stop", "emergency_stop", "reset_estop",
+        "fire_shield_open", "fire_shield_close", "fire_shield_stop",
+        "scene_load"
+      ]
+    },
+    "actionReadiness": {
+      "type": "object", "additionalProperties": false,
+      "required": ["allowed", "reasons", "required_permission", "permitted_for_user"],
+      "properties": {
+        "allowed": { "type": "boolean", "description": "Server decision incl. permission. Web MUST NOT recompute." },
+        "reasons": { "type": "array", "items": { "$ref": "#/$defs/reasonCode" }, "uniqueItems": true },
+        "required_permission": { "type": "string", "pattern": "^[a-z][a-z0-9_.]{2,63}$" },
+        "permitted_for_user": { "type": "boolean" },
+        "confirm": { "enum": ["NONE", "CLICK", "HOLD", "DOUBLE"] }
+      },
+      "allOf": [
+        { "if": { "properties": { "allowed": { "const": true } } },
+          "then": { "properties": { "reasons": { "maxItems": 0 }, "permitted_for_user": { "const": true } } },
+          "else": { "properties": { "reasons": { "minItems": 1 } } } }
+      ]
+    },
+
+    "VehicleSnapshot": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contract_version", "kind", "vehicle_id", "environment", "generated_at", "boot_id", "link", "pose", "battery_pct", "smoke", "temperature_c", "estop", "devices", "active_mission_id", "scene"],
+      "allOf": [{ "$ref": "#/$defs/envBinding" }],
+      "properties": {
+        "contract_version": { "$ref": "#/$defs/contractVersion" },
+        "kind": { "const": "VehicleSnapshot" },
+        "vehicle_id": { "$ref": "#/$defs/vehicleId" },
+        "environment": { "$ref": "#/$defs/environment" },
+        "generated_at": { "$ref": "#/$defs/ts" },
+        "boot_id": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "link": {
+          "type": "object", "additionalProperties": false, "required": ["state", "last_seen_at", "latency_ms"],
+          "properties": {
+            "state": { "enum": ["ONLINE", "STALE", "OFFLINE", "UNKNOWN"] },
+            "last_seen_at": { "anyOf": [{ "$ref": "#/$defs/ts" }, { "type": "null" }] },
+            "latency_ms": { "anyOf": [{ "type": "number", "minimum": 0, "maximum": 600000 }, { "type": "null" }] }
+          }
+        },
+        "pose": {
+          "type": "object", "additionalProperties": false,
+          "required": ["quality", "observed_at", "value", "localization", "map_code", "map_version", "map_checksum"],
+          "properties": {
+            "quality": { "$ref": "#/$defs/quality" },
+            "observed_at": { "anyOf": [{ "$ref": "#/$defs/ts" }, { "type": "null" }] },
+            "value": { "anyOf": [{ "$ref": "#/$defs/pose" }, { "type": "null" }] },
+            "localization": { "enum": ["OK", "DEGRADED", "LOST", "UNKNOWN", "MAP_UNVERIFIED"] },
+            "map_code": { "anyOf": [{ "$ref": "#/$defs/code" }, { "type": "null" }] },
+            "map_version": { "anyOf": [{ "type": "string", "minLength": 1, "maxLength": 32 }, { "type": "null" }] },
+            "map_checksum": { "anyOf": [{ "type": "string", "minLength": 8, "maxLength": 128 }, { "type": "null" }] }
+          },
+          "if": { "properties": { "quality": { "enum": ["LIVE", "STALE"] } } },
+          "then": { "properties": { "value": { "$ref": "#/$defs/pose" }, "observed_at": { "$ref": "#/$defs/ts" } } },
+          "else": { "properties": { "value": { "type": "null" } } }
+        },
+        "battery_pct": { "allOf": [{ "$ref": "#/$defs/observedNumber" }], "properties": { "value": { "type": ["number", "null"], "minimum": 0, "maximum": 100 } } },
+        "smoke": { "$ref": "#/$defs/smokeReading" },
+        "temperature_c": {
+          "allOf": [{ "$ref": "#/$defs/observedNumber" }],
+          "properties": { "value": { "type": ["number", "null"], "minimum": -50, "maximum": 1200 } },
+          "description": "G3-R2: 独立温度已禁用；未接入时 quality=UNSUPPORTED,value=null。"
+        },
+        "estop": {
+          "type": "object", "additionalProperties": false, "required": ["active", "quality", "observed_at"],
+          "properties": {
+            "active": { "type": ["boolean", "null"] },
+            "quality": { "$ref": "#/$defs/quality" },
+            "observed_at": { "anyOf": [{ "$ref": "#/$defs/ts" }, { "type": "null" }] }
+          },
+          "if": { "properties": { "quality": { "enum": ["LIVE", "STALE"] } } },
+          "then": { "properties": { "active": { "type": "boolean" } } },
+          "else": { "properties": { "active": { "type": "null" } } }
+        },
+        "devices": { "type": "array", "items": { "$ref": "#/$defs/deviceHealth" }, "maxItems": 32 },
+        "active_mission_id": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "scene": {
+          "type": "object", "additionalProperties": false, "required": ["loaded_scene_id", "loaded_scene_version", "loaded_scene_digest", "load_state"],
+          "properties": {
+            "loaded_scene_id": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+            "loaded_scene_version": { "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }] },
+            "loaded_scene_digest": { "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+            "load_state": { "enum": ["LOADED_CONFIRMED", "LOAD_PENDING", "LOAD_REJECTED", "NONE", "UNKNOWN"] }
+          },
+          "if": { "properties": { "load_state": { "const": "LOADED_CONFIRMED" } } },
+          "then": { "properties": { "loaded_scene_id": { "$ref": "#/$defs/uuid" }, "loaded_scene_version": { "type": "integer" }, "loaded_scene_digest": { "$ref": "#/$defs/sha256" } } }
+        }
+      }
+    },
+
+    "OperationReadiness": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contract_version", "kind", "vehicle_id", "environment", "evaluated_at", "valid_until", "boot_id", "control_frozen", "freeze_reasons", "control_owner", "actions"],
+      "allOf": [{ "$ref": "#/$defs/envBinding" }],
+      "properties": {
+        "contract_version": { "$ref": "#/$defs/contractVersion" },
+        "kind": { "const": "OperationReadiness" },
+        "vehicle_id": { "$ref": "#/$defs/vehicleId" },
+        "environment": { "$ref": "#/$defs/environment" },
+        "evaluated_at": { "$ref": "#/$defs/ts" },
+        "valid_until": { "$ref": "#/$defs/ts" },
+        "boot_id": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "control_frozen": { "type": "boolean" },
+        "freeze_reasons": { "type": "array", "items": { "$ref": "#/$defs/reasonCode" }, "uniqueItems": true },
+        "control_owner": {
+          "anyOf": [
+            { "type": "null" },
+            { "type": "object", "additionalProperties": false, "required": ["user_id", "display_name", "lease_id", "expires_at", "is_current_user"],
+              "properties": {
+                "user_id": { "$ref": "#/$defs/uuid" }, "display_name": { "type": "string", "maxLength": 128 },
+                "lease_id": { "$ref": "#/$defs/uuid" }, "expires_at": { "$ref": "#/$defs/ts" },
+                "is_current_user": { "type": "boolean" } } }
+          ]
+        },
+        "actions": {
+          "type": "object", "additionalProperties": false,
+          "required": ["stop_motion", "protective_stop", "emergency_stop"],
+          "propertyNames": { "$ref": "#/$defs/action" },
+          "patternProperties": { "^[a-z_]+$": { "$ref": "#/$defs/actionReadiness" } }
+        }
+      },
+      "if": { "properties": { "control_frozen": { "const": true } } },
+      "then": { "properties": { "freeze_reasons": { "minItems": 1 } } },
+      "else": { "properties": { "freeze_reasons": { "maxItems": 0 } } }
+    },
+
+    "scenePoint": {
+      "type": "object", "additionalProperties": false, "required": ["point_id", "code", "kind", "pose"],
+      "properties": {
+        "point_id": { "$ref": "#/$defs/uuid" }, "code": { "$ref": "#/$defs/code" },
+        "kind": { "enum": ["INSPECTION", "FIRE_OPERATION", "RETURN_HOME", "WAITING", "TRANSIT"] },
+        "pose": { "$ref": "#/$defs/pose" },
+        "parking_slot_code": { "anyOf": [{ "$ref": "#/$defs/code" }, { "type": "null" }] },
+        "xy_tolerance_m": { "type": "number", "exclusiveMinimum": 0, "maximum": 2 },
+        "yaw_tolerance_rad": { "type": "number", "exclusiveMinimum": 0, "maximum": 3.1415927 },
+        "taught_from": { "enum": ["MANUAL_INPUT", "MAP_CLICK", "VEHICLE_POSE"] }
+      }
+    },
+    "SceneManifest": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contract_version", "kind", "scene_id", "scene_version", "status", "site_code", "nav_map", "points", "parking_slots", "routes", "corridors", "validation", "digest", "created_at"],
+      "properties": {
+        "contract_version": { "$ref": "#/$defs/contractVersion" },
+        "kind": { "const": "SceneManifest" },
+        "scene_id": { "$ref": "#/$defs/uuid" },
+        "scene_version": { "type": "integer", "minimum": 1 },
+        "base_scene_version": { "anyOf": [{ "type": "integer", "minimum": 1 }, { "type": "null" }], "description": "draft optimistic-lock base" },
+        "status": { "enum": ["DRAFT", "PUBLISHED", "ARCHIVED"] },
+        "site_code": { "$ref": "#/$defs/code" },
+        "nav_map": {
+          "type": "object", "additionalProperties": false,
+          "required": ["map_code", "map_version", "frame_id", "resolution_m_per_px", "origin", "width_px", "height_px", "image_sha256", "yaml_sha256", "map_checksum", "occupied_thresh", "free_thresh", "negate"],
+          "properties": {
+            "map_code": { "$ref": "#/$defs/code" }, "map_version": { "type": "string", "minLength": 1, "maxLength": 32 },
+            "frame_id": { "const": "map" },
+            "resolution_m_per_px": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+            "origin": { "$ref": "#/$defs/pose" },
+            "width_px": { "type": "integer", "minimum": 1, "maximum": 8192 },
+            "height_px": { "type": "integer", "minimum": 1, "maximum": 8192 },
+            "image_sha256": { "$ref": "#/$defs/sha256" }, "yaml_sha256": { "$ref": "#/$defs/sha256" },
+            "map_checksum": { "type": "string", "minLength": 8, "maxLength": 128, "description": "wire 1.3 location.map_checksum" },
+            "occupied_thresh": { "type": "number", "minimum": 0, "maximum": 1 },
+            "free_thresh": { "type": "number", "minimum": 0, "maximum": 1 },
+            "negate": { "type": "integer", "enum": [0, 1] }
+          }
+        },
+        "points": { "type": "array", "items": { "$ref": "#/$defs/scenePoint" }, "maxItems": 2000 },
+        "parking_slots": {
+          "type": "array", "maxItems": 2000,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["slot_id", "code", "polygon", "center"],
+            "properties": {
+              "slot_id": { "$ref": "#/$defs/uuid" }, "code": { "$ref": "#/$defs/code" },
+              "polygon": { "type": "array", "items": { "$ref": "#/$defs/xy" }, "minItems": 3, "maxItems": 64 },
+              "center": { "$ref": "#/$defs/pose" }, "enabled": { "type": "boolean" }
+            }
+          }
+        },
+        "routes": {
+          "type": "array", "maxItems": 200,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["route_id", "code", "point_refs", "closed", "corridor_refs"],
+            "properties": {
+              "route_id": { "$ref": "#/$defs/uuid" }, "code": { "$ref": "#/$defs/code" },
+              "point_refs": { "type": "array", "items": { "$ref": "#/$defs/uuid" }, "minItems": 2, "maxItems": 2000 },
+              "closed": { "type": "boolean" },
+              "corridor_refs": { "type": "array", "items": { "$ref": "#/$defs/uuid" }, "maxItems": 200 }
+            }
+          }
+        },
+        "corridors": {
+          "type": "array", "maxItems": 200,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["corridor_id", "code", "kind", "centerline", "width_m"],
+            "properties": {
+              "corridor_id": { "$ref": "#/$defs/uuid" }, "code": { "$ref": "#/$defs/code" },
+              "kind": { "enum": ["RIGHT_LANE"] },
+              "centerline": { "type": "array", "items": { "$ref": "#/$defs/xy" }, "minItems": 2, "maxItems": 2000, "description": "ordered = travel direction; lane is on the right of travel" },
+              "width_m": { "type": "number", "minimum": 0.5, "maximum": 10 }
+            }
+          }
+        },
+        "validation": {
+          "type": "object", "additionalProperties": false, "required": ["schema_ok", "references_ok", "traversability", "checked_at"],
+          "properties": {
+            "schema_ok": { "type": "boolean" }, "references_ok": { "type": "boolean" },
+            "traversability": { "enum": ["VERIFIED", "PENDING_VERIFICATION", "FAILED"], "description": "无真实规划验证证据时必须 PENDING_VERIFICATION，禁止默认 VERIFIED" },
+            "traversability_evidence": { "anyOf": [{ "type": "string", "maxLength": 512 }, { "type": "null" }] },
+            "checked_at": { "anyOf": [{ "$ref": "#/$defs/ts" }, { "type": "null" }] },
+            "issues": { "type": "array", "items": { "type": "object", "required": ["code", "ref"], "properties": { "code": { "$ref": "#/$defs/reasonCode" }, "ref": { "type": "string" } } } }
+          },
+          "if": { "properties": { "traversability": { "const": "VERIFIED" } } },
+          "then": { "required": ["traversability_evidence"], "properties": { "traversability_evidence": { "type": "string", "minLength": 1 } } }
+        },
+        "digest": { "anyOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }], "description": "sha256 of canonical JSON of {scene_id,scene_version,nav_map,points,parking_slots,routes,corridors}" },
+        "created_at": { "$ref": "#/$defs/ts" },
+        "published_at": { "anyOf": [{ "$ref": "#/$defs/ts" }, { "type": "null" }] },
+        "published_by": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] }
+      },
+      "if": { "properties": { "status": { "enum": ["PUBLISHED", "ARCHIVED"] } } },
+      "then": {
+        "required": ["published_at", "published_by"],
+        "properties": {
+          "digest": { "$ref": "#/$defs/sha256" }, "published_at": { "$ref": "#/$defs/ts" }, "published_by": { "$ref": "#/$defs/uuid" },
+          "validation": { "properties": { "schema_ok": { "const": true }, "references_ok": { "const": true }, "traversability": { "enum": ["VERIFIED", "PENDING_VERIFICATION"] } } }
+        }
+      }
+    },
+
+    "SceneLoadReceipt": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contract_version", "kind", "receipt_id", "vehicle_id", "environment", "boot_id", "seq", "scene_id", "scene_version", "scene_digest", "nav_map_checksum", "result", "reason_code", "reported_at"],
+      "allOf": [{ "$ref": "#/$defs/envBinding" }],
+      "properties": {
+        "contract_version": { "$ref": "#/$defs/contractVersion" },
+        "kind": { "const": "SceneLoadReceipt" },
+        "receipt_id": { "$ref": "#/$defs/uuid" },
+        "vehicle_id": { "$ref": "#/$defs/vehicleId" }, "environment": { "$ref": "#/$defs/environment" },
+        "boot_id": { "$ref": "#/$defs/uuid" }, "seq": { "type": "integer", "minimum": 0 },
+        "scene_id": { "$ref": "#/$defs/uuid" }, "scene_version": { "type": "integer", "minimum": 1 },
+        "scene_digest": { "$ref": "#/$defs/sha256" },
+        "nav_map_checksum": { "type": "string", "minLength": 8, "maxLength": 128 },
+        "result": { "enum": ["LOADED", "REJECTED", "FAILED"] },
+        "reason_code": { "anyOf": [{ "$ref": "#/$defs/reasonCode" }, { "type": "null" }] },
+        "loaded_at": { "anyOf": [{ "$ref": "#/$defs/ts" }, { "type": "null" }] },
+        "reported_at": { "$ref": "#/$defs/ts" }
+      },
+      "if": { "properties": { "result": { "const": "LOADED" } } },
+      "then": { "required": ["loaded_at"], "properties": { "reason_code": { "type": "null" }, "loaded_at": { "$ref": "#/$defs/ts" } } },
+      "else": { "properties": { "reason_code": { "$ref": "#/$defs/reasonCode" } } }
+    },
+
+    "waypoint": {
+      "type": "object", "additionalProperties": false, "required": ["index", "point_id", "pose"],
+      "properties": { "index": { "type": "integer", "minimum": 0 }, "point_id": { "$ref": "#/$defs/uuid" }, "pose": { "$ref": "#/$defs/pose" } }
+    },
+    "MissionRequest": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contract_version", "kind", "mission_id", "idempotency_key", "vehicle_id", "environment", "target_boot_id", "mission_kind", "scene_id", "scene_version", "scene_digest", "issued_at", "expires_at", "operator_id"],
+      "allOf": [
+        { "$ref": "#/$defs/envBinding" },
+        { "if": { "properties": { "mission_kind": { "const": "PATROL" } } },
+          "then": { "required": ["route_snapshot"], "not": { "required": ["target"] } } },
+        { "if": { "properties": { "mission_kind": { "enum": ["NAVIGATE_TO_POINT", "RETURN_HOME"] } } },
+          "then": { "required": ["target"], "not": { "required": ["route_snapshot"] } } }
+      ],
+      "properties": {
+        "contract_version": { "$ref": "#/$defs/contractVersion" },
+        "kind": { "const": "MissionRequest" },
+        "mission_id": { "$ref": "#/$defs/uuid" },
+        "idempotency_key": { "type": "string", "minLength": 8, "maxLength": 128 },
+        "vehicle_id": { "$ref": "#/$defs/vehicleId" }, "environment": { "$ref": "#/$defs/environment" },
+        "target_boot_id": { "$ref": "#/$defs/uuid" },
+        "mission_kind": { "enum": ["PATROL", "NAVIGATE_TO_POINT", "RETURN_HOME"] },
+        "scene_id": { "$ref": "#/$defs/uuid" }, "scene_version": { "type": "integer", "minimum": 1 },
+        "scene_digest": { "$ref": "#/$defs/sha256" },
+        "route_snapshot": {
+          "type": "object", "additionalProperties": false, "required": ["route_id", "waypoints", "start_index"],
+          "properties": {
+            "route_id": { "$ref": "#/$defs/uuid" },
+            "waypoints": { "type": "array", "items": { "$ref": "#/$defs/waypoint" }, "minItems": 2, "maxItems": 2000 },
+            "start_index": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "target": {
+          "type": "object", "additionalProperties": false, "required": ["point_id", "pose"],
+          "properties": { "point_id": { "$ref": "#/$defs/uuid" }, "pose": { "$ref": "#/$defs/pose" } }
+        },
+        "resume_of": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "issued_at": { "$ref": "#/$defs/ts" }, "expires_at": { "$ref": "#/$defs/ts" },
+        "operator_id": { "$ref": "#/$defs/uuid" }
+      }
+    },
+
+    "MissionFeedback": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contract_version", "kind", "vehicle_id", "environment", "boot_id", "seq", "mission_id", "goal_id", "state", "phase", "progress", "observed_at"],
+      "allOf": [
+        { "$ref": "#/$defs/envBinding" },
+        { "if": { "properties": { "state": { "enum": ["FAILED", "REJECTED"] } } },
+          "then": { "required": ["failure_code"], "properties": { "failure_code": { "$ref": "#/$defs/reasonCode" } } } },
+        { "if": { "properties": { "state": { "const": "WAITING_OBSTACLE" } } },
+          "then": { "required": ["obstacle_since"] } },
+        { "if": { "properties": { "state": { "const": "SUCCEEDED" } } },
+          "then": { "required": ["final_pose"], "properties": { "progress": { "const": 100 } } } }
+      ],
+      "properties": {
+        "contract_version": { "$ref": "#/$defs/contractVersion" },
+        "kind": { "const": "MissionFeedback" },
+        "vehicle_id": { "$ref": "#/$defs/vehicleId" }, "environment": { "$ref": "#/$defs/environment" },
+        "boot_id": { "$ref": "#/$defs/uuid" }, "seq": { "type": "integer", "minimum": 0 },
+        "mission_id": { "$ref": "#/$defs/uuid" },
+        "goal_id": { "anyOf": [{ "type": "string", "minLength": 1, "maxLength": 128 }, { "type": "null" }], "description": "vehicle-side nav goal id (move_base goal id); ingress external_goal_id" },
+        "state": { "enum": ["ACCEPTED", "REJECTED", "EXECUTING", "WAITING_OBSTACLE", "PAUSED", "SUCCEEDED", "FAILED", "CANCELLED"] },
+        "phase": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{1,63}$" },
+        "progress": { "type": "number", "minimum": 0, "maximum": 100 },
+        "waypoint_index": { "type": "integer", "minimum": 0 }, "waypoint_total": { "type": "integer", "minimum": 0 },
+        "current_point_id": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "obstacle_since": { "$ref": "#/$defs/ts" },
+        "final_pose": { "$ref": "#/$defs/pose" },
+        "failure_code": { "anyOf": [{ "$ref": "#/$defs/reasonCode" }, { "type": "null" }] },
+        "failure_message": { "type": "string", "maxLength": 512 },
+        "observed_at": { "$ref": "#/$defs/ts" }
+      }
+    },
+
+    "DeviceOperation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contract_version", "kind", "message", "operation_id", "vehicle_id", "environment", "device", "action"],
+      "allOf": [
+        { "$ref": "#/$defs/envBinding" },
+        { "if": { "properties": { "message": { "const": "REQUEST" } } },
+          "then": { "required": ["target_boot_id", "issued_at", "expires_at", "operator_id", "control_mode"], "not": { "required": ["result"] } },
+          "else": { "required": ["boot_id", "seq", "result"] } }
+      ],
+      "properties": {
+        "contract_version": { "$ref": "#/$defs/contractVersion" },
+        "kind": { "const": "DeviceOperation" },
+        "message": { "enum": ["REQUEST", "ACK", "RESULT"] },
+        "operation_id": { "$ref": "#/$defs/uuid" },
+        "vehicle_id": { "$ref": "#/$defs/vehicleId" }, "environment": { "$ref": "#/$defs/environment" },
+        "device": { "const": "FIRE_SHIELD" },
+        "action": { "enum": ["OPEN", "CLOSE", "STOP"] },
+        "control_mode": { "const": "MANUAL", "description": "自动防火罩作业本期暂缓" },
+        "target_boot_id": { "$ref": "#/$defs/uuid" },
+        "boot_id": { "$ref": "#/$defs/uuid" }, "seq": { "type": "integer", "minimum": 0 },
+        "issued_at": { "$ref": "#/$defs/ts" }, "expires_at": { "$ref": "#/$defs/ts" },
+        "operator_id": { "$ref": "#/$defs/uuid" },
+        "result": {
+          "type": "object", "additionalProperties": false, "required": ["state", "position", "limit_open", "limit_closed", "observed_at", "reason_code"],
+          "properties": {
+            "state": { "enum": ["ACCEPTED", "REJECTED", "IN_PROGRESS", "COMPLETED", "FAILED", "TIMEOUT", "STOPPED"] },
+            "position": { "enum": ["OPEN", "CLOSED", "MOVING", "INTERMEDIATE", "UNKNOWN"] },
+            "limit_open": { "type": ["boolean", "null"] }, "limit_closed": { "type": ["boolean", "null"] },
+            "observed_at": { "$ref": "#/$defs/ts" },
+            "reason_code": { "anyOf": [{ "$ref": "#/$defs/reasonCode" }, { "type": "null" }] }
+          },
+          "allOf": [
+            { "if": { "properties": { "state": { "enum": ["REJECTED", "FAILED", "TIMEOUT"] } } },
+              "then": { "properties": { "reason_code": { "$ref": "#/$defs/reasonCode" } } } },
+            { "if": { "properties": { "position": { "const": "OPEN" } } },
+              "then": { "properties": { "limit_open": { "const": true }, "limit_closed": { "const": false } } } },
+            { "if": { "properties": { "position": { "const": "CLOSED" } } },
+              "then": { "properties": { "limit_closed": { "const": true }, "limit_open": { "const": false } } } }
+          ]
+        }
+      }
+    },
+
+    "AlarmEvent": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contract_version", "kind", "alarm_id", "vehicle_id", "environment", "category", "severity", "state", "source", "first_seen_at", "last_seen_at", "occurrence_count", "handling"],
+      "allOf": [
+        { "$ref": "#/$defs/envBinding" },
+        { "if": { "properties": { "category": { "enum": ["SMOKE_HIGH", "TEMPERATURE_HIGH", "BATTERY_LOW"] } } }, "then": { "required": ["measurement"] } }
+      ],
+      "properties": {
+        "contract_version": { "$ref": "#/$defs/contractVersion" },
+        "kind": { "const": "AlarmEvent" },
+        "alarm_id": { "$ref": "#/$defs/uuid" },
+        "vehicle_event_id": { "anyOf": [{ "type": "string", "maxLength": 128 }, { "type": "null" }], "description": "wire 1.3 alarm.event_id" },
+        "vehicle_id": { "$ref": "#/$defs/vehicleId" }, "environment": { "$ref": "#/$defs/environment" },
+        "category": { "enum": ["FIRE", "SMOKE_HIGH", "TEMPERATURE_HIGH", "BATTERY_LOW", "DEVICE_FAULT", "LINK_LOSS", "NAVIGATION_FAULT", "ESTOP"] },
+        "severity": { "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+        "state": { "enum": ["NEW", "ACKNOWLEDGED", "CONFIRMED", "DISMISSED", "RESOLVED", "CLOSED"] },
+        "source": { "enum": ["VEHICLE", "PLATFORM_RULE", "MANUAL"] },
+        "fire_type": { "enum": ["smoke", "flame", "unknown"] },
+        "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "measurement": {
+          "type": "object", "additionalProperties": false, "required": ["metric", "value", "unit", "unit_verified", "threshold", "observed_at"],
+          "properties": {
+            "metric": { "enum": ["smoke", "temperature", "battery"] },
+            "value": { "type": "number" },
+            "unit": { "enum": ["ppm", "UNVERIFIED", "celsius", "percent"] },
+            "unit_verified": { "type": "boolean" },
+            "threshold": { "type": ["number", "null"] },
+            "observed_at": { "$ref": "#/$defs/ts" }
+          },
+          "allOf": [
+            { "if": { "properties": { "unit": { "enum": ["UNVERIFIED"] } } }, "then": { "properties": { "unit_verified": { "const": false }, "threshold": { "type": "null" } } } },
+            { "if": { "properties": { "unit": { "enum": ["ppm"] } } }, "then": { "properties": { "unit_verified": { "const": true }, "metric": { "const": "smoke" } } } },
+            { "if": { "properties": { "metric": { "const": "smoke" } } }, "then": { "properties": { "unit": { "enum": ["ppm", "UNVERIFIED"] } } } },
+            { "if": { "properties": { "metric": { "const": "battery" } } }, "then": { "properties": { "unit": { "const": "percent" }, "value": { "minimum": 0, "maximum": 100 } } } },
+            { "if": { "properties": { "metric": { "const": "temperature" } } }, "then": { "properties": { "unit": { "const": "celsius" } } } }
+          ]
+        },
+        "position": { "anyOf": [{ "$ref": "#/$defs/pose" }, { "type": "null" }] },
+        "parking_slot_code": { "anyOf": [{ "$ref": "#/$defs/code" }, { "type": "null" }] },
+        "first_seen_at": { "$ref": "#/$defs/ts" }, "last_seen_at": { "$ref": "#/$defs/ts" },
+        "occurrence_count": { "type": "integer", "minimum": 1 },
+        "handling": {
+          "type": "array", "maxItems": 200,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["action", "actor_id", "at"],
+            "properties": {
+              "action": { "enum": ["ACKNOWLEDGE", "CONFIRM", "DISMISS", "RESOLVE", "CLOSE", "NOTE", "LOCATE_ON_MAP"] },
+              "actor_id": { "$ref": "#/$defs/uuid" }, "at": { "$ref": "#/$defs/ts" },
+              "note": { "type": "string", "maxLength": 1000 }
+            }
+          }
+        }
+      }
+    },
+
+    "NavigationDiagnostics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["contract_version", "kind", "vehicle_id", "environment", "boot_id", "seq", "observed_at", "mission_id", "goal_id", "planner_state", "localization", "obstacle"],
+      "allOf": [{ "$ref": "#/$defs/envBinding" }],
+      "properties": {
+        "contract_version": { "$ref": "#/$defs/contractVersion" },
+        "kind": { "const": "NavigationDiagnostics" },
+        "vehicle_id": { "$ref": "#/$defs/vehicleId" }, "environment": { "$ref": "#/$defs/environment" },
+        "boot_id": { "$ref": "#/$defs/uuid" }, "seq": { "type": "integer", "minimum": 0 },
+        "observed_at": { "$ref": "#/$defs/ts" },
+        "mission_id": { "anyOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }] },
+        "goal_id": { "anyOf": [{ "type": "string", "minLength": 1, "maxLength": 128 }, { "type": "null" }] },
+        "planner_state": { "enum": ["IDLE", "PLANNING", "FOLLOWING", "BLOCKED", "RECOVERING", "ABORTED", "UNKNOWN"] },
+        "localization": {
+          "type": "object", "additionalProperties": false, "required": ["state"],
+          "properties": {
+            "state": { "enum": ["OK", "DEGRADED", "LOST", "UNKNOWN"] },
+            "xy_std_m": { "type": ["number", "null"], "minimum": 0 }, "yaw_std_rad": { "type": ["number", "null"], "minimum": 0 }
+          }
+        },
+        "obstacle": {
+          "type": "object", "additionalProperties": false, "required": ["blocked"],
+          "properties": {
+            "blocked": { "type": ["boolean", "null"] },
+            "nearest_m": { "type": ["number", "null"], "minimum": 0 },
+            "since": { "anyOf": [{ "$ref": "#/$defs/ts" }, { "type": "null" }] }
+          }
+        },
+        "distance_to_goal_m": { "type": ["number", "null"], "minimum": 0 },
+        "recovery_count": { "type": "integer", "minimum": 0 },
+        "cmd_vel_source": { "enum": ["NAV", "MANUAL", "SAFETY", "NONE", "UNKNOWN"] }
+      },
+      "if": { "properties": { "planner_state": { "const": "BLOCKED" } } },
+      "then": { "properties": { "obstacle": { "properties": { "blocked": { "const": true } } } } }
+    }
+  }
+}

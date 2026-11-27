@@ -1,0 +1,129 @@
+{
+  "valid": [
+    {
+      "name": "sim_loaded",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneLoadReceipt",
+        "receipt_id": "f4000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 10,
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "result": "LOADED",
+        "reason_code": null,
+        "loaded_at": "2026-11-26T09:00:05+08:00",
+        "reported_at": "2026-11-26T09:00:05+08:00"
+      }
+    },
+    {
+      "name": "sim_rejected",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneLoadReceipt",
+        "receipt_id": "f4000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 10,
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "result": "REJECTED",
+        "reason_code": "NAV_MAP_CHECKSUM_MISMATCH",
+        "loaded_at": null,
+        "reported_at": "2026-11-26T09:00:05+08:00"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "loaded_with_reason",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneLoadReceipt",
+        "receipt_id": "f4000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 10,
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "result": "LOADED",
+        "reason_code": "SOMETHING",
+        "loaded_at": "2026-11-26T09:00:05+08:00",
+        "reported_at": "2026-11-26T09:00:05+08:00"
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "rejected_without_reason",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneLoadReceipt",
+        "receipt_id": "f4000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 10,
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "result": "REJECTED",
+        "reason_code": null,
+        "loaded_at": null,
+        "reported_at": "2026-11-26T09:00:05+08:00"
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "loaded_without_loaded_at",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneLoadReceipt",
+        "receipt_id": "f4000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 10,
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "result": "LOADED",
+        "reason_code": null,
+        "reported_at": "2026-11-26T09:00:05+08:00"
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "digest_not_hex",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "SceneLoadReceipt",
+        "receipt_id": "f4000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 10,
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "result": "LOADED",
+        "reason_code": null,
+        "loaded_at": "2026-11-26T09:00:05+08:00",
+        "reported_at": "2026-11-26T09:00:05+08:00"
+      },
+      "expect": "SCHEMA_INVALID"
+    }
+  ]
+}

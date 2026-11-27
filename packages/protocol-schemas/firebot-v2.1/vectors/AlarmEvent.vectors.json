@@ -1,0 +1,367 @@
+{
+  "valid": [
+    {
+      "name": "fire_new",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "AlarmEvent",
+        "alarm_id": "f3000000-0000-4000-8000-000000000001",
+        "vehicle_event_id": "evt-001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "category": "FIRE",
+        "severity": "CRITICAL",
+        "state": "NEW",
+        "source": "VEHICLE",
+        "fire_type": "flame",
+        "confidence": 0.92,
+        "position": {
+          "x": 4.0,
+          "y": 2.5,
+          "yaw": 0.0,
+          "frame_id": "map"
+        },
+        "parking_slot_code": "S-01",
+        "first_seen_at": "2026-11-26T09:00:00+08:00",
+        "last_seen_at": "2026-11-26T09:00:05+08:00",
+        "occurrence_count": 2,
+        "handling": []
+      }
+    },
+    {
+      "name": "battery_low_50",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "AlarmEvent",
+        "alarm_id": "f3000000-0000-4000-8000-000000000001",
+        "vehicle_event_id": "evt-001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "category": "BATTERY_LOW",
+        "severity": "MEDIUM",
+        "state": "NEW",
+        "source": "PLATFORM_RULE",
+        "fire_type": "unknown",
+        "confidence": 0.92,
+        "position": {
+          "x": 4.0,
+          "y": 2.5,
+          "yaw": 0.0,
+          "frame_id": "map"
+        },
+        "parking_slot_code": "S-01",
+        "first_seen_at": "2026-11-26T09:00:00+08:00",
+        "last_seen_at": "2026-11-26T09:00:05+08:00",
+        "occurrence_count": 2,
+        "handling": [],
+        "measurement": {
+          "metric": "battery",
+          "value": 48.0,
+          "unit": "percent",
+          "unit_verified": true,
+          "threshold": 50.0,
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        }
+      }
+    },
+    {
+      "name": "smoke_raw_unverified",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "AlarmEvent",
+        "alarm_id": "f3000000-0000-4000-8000-000000000001",
+        "vehicle_event_id": "evt-001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "category": "SMOKE_HIGH",
+        "severity": "HIGH",
+        "state": "NEW",
+        "source": "VEHICLE",
+        "fire_type": "smoke",
+        "confidence": 0.92,
+        "position": {
+          "x": 4.0,
+          "y": 2.5,
+          "yaw": 0.0,
+          "frame_id": "map"
+        },
+        "parking_slot_code": "S-01",
+        "first_seen_at": "2026-11-26T09:00:00+08:00",
+        "last_seen_at": "2026-11-26T09:00:05+08:00",
+        "occurrence_count": 2,
+        "handling": [],
+        "measurement": {
+          "metric": "smoke",
+          "value": 41.0,
+          "unit": "UNVERIFIED",
+          "unit_verified": false,
+          "threshold": null,
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        }
+      }
+    },
+    {
+      "name": "fire_acked",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "AlarmEvent",
+        "alarm_id": "f3000000-0000-4000-8000-000000000001",
+        "vehicle_event_id": "evt-001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "category": "FIRE",
+        "severity": "CRITICAL",
+        "state": "ACKNOWLEDGED",
+        "source": "VEHICLE",
+        "fire_type": "flame",
+        "confidence": 0.92,
+        "position": {
+          "x": 4.0,
+          "y": 2.5,
+          "yaw": 0.0,
+          "frame_id": "map"
+        },
+        "parking_slot_code": "S-01",
+        "first_seen_at": "2026-11-26T09:00:00+08:00",
+        "last_seen_at": "2026-11-26T09:00:05+08:00",
+        "occurrence_count": 2,
+        "handling": [
+          {
+            "action": "ACKNOWLEDGE",
+            "actor_id": "11111111-2222-4333-8444-555555555555",
+            "at": "2026-11-26T09:00:05+08:00"
+          }
+        ]
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "fake_ppm",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "AlarmEvent",
+        "alarm_id": "f3000000-0000-4000-8000-000000000001",
+        "vehicle_event_id": "evt-001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "category": "SMOKE_HIGH",
+        "severity": "HIGH",
+        "state": "NEW",
+        "source": "VEHICLE",
+        "fire_type": "smoke",
+        "confidence": 0.92,
+        "position": {
+          "x": 4.0,
+          "y": 2.5,
+          "yaw": 0.0,
+          "frame_id": "map"
+        },
+        "parking_slot_code": "S-01",
+        "first_seen_at": "2026-11-26T09:00:00+08:00",
+        "last_seen_at": "2026-11-26T09:00:05+08:00",
+        "occurrence_count": 2,
+        "handling": [],
+        "measurement": {
+          "metric": "smoke",
+          "value": 41.0,
+          "unit": "ppm",
+          "unit_verified": false,
+          "threshold": null,
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        }
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "unverified_with_threshold",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "AlarmEvent",
+        "alarm_id": "f3000000-0000-4000-8000-000000000001",
+        "vehicle_event_id": "evt-001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "category": "SMOKE_HIGH",
+        "severity": "HIGH",
+        "state": "NEW",
+        "source": "VEHICLE",
+        "fire_type": "smoke",
+        "confidence": 0.92,
+        "position": {
+          "x": 4.0,
+          "y": 2.5,
+          "yaw": 0.0,
+          "frame_id": "map"
+        },
+        "parking_slot_code": "S-01",
+        "first_seen_at": "2026-11-26T09:00:00+08:00",
+        "last_seen_at": "2026-11-26T09:00:05+08:00",
+        "occurrence_count": 2,
+        "handling": [],
+        "measurement": {
+          "metric": "smoke",
+          "value": 41.0,
+          "unit": "UNVERIFIED",
+          "unit_verified": false,
+          "threshold": 300,
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        }
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "battery_in_ppm",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "AlarmEvent",
+        "alarm_id": "f3000000-0000-4000-8000-000000000001",
+        "vehicle_event_id": "evt-001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "category": "BATTERY_LOW",
+        "severity": "MEDIUM",
+        "state": "NEW",
+        "source": "PLATFORM_RULE",
+        "fire_type": "unknown",
+        "confidence": 0.92,
+        "position": {
+          "x": 4.0,
+          "y": 2.5,
+          "yaw": 0.0,
+          "frame_id": "map"
+        },
+        "parking_slot_code": "S-01",
+        "first_seen_at": "2026-11-26T09:00:00+08:00",
+        "last_seen_at": "2026-11-26T09:00:05+08:00",
+        "occurrence_count": 2,
+        "handling": [],
+        "measurement": {
+          "metric": "battery",
+          "value": 48.0,
+          "unit": "ppm",
+          "unit_verified": true,
+          "threshold": 50.0,
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        }
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "acked_without_record",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "AlarmEvent",
+        "alarm_id": "f3000000-0000-4000-8000-000000000001",
+        "vehicle_event_id": "evt-001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "category": "FIRE",
+        "severity": "CRITICAL",
+        "state": "ACKNOWLEDGED",
+        "source": "VEHICLE",
+        "fire_type": "flame",
+        "confidence": 0.92,
+        "position": {
+          "x": 4.0,
+          "y": 2.5,
+          "yaw": 0.0,
+          "frame_id": "map"
+        },
+        "parking_slot_code": "S-01",
+        "first_seen_at": "2026-11-26T09:00:00+08:00",
+        "last_seen_at": "2026-11-26T09:00:05+08:00",
+        "occurrence_count": 2,
+        "handling": []
+      },
+      "expect": "ALARM_STATE_WITHOUT_HANDLING_RECORD"
+    },
+    {
+      "name": "last_seen_before_first",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "AlarmEvent",
+        "alarm_id": "f3000000-0000-4000-8000-000000000001",
+        "vehicle_event_id": "evt-001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "category": "FIRE",
+        "severity": "CRITICAL",
+        "state": "NEW",
+        "source": "VEHICLE",
+        "fire_type": "flame",
+        "confidence": 0.92,
+        "position": {
+          "x": 4.0,
+          "y": 2.5,
+          "yaw": 0.0,
+          "frame_id": "map"
+        },
+        "parking_slot_code": "S-01",
+        "first_seen_at": "2026-11-26T09:00:00+08:00",
+        "last_seen_at": "2026-11-25T00:00:00+08:00",
+        "occurrence_count": 2,
+        "handling": []
+      },
+      "expect": "ALARM_LAST_SEEN_BEFORE_FIRST"
+    },
+    {
+      "name": "battery_low_without_measurement",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "AlarmEvent",
+        "alarm_id": "f3000000-0000-4000-8000-000000000001",
+        "vehicle_event_id": "evt-001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "category": "BATTERY_LOW",
+        "severity": "MEDIUM",
+        "state": "NEW",
+        "source": "PLATFORM_RULE",
+        "fire_type": "unknown",
+        "confidence": 0.92,
+        "position": {
+          "x": 4.0,
+          "y": 2.5,
+          "yaw": 0.0,
+          "frame_id": "map"
+        },
+        "parking_slot_code": "S-01",
+        "first_seen_at": "2026-11-26T09:00:00+08:00",
+        "last_seen_at": "2026-11-26T09:00:05+08:00",
+        "occurrence_count": 2,
+        "handling": []
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "zero_occurrence",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "AlarmEvent",
+        "alarm_id": "f3000000-0000-4000-8000-000000000001",
+        "vehicle_event_id": "evt-001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "category": "FIRE",
+        "severity": "CRITICAL",
+        "state": "NEW",
+        "source": "VEHICLE",
+        "fire_type": "flame",
+        "confidence": 0.92,
+        "position": {
+          "x": 4.0,
+          "y": 2.5,
+          "yaw": 0.0,
+          "frame_id": "map"
+        },
+        "parking_slot_code": "S-01",
+        "first_seen_at": "2026-11-26T09:00:00+08:00",
+        "last_seen_at": "2026-11-26T09:00:05+08:00",
+        "occurrence_count": 0,
+        "handling": []
+      },
+      "expect": "SCHEMA_INVALID"
+    }
+  ]
+}

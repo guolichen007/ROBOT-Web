@@ -1,0 +1,375 @@
+{
+  "valid": [
+    {
+      "name": "executing",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionFeedback",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 21,
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "goal_id": "move_base-1732582800-7",
+        "state": "EXECUTING",
+        "phase": "NAVIGATING",
+        "progress": 33.3,
+        "waypoint_index": 1,
+        "waypoint_total": 3,
+        "current_point_id": "b1000000-0000-4000-8000-000000000002",
+        "observed_at": "2026-11-26T09:00:05+08:00"
+      }
+    },
+    {
+      "name": "waiting_obstacle",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionFeedback",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 22,
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "goal_id": "move_base-1732582800-7",
+        "state": "WAITING_OBSTACLE",
+        "phase": "OBSTACLE_WAIT",
+        "progress": 33.3,
+        "waypoint_index": 1,
+        "waypoint_total": 3,
+        "current_point_id": "b1000000-0000-4000-8000-000000000002",
+        "observed_at": "2026-11-26T09:00:05+08:00",
+        "obstacle_since": "2026-11-26T09:00:05+08:00"
+      }
+    },
+    {
+      "name": "succeeded",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionFeedback",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 30,
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "goal_id": "move_base-1732582800-7",
+        "state": "SUCCEEDED",
+        "phase": "DONE",
+        "progress": 100,
+        "waypoint_index": 1,
+        "waypoint_total": 3,
+        "current_point_id": "b1000000-0000-4000-8000-000000000002",
+        "observed_at": "2026-11-26T09:00:05+08:00",
+        "final_pose": {
+          "x": 8.0,
+          "y": 0.0,
+          "yaw": 0.0,
+          "frame_id": "map"
+        }
+      }
+    },
+    {
+      "name": "failed",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionFeedback",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 31,
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "goal_id": "move_base-1732582800-7",
+        "state": "FAILED",
+        "phase": "ABORTED",
+        "progress": 33.3,
+        "waypoint_index": 1,
+        "waypoint_total": 3,
+        "current_point_id": "b1000000-0000-4000-8000-000000000002",
+        "observed_at": "2026-11-26T09:00:05+08:00",
+        "failure_code": "NAV_GOAL_ABORTED",
+        "failure_message": "planner aborted"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "failed_without_code",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionFeedback",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 31,
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "goal_id": "move_base-1732582800-7",
+        "state": "FAILED",
+        "phase": "ABORTED",
+        "progress": 33.3,
+        "waypoint_index": 1,
+        "waypoint_total": 3,
+        "current_point_id": "b1000000-0000-4000-8000-000000000002",
+        "observed_at": "2026-11-26T09:00:05+08:00",
+        "failure_message": "planner aborted"
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "obstacle_without_since",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionFeedback",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 22,
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "goal_id": "move_base-1732582800-7",
+        "state": "WAITING_OBSTACLE",
+        "phase": "OBSTACLE_WAIT",
+        "progress": 33.3,
+        "waypoint_index": 1,
+        "waypoint_total": 3,
+        "current_point_id": "b1000000-0000-4000-8000-000000000002",
+        "observed_at": "2026-11-26T09:00:05+08:00"
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "succeeded_progress_not_100",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionFeedback",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 30,
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "goal_id": "move_base-1732582800-7",
+        "state": "SUCCEEDED",
+        "phase": "DONE",
+        "progress": 90,
+        "waypoint_index": 1,
+        "waypoint_total": 3,
+        "current_point_id": "b1000000-0000-4000-8000-000000000002",
+        "observed_at": "2026-11-26T09:00:05+08:00",
+        "final_pose": {
+          "x": 8.0,
+          "y": 0.0,
+          "yaw": 0.0,
+          "frame_id": "map"
+        }
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "succeeded_without_final_pose",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionFeedback",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 30,
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "goal_id": "move_base-1732582800-7",
+        "state": "SUCCEEDED",
+        "phase": "DONE",
+        "progress": 100,
+        "waypoint_index": 1,
+        "waypoint_total": 3,
+        "current_point_id": "b1000000-0000-4000-8000-000000000002",
+        "observed_at": "2026-11-26T09:00:05+08:00"
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "waypoint_out_of_range",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionFeedback",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 21,
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "goal_id": "move_base-1732582800-7",
+        "state": "EXECUTING",
+        "phase": "NAVIGATING",
+        "progress": 33.3,
+        "waypoint_index": 3,
+        "waypoint_total": 3,
+        "current_point_id": "b1000000-0000-4000-8000-000000000002",
+        "observed_at": "2026-11-26T09:00:05+08:00"
+      },
+      "expect": "WAYPOINT_INDEX_OUT_OF_RANGE"
+    },
+    {
+      "name": "lowercase_state",
+      "payload": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionFeedback",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 21,
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "goal_id": "move_base-1732582800-7",
+        "state": "executing",
+        "phase": "NAVIGATING",
+        "progress": 33.3,
+        "waypoint_index": 1,
+        "waypoint_total": 3,
+        "current_point_id": "b1000000-0000-4000-8000-000000000002",
+        "observed_at": "2026-11-26T09:00:05+08:00"
+      },
+      "expect": "SCHEMA_INVALID"
+    }
+  ],
+  "stale_cases": [
+    {
+      "name": "old_boot",
+      "task": {
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "goal_id": "move_base-1732582800-7",
+        "last_seq": 20,
+        "state": "EXECUTING"
+      },
+      "feedback": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionFeedback",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "0b0b0b0b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 21,
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "goal_id": "move_base-1732582800-7",
+        "state": "EXECUTING",
+        "phase": "NAVIGATING",
+        "progress": 33.3,
+        "waypoint_index": 1,
+        "waypoint_total": 3,
+        "current_point_id": "b1000000-0000-4000-8000-000000000002",
+        "observed_at": "2026-11-26T09:00:05+08:00"
+      },
+      "expect": "STALE_BOOT_ID"
+    },
+    {
+      "name": "old_goal",
+      "task": {
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "goal_id": "move_base-NEW",
+        "last_seq": 20,
+        "state": "EXECUTING"
+      },
+      "feedback": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionFeedback",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 21,
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "goal_id": "move_base-1732582800-7",
+        "state": "EXECUTING",
+        "phase": "NAVIGATING",
+        "progress": 33.3,
+        "waypoint_index": 1,
+        "waypoint_total": 3,
+        "current_point_id": "b1000000-0000-4000-8000-000000000002",
+        "observed_at": "2026-11-26T09:00:05+08:00"
+      },
+      "expect": "STALE_GOAL_ID"
+    },
+    {
+      "name": "replayed_seq",
+      "task": {
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "goal_id": "move_base-1732582800-7",
+        "last_seq": 21,
+        "state": "EXECUTING"
+      },
+      "feedback": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionFeedback",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 21,
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "goal_id": "move_base-1732582800-7",
+        "state": "EXECUTING",
+        "phase": "NAVIGATING",
+        "progress": 33.3,
+        "waypoint_index": 1,
+        "waypoint_total": 3,
+        "current_point_id": "b1000000-0000-4000-8000-000000000002",
+        "observed_at": "2026-11-26T09:00:05+08:00"
+      },
+      "expect": "STALE_SEQ"
+    },
+    {
+      "name": "after_terminal",
+      "task": {
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "goal_id": "move_base-1732582800-7",
+        "last_seq": 5,
+        "state": "CANCELLED"
+      },
+      "feedback": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionFeedback",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 21,
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "goal_id": "move_base-1732582800-7",
+        "state": "EXECUTING",
+        "phase": "NAVIGATING",
+        "progress": 33.3,
+        "waypoint_index": 1,
+        "waypoint_total": 3,
+        "current_point_id": "b1000000-0000-4000-8000-000000000002",
+        "observed_at": "2026-11-26T09:00:05+08:00"
+      },
+      "expect": "TASK_ALREADY_TERMINAL"
+    },
+    {
+      "name": "fresh_ok",
+      "task": {
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "goal_id": "move_base-1732582800-7",
+        "last_seq": 20,
+        "state": "EXECUTING"
+      },
+      "feedback": {
+        "contract_version": "2.1.0-draft.1",
+        "kind": "MissionFeedback",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 21,
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "goal_id": "move_base-1732582800-7",
+        "state": "EXECUTING",
+        "phase": "NAVIGATING",
+        "progress": 33.3,
+        "waypoint_index": 1,
+        "waypoint_total": 3,
+        "current_point_id": "b1000000-0000-4000-8000-000000000002",
+        "observed_at": "2026-11-26T09:00:05+08:00"
+      },
+      "expect": "OK"
+    }
+  ]
+}
