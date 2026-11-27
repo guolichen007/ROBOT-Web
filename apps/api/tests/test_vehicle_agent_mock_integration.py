@@ -207,13 +207,14 @@ def test_legacy_canonical_transport_and_v1_mutual_exclusion(runtime):
         )
         db.commit()
         assert payload["schema_version"] == "1.2"
-        # WEB-R1A: a canonical command with no authorised Command row, for a REAL vehicle that is
-        # not on CANONICAL_DOWNLINK_ALLOWLIST, is refused at the final publish gate (REAL default
-        # deny). Before R1A this published to robot/R002/command.
+        # WEB-R1A: a canonical command with no authorised Command row is refused at the final
+        # publish gate under ANY configuration: FG_NOT_ALLOWLISTED by default (REAL default deny),
+        # FG_UNAUTHORIZED where a test stack allowlists the mock R002 (compose.test.yml).
+        # Before R1A this published to robot/R002/command.
         from services.dispatch_gate import GateDenied
 
         before = len(runtime.published)
-        with pytest.raises(GateDenied, match="FG_NOT_ALLOWLISTED"):
+        with pytest.raises(GateDenied, match="FG_NOT_ALLOWLISTED|FG_UNAUTHORIZED"):
             runtime.dispatcher.publish_command(payload, qos=1)
         assert len(runtime.published) == before
         payload["vehicle_id"] = "R001"
