@@ -150,7 +150,14 @@ def publish_command(payload: dict, qos: int, path: str = "outbox") -> None:
         else:
             # WEB-R1A final gate: CANONICAL_MQTT only (V1/001 branch above is unchanged).
             claim = final_publish_gate(
-                payload, robot, db=db, redis=redis, settings=settings, now=now, path=path
+                payload,
+                robot,
+                db=db,
+                redis=redis,
+                settings=settings,
+                now=now,
+                path=path,
+                destination=destination,
             )
     try:
         _publish_to_broker(profile, destination, payload, qos, expiry_interval)
@@ -180,6 +187,27 @@ def _publish_to_broker(
     if not info.is_published():
         raise RuntimeError("MQTT publish did not complete")
     # 注意：is_published 仅表示目标 Broker 已 PUBACK（Broker 收到），不代表车端收到或执行。
+
+
+def _record_gate_denial(db, command, exc: GateDenied, *, pending: set[str]) -> None:
+    """Record a final-gate refusal WITHOUT rewriting correct history.
+
+    - Command already PUBLISHED / ACKed / terminal (a duplicate consumption): left untouched.
+    - FG_REPLAY on a still-pending command: an earlier attempt consumed the claim, so the
+      broker may already have the message (publish ok, DB commit lost / crash). It is never
+      re-sent; surface the uncertainty as PUBLISHED_UNCONFIRMED / DISPATCH_STATE_UNKNOWN.
+    - Otherwise: GATE_REJECTED with the refusal code.
+    """
+    if command is None or command.lifecycle_status not in pending:
+        return
+    if exc.code == "FG_REPLAY":
+        command.lifecycle_status = "PUBLISHED_UNCONFIRMED"
+        command.ack_reason = "DISPATCH_STATE_UNKNOWN"
+    else:
+        command.lifecycle_status = "GATE_REJECTED"
+        command.ack_reason = exc.code
+        command.terminal_at = datetime.now(UTC)
+    queue_event(db, "command.updated", serialize_model(command))
 
 
 def _manual_heartbeat() -> None:
@@ -284,11 +312,7 @@ def process_safety_events(events: list) -> None:
                         queue_event(db, "command.updated", serialize_model(command))
                     acknowledge = True
                 except GateDenied as exc:
-                    if command:
-                        command.lifecycle_status = "GATE_REJECTED"
-                        command.ack_reason = exc.code
-                        command.terminal_at = datetime.now(UTC)
-                        queue_event(db, "command.updated", serialize_model(command))
+                    _record_gate_denial(db, command, exc, pending={"CREATED"})
                     acknowledge = True
                 except TimeoutError:
                     if command:
@@ -347,11 +371,7 @@ def dispatch_next() -> bool:
         except GateDenied as exc:
             row.status = "REJECTED"
             row.last_error = exc.code
-            if command:
-                command.lifecycle_status = "GATE_REJECTED"
-                command.ack_reason = exc.code
-                command.terminal_at = datetime.now(UTC)
-                queue_event(db, "command.updated", serialize_model(command))
+            _record_gate_denial(db, command, exc, pending={"QUEUED"})
         except TimeoutError:
             row.status = "EXPIRED"
             row.last_error = "expired"

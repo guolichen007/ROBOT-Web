@@ -27,6 +27,10 @@ from app.db.models import Command, Robot
 logger = logging.getLogger("command-dispatcher.gate")
 
 PRODUCTION_BROKER_HOSTS = frozenset({"firebot.youdaozd.com"})
+# Production platform MQTT identity (deploy/u-dao/.env.u-dao.example MQTT_USERNAME=platform):
+# a SIM deployment must never publish with it.
+PRODUCTION_MQTT_USERNAMES = frozenset({"platform"})
+COMMAND_TOPIC = "robot/{vehicle_id}/command"
 AUTHORISED_LIFECYCLE = {"outbox": {"QUEUED"}, "safety": {"CREATED"}}
 MAX_TTL = timedelta(seconds=240)
 CLOCK_SKEW = timedelta(seconds=2)
@@ -71,6 +75,7 @@ def final_publish_gate(
     settings,
     now: datetime,
     path: str,
+    destination: str | None = None,
 ) -> str:
     """Raise GateDenied or return the replay-claim key (release it if the publish fails)."""
     if path not in PATHS:
@@ -78,8 +83,10 @@ def final_publish_gate(
     vehicle_id = robot.vehicle_id
     cmd = payload.get("cmd")
 
-    if settings.downlink_frozen:
-        raise _deny(redis, path, "FG_DOWNLINK_FROZEN", "", payload)
+    # The canonical path may only ever reach the vehicle's command topic (no scene/other
+    # downlink can be added behind this gate without failing here).
+    if destination is not None and destination != COMMAND_TOPIC.format(vehicle_id=vehicle_id):
+        raise _deny(redis, path, "FG_TOPIC_NOT_ALLOWED", destination, payload)
 
     env = settings.firebot_deployment_env
     if env not in ("REAL", "SIM"):
@@ -87,8 +94,15 @@ def final_publish_gate(
     synthetic = is_synthetic_namespace(vehicle_id)
     if (env == "SIM") != synthetic:
         raise _deny(redis, path, "FG_ENV_MISMATCH", f"{env}/{vehicle_id}", payload)
-    if env == "SIM" and settings.mqtt_host in PRODUCTION_BROKER_HOSTS:
+    if env == "SIM" and (
+        settings.mqtt_host in PRODUCTION_BROKER_HOSTS
+        or (settings.mqtt_username or "") in PRODUCTION_MQTT_USERNAMES
+    ):
         raise _deny(redis, path, "FG_ENV_CREDENTIALS", settings.mqtt_host, payload)
+
+    # Global freeze is ON by default. Only an isolated SIM deployment can opt out, independently.
+    if settings.downlink_frozen and not (env == "SIM" and settings.sim_downlink_enabled):
+        raise _deny(redis, path, "FG_DOWNLINK_FROZEN", env, payload)
 
     if vehicle_id not in settings.canonical_downlink_allowlist_set:
         raise _deny(redis, path, "FG_NOT_ALLOWLISTED", vehicle_id, payload)

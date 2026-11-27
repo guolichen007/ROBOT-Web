@@ -91,10 +91,13 @@ class Settings(BaseSettings):
     # WEB-R1A 最终发布门禁（services/dispatch_gate.py，仅 CANONICAL_MQTT 路径）：
     #   FIREBOT_DEPLOYMENT_ENV=REAL|SIM —— SIM 只放行 firebot-sim-* 车辆且禁止连接生产 Broker；
     #   CANONICAL_DOWNLINK_ALLOWLIST —— 默认空 = REAL 默认拒绝（001 走 V1，不得列入）；
-    #   DOWNLINK_FROZEN=true —— 冻结全部 Canonical 下行。
+    #   DOWNLINK_FROZEN —— 默认 true（WEB-R1B 全局冻结显式开启）；REAL 只能由 OWNER 显式设 false；
+    #   SIM_DOWNLINK_ENABLED=true —— 独立 SIM 放行：仅 FIREBOT_DEPLOYMENT_ENV=SIM、车辆在
+    #   firebot-sim-* 命名空间、且未用生产 Broker/凭证时，冻结状态下仍允许该 SIM 车辆下行。
     firebot_deployment_env: str = "REAL"
     canonical_downlink_allowlist: str = ""
-    downlink_frozen: bool = False
+    downlink_frozen: bool = True
+    sim_downlink_enabled: bool = False
     # G2 逐车路由/执行档（API、Dispatcher、Adapter 三侧必须读取同一份配置）：
     #   VEHICLE_TRANSPORT_PROFILES="firebot-vehicle-01=r001-independent-v1"（未列出=default）
     #   TRANSPORT_PROFILE_ADAPTERS="r001-independent-v1=r001-dedicated-adapter"

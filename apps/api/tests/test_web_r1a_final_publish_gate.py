@@ -80,8 +80,11 @@ def env(disp, monkeypatch):
     for key, value in {
         "firebot_deployment_env": "SIM",
         "canonical_downlink_allowlist": SIM_ID,
-        "downlink_frozen": False,
+        # R1B: global freeze stays ON (production default); SIM runs via its independent opt-in
+        "downlink_frozen": True,
+        "sim_downlink_enabled": True,
         "mqtt_host": "127.0.0.1",
+        "mqtt_username": None,
     }.items():
         monkeypatch.setattr(settings, key, value)
     with SessionLocal.begin() as db:
@@ -216,7 +219,10 @@ def test_outbox_real_vehicle_default_deny(disp, env, monkeypatch) -> None:
     _persist(payload)
     _drain(disp)
     assert env["cap"].published == []
-    assert _state(payload["command_id"]) == ("REJECTED", "GATE_REJECTED", "FG_NOT_ALLOWLISTED")
+    outbox, lifecycle, code = _state(payload["command_id"])
+    # R1B: REAL is refused by the default freeze first, and by the empty allowlist if unfrozen
+    assert (outbox, lifecycle) == ("REJECTED", "GATE_REJECTED")
+    assert code in {"FG_DOWNLINK_FROZEN", "FG_NOT_ALLOWLISTED"}
 
 
 @pytest.mark.parametrize(
@@ -256,7 +262,7 @@ def test_outbox_rejections_never_publish(disp, env, monkeypatch, mutation, code)
     else:
         _persist(payload)
     if mutation == "frozen":
-        monkeypatch.setattr(s, "downlink_frozen", True)
+        monkeypatch.setattr(s, "sim_downlink_enabled", False)  # freeze on, SIM opt-in off
     if mutation == "real_env_sim_vehicle":
         monkeypatch.setattr(s, "firebot_deployment_env", "REAL")
     if mutation == "sim_env_production_broker":
@@ -320,7 +326,7 @@ def test_safety_stream_sim_authorised_positive_control(disp, env) -> None:
     ("mutation", "code"),
     [
         ("forged_no_command", "FG_UNAUTHORIZED"),
-        ("real_vehicle_estop", "FG_NOT_ALLOWLISTED"),
+        ("real_vehicle_estop", "FG_DOWNLINK_FROZEN"),  # R1B: REAL freeze includes software e-stop
         ("wrong_boot", "FG_BOOT_MISMATCH"),
         ("manual_frame_injected_into_stream", "FG_UNAUTHORIZED"),
     ],
@@ -420,5 +426,126 @@ def test_real_default_settings_deny_everything() -> None:
     defaults = Settings.model_fields
     assert defaults["firebot_deployment_env"].default == "REAL"
     assert defaults["canonical_downlink_allowlist"].default == ""
-    assert defaults["downlink_frozen"].default is False
+    assert defaults["downlink_frozen"].default is True  # R1B: freeze explicitly ON by default
+    assert defaults["sim_downlink_enabled"].default is False
     assert "firebot-vehicle-01" not in get_settings().canonical_downlink_allowlist_set
+
+
+# ------------------------------------------------------------------ WEB-R1B hardening
+
+
+def test_real_unfreeze_flag_does_not_apply_to_sim_optin(disp, env, monkeypatch) -> None:
+    """SIM opt-in is SIM-only: a REAL deployment stays frozen even with sim_downlink_enabled."""
+    s = env["settings"]
+    monkeypatch.setattr(s, "firebot_deployment_env", "REAL")
+    monkeypatch.setattr(s, "canonical_downlink_allowlist", "R002")
+    payload = _payload(env, vehicle_id="R002")
+    _persist(payload)
+    _drain(disp)
+    assert env["cap"].published == []
+    assert _state(payload["command_id"])[1:] == ("GATE_REJECTED", "FG_DOWNLINK_FROZEN")
+
+
+def test_sim_with_production_mqtt_identity_refused(disp, env, monkeypatch) -> None:
+    monkeypatch.setattr(env["settings"], "mqtt_username", "platform")
+    payload = _payload(env)
+    _persist(payload)
+    _drain(disp)
+    assert env["cap"].published == []
+    assert _state(payload["command_id"])[1:] == ("GATE_REJECTED", "FG_ENV_CREDENTIALS")
+
+
+def _requeue_outbox(command_id: str) -> None:
+    with SessionLocal.begin() as db:
+        row = db.scalar(select(OutboxEvent).where(OutboxEvent.aggregate_id == command_id))
+        row.status = "PENDING"
+        row.published_at = None
+
+
+def test_duplicate_outbox_consumption_keeps_correct_published_history(disp, env) -> None:
+    payload = _payload(env)
+    _persist(payload)
+    _drain(disp)
+    assert _state(payload["command_id"])[:2] == ("PUBLISHED", "PUBLISHED")
+    _requeue_outbox(payload["command_id"])  # same row consumed again (redelivery / operator retry)
+    _drain(disp)
+    assert len(env["cap"].published) == 1, "never published twice"
+    outbox, lifecycle, reason = _state(payload["command_id"])
+    assert outbox == "REJECTED"
+    assert (lifecycle, reason) == ("PUBLISHED", None), "correct PUBLISHED history not rewritten"
+
+
+def test_duplicate_safety_stream_entry_keeps_published_history(disp, env) -> None:
+    payload = _payload(env, cmd="stop_motion", ttl_ms=3000)
+    _persist(payload, lifecycle="CREATED", outbox=False)
+    _safety(disp, payload)
+    _safety(disp, payload)  # stream redelivery after the first was published
+    assert len(env["cap"].published) == 1
+    assert _state(payload["command_id"])[1] == "PUBLISHED"
+
+
+def test_terminal_command_redelivered_is_not_rewritten(disp, env) -> None:
+    payload = _payload(env)
+    _persist(payload, lifecycle="SUCCEEDED")
+    _drain(disp)
+    assert env["cap"].published == []
+    assert _state(payload["command_id"])[1:] == ("SUCCEEDED", None)
+
+
+def test_restart_after_unknown_broker_outcome_never_resends(disp, env) -> None:
+    """Crash after the broker accepted the publish but before the DB commit (or with the
+    broker confirmation lost): the replay claim survives, the Outbox row is still PENDING and
+    the Command still QUEUED. On restart the gate refuses to re-send and the command is
+    surfaced as PUBLISHED_UNCONFIRMED / DISPATCH_STATE_UNKNOWN, never as a clean PUBLISHED."""
+    payload = _payload(env)
+    _persist(payload)
+    env["redis"].set(f"dispatch:fg:claim:{payload['command_id']}", "outbox", px=60_000)
+    _drain(disp)
+    assert env["cap"].published == []
+    assert _state(payload["command_id"]) == (
+        "REJECTED",
+        "PUBLISHED_UNCONFIRMED",
+        "DISPATCH_STATE_UNKNOWN",
+    )
+
+
+@pytest.mark.parametrize("switch", ["other_user_takes_lease", "same_user_new_lease"])
+def test_manual_frame_of_a_replaced_lease_is_refused(disp, env, switch) -> None:
+    from services.dispatch_gate import GateDenied
+
+    old = _manual(env)  # frame built under lease L1
+    robot_id = env["robots"][SIM_ID]
+    env["redis"].set(
+        f"manual:lease:{robot_id}",
+        json.dumps(
+            {
+                "lease_id": str(uuid4()),
+                "user_id": str(uuid4()) if switch == "other_user_takes_lease" else env["admin"],
+                "control_session_id": str(uuid4()),
+            }
+        ),
+    )
+    with pytest.raises(GateDenied, match="FG_UNAUTHORIZED"):
+        disp.publish_command(old, qos=0, path="manual")
+    assert env["cap"].published == []
+
+
+def test_non_command_destination_refused_by_gate(env) -> None:
+    """A future scene (or any other) downlink cannot ride the canonical gate path."""
+    from services.dispatch_gate import GateDenied, final_publish_gate
+
+    payload = _payload(env)
+    _persist(payload, outbox=False)
+    with SessionLocal() as db:
+        robot = db.scalar(select(Robot).where(Robot.vehicle_id == SIM_ID))
+        with pytest.raises(GateDenied, match="FG_TOPIC_NOT_ALLOWED"):
+            final_publish_gate(
+                payload,
+                robot,
+                db=db,
+                redis=env["redis"],
+                settings=env["settings"],
+                now=datetime.fromisoformat(payload["issued_at"]),
+                path="outbox",
+                destination=f"robot/{SIM_ID}/scene",
+            )

@@ -126,6 +126,13 @@
 | 8 | FG_UNAUTHORIZED | 非人工命令：须有同车、同 cmd、**payload 逐字节相等**、生命周期为 QUEUED(outbox)/CREATED(safety) 的 Command 行；人工控制：须走 manual 路径且 Redis 租约 lease_id/control_session_id/user 全匹配；路径与命令类型交叉注入一律拒绝 |
 | 9 | FG_REPLAY | `dispatch:fg:claim:{command_id}` 已存在（SET NX）；Broker 发布失败会释放 claim，重试不算重放 |
 
+**R1B 补强**：
+- 全局冻结默认开启：`DOWNLINK_FROZEN` 默认 `true`，REAL 只能由 OWNER 显式设为 `false`。SIM 通过独立的 `SIM_DOWNLINK_ENABLED=true` 放行，且仅在 `FIREBOT_DEPLOYMENT_ENV=SIM`、车辆为 `firebot-sim-*`、并未使用生产 Broker 与生产 MQTT 身份（`platform`）时生效（`FG_ENV_CREDENTIALS`）。仅 `compose.test.yml` 测试栈显式解冻。
+- Canonical 路径只允许发往 `robot/{vehicle_id}/command`，其他目标一律 `FG_TOPIC_NOT_ALLOWED`。`test_web_r1b_no_ungated_downlink.py` 静态清点平台侧全部 Broker 发布点，新增任何发布点（例如 scene topic）都会让 CI 失败，直到它经过门禁或经审查列入清单。
+- 不改写正确历史：已 PUBLISHED、已 ACK 或已终态的命令被重复消费时，Command 保持原状，只把 Outbox 置为 REJECTED。
+- 重启对账：Broker 结果未知或数据库提交失败后，replay claim 仍在，命令绝不重发，标记为 `PUBLISHED_UNCONFIRMED` / `DISPATCH_STATE_UNKNOWN`。
+- 人工租约被替换后，旧 lease 的帧一律 `FG_UNAUTHORIZED`，无论新租约属于他人还是同一用户。
+
 **拒绝处理**：Outbox → `REJECTED`（不重试）+ Command `GATE_REJECTED`/`ack_reason=码`；安全 Stream → Command `GATE_REJECTED` 并 xack；人工 → 丢帧。每次拒绝计数 `dispatch:fg:denied:{path}:{code}` 并记日志。
 
 **证据**：`apps/api/tests/test_web_r1a_final_publish_gate.py` 27 项（每项断言捕获客户端 0 次 publish）；11 个门禁变异体全部被杀死。
