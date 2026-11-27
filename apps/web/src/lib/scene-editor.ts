@@ -39,12 +39,19 @@ export interface ParkingSlot {
   center: Pose
   enabled?: boolean
 }
+export type Arrival = 'PASS_THROUGH' | 'STOP'
 export interface Route {
   route_id: string
   code: string
   point_refs: string[]
+  /** WEB-R1C: per-waypoint arrival, index-aligned with point_refs (kept through every edit) */
+  arrivals: Arrival[]
   closed: boolean
   corridor_refs: string[]
+}
+/** Default arrival when a route is created: the last waypoint stops, the others pass through. */
+export function defaultArrivals(n: number): Arrival[] {
+  return Array.from({ length: n }, (_, i) => (i === n - 1 ? 'STOP' : 'PASS_THROUGH'))
 }
 export interface Corridor {
   corridor_id: string
@@ -326,7 +333,14 @@ export class SceneEditor {
         if (!s.points.some((p) => p.point_id === ref))
           throw new SceneEditError('ROUTE_POINT_REF_MISSING', ref)
       }
-      s.routes.push({ route_id: id, code, point_refs: [...pointRefs], closed, corridor_refs: [] })
+      s.routes.push({
+        route_id: id,
+        code,
+        point_refs: [...pointRefs],
+        arrivals: defaultArrivals(pointRefs.length),
+        closed,
+        corridor_refs: [],
+      })
     })
     return id
   }
@@ -339,6 +353,7 @@ export class SceneEditor {
       if (r.point_refs[r.point_refs.length - 1] === pointId)
         throw new SceneEditError('ROUTE_REPEATED_ADJACENT_POINT', pointId)
       r.point_refs.push(pointId)
+      r.arrivals.push('STOP') // a new final waypoint stops; the previous one keeps its own value
     })
   }
 
@@ -351,6 +366,8 @@ export class SceneEditor {
       }
       const [ref] = r.point_refs.splice(from, 1)
       r.point_refs.splice(to, 0, ref)
+      const [arrival] = r.arrivals.splice(from, 1) // the attribute travels with its waypoint
+      r.arrivals.splice(to, 0, arrival)
     })
   }
 
@@ -360,12 +377,26 @@ export class SceneEditor {
       if (index < 0 || index >= r.point_refs.length)
         throw new SceneEditError('ROUTE_INDEX_OUT_OF_RANGE', String(index))
       r.point_refs.splice(index, 1)
+      r.arrivals.splice(index, 1)
+    })
+  }
+
+  /** Waypoint attribute: PASS_THROUGH (reach without stopping) or STOP (must stop, success anchor). */
+  setArrival(routeId: string, index: number, arrival: Arrival): void {
+    if (arrival !== 'STOP' && arrival !== 'PASS_THROUGH') throw new SceneEditError('ARRIVAL_INVALID', arrival)
+    this.mutate((s) => {
+      const r = this.route(s, routeId)
+      if (index < 0 || index >= r.point_refs.length)
+        throw new SceneEditError('ROUTE_INDEX_OUT_OF_RANGE', String(index))
+      r.arrivals[index] = arrival
     })
   }
 
   reverseRoute(routeId: string): void {
     this.mutate((s) => {
-      this.route(s, routeId).point_refs.reverse()
+      const r = this.route(s, routeId)
+      r.point_refs.reverse()
+      r.arrivals.reverse()
     })
   }
 
@@ -454,6 +485,10 @@ export class SceneEditor {
     }
     for (const r of s.routes) {
       if (r.point_refs.length < 2) issues.push({ code: 'ROUTE_TOO_SHORT', ref: r.code, level: 'error' })
+      if (r.arrivals.length !== r.point_refs.length)
+        issues.push({ code: 'ROUTE_ARRIVALS_MISALIGNED', ref: r.code, level: 'error' })
+      if (r.arrivals[r.arrivals.length - 1] !== 'STOP')
+        issues.push({ code: 'ROUTE_FINAL_WAYPOINT_NOT_STOP', ref: r.code, level: 'error' })
       for (const ref of r.point_refs)
         if (!ids.has(ref)) issues.push({ code: 'ROUTE_POINT_REF_MISSING', ref: r.code, level: 'error' })
       r.point_refs.forEach((ref, i) => {

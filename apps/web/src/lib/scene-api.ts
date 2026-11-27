@@ -74,7 +74,7 @@ export async function loadNavImage(scene: ServerScene): Promise<Uint8Array> {
   return new Uint8Array(res.data as ArrayBuffer)
 }
 
-/** Server scene -> editor state (route arrivals: last waypoint STOP, others PASS_THROUGH). */
+/** Server scene -> editor state. Every waypoint keeps its stored arrival (WEB-R1C). */
 export function toEditorState(s: ServerScene): SceneState {
   const n = s.nav_map
   return {
@@ -114,6 +114,7 @@ export function toEditorState(s: ServerScene): SceneState {
       code: r.code,
       closed: r.closed,
       point_refs: r.points.map((x) => x.point_id),
+      arrivals: r.points.map((x) => x.arrival),
       corridor_refs: [],
     })),
     corridors: [],
@@ -145,7 +146,8 @@ export async function saveScene(
         closed: r.closed,
         points: r.point_refs.map((id, i) => ({
           point_id: id,
-          arrival: i === r.point_refs.length - 1 ? 'STOP' : 'PASS_THROUGH',
+          // never re-derived from position: an intermediate STOP stays STOP (WEB-R1C)
+          arrival: r.arrivals[i],
         })),
       })),
     })
