@@ -72,7 +72,7 @@ export async function assertConsoleLayout(page: Page, viewport: { width: number;
   }
   await expect(page.locator('button.protective-stop')).toBeVisible()
   const hit = await page.evaluate(() =>
-    ['.hold-estop', 'button.protective-stop'].map((sel) => {
+    ['.hold-estop', 'button.protective-stop', '.hmi-control-tabs button'].map((sel) => {
       const el = document.querySelector(sel) as HTMLElement | null
       if (!el) return false
       const r = el.getBoundingClientRect()
@@ -80,7 +80,14 @@ export async function assertConsoleLayout(page: Page, viewport: { width: number;
       return Boolean(top && (top === el || el.contains(top)))
     }),
   )
-  expect(hit, `${tag} e-stop / protective stop not covered`).toEqual([true, true])
+  expect(hit, `${tag} e-stop / protective stop / rail tabs not covered`).toEqual([true, true, true])
+  // a fire popup (if any) must not overlap the control rail or the fixed action area
+  const popup = page.getByTestId('alarm-popup')
+  if (await popup.count()) {
+    const p = (await popup.boundingBox())!
+    expect(disjoint(p, rail), `${tag} alarm popup over control rail`).toBe(true)
+    expect(disjoint(p, bar), `${tag} alarm popup over action bar`).toBe(true)
+  }
   // 6. no region overlaps another, no horizontal scroll, KPI row stays one ordered row
   const regions = [map, video, rail, bar, status]
   for (let i = 0; i < regions.length; i++)

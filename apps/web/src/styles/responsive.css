@@ -560,9 +560,14 @@
 .app-shell:has(.console-v21) .situation-banner {
   min-height: 38px;
 }
-/* fire popup must never cover the fixed action area: lift it above the bar */
-body.has-alarm-popup .alarm-popup {
+/* fire popup on the console: over the map's bottom-left (legend only), above the action bar —
+ * never over the control rail (tabs, e-stop, protective stop) or the fixed action area.
+ * (R1B: the R1A placement at the right covered the rail tabs when another vehicle alarmed.) */
+body.has-alarm-popup:has(.console-v21) .alarm-popup {
+  right: auto;
+  left: calc(var(--yd-sidebar-width) + 24px);
   bottom: 96px;
+  width: min(360px, calc(100vw - var(--yd-sidebar-width) - 48px));
 }
 @media (max-width: 1400px) and (max-height: 860px) {
   .console-v21 .yd-monitor-core,
@@ -592,9 +597,9 @@ body.has-alarm-popup .alarm-popup {
   .console-v21 .hmi-kpi small {
     display: none;
   }
-  body.has-alarm-popup .alarm-popup {
+  body.has-alarm-popup:has(.console-v21) .alarm-popup {
     bottom: 88px;
-    width: min(340px, calc(100vw - 24px));
+    width: 320px;
   }
 }
 @media (max-width: 1100px) {

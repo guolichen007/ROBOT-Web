@@ -115,17 +115,15 @@ async function geometry(tag, w, h, expect) {
     dockButtons.some((t) => /软件急停|解除急停/.test(t)),
     `${tag} estop entry`,
   )
-  // fire popup (if present) must not overlap the fixed action area
+  // fire popup (if present) must not overlap the fixed action area NOR the control rail
   const popup = page.getByTestId('alarm-popup')
+  const rail = await page.locator('.hmi-control-rail').boundingBox()
+  const hits = (p, b) =>
+    !(p.y + p.height <= b.y || p.y >= b.y + b.height || p.x + p.width <= b.x || p.x >= b.x + b.width)
   let popupOverlap = null
   if (await popup.count()) {
     const p = await popup.boundingBox()
-    popupOverlap = !(
-      p.y + p.height <= bar.y ||
-      p.y >= bar.y + bar.height ||
-      p.x + p.width <= bar.x ||
-      p.x >= bar.x + bar.width
-    )
+    popupOverlap = hits(p, bar) || hits(p, rail)
     assert.equal(popupOverlap, false, `${tag} alarm popup overlaps the action bar`)
   }
   // protective stop never pretends to be available

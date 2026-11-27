@@ -13,11 +13,11 @@
       "server": {
         "online_state": "ONLINE",
         "estop_active": false,
-        "boot_id": "460e5eaa-a769-481e-9c9f-e1774fc0e66b",
+        "boot_id": "4b0def24-819c-48d9-93d6-68b241dadf6f",
         "x": 1.2,
         "y": 1.2,
         "theta": 1.5707963267948966,
-        "server_received_at": "2026-11-27T05:11:43.567573+00:00",
+        "server_received_at": "2026-11-27T05:36:04.061742+00:00",
         "safety_command_ready": {
           "stop_motion": true,
           "emergency_stop": true,
@@ -43,7 +43,7 @@
           "action_bar_bottom": 758,
           "protective_stop": 758,
           "popup_overlap": null,
-          "status": "车辆\nR001\nR002\n部署 REAL\n车辆 REAL · 演示数据\n平台\n已连接\n车辆链路\n实时\n控制就绪\n就绪\n任务\n空闲（车端上报）\n安全\n急停状态未知\n\nX 1.20\nY 1.20\nyaw 90.0°\n定位 OK\n13:11:46"
+          "status": "车辆\nR001\nR002\n部署 REAL\n车辆 REAL · 演示数据\n平台\n已连接\n车辆链路\n实时\n控制就绪\n就绪\n任务\n空闲（车端上报）\n安全\n急停状态未知\n\nX 1.20\nY 1.20\nyaw 90.0°\n定位 OK\n13:36:06"
         },
         {
           "viewport": "1920x1080",
@@ -55,7 +55,7 @@
           "action_bar_bottom": 1066,
           "protective_stop": 1066,
           "popup_overlap": null,
-          "status": "车辆\nR001\nR002\n部署 REAL\n车辆 REAL · 演示数据\n平台\n已连接\n车辆链路\n实时\n控制就绪\n就绪\n任务\n空闲（车端上报）\n安全\n急停状态未知\n\nX 1.20\nY 1.20\nyaw 90.0°\n定位 OK\n13:11:48"
+          "status": "车辆\nR001\nR002\n部署 REAL\n车辆 REAL · 演示数据\n平台\n已连接\n车辆链路\n实时\n控制就绪\n就绪\n任务\n空闲（车端上报）\n安全\n急停状态未知\n\nX 1.20\nY 1.20\nyaw 90.0°\n定位 OK\n13:36:09"
         }
       ]
     },
@@ -64,11 +64,11 @@
       "server": {
         "online_state": "ONLINE",
         "estop_active": false,
-        "boot_id": "460e5eaa-a769-481e-9c9f-e1774fc0e66b",
+        "boot_id": "4b0def24-819c-48d9-93d6-68b241dadf6f",
         "x": 1.2,
         "y": 1.2,
         "theta": 1.5707963267948966,
-        "server_received_at": "2026-11-27T05:11:48.872074+00:00",
+        "server_received_at": "2026-11-27T05:36:09.380220+00:00",
         "safety_command_ready": {
           "stop_motion": true,
           "emergency_stop": true,
@@ -100,7 +100,7 @@
           "action_bar_bottom": 758,
           "protective_stop": 758,
           "popup_overlap": null,
-          "status": "车辆\nR001\nR002\n部署 REAL\n车辆 REAL · 演示数据\n平台\n已连接\n车辆链路\n实时\n控制就绪\n就绪\n任务\n巡检 · 0%\n安全\n急停状态未知\n\nX 1.20\nY 8.22\nyaw 90.0°\n定位 OK\n13:11:51"
+          "status": "车辆\nR001\nR002\n部署 REAL\n车辆 REAL · 演示数据\n平台\n已连接\n车辆链路\n实时\n控制就绪\n就绪\n任务\n巡检 · 0%\n安全\n急停状态未知\n\nX 1.20\nY 7.95\nyaw 90.0°\n定位 OK\n13:36:11"
         },
         {
           "viewport": "1920x1080",
@@ -112,7 +112,7 @@
           "action_bar_bottom": 1066,
           "protective_stop": 1066,
           "popup_overlap": null,
-          "status": "车辆\nR001\nR002\n部署 REAL\n车辆 REAL · 演示数据\n平台\n已连接\n车辆链路\n实时\n控制就绪\n就绪\n任务\n巡检 · 0%\n安全\n急停状态未知\n\nX 1.20\nY 15.25\nyaw 90.0°\n定位 OK\n13:11:53"
+          "status": "车辆\nR001\nR002\n部署 REAL\n车辆 REAL · 演示数据\n平台\n已连接\n车辆链路\n实时\n控制就绪\n就绪\n任务\n巡检 · 0%\n安全\n急停状态未知\n\nX 1.20\nY 15.25\nyaw 90.0°\n定位 OK\n13:36:14"
         }
       ]
     }

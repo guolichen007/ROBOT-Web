@@ -9,11 +9,11 @@
       "server": {
         "online_state": "OFFLINE",
         "estop_active": false,
-        "boot_id": "6ecb2f31-8f33-4393-8600-4ddb785b9ff5",
+        "boot_id": "f7623b31-6a21-4057-9bc8-4a62acfd8fe2",
         "x": 1.2,
         "y": 1.2,
         "theta": 1.5707963267948966,
-        "server_received_at": "2026-11-27T05:12:10.072026+00:00",
+        "server_received_at": "2026-11-27T05:36:30.685626+00:00",
         "safety_command_ready": {
           "stop_motion": false,
           "emergency_stop": false,

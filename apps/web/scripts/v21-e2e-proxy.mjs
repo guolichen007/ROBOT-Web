@@ -21,12 +21,16 @@ const server = http.createServer((req, res) => {
     },
   )
   proxied.on('error', () => {
-    res.writeHead(502)
+    if (!res.headersSent) res.writeHead(502)
     res.end()
   })
+  // a client that aborts (e.g. a test closing a page) must never take the proxy down
+  req.on('error', () => proxied.destroy())
+  res.on('error', () => proxied.destroy())
   req.pipe(proxied)
 })
 server.on('upgrade', (req, socket, head) => {
+  socket.on('error', () => socket.destroy())
   const up = net.connect(upstream, HOST, () => {
     up.write(`${req.method} ${req.url} HTTP/1.1\r\n`)
     for (const [k, v] of Object.entries(req.headers)) up.write(`${k}: ${v}\r\n`)
@@ -36,5 +40,8 @@ server.on('upgrade', (req, socket, head) => {
     socket.pipe(up)
   })
   up.on('error', () => socket.destroy())
+  socket.on('close', () => up.destroy())
 })
+server.on('clientError', (_err, socket) => socket.destroy())
+process.on('uncaughtException', (err) => console.error('proxy kept alive after', err.code || err))
 server.listen(listen, HOST, () => console.log(`e2e proxy ${HOST}:${listen} -> ${HOST}:${upstream}`))
