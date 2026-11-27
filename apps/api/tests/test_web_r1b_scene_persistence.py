@@ -166,7 +166,7 @@ def test_save_then_reload_restores_exactly(client, auth) -> None:
         "route_id": str(uuid4()),
         "code": "R1",
         "points": [
-            {"point_id": a["point_id"]},
+            {"point_id": a["point_id"], "arrival": "PASS_THROUGH"},
             {"point_id": b["point_id"], "arrival": "STOP"},
         ],
     }
@@ -193,7 +193,10 @@ def test_edit_and_delete_points_and_routes(client, auth) -> None:
     route = {
         "route_id": str(uuid4()),
         "code": "R1",
-        "points": [{"point_id": a["point_id"]}, {"point_id": b["point_id"]}],
+        "points": [
+            {"point_id": a["point_id"], "arrival": "PASS_THROUGH"},
+            {"point_id": b["point_id"], "arrival": "STOP"},
+        ],
     }
     s2 = _save(client, auth, scene, [a, b, c], [route]).json()
     moved = {**a, "x": 9.5, "yaw": -1.0}
@@ -242,7 +245,10 @@ def test_save_rejects_dangling_route_reference(client, auth) -> None:
     route = {
         "route_id": str(uuid4()),
         "code": "R1",
-        "points": [{"point_id": a["point_id"]}, {"point_id": str(uuid4())}],
+        "points": [
+            {"point_id": a["point_id"], "arrival": "PASS_THROUGH"},
+            {"point_id": str(uuid4()), "arrival": "STOP"},
+        ],
     }
     r = _save(client, auth, scene, [a], [route])
     assert r.status_code == 422 and r.json()["error"]["code"] == "ROUTE_POINT_REF_MISSING"
@@ -347,7 +353,10 @@ def test_db_rejects_deleting_a_referenced_point_directly(client, auth) -> None:
             {
                 "route_id": str(uuid4()),
                 "code": "R",
-                "points": [{"point_id": a["point_id"]}, {"point_id": b["point_id"]}],
+                "points": [
+                    {"point_id": a["point_id"], "arrival": "PASS_THROUGH"},
+                    {"point_id": b["point_id"], "arrival": "STOP"},
+                ],
             }
         ],
     )
@@ -359,10 +368,27 @@ def test_db_rejects_deleting_a_referenced_point_directly(client, auth) -> None:
 
 
 def test_published_v2_scene_is_immutable(client, auth) -> None:
+    # WEB-R1C: published only through the real atomic publish (digest + asset are mandatory —
+    # flipping status by hand is now refused by ck_map_versions_v2_published_digest)
     scene = _scene(client, auth)
-    with SessionLocal.begin() as db:
+    with pytest.raises(IntegrityError), SessionLocal.begin() as db:
         db.get(MapVersion, scene["scene_id"]).status = "PUBLISHED"
-    r = _save(client, auth, scene, [_pt("I1")], [])
+    r = client.put(
+        f"/api/v1/scenes/{scene['scene_id']}/nav-map-checksum",
+        json={"expected_revision": 1, "map_checksum": "sim-gz-r002-v1"},
+        headers=auth,
+    )
+    assert r.status_code == 200, r.text
+    home = _pt("HOME", "RETURN_HOME")
+    saved = _save(client, auth, r.json(), [home], [])
+    assert saved.status_code == 200, saved.text
+    pub = client.post(
+        f"/api/v1/scenes/{scene['scene_id']}/publish",
+        json={"expected_revision": saved.json()["revision"]},
+        headers=auth,
+    )
+    assert pub.status_code == 200, pub.text
+    r = _save(client, auth, pub.json(), [_pt("I1")], [])
     assert r.status_code == 409 and r.json()["error"]["code"] == "SCENE_NOT_DRAFT"
 
 
@@ -399,7 +425,10 @@ def test_whole_version_delete_cascades_with_routes(client, auth) -> None:
     """Regression for the NO ACTION ordering defect: deleting a version that has routes works."""
     scene = _scene(client, auth)
     a, b = _pt("I1"), _pt("I2")
-    pts = [{"point_id": a["point_id"]}, {"point_id": b["point_id"]}]
+    pts = [
+        {"point_id": a["point_id"], "arrival": "PASS_THROUGH"},
+        {"point_id": b["point_id"], "arrival": "STOP"},
+    ]
     route = {"route_id": str(uuid4()), "code": "R", "points": pts}
     assert _save(client, auth, scene, [a, b], [route]).status_code == 200
     with SessionLocal.begin() as db:

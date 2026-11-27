@@ -187,6 +187,14 @@ class MapVersion(Base):
     traversability: Mapped[str] = mapped_column(
         String(24), default="PENDING_VERIFICATION", server_default="PENDING_VERIFICATION"
     )
+    # WEB-R1C 0012: atomic publish -> canonical scene digest + immutable manifest asset
+    scene_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    scene_asset_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("assets.id"), nullable=True
+    )
+    published_by: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("users.id"), nullable=True
+    )
     __table_args__ = (UniqueConstraint("map_id", "version", name="uq_map_version"),)
 
 
@@ -224,6 +232,8 @@ class ScenePoint(Base):
     yaw_tolerance_rad: Mapped[float | None] = mapped_column(Float, nullable=True)
     parking_slot_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     taught_from: Mapped[str] = mapped_column(String(24), default="MANUAL_INPUT")
+    # WEB-R1C 0012: V2 slot reference (same-version composite FK to scene_parking_slots)
+    slot_uid: Mapped[str | None] = mapped_column(String(36), nullable=True)
     __table_args__ = (
         UniqueConstraint("map_version_id", "point_uid", name="uq_scene_points_version_uid"),
         UniqueConstraint("map_version_id", "code", name="uq_scene_points_version_code"),
@@ -272,6 +282,109 @@ class SceneRoutePoint(Base):
             initially="DEFERRED",
         ),
     )
+
+
+class SceneParkingSlot(Base):
+    """WEB-R1C 0012: V2.1 parking slot (storage_version=2)."""
+
+    __tablename__ = "scene_parking_slots"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    map_version_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("map_versions.id", ondelete="CASCADE"), index=True
+    )
+    slot_uid: Mapped[str] = mapped_column(String(36))
+    code: Mapped[str] = mapped_column(String(64))
+    polygon_json: Mapped[list[dict[str, Any]]] = mapped_column(JsonType)
+    center_x: Mapped[float] = mapped_column(Float)
+    center_y: Mapped[float] = mapped_column(Float)
+    center_yaw: Mapped[float] = mapped_column(Float)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    __table_args__ = (
+        UniqueConstraint("map_version_id", "slot_uid", name="uq_scene_slots_version_uid"),
+        UniqueConstraint("map_version_id", "code", name="uq_scene_slots_version_code"),
+    )
+
+
+class SceneCorridor(Base):
+    """WEB-R1C 0012: right-lane corridor (centerline order = travel direction)."""
+
+    __tablename__ = "scene_corridors"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    map_version_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("map_versions.id", ondelete="CASCADE"), index=True
+    )
+    corridor_uid: Mapped[str] = mapped_column(String(36))
+    code: Mapped[str] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(16), default="RIGHT_LANE")
+    centerline_json: Mapped[list[dict[str, Any]]] = mapped_column(JsonType)
+    width_m: Mapped[float] = mapped_column(Float)
+    __table_args__ = (
+        UniqueConstraint("map_version_id", "corridor_uid", name="uq_scene_corridors_version_uid"),
+        UniqueConstraint("map_version_id", "code", name="uq_scene_corridors_version_code"),
+    )
+
+
+class SceneRouteCorridor(Base):
+    __tablename__ = "scene_route_corridors"
+    map_version_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    route_uid: Mapped[str] = mapped_column(String(36), primary_key=True)
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True)
+    corridor_uid: Mapped[str] = mapped_column(String(36))
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["map_version_id", "route_uid"],
+            ["scene_routes.map_version_id", "scene_routes.route_uid"],
+            ondelete="CASCADE",
+            name="fk_scene_route_corridors_route_same_version",
+        ),
+        ForeignKeyConstraint(
+            ["map_version_id", "corridor_uid"],
+            ["scene_corridors.map_version_id", "scene_corridors.corridor_uid"],
+            name="fk_scene_route_corridors_corridor_same_version",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+    )
+
+
+class SceneLoadRequest(Base):
+    """WEB-R1C 0012: one platform load operation (SIM only in this release)."""
+
+    __tablename__ = "scene_load_requests"
+    load_id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    robot_id: Mapped[str] = mapped_column(String(36), ForeignKey("robots.id"))
+    vehicle_id: Mapped[str] = mapped_column(String(64))
+    environment: Mapped[str] = mapped_column(String(8))
+    map_version_id: Mapped[str] = mapped_column(String(36), ForeignKey("map_versions.id"))
+    scene_version: Mapped[int] = mapped_column(Integer)
+    scene_digest: Mapped[str] = mapped_column(String(64))
+    nav_map_checksum: Mapped[str] = mapped_column(String(128))
+    target_boot_id: Mapped[str] = mapped_column(String(36))
+    issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    issued_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
+    state: Mapped[str] = mapped_column(String(24), default="PENDING")
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JsonType)
+
+
+class SceneLoadReceiptRow(Base):
+    """WEB-R1C 0012: the single final receipt of a load (UNIQUE load_id)."""
+
+    __tablename__ = "scene_load_receipts"
+    receipt_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    load_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("scene_load_requests.load_id"), unique=True
+    )
+    robot_id: Mapped[str] = mapped_column(String(36), ForeignKey("robots.id"))
+    boot_id: Mapped[str] = mapped_column(String(36))
+    seq: Mapped[int] = mapped_column(Integer)
+    result: Mapped[str] = mapped_column(String(16))
+    reason_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    loaded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    confirm_code: Mapped[str] = mapped_column(String(64))
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JsonType)
 
 
 class InspectionPoint(Base):
@@ -338,6 +451,15 @@ class Robot(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+    # WEB-R1C 0012: written ONLY by a confirmed SceneLoadReceipt (SIM); cleared on reboot
+    loaded_scene_version_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("map_versions.id"), nullable=True
+    )
+    loaded_scene_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    loaded_scene_boot_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    latest_scene_load_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("scene_load_requests.load_id", use_alter=True), nullable=True
     )
 
 
