@@ -221,7 +221,7 @@ describe('manifest export', () => {
       digest: null
       contract_version: string
     }
-    expect(m.contract_version).toBe('2.1.0-draft.1')
+    expect(m.contract_version).toBe('2.1.0-draft.2')
     expect(m.validation.traversability).toBe('PENDING_VERIFICATION')
     expect(m.validation.references_ok).toBe(false)
     expect(m.validation.issues.map((i) => i.code)).toContain('RETURN_HOME_POINT_MISSING')

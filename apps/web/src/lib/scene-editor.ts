@@ -10,7 +10,7 @@
 import { newUuid } from '@/lib/id'
 import type { NavMapGrid } from '@/lib/nav-map'
 
-export const CONTRACT_VERSION = '2.1.0-draft.1'
+export const CONTRACT_VERSION = '2.1.0-draft.2'
 export type PointKind = 'INSPECTION' | 'FIRE_OPERATION' | 'RETURN_HOME' | 'WAITING' | 'TRANSIT'
 export interface Pose {
   x: number
@@ -472,7 +472,7 @@ export class SceneEditor {
     return issues
   }
 
-  /** SceneManifest DRAFT payload (contract 2.1.0-draft.1); digest stays null until server publish. */
+  /** SceneManifest DRAFT payload (contract 2.1.0-draft.2); digest stays null until server publish. */
   toManifest(createdAt = new Date().toISOString()): Record<string, unknown> {
     const issues = this.validate()
     const errors = issues.filter((i) => i.level === 'error')

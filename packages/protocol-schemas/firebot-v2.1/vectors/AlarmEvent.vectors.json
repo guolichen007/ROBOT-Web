@@ -3,7 +3,7 @@
     {
       "name": "fire_new",
       "payload": {
-        "contract_version": "2.1.0-draft.1",
+        "contract_version": "2.1.0-draft.2",
         "kind": "AlarmEvent",
         "alarm_id": "f3000000-0000-4000-8000-000000000001",
         "vehicle_event_id": "evt-001",
@@ -31,7 +31,7 @@
     {
       "name": "battery_low_50",
       "payload": {
-        "contract_version": "2.1.0-draft.1",
+        "contract_version": "2.1.0-draft.2",
         "kind": "AlarmEvent",
         "alarm_id": "f3000000-0000-4000-8000-000000000001",
         "vehicle_event_id": "evt-001",
@@ -67,7 +67,7 @@
     {
       "name": "smoke_raw_unverified",
       "payload": {
-        "contract_version": "2.1.0-draft.1",
+        "contract_version": "2.1.0-draft.2",
         "kind": "AlarmEvent",
         "alarm_id": "f3000000-0000-4000-8000-000000000001",
         "vehicle_event_id": "evt-001",
@@ -103,7 +103,7 @@
     {
       "name": "fire_acked",
       "payload": {
-        "contract_version": "2.1.0-draft.1",
+        "contract_version": "2.1.0-draft.2",
         "kind": "AlarmEvent",
         "alarm_id": "f3000000-0000-4000-8000-000000000001",
         "vehicle_event_id": "evt-001",
@@ -139,7 +139,7 @@
     {
       "name": "fake_ppm",
       "payload": {
-        "contract_version": "2.1.0-draft.1",
+        "contract_version": "2.1.0-draft.2",
         "kind": "AlarmEvent",
         "alarm_id": "f3000000-0000-4000-8000-000000000001",
         "vehicle_event_id": "evt-001",
@@ -176,7 +176,7 @@
     {
       "name": "unverified_with_threshold",
       "payload": {
-        "contract_version": "2.1.0-draft.1",
+        "contract_version": "2.1.0-draft.2",
         "kind": "AlarmEvent",
         "alarm_id": "f3000000-0000-4000-8000-000000000001",
         "vehicle_event_id": "evt-001",
@@ -213,7 +213,7 @@
     {
       "name": "battery_in_ppm",
       "payload": {
-        "contract_version": "2.1.0-draft.1",
+        "contract_version": "2.1.0-draft.2",
         "kind": "AlarmEvent",
         "alarm_id": "f3000000-0000-4000-8000-000000000001",
         "vehicle_event_id": "evt-001",
@@ -250,7 +250,7 @@
     {
       "name": "acked_without_record",
       "payload": {
-        "contract_version": "2.1.0-draft.1",
+        "contract_version": "2.1.0-draft.2",
         "kind": "AlarmEvent",
         "alarm_id": "f3000000-0000-4000-8000-000000000001",
         "vehicle_event_id": "evt-001",
@@ -279,7 +279,7 @@
     {
       "name": "last_seen_before_first",
       "payload": {
-        "contract_version": "2.1.0-draft.1",
+        "contract_version": "2.1.0-draft.2",
         "kind": "AlarmEvent",
         "alarm_id": "f3000000-0000-4000-8000-000000000001",
         "vehicle_event_id": "evt-001",
@@ -308,7 +308,7 @@
     {
       "name": "battery_low_without_measurement",
       "payload": {
-        "contract_version": "2.1.0-draft.1",
+        "contract_version": "2.1.0-draft.2",
         "kind": "AlarmEvent",
         "alarm_id": "f3000000-0000-4000-8000-000000000001",
         "vehicle_event_id": "evt-001",
@@ -337,7 +337,7 @@
     {
       "name": "zero_occurrence",
       "payload": {
-        "contract_version": "2.1.0-draft.1",
+        "contract_version": "2.1.0-draft.2",
         "kind": "AlarmEvent",
         "alarm_id": "f3000000-0000-4000-8000-000000000001",
         "vehicle_event_id": "evt-001",

@@ -1,9 +1,10 @@
-"""Firebot Web V2.1 contract vectors (2.1.0-draft.1). Pure, no DB/MQTT."""
+"""Firebot Web V2.1 contract vectors (2.1.0-draft.2). Pure, no DB/MQTT."""
 
 from __future__ import annotations
 
 import copy
 import json
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -74,87 +75,117 @@ def test_nan_object_rejected_even_if_parser_was_lenient() -> None:
     assert err.value.code == "NON_FINITE_NUMBER"
 
 
-@pytest.mark.parametrize("case", _load("MissionFeedback")["stale_cases"], ids=lambda x: x["name"])
-def test_stale_feedback_never_updates_current_task(case: dict) -> None:
-    ok, code = c.feedback_applies(case["task"], case["feedback"])
+def _dt(value: str) -> datetime:
+    return datetime.fromisoformat(value)
+
+
+def _named(contract: str, key: str) -> list:
+    return [pytest.param(case, id=case["name"]) for case in _load(contract)[key]]
+
+
+@pytest.mark.parametrize("case", _named("MissionFeedback", "apply_cases"))
+def test_feedback_reducer_cases(case: dict) -> None:
+    c.validate("MissionFeedback", case["feedback"])  # every case is schema-valid on purpose
+    ok, code, nxt = c.apply_feedback(case["task"], case["feedback"], now=_dt(case["now"]))
     assert code == case["expect"]
     assert ok is (case["expect"] == "OK")
+    if not ok:
+        assert nxt is case["task"]  # rejected feedback never mutates the task
 
 
-def _scene_pub() -> dict:
-    return copy.deepcopy(_load("SceneManifest")["valid"][1]["payload"])
-
-
-def _receipt() -> dict:
-    return copy.deepcopy(_load("SceneLoadReceipt")["valid"][0]["payload"])
-
-
-BOOT = _receipt()["boot_id"]
-
-
-def test_scene_load_confirmation_requires_exact_match() -> None:
-    m, r = _scene_pub(), _receipt()
-    assert c.scene_load_confirms(m, r, BOOT) == (True, "OK")
-    assert c.scene_load_confirms(m, r, None)[1] == "RECEIPT_STALE_BOOT_ID"
-    assert (
-        c.scene_load_confirms(m, r, "00000000-0000-4000-8000-000000000000")[1]
-        == "RECEIPT_STALE_BOOT_ID"
+@pytest.mark.parametrize("case", _named("SceneLoadReceipt", "confirm_cases"))
+def test_scene_load_confirm_cases(case: dict) -> None:
+    manifest = _load("SceneManifest")["valid"][1]["payload"]
+    c.validate("SceneLoadRequest", case["request"])
+    c.validate("SceneLoadReceipt", case["receipt"])
+    ok, code = c.scene_load_confirms(
+        manifest, case["request"], case["receipt"], current_boot_id=case["current_boot_id"]
     )
-    assert (
-        c.scene_load_confirms(m, {**r, "scene_digest": "0" * 64}, BOOT)[1]
-        == "RECEIPT_DIGEST_MISMATCH"
-    )
-    assert c.scene_load_confirms(m, {**r, "scene_version": 2}, BOOT)[1] == "RECEIPT_SCENE_MISMATCH"
-    assert (
-        c.scene_load_confirms(m, {**r, "nav_map_checksum": "other-map-1"}, BOOT)[1]
-        == "RECEIPT_NAV_MAP_MISMATCH"
-    )
-    assert c.scene_load_confirms(m, {**r, "result": "REJECTED"}, BOOT)[1] == "RECEIPT_REJECTED"
-    assert c.scene_load_confirms({**m, "status": "DRAFT"}, r, BOOT)[1] == "SCENE_NOT_PUBLISHED"
+    assert (ok, code) == (case["expect"] == "OK", case["expect"])
 
 
-def _snap_loaded(m: dict) -> dict:
-    snap = copy.deepcopy(_load("VehicleSnapshot")["valid"][0]["payload"])
-    snap["scene"] = {
-        "loaded_scene_id": m["scene_id"],
-        "loaded_scene_version": m["scene_version"],
-        "loaded_scene_digest": m["digest"],
-        "load_state": "LOADED_CONFIRMED",
+@pytest.mark.parametrize("case", _named("OperationReadiness", "admission_cases"))
+def test_mission_admission_cases(case: dict) -> None:
+    ok, code = c.mission_admissible(
+        case["manifest"], case["snapshot"], case["readiness"], case["action"], now=_dt(case["now"])
+    )
+    assert (ok, code) == (case["expect"] == "OK", case["expect"])
+
+
+@pytest.mark.parametrize("case", _named("VehicleSnapshot", "threshold_cases"))
+def test_threshold_exact_boundaries(case: dict) -> None:
+    c.validate("VehicleSnapshot", case["snapshot"])
+    assert c.threshold_alarms(case["snapshot"]) == case["expect"]
+
+
+def test_full_multi_waypoint_sequence_then_resume_generation() -> None:
+    """DISPATCHED -> ACCEPTED -> 3 waypoints (new goal per waypoint) -> PAUSED;
+    old-generation feedback is then rejected after a gen-2 resume is dispatched."""
+    vec = _load("MissionFeedback")
+    base = next(x["payload"] for x in vec["valid"] if x["name"] == "executing")
+    task = next(x["task"] for x in vec["apply_cases"] if x["name"] == "dispatched_to_accepted_ok")
+    now = _dt("2026-11-26T09:00:06+08:00")
+    steps = [
+        ({"state": "ACCEPTED", "goal_id": None, "waypoint_index": 0, "progress": 0}, "OK"),
+        ({"state": "EXECUTING", "goal_id": "g0", "waypoint_index": 0, "progress": 10}, "OK"),
+        ({"state": "EXECUTING", "goal_id": "g0", "waypoint_index": 0, "progress": 20}, "OK"),
+        ({"state": "EXECUTING", "goal_id": None, "waypoint_index": 0, "progress": 25}, "SCHEMA"),
+        ({"state": "WAITING_OBSTACLE", "goal_id": "g0", "waypoint_index": 0, "progress": 25}, "OK"),
+        ({"state": "EXECUTING", "goal_id": "g1", "waypoint_index": 1, "progress": 50}, "OK"),
+        (
+            {"state": "EXECUTING", "goal_id": "g0", "waypoint_index": 1, "progress": 55},
+            "STALE_GOAL_ID",
+        ),
+        (
+            {"state": "EXECUTING", "goal_id": "g0", "waypoint_index": 0, "progress": 55},
+            "WAYPOINT_REGRESSION",
+        ),
+        (
+            {"state": "PAUSED", "goal_id": None, "waypoint_index": 1, "progress": 55},
+            "GOAL_REQUIRED",
+        ),
+        ({"state": "PAUSED", "goal_id": "g1", "waypoint_index": 1, "progress": 55}, "OK"),
+        (
+            {"state": "ACCEPTED", "goal_id": "g1", "waypoint_index": 1, "progress": 55},
+            "ILLEGAL_TRANSITION",
+        ),
+    ]
+    seq = 0
+    for over, expect in steps:
+        seq += 1
+        fb = {**base, **over, "seq": seq, "observed_at": "2026-11-26T09:00:05+08:00"}
+        fb.pop("obstacle_since", None)
+        if fb["state"] == "WAITING_OBSTACLE":
+            fb["obstacle_since"] = fb["observed_at"]
+        if expect == "SCHEMA":
+            with pytest.raises(c.ContractError):
+                c.validate("MissionFeedback", fb)
+            continue
+        c.validate("MissionFeedback", fb)
+        ok, code, task = c.apply_feedback(task, fb, now=now)
+        assert code == expect, (over, code)
+    assert task["state"] == "PAUSED" and task["waypoint_index"] == 1 and task["goal_id"] == "g1"
+    # resume dispatched as generation 2 with a new command: gen-1 stragglers are rejected
+    resumed = {**task, "execution_gen": 2, "command_id": "f6000000-0000-4000-8000-000000000003"}
+    straggler = {**base, "seq": seq + 1, "goal_id": "g1", "waypoint_index": 1}
+    assert c.apply_feedback(resumed, straggler, now=now)[1] == "COMMAND_MISMATCH"
+    same_cmd = {**straggler, "command_id": resumed["command_id"]}
+    assert c.apply_feedback(resumed, same_cmd, now=now)[1] == "STALE_EXECUTION_GEN"
+
+
+def test_reviewed_counterexamples_all_rejected() -> None:
+    """The five independently reviewed counterexamples (CE1..CE5) are each present and rejected."""
+    names = {
+        "CE1_bound_goal_null_goal_feedback": ("MissionFeedback", "apply_cases"),
+        "CE2_executing_back_to_accepted": ("MissionFeedback", "apply_cases"),
+        "CE3_other_vehicle": ("SceneLoadReceipt", "confirm_cases"),
+        "CE3_other_load_operation": ("SceneLoadReceipt", "confirm_cases"),
+        "CE4_readiness_expired": ("OperationReadiness", "admission_cases"),
+        "CE5_archived_scene": ("OperationReadiness", "admission_cases"),
     }
-    return snap
-
-
-def test_unloaded_scene_cannot_create_mission_and_publish_is_not_motion_authorization() -> None:
-    m = _scene_pub()
-    ready = copy.deepcopy(_load("OperationReadiness")["valid"][1]["payload"])
-    snap = copy.deepcopy(_load("VehicleSnapshot")["valid"][0]["payload"])  # LOAD_PENDING
-    assert c.mission_admissible(m, snap, ready, "patrol_start")[1] == "SCENE_NOT_LOADED_ON_VEHICLE"
-    assert c.mission_admissible(None, snap, ready, "patrol_start")[1] == "SCENE_MISSING"
-    loaded = _snap_loaded(m)
-    c.validate("VehicleSnapshot", loaded)
-    assert c.mission_admissible(m, loaded, ready, "patrol_start") == (True, "OK")
-    # loaded + published but readiness denies -> still refused (地图发布/加载 != 运动授权)
-    denied = copy.deepcopy(ready)
-    denied["actions"]["patrol_start"] = {
-        "allowed": False,
-        "reasons": ["REAL_CONTROL_NOT_AUTHORIZED"],
-        "required_permission": "patrol.create",
-        "permitted_for_user": False,
-    }
-    assert c.mission_admissible(m, loaded, denied, "patrol_start")[1] == "READINESS_DENIED"
-    assert (
-        c.mission_admissible(m, loaded, ready, "navigate_to_point")[1] == "READINESS_DENIED"
-    )  # absent = deny
-    other = copy.deepcopy(loaded)
-    other["scene"]["loaded_scene_version"] = 2
-    assert (
-        c.mission_admissible(m, other, ready, "patrol_start")[1] == "SCENE_LOADED_VERSION_MISMATCH"
-    )
-    stale = copy.deepcopy(ready)
-    stale["boot_id"] = "00000000-0000-4000-8000-000000000000"
-    assert (
-        c.mission_admissible(m, loaded, stale, "patrol_start")[1] == "READINESS_SNAPSHOT_MISMATCH"
-    )
+    for name, (contract, key) in names.items():
+        case = next(x for x in _load(contract)[key] if x["name"] == name)
+        assert case["expect"] != "OK", name
 
 
 def test_real_default_deny_vector_allows_nothing() -> None:
@@ -172,7 +203,7 @@ def test_delete_referenced_point_refused_and_published_immutable() -> None:
     free_point = next(p["point_id"] for p in draft["points"] if p["kind"] == "FIRE_OPERATION")
     c.can_delete_point(draft, free_point)
     with pytest.raises(c.ContractError) as err:
-        c.can_delete_point(_scene_pub(), free_point)
+        c.can_delete_point(_load("SceneManifest")["valid"][1]["payload"], free_point)
     assert err.value.code == "SCENE_NOT_DRAFT"
 
 
@@ -185,3 +216,17 @@ def test_samples_never_use_demo_parking_geometry() -> None:
             p = vec["payload"]
             if p.get("environment") == "REAL":
                 assert "route_snapshot" not in p and "target" not in p  # no REAL task samples
+
+
+def test_handoff_index_matches_committed_schema_and_vectors() -> None:
+    import hashlib
+
+    here = Path(c.SCHEMA_PATH).parent
+    index = c.strict_loads((here / "handoff" / "handoff.json").read_text(encoding="utf-8"))
+    assert index["contract_version"] == c.CONTRACT_VERSION
+    assert index["schema"]["sha256"] == hashlib.sha256(Path(c.SCHEMA_PATH).read_bytes()).hexdigest()
+    for name, entry in index["case_files"].items():
+        data = (here / entry["path"]).read_bytes()
+        assert entry["sha256"] == hashlib.sha256(data).hexdigest(), name
+    assert set(index["extension_contracts"]).isdisjoint(index["core_contracts"])
+    assert {"DeviceOperation", "AlarmEvent"} == set(index["extension_contracts"])

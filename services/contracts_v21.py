@@ -1,4 +1,4 @@
-"""Firebot Web V2.1 contract helpers (DRAFT 2.1.0-draft.1, NOT FROZEN).
+"""Firebot Web V2.1 contract helpers (DRAFT 2.1.0-draft.2, NOT FROZEN).
 
 Pure functions only: no DB, no MQTT, no network. Safe to import from API, workers
 and tests. Real wire protocol stays Canonical MQTT 1.3 until an independent review
@@ -10,17 +10,19 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+from datetime import datetime
 from functools import cache, lru_cache
 from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator, FormatChecker
 
-CONTRACT_VERSION = "2.1.0-draft.1"
+CONTRACT_VERSION = "2.1.0-draft.2"
 CONTRACTS = (
     "VehicleSnapshot",
     "OperationReadiness",
     "SceneManifest",
+    "SceneLoadRequest",
     "SceneLoadReceipt",
     "MissionRequest",
     "MissionFeedback",
@@ -36,6 +38,25 @@ SCHEMA_PATH = (
     / "firebot-web-v2.1.contracts.schema.json"
 )
 TERMINAL_MISSION_STATES = frozenset({"SUCCEEDED", "FAILED", "CANCELLED", "REJECTED"})
+# Legal MissionFeedback transitions. Platform-side initial state is DISPATCHED.
+# Repeating the same state (progress update) is legal; going back (e.g. EXECUTING->ACCEPTED) is not.
+MISSION_TRANSITIONS: dict[str, frozenset[str]] = {
+    "DISPATCHED": frozenset({"ACCEPTED", "REJECTED"}),
+    "ACCEPTED": frozenset(
+        {"ACCEPTED", "EXECUTING", "WAITING_OBSTACLE", "PAUSED", "FAILED", "CANCELLED"}
+    ),
+    "EXECUTING": frozenset(
+        {"EXECUTING", "WAITING_OBSTACLE", "PAUSED", "SUCCEEDED", "FAILED", "CANCELLED"}
+    ),
+    "WAITING_OBSTACLE": frozenset(
+        {"WAITING_OBSTACLE", "EXECUTING", "PAUSED", "FAILED", "CANCELLED"}
+    ),
+    "PAUSED": frozenset({"PAUSED", "EXECUTING", "FAILED", "CANCELLED"}),
+}
+GOAL_REQUIRED_STATES = frozenset({"EXECUTING", "WAITING_OBSTACLE", "SUCCEEDED"})
+FEEDBACK_MAX_AGE_S = 10.0
+SNAPSHOT_MAX_AGE_S = 5.0
+CLOCK_SKEW_S = 2.0
 # Business thresholds (display/alarm rules). Smoke threshold only applies when unit verified as ppm.
 BATTERY_LOW_PCT = 50.0
 TEMPERATURE_HIGH_C = 80.0
@@ -231,8 +252,14 @@ def _readiness_rules(r: dict[str, Any]) -> None:
                 raise ContractError("BOOT_UNKNOWN_BUT_ACTION_ALLOWED", name)
 
 
+def _scene_load_request_rules(r: dict[str, Any]) -> None:
+    _ts_order(r["issued_at"], r["expires_at"], "LOAD_EXPIRES_BEFORE_ISSUED")
+
+
 def _mission_request_rules(m: dict[str, Any]) -> None:
     _ts_order(m["issued_at"], m["expires_at"], "MISSION_EXPIRES_BEFORE_ISSUED")
+    if m.get("resume_of") and m["execution_gen"] < 2:
+        raise ContractError("RESUME_REQUIRES_NEW_EXECUTION_GEN", str(m["execution_gen"]))
     snap = m.get("route_snapshot")
     if snap:
         indexes = [w["index"] for w in snap["waypoints"]]
@@ -243,8 +270,8 @@ def _mission_request_rules(m: dict[str, Any]) -> None:
 
 
 def _mission_feedback_rules(f: dict[str, Any]) -> None:
-    total, index = f.get("waypoint_total"), f.get("waypoint_index")
-    if total is not None and index is not None and index >= max(total, 1):
+    total, index = f["waypoint_total"], f["waypoint_index"]
+    if index >= total:
         raise ContractError("WAYPOINT_INDEX_OUT_OF_RANGE", f"{index}/{total}")
 
 
@@ -270,6 +297,7 @@ def _alarm_rules(a: dict[str, Any]) -> None:
 
 SEMANTIC_RULES = {
     "SceneManifest": _scene_rules,
+    "SceneLoadRequest": _scene_load_request_rules,
     "OperationReadiness": _readiness_rules,
     "MissionRequest": _mission_request_rules,
     "MissionFeedback": _mission_feedback_rules,
@@ -281,36 +309,111 @@ SEMANTIC_RULES = {
 # ---------------------------------------------------------------- state-machine guards
 
 
-def feedback_applies(task: dict[str, Any], feedback: dict[str, Any]) -> tuple[bool, str]:
-    """Whether a MissionFeedback may update the current task.
+def _ts(value: str) -> datetime:
+    return datetime.fromisoformat(value)
 
-    task: {mission_id, vehicle_id, boot_id, goal_id|None, last_seq|None, state}
-    Rejects stale boot_id / goal / seq and anything after a terminal state.
+
+def apply_feedback(
+    task: dict[str, Any],
+    feedback: dict[str, Any],
+    *,
+    now: datetime,
+    max_age_s: float = FEEDBACK_MAX_AGE_S,
+) -> tuple[bool, str, dict[str, Any]]:
+    """Pure reducer: (accepted, code, next_task). A rejected feedback returns the task unchanged.
+
+    task keys: vehicle_id, environment, mission_id, command_id, execution_gen, boot_id,
+               state (DISPATCHED|...), last_seq|None, waypoint_index|None, waypoint_total,
+               goal_id|None (goal bound to the current waypoint)
     """
-    if feedback["vehicle_id"] != task["vehicle_id"]:
-        return False, "VEHICLE_MISMATCH"
-    if feedback["mission_id"] != task["mission_id"]:
-        return False, "MISSION_MISMATCH"
-    if feedback["boot_id"] != task["boot_id"]:
-        return False, "STALE_BOOT_ID"
-    if task.get("goal_id") and feedback.get("goal_id") and feedback["goal_id"] != task["goal_id"]:
-        return False, "STALE_GOAL_ID"
-    if task.get("last_seq") is not None and feedback["seq"] <= task["last_seq"]:
-        return False, "STALE_SEQ"
+    f = feedback
+    if f["vehicle_id"] != task["vehicle_id"]:
+        return False, "VEHICLE_MISMATCH", task
+    if f["environment"] != task["environment"]:
+        return False, "ENVIRONMENT_MISMATCH", task
+    if f["mission_id"] != task["mission_id"]:
+        return False, "MISSION_MISMATCH", task
+    if f["command_id"] != task["command_id"]:
+        return False, "COMMAND_MISMATCH", task
+    if f["boot_id"] != task["boot_id"]:
+        return False, "STALE_BOOT_ID", task
+    if f["execution_gen"] < task["execution_gen"]:
+        return False, "STALE_EXECUTION_GEN", task
+    if f["execution_gen"] > task["execution_gen"]:
+        return False, "UNKNOWN_EXECUTION_GEN", task
     if task["state"] in TERMINAL_MISSION_STATES:
-        return False, "TASK_ALREADY_TERMINAL"
-    return True, "OK"
+        return False, "TASK_ALREADY_TERMINAL", task
+    observed = _ts(f["observed_at"])
+    if (now - observed).total_seconds() > max_age_s:
+        return False, "FEEDBACK_TOO_OLD", task
+    if (observed - now).total_seconds() > CLOCK_SKEW_S:
+        return False, "FEEDBACK_FROM_FUTURE", task
+    if task.get("last_seq") is not None and f["seq"] <= task["last_seq"]:
+        return False, "STALE_SEQ", task  # covers exact replay of an already-applied message
+    if f["waypoint_total"] != task["waypoint_total"]:
+        return False, "WAYPOINT_TOTAL_MISMATCH", task
+    current_wp = task.get("waypoint_index")
+    if current_wp is not None and f["waypoint_index"] < current_wp:
+        return False, "WAYPOINT_REGRESSION", task
+    same_wp = current_wp is not None and f["waypoint_index"] == current_wp
+    bound = task.get("goal_id") if same_wp else None
+    if bound is not None:
+        if f.get("goal_id") is None:
+            return False, "GOAL_REQUIRED", task
+        if f["goal_id"] != bound:
+            return False, "STALE_GOAL_ID", task
+    if f["state"] in GOAL_REQUIRED_STATES and not f.get("goal_id"):
+        return False, "GOAL_REQUIRED", task
+    if f["state"] not in MISSION_TRANSITIONS.get(task["state"], frozenset()):
+        return False, "ILLEGAL_TRANSITION", task
+    nxt = dict(task)
+    nxt.update(
+        state=f["state"],
+        last_seq=f["seq"],
+        waypoint_index=f["waypoint_index"],
+        goal_id=f.get("goal_id") or bound,
+        progress=f["progress"],
+    )
+    return True, "OK", nxt
+
+
+def feedback_applies(
+    task: dict[str, Any], feedback: dict[str, Any], *, now: datetime
+) -> tuple[bool, str]:
+    ok, code, _ = apply_feedback(task, feedback, now=now)
+    return ok, code
 
 
 def scene_load_confirms(
-    manifest: dict[str, Any], receipt: dict[str, Any], current_boot_id: str | None
+    manifest: dict[str, Any],
+    request: dict[str, Any],
+    receipt: dict[str, Any],
+    *,
+    current_boot_id: str | None,
 ) -> tuple[bool, str]:
-    """A scene becomes the vehicle's executable basis ONLY with a matching LOADED receipt."""
+    """A scene becomes a vehicle's executable basis ONLY via a LOADED receipt that answers
+    exactly THIS load operation (load_id) on THIS vehicle/environment/boot, inside its window."""
     if manifest["status"] != "PUBLISHED":
         return False, "SCENE_NOT_PUBLISHED"
+    if (request["scene_id"], request["scene_version"], request["scene_digest"]) != (
+        manifest["scene_id"],
+        manifest["scene_version"],
+        manifest["digest"],
+    ) or request["nav_map_checksum"] != manifest["nav_map"]["map_checksum"]:
+        return False, "REQUEST_SCENE_MISMATCH"
+    if receipt["load_id"] != request["load_id"]:
+        return False, "RECEIPT_LOAD_MISMATCH"
+    if receipt["vehicle_id"] != request["vehicle_id"]:
+        return False, "RECEIPT_VEHICLE_MISMATCH"
+    if receipt["environment"] != request["environment"]:
+        return False, "RECEIPT_ENVIRONMENT_MISMATCH"
     if receipt["result"] != "LOADED":
         return False, f"RECEIPT_{receipt['result']}"
-    if current_boot_id is None or receipt["boot_id"] != current_boot_id:
+    if (
+        current_boot_id is None
+        or receipt["boot_id"] != current_boot_id
+        or request["target_boot_id"] != current_boot_id
+    ):
         return False, "RECEIPT_STALE_BOOT_ID"
     if (receipt["scene_id"], receipt["scene_version"]) != (
         manifest["scene_id"],
@@ -321,6 +424,11 @@ def scene_load_confirms(
         return False, "RECEIPT_DIGEST_MISMATCH"
     if receipt["nav_map_checksum"] != manifest["nav_map"]["map_checksum"]:
         return False, "RECEIPT_NAV_MAP_MISMATCH"
+    issued, expires = _ts(request["issued_at"]), _ts(request["expires_at"])
+    for key in ("loaded_at", "reported_at"):
+        at = _ts(receipt[key])
+        if at < issued or at > expires:
+            return False, "RECEIPT_OUTSIDE_LOAD_WINDOW"
     return True, "OK"
 
 
@@ -329,11 +437,32 @@ def mission_admissible(
     snapshot: dict[str, Any],
     readiness: dict[str, Any],
     action: str,
+    *,
+    now: datetime,
+    snapshot_max_age_s: float = SNAPSHOT_MAX_AGE_S,
 ) -> tuple[bool, str]:
-    """Server-side admission for a REAL mission. Map CRUD/publish/load is NOT motion authorization:
-    the readiness action must independently be allowed."""
+    """Server-side admission for a mission. Map CRUD/publish/load is NOT motion authorization:
+    the (fresh, unexpired) readiness action must independently be allowed."""
     if manifest is None:
         return False, "SCENE_MISSING"
+    if manifest["status"] != "PUBLISHED":
+        return False, "SCENE_NOT_ACTIVE"  # ARCHIVED / DRAFT can never back a new mission
+    if now >= _ts(readiness["valid_until"]):
+        return False, "READINESS_EXPIRED"
+    if (_ts(readiness["evaluated_at"]) - now).total_seconds() > CLOCK_SKEW_S:
+        return False, "READINESS_FROM_FUTURE"
+    if (now - _ts(snapshot["generated_at"])).total_seconds() > snapshot_max_age_s:
+        return False, "SNAPSHOT_STALE"
+    if (
+        readiness["vehicle_id"] != snapshot["vehicle_id"]
+        or readiness["environment"] != snapshot["environment"]
+        or readiness["boot_id"] != snapshot["boot_id"]
+    ):
+        return False, "READINESS_SNAPSHOT_MISMATCH"
+    if snapshot["boot_id"] is None:
+        return False, "BOOT_UNKNOWN"
+    if readiness["control_frozen"]:
+        return False, "CONTROL_FROZEN"
     scene = snapshot["scene"]
     if scene["load_state"] != "LOADED_CONFIRMED":
         return False, "SCENE_NOT_LOADED_ON_VEHICLE"
@@ -346,9 +475,29 @@ def mission_admissible(
     entry = readiness["actions"].get(action)
     if not entry or not entry["allowed"]:
         return False, "READINESS_DENIED"
-    if (
-        readiness["vehicle_id"] != snapshot["vehicle_id"]
-        or readiness["boot_id"] != snapshot["boot_id"]
-    ):
-        return False, "READINESS_SNAPSHOT_MISMATCH"
     return True, "OK"
+
+
+# ---------------------------------------------------------------- business thresholds
+
+
+def threshold_alarms(snapshot: dict[str, Any]) -> list[str]:
+    """Exact boundaries: battery < 50 %, temperature > 80 degC, smoke > 300 ppm (verified only).
+    Only LIVE readings raise; UNKNOWN/STALE never fabricate an alarm."""
+    out: list[str] = []
+    battery = snapshot.get("battery_pct")
+    if battery and battery["quality"] == "LIVE" and battery["value"] < BATTERY_LOW_PCT:
+        out.append("BATTERY_LOW")
+    temp = snapshot.get("temperature_c")
+    if temp and temp["quality"] == "LIVE" and temp["value"] > TEMPERATURE_HIGH_C:
+        out.append("TEMPERATURE_HIGH")
+    smoke = snapshot.get("smoke")
+    if (
+        smoke
+        and smoke["quality"] == "LIVE"
+        and smoke["unit"] == "ppm"
+        and smoke["unit_verified"] is True
+        and smoke["value"] > SMOKE_HIGH_PPM
+    ):
+        out.append("SMOKE_HIGH")
+    return out

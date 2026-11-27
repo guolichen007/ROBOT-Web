@@ -1,8 +1,15 @@
 # R002_SCENE_CONTRACT — 地图场景、发布与车端加载合同
 
-> CONTRACT_VERSION=`2.1.0-draft.1` · 状态：**DRAFT，未冻结**（须独立审查后冻结） · 基线 `23854b0`
+> CONTRACT_VERSION=`2.1.0-draft.2` · 状态：**DRAFT，未冻结**（须独立审查后冻结） · 基线 `23854b0`
 > 机器可读：[firebot-web-v2.1.contracts.schema.json](../../../packages/protocol-schemas/firebot-v2.1/firebot-web-v2.1.contracts.schema.json)（`$defs/SceneManifest`、`$defs/SceneLoadReceipt`）；样例/向量：[vectors/](../../../packages/protocol-schemas/firebot-v2.1/vectors/)；语义规则：[contracts_v21.py](../../../services/contracts_v21.py)。
 > 上位合同：[地图坐标合同.md](../地图坐标合同.md)、[MQTT协议.md](../MQTT协议.md)、[FIREBOT_BRIDGE_CONTRACT_1.3.md](../FIREBOT_BRIDGE_CONTRACT_1.3.md)。冲突时上位合同优先。
+
+## 0. draft.2 变更（HF1，2026-11-27）
+
+- 新增 `SceneLoadRequest`（平台→车，含 `load_id`、`target_boot_id`、`issued_at..expires_at` 窗口）。
+- `SceneLoadReceipt` 必须回传 `load_id`；`scene_load_confirms(manifest, request, receipt, current_boot_id)` 额外校验：回执车辆=请求车辆、环境一致、`load_id` 一致、请求与 manifest 指向同一场景、`loaded_at`/`reported_at` 在加载窗口内（修复审查反例 CE3）。
+- 任务准入：ARCHIVED/DRAFT 场景一律 `SCENE_NOT_ACTIVE`（修复 CE5）。
+- 交接包：[handoff/](../../../packages/protocol-schemas/firebot-v2.1/handoff/README.md)。
 
 ## 1. 两个版本，彼此独立
 

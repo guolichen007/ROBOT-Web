@@ -1,8 +1,17 @@
 # R002_OPERATION_CONTRACT — 控制资格、任务、设备、告警与诊断合同
 
-> CONTRACT_VERSION=`2.1.0-draft.1` · 状态：**DRAFT，未冻结** · 基线 `23854b0`
+> CONTRACT_VERSION=`2.1.0-draft.2` · 状态：**DRAFT，未冻结** · 基线 `23854b0`
 > 机器可读：[firebot-web-v2.1.contracts.schema.json](../../../packages/protocol-schemas/firebot-v2.1/firebot-web-v2.1.contracts.schema.json)（VehicleSnapshot / OperationReadiness / MissionRequest / MissionFeedback / DeviceOperation / AlarmEvent / NavigationDiagnostics）；向量 [vectors/](../../../packages/protocol-schemas/firebot-v2.1/vectors/)；规则 [contracts_v21.py](../../../services/contracts_v21.py)；场景见 [R002_SCENE_CONTRACT.md](R002_SCENE_CONTRACT.md)。
 > 上位：[车辆安全责任合同.md](../车辆安全责任合同.md)（最终运动安全由车端负责）、[MQTT协议.md](../MQTT协议.md)、[FIREBOT_BRIDGE_CONTRACT_1.3.md](../FIREBOT_BRIDGE_CONTRACT_1.3.md)。
+
+## draft.2 变更（HF1，2026-11-27）
+
+- **反馈准入改为纯 reducer** `apply_feedback(task, feedback, now)`，校验顺序：车辆→环境→任务→`command_id`→boot→`execution_gen`（旧代次/未知代次）→终态→新鲜度（>10 s 过期、超前 >2 s）→seq（含精确重放）→航点总数/航点不回退→goal 绑定（同航点已绑定 goal 时空 goal=`GOAL_REQUIRED`，修复 CE1）→合法迁移表（`EXECUTING→ACCEPTED` 等=`ILLEGAL_TRANSITION`，修复 CE2）。
+- **准入带时间**：`mission_admissible(..., now)` 拒绝过期 readiness（`now >= valid_until`，修复 CE4）、未来 readiness、陈旧快照（>5 s）、冻结、boot 未知。
+- MissionRequest/MissionFeedback 新增必填 `command_id`、`execution_gen`（续巡 +1，`resume_of` 时 gen 必须 ≥2）；Feedback `waypoint_index/waypoint_total` 必填；`EXECUTING/WAITING_OBSTACLE/SUCCEEDED` 必带 `goal_id`。
+- **阈值精确边界**（`threshold_alarms`，仅 LIVE 触发）：电量 `< 50`、温度 `> 80`、烟雾 `> 300` 且 `unit=ppm, unit_verified=true`；恰好 50/80/300 不报警。
+- **分层**：`x-tier=core` 的合同可独立联调；`DeviceOperation`、`AlarmEvent` 为 extension；`VehicleSnapshot` 的烟雾/温度/设备改为可选，不阻塞导航联调。
+- 证据：5 项反例修复前 ACCEPTED_WRONGLY、修复后全部拒绝；11 个变异体全部被测试杀死（见证据包）。
 
 ## 0. 不变式
 
@@ -70,7 +79,7 @@
 
 ## 5. AlarmEvent
 
-复用 `fire_events`（状态 NEW→ACK/CONFIRMED/DISMISSED→RESOLVED→CLOSED，`apps/api/app/modules/alarms/router.py:334`）与审计。新增类别：SMOKE_HIGH、TEMPERATURE_HIGH、BATTERY_LOW、DEVICE_FAULT、LINK_LOSS、NAVIGATION_FAULT、ESTOP。阈值：电量 <50%（percent）、温度 ≥80℃（celsius，当前无数据源）、烟雾 ≥300ppm **仅当 unit_verified=true**；未验证时 `unit=UNVERIFIED, threshold=null`，平台规则不得生成 SMOKE_HIGH。状态非 NEW 必须有 handling 记录（确认人/时间）。火情弹窗携带 position/parking_slot_code 供地图定位。
+复用 `fire_events`（状态 NEW→ACK/CONFIRMED/DISMISSED→RESOLVED→CLOSED，`apps/api/app/modules/alarms/router.py:334`）与审计。新增类别：SMOKE_HIGH、TEMPERATURE_HIGH、BATTERY_LOW、DEVICE_FAULT、LINK_LOSS、NAVIGATION_FAULT、ESTOP。阈值（精确边界）：电量 <50%（percent）、温度 >80℃（celsius，当前无数据源）、烟雾 >300ppm **仅当 unit_verified=true**；恰为 50/80/300 不报警；未验证时 `unit=UNVERIFIED, threshold=null`，平台规则不得生成 SMOKE_HIGH。状态非 NEW 必须有 handling 记录（确认人/时间）。火情弹窗携带 position/parking_slot_code 供地图定位。
 
 ## 6. NavigationDiagnostics
 
