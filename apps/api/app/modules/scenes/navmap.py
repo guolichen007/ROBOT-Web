@@ -135,27 +135,95 @@ def _check_dims(width: int, height: int) -> None:
         raise NavMapError("IMAGE_TOO_MANY_PIXELS", f"{width}x{height}")
 
 
+# WEB-R1C R1C-3: the header is not the image. Every raster is FULLY decoded with resource limits
+# (pixel budget checked before any allocation, Pillow decompression-bomb guard, bounded ASCII
+# token count) and checked against ROS map_server semantics: all pixels present, none above the
+# declared maxval, nothing trailing, 8-bit grey (or grey+alpha / RGB that map_server averages).
+PGM_ASCII_MAX_BYTES = 64 * 1024 * 1024
+PNG_ALLOWED_MODES = {"L", "LA", "RGB", "RGBA", "P", "1", "I;16", "I"}
+
+
+def _parse_pgm(data: bytes) -> Raster:
+    m = PGM_HEADER.match(data)
+    if not m:
+        raise NavMapError("PGM_MAGIC_UNSUPPORTED", data[:2].decode("ascii", "replace"))
+    magic = m.group(1)
+    width, height, maxval = (int(m.group(i)) for i in (2, 3, 4))
+    _check_dims(width, height)
+    if not 1 <= maxval <= 255:
+        raise NavMapError("PGM_MAXVAL_UNSUPPORTED", str(maxval))
+    count = width * height
+    body = data[m.end() :]
+    if magic == b"P5":
+        if len(body) < count:
+            raise NavMapError("PGM_DATA_TRUNCATED", f"{len(body)}<{count}")
+        if len(body) > count:
+            raise NavMapError("PGM_TRAILING_DATA", f"{len(body) - count} bytes")
+        if max(body) > maxval:  # bytes are 0..255: one pass over the raster
+            index = next(i for i, v in enumerate(body) if v > maxval)
+            raise NavMapError("PGM_PIXEL_OVER_MAXVAL", f"pixel {index}={body[index]}>{maxval}")
+        return Raster("pgm", width, height)
+    # P2 (ASCII): comments allowed, exactly width*height decimal tokens, each <= maxval
+    if len(body) > PGM_ASCII_MAX_BYTES:
+        raise NavMapError("IMAGE_TOO_LARGE", str(len(body)))
+    text = re.sub(rb"#[^\n]*", b" ", body)
+    tokens = text.split()
+    if len(tokens) < count:
+        raise NavMapError("PGM_DATA_TRUNCATED", f"{len(tokens)}<{count} pixels")
+    if len(tokens) > count:
+        raise NavMapError("PGM_TRAILING_DATA", f"{len(tokens) - count} extra tokens")
+    for index, token in enumerate(tokens):
+        if not token.isdigit() or len(token) > 3:
+            raise NavMapError("PGM_PIXEL_INVALID", f"pixel {index}")
+        if int(token) > maxval:
+            raise NavMapError("PGM_PIXEL_OVER_MAXVAL", f"pixel {index}={int(token)}>{maxval}")
+    return Raster("pgm", width, height)
+
+
+def _parse_png(data: bytes) -> Raster:
+    import io
+    import warnings
+
+    from PIL import Image
+
+    if len(data) < 33 or data[:8] != PNG_SIG or data[12:16] != b"IHDR":
+        raise NavMapError("PNG_SIGNATURE_INVALID")
+    width, height = struct.unpack(">II", data[16:24])
+    _check_dims(width, height)  # before Pillow allocates anything
+    if b"IEND" not in data[-12:]:
+        raise NavMapError("PNG_TRUNCATED", "IEND chunk missing")
+    previous = Image.MAX_IMAGE_PIXELS
+    try:
+        Image.MAX_IMAGE_PIXELS = MAX_PIXELS
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(data), formats=["PNG"]) as image:
+                if image.size != (width, height):
+                    raise NavMapError("PNG_HEADER_MISMATCH", f"{image.size}")
+                if image.mode not in PNG_ALLOWED_MODES:
+                    raise NavMapError("PNG_MODE_UNSUPPORTED", image.mode)
+                if getattr(image, "is_animated", False):
+                    raise NavMapError("PNG_ANIMATED_UNSUPPORTED")
+                image.load()  # full decode: every IDAT byte, CRCs, zlib stream
+    except NavMapError:
+        raise
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
+        raise NavMapError("IMAGE_TOO_MANY_PIXELS", type(exc).__name__) from exc
+    except (OSError, SyntaxError, ValueError, struct.error, EOFError) as exc:
+        raise NavMapError("PNG_DECODE_FAILED", type(exc).__name__) from exc
+    finally:
+        Image.MAX_IMAGE_PIXELS = previous
+    return Raster("png", width, height)
+
+
 def parse_raster(filename: str, data: bytes, max_bytes: int) -> Raster:
     if len(data) > max_bytes:
         raise NavMapError("IMAGE_TOO_LARGE", str(len(data)))
     lower = filename.lower()
     if lower.endswith(".png"):
-        if len(data) < 24 or data[:8] != PNG_SIG or data[12:16] != b"IHDR":
-            raise NavMapError("PNG_SIGNATURE_INVALID")
-        width, height = struct.unpack(">II", data[16:24])
-        _check_dims(width, height)
-        return Raster("png", width, height)
+        return _parse_png(data)
     if lower.endswith(".pgm"):
-        m = PGM_HEADER.match(data)
-        if not m:
-            raise NavMapError("PGM_MAGIC_UNSUPPORTED", data[:2].decode("ascii", "replace"))
-        width, height, maxval = (int(m.group(i)) for i in (2, 3, 4))
-        _check_dims(width, height)
-        if not 1 <= maxval <= 255:
-            raise NavMapError("PGM_MAXVAL_UNSUPPORTED", str(maxval))
-        if m.group(1) == b"P5" and len(data) - m.end() < width * height:
-            raise NavMapError("PGM_DATA_TRUNCATED", f"{len(data) - m.end()}<{width * height}")
-        return Raster("pgm", width, height)
+        return _parse_pgm(data)
     raise NavMapError("IMAGE_FORMAT_UNSUPPORTED", filename)
 
 

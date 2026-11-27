@@ -189,7 +189,13 @@ def scene_payload(db, version: MapVersion) -> dict[str, Any]:
     }
 
 
-def _store_asset(db, auth: AuthContext, name: str, content: bytes, mime: str) -> Asset:
+def _store_asset(
+    db, auth: AuthContext, name: str, content: bytes, mime: str, written: list[Path]
+) -> Asset:
+    """Write an asset file atomically (tmp + fsync + rename) and record it in `written`, so the
+    caller can remove every file of a transaction that does not commit (no orphan files)."""
+    import os
+
     settings = get_settings()
     root = settings.asset_root.resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -197,7 +203,19 @@ def _store_asset(db, auth: AuthContext, name: str, content: bytes, mime: str) ->
     target = (root / f"{uuid4().hex}{suffix}").resolve()
     if root not in target.parents:
         raise PlatformError("ASSET_PATH_INVALID", "非法文件路径", status_code=400)
-    target.write_bytes(content)
+    tmp = target.with_name(target.name + ".part")
+    try:
+        with open(tmp, "xb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, target)
+    except OSError as exc:
+        tmp.unlink(missing_ok=True)
+        raise PlatformError(
+            "ASSET_WRITE_FAILED", "地图文件写入失败，未导入", status_code=500
+        ) from exc
+    written.append(target)
     row = Asset(
         object_name=target.name,
         original_filename=Path(name).name,
@@ -234,15 +252,67 @@ async def import_nav_map(
         raster = parse_raster(image_file.filename or "", image_bytes, settings.upload_max_bytes)
     except NavMapError as exc:
         raise PlatformError(exc.code, f"导航地图被拒绝：{exc}", status_code=422) from exc
+    written: list[Path] = []
+    try:
+        return _import_tx(
+            request,
+            db,
+            auth,
+            site_id,
+            map_code,
+            version,
+            meta,
+            raster,
+            image_file.filename or "map",
+            image_bytes,
+            yaml_file.filename or "map.yaml",
+            yaml_bytes,
+            written,
+        )
+    except BaseException:
+        # WEB-R1C: any failure before commit (duplicate version, DB error, write error) removes
+        # every file this import wrote — the DB rolled back, so they would be orphans
+        db.rollback()
+        for path in written:
+            path.unlink(missing_ok=True)
+        raise
+
+
+def _import_tx(
+    request,
+    db,
+    auth,
+    site_id,
+    map_code,
+    version,
+    meta,
+    raster,
+    image_name,
+    image_bytes,
+    yaml_name,
+    yaml_bytes,
+    written: list[Path],
+) -> dict:
+    # duplicate (site, map, version) is refused BEFORE anything is written
     map_row = db.scalar(select(Map).where(Map.site_id == site_id, Map.code == map_code))
+    if map_row is not None and db.scalar(
+        select(MapVersion.id).where(MapVersion.map_id == map_row.id, MapVersion.version == version)
+    ):
+        raise PlatformError("SCENE_VERSION_EXISTS", "该地图版本号已存在", status_code=409)
     if map_row is None:
-        map_row = Map(site_id=site_id, code=map_code, name=map_code)
-        db.add(map_row)
-        db.flush()
-    image_asset = _store_asset(
-        db, auth, image_file.filename or "map", image_bytes, f"image/x-{raster.fmt}"
-    )
-    yaml_asset = _store_asset(db, auth, yaml_file.filename or "map.yaml", yaml_bytes, "text/yaml")
+        # concurrent first imports of the same map race here: the loser re-reads the winner's
+        # row inside a savepoint instead of failing the whole request (found by R1C race test)
+        try:
+            with db.begin_nested():
+                map_row = Map(site_id=site_id, code=map_code, name=map_code)
+                db.add(map_row)
+                db.flush()
+        except IntegrityError:
+            map_row = db.scalar(select(Map).where(Map.site_id == site_id, Map.code == map_code))
+            if map_row is None:
+                raise
+    image_asset = _store_asset(db, auth, image_name, image_bytes, f"image/x-{raster.fmt}", written)
+    yaml_asset = _store_asset(db, auth, yaml_name, yaml_bytes, "text/yaml", written)
     row = MapVersion(
         map_id=map_row.id,
         version=version,
@@ -272,8 +342,7 @@ async def import_nav_map(
     db.add(row)
     try:
         db.flush()
-    except IntegrityError as exc:
-        db.rollback()
+    except IntegrityError as exc:  # concurrent import of the same version
         raise PlatformError("SCENE_VERSION_EXISTS", "该地图版本号已存在", status_code=409) from exc
     write_audit(
         db,

@@ -189,14 +189,32 @@ export function parsePgm(bytes: Uint8Array): RasterInfo {
     pos += 1 // single whitespace after maxval
     if (bytes.length - pos < count)
       throw new NavMapImportError('PGM_DATA_TRUNCATED', `${bytes.length - pos}<${count}`)
+    if (bytes.length - pos > count)
+      throw new NavMapImportError('PGM_TRAILING_DATA', `${bytes.length - pos - count} bytes`)
     data = bytes.slice(pos, pos + count)
+    // WEB-R1C: every pixel must respect the declared maxval (server rule mirrored)
+    for (let i = 0; i < count; i++)
+      if (data[i] > maxval) throw new NavMapImportError('PGM_PIXEL_OVER_MAXVAL', String(i))
   } else {
     data = new Uint8Array(count)
     for (let i = 0; i < count; i++) {
-      const v = int('pixel')
+      let v: number
+      try {
+        v = int('pixel')
+      } catch (e) {
+        if (e instanceof NavMapImportError && e.code === 'PGM_HEADER_TRUNCATED')
+          throw new NavMapImportError('PGM_DATA_TRUNCATED', `${i}<${count} pixels`)
+        throw e
+      }
       if (v > maxval) throw new NavMapImportError('PGM_PIXEL_OVER_MAXVAL', String(i))
       data[i] = v
     }
+    for (;;) {
+      while (pos < bytes.length && /\s/.test(String.fromCharCode(bytes[pos]))) pos++
+      if (bytes[pos] !== 0x23) break
+      while (pos < bytes.length && bytes[pos] !== 0x0a) pos++
+    }
+    if (pos < bytes.length) throw new NavMapImportError('PGM_TRAILING_DATA', `${bytes.length - pos} bytes`)
   }
   return { format: 'pgm', width, height, maxval, data }
 }
@@ -215,6 +233,12 @@ export function parsePngHeader(bytes: Uint8Array): RasterInfo {
   const width = view.getUint32(16)
   const height = view.getUint32(20)
   checkDims(width, height)
+  // WEB-R1C: a header-only / truncated PNG is refused here too (the server fully decodes it)
+  const tail = new TextDecoder('ascii').decode(bytes.subarray(Math.max(0, bytes.length - 12)))
+  if (bytes.length < 45 || !tail.includes('IEND'))
+    throw new NavMapImportError('PNG_TRUNCATED', 'IEND missing')
+  if (!new TextDecoder('ascii').decode(bytes).includes('IDAT'))
+    throw new NavMapImportError('PNG_TRUNCATED', 'no IDAT')
   return { format: 'png', width, height }
 }
 
