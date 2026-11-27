@@ -412,10 +412,23 @@ def confirm_mission_success(
     stillness and the same nav map, all observed after the claim."""
     if task["state"] != "SUCCEEDED" or not task.get("succeeded_reported_at"):
         return False, "NOT_REPORTED_SUCCEEDED"
+    # R1C-4 #3: the task being confirmed must be THIS request's task (same mission, command,
+    # execution generation, vehicle, environment) — a SUCCEEDED of another mission proves nothing
+    for key in ("mission_id", "command_id", "execution_gen", "vehicle_id", "environment"):
+        if task.get(key) != request.get(key):
+            return False, "MISSION_IDENTITY_MISMATCH"
     if request["mission_kind"] == "PATROL":
-        last = request["route_snapshot"]["waypoints"][-1]
+        waypoints = request["route_snapshot"]["waypoints"]
+        last = waypoints[-1]
         if last.get("arrival", "PASS_THROUGH") != "STOP":
             return False, "FINAL_WAYPOINT_NOT_STOP"
+        # R1C-4 #4: the vehicle-reported progress must actually be AT the target (last) waypoint
+        # of this route snapshot; a task still at an earlier waypoint is not a completed patrol
+        if (
+            task.get("waypoint_total") != len(waypoints)
+            or task.get("waypoint_index") != last["index"]
+        ):
+            return False, "TARGET_WAYPOINT_NOT_REACHED"
         target, wp = last["pose"], last
     else:
         target, wp = request["target"]["pose"], request["target"]
@@ -428,13 +441,28 @@ def confirm_mission_success(
         return False, "POSE_NOT_LIVE"
     if pose["map_checksum"] != request["nav_map_checksum"]:
         return False, "NAV_MAP_MISMATCH"
+    claim = _ts(task["succeeded_reported_at"])
     observed = _ts(pose["observed_at"])
+    # R1C-4 #2: an observation from the future is not evidence (clock fault or forgery)
+    if (observed - now).total_seconds() > CLOCK_SKEW_S:
+        return False, "POSE_FROM_FUTURE"
     if (now - observed).total_seconds() > SUCCESS_POSE_MAX_AGE_S:
         return False, "POSE_STALE"
-    if observed < _ts(task["succeeded_reported_at"]):
+    if observed < claim:
         return False, "POSE_PREDATES_CLAIM"
     if motion["quality"] != "LIVE" or motion["stationary"] is not True:
         return False, "NOT_STATIONARY"
+    # R1C-4 #1: stillness is evidence only when IT is fresh and observed after the claim —
+    # an ancient "stationary" sample must never confirm arrival
+    if not motion.get("observed_at"):
+        return False, "NOT_STATIONARY"
+    moved = _ts(motion["observed_at"])
+    if (moved - now).total_seconds() > CLOCK_SKEW_S:
+        return False, "MOTION_FROM_FUTURE"
+    if (now - moved).total_seconds() > SUCCESS_POSE_MAX_AGE_S:
+        return False, "MOTION_STALE"
+    if moved < claim:
+        return False, "MOTION_PREDATES_CLAIM"
     value = pose["value"]
     if math.hypot(value["x"] - target["x"], value["y"] - target["y"]) > wp.get(
         "xy_tolerance_m", DEFAULT_XY_TOL_M
@@ -569,6 +597,15 @@ def mission_admissible(
     pose = snapshot["pose"]
     if pose["quality"] != "LIVE" or pose["localization"] != "OK":
         return False, "POSE_NOT_LIVE"
+    # R1C-4 #5: a freshly generated snapshot may still carry an old pose sample; the pose
+    # observation itself must be fresh (same budget as the snapshot) and not from the future
+    if not pose.get("observed_at"):
+        return False, "POSE_NOT_LIVE"
+    pose_at = _ts(pose["observed_at"])
+    if (pose_at - now).total_seconds() > CLOCK_SKEW_S:
+        return False, "POSE_FROM_FUTURE"
+    if (now - pose_at).total_seconds() > snapshot_max_age_s:
+        return False, "POSE_STALE"
     if pose["map_checksum"] != manifest["nav_map"]["map_checksum"]:
         return False, "NAV_MAP_MISMATCH"
     if readiness["control_frozen"]:

@@ -171,6 +171,25 @@ def test_reviewed_r1b_false_accepts_all_rejected() -> None:
             assert cases[name]["expect"] == code, name
 
 
+def test_reviewed_r1c_false_accepts_all_rejected() -> None:
+    """WEB-R1C independent review: the 5 draft.3 false accepts (R1C-4) are pinned as vectors."""
+    expected = {
+        ("MissionFeedback", "success_cases"): {
+            "R1C_1_ancient_motion_observation_not_stationary_evidence": "MOTION_STALE",
+            "R1C_2_pose_observed_in_future": "POSE_FROM_FUTURE",
+            "R1C_3_request_task_mission_mismatch": "MISSION_IDENTITY_MISMATCH",
+            "R1C_4_task_still_at_first_waypoint": "TARGET_WAYPOINT_NOT_REACHED",
+        },
+        ("OperationReadiness", "admission_cases"): {
+            "R1C_5_fresh_snapshot_stale_pose_observation": "POSE_STALE",
+        },
+    }
+    for (contract, key), names in expected.items():
+        cases = {x["name"]: x for x in _load(contract)[key]}
+        for name, code in names.items():
+            assert cases[name]["expect"] == code, name
+
+
 def test_real_freeze_includes_software_estop() -> None:
     real = copy.deepcopy(_load("OperationReadiness")["valid"][0]["payload"])
     assert real["freeze_scope"] == "ALL"

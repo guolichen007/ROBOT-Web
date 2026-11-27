@@ -19,6 +19,12 @@
 8. 快照需带实测 `motion`（静止/运动及观测时间），LIVE 位姿需带当前 `map_checksum`。
 9. 场景回执只对平台最近一次 `SceneLoadRequest` 有效；之前的回执会被丢弃。用例：`SceneLoadReceipt.vectors.json#state_cases`、`MissionFeedback.vectors.json#success_cases`。
 
+## WEB-R1C 平台侧收紧（合同版本号不变，仍 draft.3；对车端的影响）
+
+10. 成功确认要求 `motion.observed_at` 本身新鲜（≤2 s）、不超前、且晚于 SUCCEEDED 声明时刻；只上报一次“静止”不再长期有效（`MOTION_STALE` / `MOTION_FROM_FUTURE` / `MOTION_PREDATES_CLAIM`）。
+11. 位姿观测超前平台时钟 2 s 以上一律不作为证据（`POSE_FROM_FUTURE`）；准入时位姿观测本身须 ≤5 s，快照新生成但位姿旧同样拒绝（`POSE_STALE`）。
+12. SUCCEEDED 必须出现在下发路线的最后一个航点（`waypoint_index` 等于路线末点 index，`waypoint_total` 与路线长度一致），且 mission/command/代次/车辆/环境与请求完全一致（`TARGET_WAYPOINT_NOT_REACHED` / `MISSION_IDENTITY_MISMATCH`）。用例：`MissionFeedback.vectors.json#success_cases` 与 `OperationReadiness.vectors.json#admission_cases` 中 `R1C_*`。
+
 ## 需 VM CC 确认（回填即冻结候选）
 
 | # | 问题 | 当前假设 |

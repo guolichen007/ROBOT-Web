@@ -7142,6 +7142,624 @@
       "action": "patrol_start",
       "now": "2026-11-26T09:00:07+08:00",
       "expect": "POSE_NOT_LIVE"
+    },
+    {
+      "name": "R1C_5_fresh_snapshot_stale_pose_observation",
+      "manifest": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "PUBLISHED",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": "2026-11-26T09:00:05+08:00",
+        "published_by": "11111111-2222-4333-8444-555555555555"
+      },
+      "snapshot": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "VehicleSnapshot",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "generated_at": "2026-11-26T09:00:05+08:00",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "link": {
+          "state": "ONLINE",
+          "last_seen_at": "2026-11-26T09:00:05+08:00",
+          "latency_ms": 42
+        },
+        "pose": {
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T08:59:00+08:00",
+          "value": {
+            "x": 3.2,
+            "y": -1.5,
+            "yaw": 1.5708,
+            "frame_id": "map"
+          },
+          "localization": "OK",
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "map_checksum": "sim-gazebo-r002-v1"
+        },
+        "battery_pct": {
+          "value": 87.5,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "smoke": {
+          "value": 12.0,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00",
+          "unit": "UNVERIFIED",
+          "unit_verified": false,
+          "raw_source_field": "sensor.smoke"
+        },
+        "temperature_c": {
+          "value": null,
+          "quality": "UNSUPPORTED",
+          "observed_at": null
+        },
+        "estop": {
+          "active": false,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "motion": {
+          "stationary": true,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "devices": [
+          {
+            "device": "LIDAR",
+            "state": "OK",
+            "quality": "LIVE",
+            "observed_at": "2026-11-26T09:00:05+08:00",
+            "fault_code": null
+          },
+          {
+            "device": "FIRE_SHIELD",
+            "state": "UNKNOWN",
+            "quality": "UNKNOWN",
+            "observed_at": null,
+            "fault_code": null
+          }
+        ],
+        "active_mission_id": null,
+        "scene": {
+          "loaded_scene_id": "a1000000-0000-4000-8000-000000000001",
+          "loaded_scene_version": 1,
+          "loaded_scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+          "load_state": "LOADED_CONFIRMED"
+        }
+      },
+      "readiness": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "OperationReadiness",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "evaluated_at": "2026-11-26T09:00:05+08:00",
+        "valid_until": "2026-11-26T09:00:30+08:00",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "source": "SERVER_OPERATION_READINESS",
+        "based_on_snapshot_at": "2026-11-26T09:00:05+08:00",
+        "control_frozen": false,
+        "freeze_scope": null,
+        "freeze_reasons": [],
+        "control_owner": {
+          "user_id": "11111111-2222-4333-8444-555555555555",
+          "display_name": "SIM 操作员",
+          "lease_id": "f2000000-0000-4000-8000-000000000001",
+          "expires_at": "2026-11-26T09:00:30+08:00",
+          "is_current_user": true
+        },
+        "actions": {
+          "stop_motion": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": true,
+            "confirm": "CLICK"
+          },
+          "protective_stop": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": true,
+            "confirm": "CLICK"
+          },
+          "emergency_stop": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.estop",
+            "permitted_for_user": true,
+            "confirm": "HOLD"
+          },
+          "patrol_start": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "patrol.create",
+            "permitted_for_user": true,
+            "confirm": "DOUBLE"
+          },
+          "patrol_pause": {
+            "allowed": false,
+            "reasons": [
+              "NO_ACTIVE_MISSION"
+            ],
+            "required_permission": "patrol.create",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "manual_control": {
+            "allowed": false,
+            "reasons": [
+              "CONTROL_LEASE_REQUIRED"
+            ],
+            "required_permission": "robot.control.manual",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          }
+        }
+      },
+      "action": "patrol_start",
+      "now": "2026-11-26T09:00:07+08:00",
+      "expect": "POSE_STALE"
+    },
+    {
+      "name": "R1C_5b_pose_observation_from_future",
+      "manifest": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "PUBLISHED",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": "2026-11-26T09:00:05+08:00",
+        "published_by": "11111111-2222-4333-8444-555555555555"
+      },
+      "snapshot": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "VehicleSnapshot",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "generated_at": "2026-11-26T09:00:05+08:00",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "link": {
+          "state": "ONLINE",
+          "last_seen_at": "2026-11-26T09:00:05+08:00",
+          "latency_ms": 42
+        },
+        "pose": {
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:10:00+08:00",
+          "value": {
+            "x": 3.2,
+            "y": -1.5,
+            "yaw": 1.5708,
+            "frame_id": "map"
+          },
+          "localization": "OK",
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "map_checksum": "sim-gazebo-r002-v1"
+        },
+        "battery_pct": {
+          "value": 87.5,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "smoke": {
+          "value": 12.0,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00",
+          "unit": "UNVERIFIED",
+          "unit_verified": false,
+          "raw_source_field": "sensor.smoke"
+        },
+        "temperature_c": {
+          "value": null,
+          "quality": "UNSUPPORTED",
+          "observed_at": null
+        },
+        "estop": {
+          "active": false,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "motion": {
+          "stationary": true,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "devices": [
+          {
+            "device": "LIDAR",
+            "state": "OK",
+            "quality": "LIVE",
+            "observed_at": "2026-11-26T09:00:05+08:00",
+            "fault_code": null
+          },
+          {
+            "device": "FIRE_SHIELD",
+            "state": "UNKNOWN",
+            "quality": "UNKNOWN",
+            "observed_at": null,
+            "fault_code": null
+          }
+        ],
+        "active_mission_id": null,
+        "scene": {
+          "loaded_scene_id": "a1000000-0000-4000-8000-000000000001",
+          "loaded_scene_version": 1,
+          "loaded_scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+          "load_state": "LOADED_CONFIRMED"
+        }
+      },
+      "readiness": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "OperationReadiness",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "evaluated_at": "2026-11-26T09:00:05+08:00",
+        "valid_until": "2026-11-26T09:00:30+08:00",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "source": "SERVER_OPERATION_READINESS",
+        "based_on_snapshot_at": "2026-11-26T09:00:05+08:00",
+        "control_frozen": false,
+        "freeze_scope": null,
+        "freeze_reasons": [],
+        "control_owner": {
+          "user_id": "11111111-2222-4333-8444-555555555555",
+          "display_name": "SIM 操作员",
+          "lease_id": "f2000000-0000-4000-8000-000000000001",
+          "expires_at": "2026-11-26T09:00:30+08:00",
+          "is_current_user": true
+        },
+        "actions": {
+          "stop_motion": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": true,
+            "confirm": "CLICK"
+          },
+          "protective_stop": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.stop",
+            "permitted_for_user": true,
+            "confirm": "CLICK"
+          },
+          "emergency_stop": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "robot.control.estop",
+            "permitted_for_user": true,
+            "confirm": "HOLD"
+          },
+          "patrol_start": {
+            "allowed": true,
+            "reasons": [],
+            "required_permission": "patrol.create",
+            "permitted_for_user": true,
+            "confirm": "DOUBLE"
+          },
+          "patrol_pause": {
+            "allowed": false,
+            "reasons": [
+              "NO_ACTIVE_MISSION"
+            ],
+            "required_permission": "patrol.create",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          },
+          "manual_control": {
+            "allowed": false,
+            "reasons": [
+              "CONTROL_LEASE_REQUIRED"
+            ],
+            "required_permission": "robot.control.manual",
+            "permitted_for_user": false,
+            "confirm": "CLICK"
+          }
+        }
+      },
+      "action": "patrol_start",
+      "now": "2026-11-26T09:00:07+08:00",
+      "expect": "POSE_FROM_FUTURE"
     }
   ]
 }

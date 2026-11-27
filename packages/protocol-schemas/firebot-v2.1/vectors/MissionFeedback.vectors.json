@@ -3174,6 +3174,1446 @@
       },
       "now": "2026-11-26T09:00:07+08:00",
       "expect": "FINAL_WAYPOINT_NOT_STOP"
+    },
+    {
+      "name": "R1C_1_ancient_motion_observation_not_stationary_evidence",
+      "request": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "command_id": "f6000000-0000-4000-8000-000000000001",
+        "execution_gen": 1,
+        "idempotency_key": "web-v21-sim-0001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "mission_kind": "PATROL",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "route_snapshot": {
+          "route_id": "d1000000-0000-4000-8000-000000000001",
+          "start_index": 0,
+          "waypoints": [
+            {
+              "index": 0,
+              "point_id": "b1000000-0000-4000-8000-000000000001",
+              "pose": {
+                "x": 0.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 1,
+              "point_id": "b1000000-0000-4000-8000-000000000002",
+              "pose": {
+                "x": 4.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 2,
+              "point_id": "b1000000-0000-4000-8000-000000000003",
+              "pose": {
+                "x": 8.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "STOP"
+            }
+          ]
+        },
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:30+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      },
+      "task": {
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "command_id": "f6000000-0000-4000-8000-000000000001",
+        "execution_gen": 1,
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "state": "SUCCEEDED",
+        "last_seq": 20,
+        "waypoint_index": 2,
+        "waypoint_total": 3,
+        "goal_id": "move_base-1732582805-8",
+        "goals_used": [
+          "move_base-1732582800-7",
+          "move_base-1732582805-8"
+        ],
+        "succeeded_reported_at": "2026-11-26T09:00:05+08:00"
+      },
+      "snapshot": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "VehicleSnapshot",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "generated_at": "2026-11-26T09:00:05+08:00",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "link": {
+          "state": "ONLINE",
+          "last_seen_at": "2026-11-26T09:00:05+08:00",
+          "latency_ms": 42
+        },
+        "pose": {
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:06+08:00",
+          "value": {
+            "x": 8.05,
+            "y": 0.02,
+            "yaw": 0.05,
+            "frame_id": "map"
+          },
+          "localization": "OK",
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "map_checksum": "sim-gazebo-r002-v1"
+        },
+        "battery_pct": {
+          "value": 87.5,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "smoke": {
+          "value": 12.0,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00",
+          "unit": "UNVERIFIED",
+          "unit_verified": false,
+          "raw_source_field": "sensor.smoke"
+        },
+        "temperature_c": {
+          "value": null,
+          "quality": "UNSUPPORTED",
+          "observed_at": null
+        },
+        "estop": {
+          "active": false,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "motion": {
+          "stationary": true,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T08:00:00+08:00"
+        },
+        "devices": [
+          {
+            "device": "LIDAR",
+            "state": "OK",
+            "quality": "LIVE",
+            "observed_at": "2026-11-26T09:00:05+08:00",
+            "fault_code": null
+          },
+          {
+            "device": "FIRE_SHIELD",
+            "state": "UNKNOWN",
+            "quality": "UNKNOWN",
+            "observed_at": null,
+            "fault_code": null
+          }
+        ],
+        "active_mission_id": null,
+        "scene": {
+          "loaded_scene_id": "a1000000-0000-4000-8000-000000000001",
+          "loaded_scene_version": 1,
+          "loaded_scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+          "load_state": "LOADED_CONFIRMED"
+        }
+      },
+      "now": "2026-11-26T09:00:07+08:00",
+      "expect": "MOTION_STALE"
+    },
+    {
+      "name": "R1C_1b_motion_predates_claim",
+      "request": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "command_id": "f6000000-0000-4000-8000-000000000001",
+        "execution_gen": 1,
+        "idempotency_key": "web-v21-sim-0001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "mission_kind": "PATROL",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "route_snapshot": {
+          "route_id": "d1000000-0000-4000-8000-000000000001",
+          "start_index": 0,
+          "waypoints": [
+            {
+              "index": 0,
+              "point_id": "b1000000-0000-4000-8000-000000000001",
+              "pose": {
+                "x": 0.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 1,
+              "point_id": "b1000000-0000-4000-8000-000000000002",
+              "pose": {
+                "x": 4.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 2,
+              "point_id": "b1000000-0000-4000-8000-000000000003",
+              "pose": {
+                "x": 8.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "STOP"
+            }
+          ]
+        },
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:30+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      },
+      "task": {
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "command_id": "f6000000-0000-4000-8000-000000000001",
+        "execution_gen": 1,
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "state": "SUCCEEDED",
+        "last_seq": 20,
+        "waypoint_index": 2,
+        "waypoint_total": 3,
+        "goal_id": "move_base-1732582805-8",
+        "goals_used": [
+          "move_base-1732582800-7",
+          "move_base-1732582805-8"
+        ],
+        "succeeded_reported_at": "2026-11-26T09:00:06.2+08:00"
+      },
+      "snapshot": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "VehicleSnapshot",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "generated_at": "2026-11-26T09:00:05+08:00",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "link": {
+          "state": "ONLINE",
+          "last_seen_at": "2026-11-26T09:00:05+08:00",
+          "latency_ms": 42
+        },
+        "pose": {
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:06.5+08:00",
+          "value": {
+            "x": 8.05,
+            "y": 0.02,
+            "yaw": 0.05,
+            "frame_id": "map"
+          },
+          "localization": "OK",
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "map_checksum": "sim-gazebo-r002-v1"
+        },
+        "battery_pct": {
+          "value": 87.5,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "smoke": {
+          "value": 12.0,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00",
+          "unit": "UNVERIFIED",
+          "unit_verified": false,
+          "raw_source_field": "sensor.smoke"
+        },
+        "temperature_c": {
+          "value": null,
+          "quality": "UNSUPPORTED",
+          "observed_at": null
+        },
+        "estop": {
+          "active": false,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "motion": {
+          "stationary": true,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05.5+08:00"
+        },
+        "devices": [
+          {
+            "device": "LIDAR",
+            "state": "OK",
+            "quality": "LIVE",
+            "observed_at": "2026-11-26T09:00:05+08:00",
+            "fault_code": null
+          },
+          {
+            "device": "FIRE_SHIELD",
+            "state": "UNKNOWN",
+            "quality": "UNKNOWN",
+            "observed_at": null,
+            "fault_code": null
+          }
+        ],
+        "active_mission_id": null,
+        "scene": {
+          "loaded_scene_id": "a1000000-0000-4000-8000-000000000001",
+          "loaded_scene_version": 1,
+          "loaded_scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+          "load_state": "LOADED_CONFIRMED"
+        }
+      },
+      "now": "2026-11-26T09:00:07+08:00",
+      "expect": "MOTION_PREDATES_CLAIM"
+    },
+    {
+      "name": "R1C_2_pose_observed_in_future",
+      "request": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "command_id": "f6000000-0000-4000-8000-000000000001",
+        "execution_gen": 1,
+        "idempotency_key": "web-v21-sim-0001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "mission_kind": "PATROL",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "route_snapshot": {
+          "route_id": "d1000000-0000-4000-8000-000000000001",
+          "start_index": 0,
+          "waypoints": [
+            {
+              "index": 0,
+              "point_id": "b1000000-0000-4000-8000-000000000001",
+              "pose": {
+                "x": 0.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 1,
+              "point_id": "b1000000-0000-4000-8000-000000000002",
+              "pose": {
+                "x": 4.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 2,
+              "point_id": "b1000000-0000-4000-8000-000000000003",
+              "pose": {
+                "x": 8.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "STOP"
+            }
+          ]
+        },
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:30+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      },
+      "task": {
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "command_id": "f6000000-0000-4000-8000-000000000001",
+        "execution_gen": 1,
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "state": "SUCCEEDED",
+        "last_seq": 20,
+        "waypoint_index": 2,
+        "waypoint_total": 3,
+        "goal_id": "move_base-1732582805-8",
+        "goals_used": [
+          "move_base-1732582800-7",
+          "move_base-1732582805-8"
+        ],
+        "succeeded_reported_at": "2026-11-26T09:00:05+08:00"
+      },
+      "snapshot": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "VehicleSnapshot",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "generated_at": "2026-11-26T09:00:05+08:00",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "link": {
+          "state": "ONLINE",
+          "last_seen_at": "2026-11-26T09:00:05+08:00",
+          "latency_ms": 42
+        },
+        "pose": {
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:10:00+08:00",
+          "value": {
+            "x": 8.05,
+            "y": 0.02,
+            "yaw": 0.05,
+            "frame_id": "map"
+          },
+          "localization": "OK",
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "map_checksum": "sim-gazebo-r002-v1"
+        },
+        "battery_pct": {
+          "value": 87.5,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "smoke": {
+          "value": 12.0,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00",
+          "unit": "UNVERIFIED",
+          "unit_verified": false,
+          "raw_source_field": "sensor.smoke"
+        },
+        "temperature_c": {
+          "value": null,
+          "quality": "UNSUPPORTED",
+          "observed_at": null
+        },
+        "estop": {
+          "active": false,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "motion": {
+          "stationary": true,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:06+08:00"
+        },
+        "devices": [
+          {
+            "device": "LIDAR",
+            "state": "OK",
+            "quality": "LIVE",
+            "observed_at": "2026-11-26T09:00:05+08:00",
+            "fault_code": null
+          },
+          {
+            "device": "FIRE_SHIELD",
+            "state": "UNKNOWN",
+            "quality": "UNKNOWN",
+            "observed_at": null,
+            "fault_code": null
+          }
+        ],
+        "active_mission_id": null,
+        "scene": {
+          "loaded_scene_id": "a1000000-0000-4000-8000-000000000001",
+          "loaded_scene_version": 1,
+          "loaded_scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+          "load_state": "LOADED_CONFIRMED"
+        }
+      },
+      "now": "2026-11-26T09:00:07+08:00",
+      "expect": "POSE_FROM_FUTURE"
+    },
+    {
+      "name": "R1C_2b_motion_observed_in_future",
+      "request": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "command_id": "f6000000-0000-4000-8000-000000000001",
+        "execution_gen": 1,
+        "idempotency_key": "web-v21-sim-0001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "mission_kind": "PATROL",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "route_snapshot": {
+          "route_id": "d1000000-0000-4000-8000-000000000001",
+          "start_index": 0,
+          "waypoints": [
+            {
+              "index": 0,
+              "point_id": "b1000000-0000-4000-8000-000000000001",
+              "pose": {
+                "x": 0.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 1,
+              "point_id": "b1000000-0000-4000-8000-000000000002",
+              "pose": {
+                "x": 4.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 2,
+              "point_id": "b1000000-0000-4000-8000-000000000003",
+              "pose": {
+                "x": 8.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "STOP"
+            }
+          ]
+        },
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:30+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      },
+      "task": {
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "command_id": "f6000000-0000-4000-8000-000000000001",
+        "execution_gen": 1,
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "state": "SUCCEEDED",
+        "last_seq": 20,
+        "waypoint_index": 2,
+        "waypoint_total": 3,
+        "goal_id": "move_base-1732582805-8",
+        "goals_used": [
+          "move_base-1732582800-7",
+          "move_base-1732582805-8"
+        ],
+        "succeeded_reported_at": "2026-11-26T09:00:05+08:00"
+      },
+      "snapshot": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "VehicleSnapshot",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "generated_at": "2026-11-26T09:00:05+08:00",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "link": {
+          "state": "ONLINE",
+          "last_seen_at": "2026-11-26T09:00:05+08:00",
+          "latency_ms": 42
+        },
+        "pose": {
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:06+08:00",
+          "value": {
+            "x": 8.05,
+            "y": 0.02,
+            "yaw": 0.05,
+            "frame_id": "map"
+          },
+          "localization": "OK",
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "map_checksum": "sim-gazebo-r002-v1"
+        },
+        "battery_pct": {
+          "value": 87.5,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "smoke": {
+          "value": 12.0,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00",
+          "unit": "UNVERIFIED",
+          "unit_verified": false,
+          "raw_source_field": "sensor.smoke"
+        },
+        "temperature_c": {
+          "value": null,
+          "quality": "UNSUPPORTED",
+          "observed_at": null
+        },
+        "estop": {
+          "active": false,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "motion": {
+          "stationary": true,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:10:00+08:00"
+        },
+        "devices": [
+          {
+            "device": "LIDAR",
+            "state": "OK",
+            "quality": "LIVE",
+            "observed_at": "2026-11-26T09:00:05+08:00",
+            "fault_code": null
+          },
+          {
+            "device": "FIRE_SHIELD",
+            "state": "UNKNOWN",
+            "quality": "UNKNOWN",
+            "observed_at": null,
+            "fault_code": null
+          }
+        ],
+        "active_mission_id": null,
+        "scene": {
+          "loaded_scene_id": "a1000000-0000-4000-8000-000000000001",
+          "loaded_scene_version": 1,
+          "loaded_scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+          "load_state": "LOADED_CONFIRMED"
+        }
+      },
+      "now": "2026-11-26T09:00:07+08:00",
+      "expect": "MOTION_FROM_FUTURE"
+    },
+    {
+      "name": "R1C_3_request_task_mission_mismatch",
+      "request": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-0000000000ff",
+        "command_id": "f6000000-0000-4000-8000-000000000001",
+        "execution_gen": 1,
+        "idempotency_key": "web-v21-sim-0001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "mission_kind": "PATROL",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "route_snapshot": {
+          "route_id": "d1000000-0000-4000-8000-000000000001",
+          "start_index": 0,
+          "waypoints": [
+            {
+              "index": 0,
+              "point_id": "b1000000-0000-4000-8000-000000000001",
+              "pose": {
+                "x": 0.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 1,
+              "point_id": "b1000000-0000-4000-8000-000000000002",
+              "pose": {
+                "x": 4.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 2,
+              "point_id": "b1000000-0000-4000-8000-000000000003",
+              "pose": {
+                "x": 8.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "STOP"
+            }
+          ]
+        },
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:30+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      },
+      "task": {
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "command_id": "f6000000-0000-4000-8000-000000000001",
+        "execution_gen": 1,
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "state": "SUCCEEDED",
+        "last_seq": 20,
+        "waypoint_index": 2,
+        "waypoint_total": 3,
+        "goal_id": "move_base-1732582805-8",
+        "goals_used": [
+          "move_base-1732582800-7",
+          "move_base-1732582805-8"
+        ],
+        "succeeded_reported_at": "2026-11-26T09:00:05+08:00"
+      },
+      "snapshot": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "VehicleSnapshot",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "generated_at": "2026-11-26T09:00:05+08:00",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "link": {
+          "state": "ONLINE",
+          "last_seen_at": "2026-11-26T09:00:05+08:00",
+          "latency_ms": 42
+        },
+        "pose": {
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:06+08:00",
+          "value": {
+            "x": 8.05,
+            "y": 0.02,
+            "yaw": 0.05,
+            "frame_id": "map"
+          },
+          "localization": "OK",
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "map_checksum": "sim-gazebo-r002-v1"
+        },
+        "battery_pct": {
+          "value": 87.5,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "smoke": {
+          "value": 12.0,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00",
+          "unit": "UNVERIFIED",
+          "unit_verified": false,
+          "raw_source_field": "sensor.smoke"
+        },
+        "temperature_c": {
+          "value": null,
+          "quality": "UNSUPPORTED",
+          "observed_at": null
+        },
+        "estop": {
+          "active": false,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "motion": {
+          "stationary": true,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:06+08:00"
+        },
+        "devices": [
+          {
+            "device": "LIDAR",
+            "state": "OK",
+            "quality": "LIVE",
+            "observed_at": "2026-11-26T09:00:05+08:00",
+            "fault_code": null
+          },
+          {
+            "device": "FIRE_SHIELD",
+            "state": "UNKNOWN",
+            "quality": "UNKNOWN",
+            "observed_at": null,
+            "fault_code": null
+          }
+        ],
+        "active_mission_id": null,
+        "scene": {
+          "loaded_scene_id": "a1000000-0000-4000-8000-000000000001",
+          "loaded_scene_version": 1,
+          "loaded_scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+          "load_state": "LOADED_CONFIRMED"
+        }
+      },
+      "now": "2026-11-26T09:00:07+08:00",
+      "expect": "MISSION_IDENTITY_MISMATCH"
+    },
+    {
+      "name": "R1C_3b_request_task_command_mismatch",
+      "request": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "command_id": "f6000000-0000-4000-8000-000000000002",
+        "execution_gen": 1,
+        "idempotency_key": "web-v21-sim-0001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "mission_kind": "PATROL",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "route_snapshot": {
+          "route_id": "d1000000-0000-4000-8000-000000000001",
+          "start_index": 0,
+          "waypoints": [
+            {
+              "index": 0,
+              "point_id": "b1000000-0000-4000-8000-000000000001",
+              "pose": {
+                "x": 0.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 1,
+              "point_id": "b1000000-0000-4000-8000-000000000002",
+              "pose": {
+                "x": 4.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 2,
+              "point_id": "b1000000-0000-4000-8000-000000000003",
+              "pose": {
+                "x": 8.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "STOP"
+            }
+          ]
+        },
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:30+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      },
+      "task": {
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "command_id": "f6000000-0000-4000-8000-000000000001",
+        "execution_gen": 1,
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "state": "SUCCEEDED",
+        "last_seq": 20,
+        "waypoint_index": 2,
+        "waypoint_total": 3,
+        "goal_id": "move_base-1732582805-8",
+        "goals_used": [
+          "move_base-1732582800-7",
+          "move_base-1732582805-8"
+        ],
+        "succeeded_reported_at": "2026-11-26T09:00:05+08:00"
+      },
+      "snapshot": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "VehicleSnapshot",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "generated_at": "2026-11-26T09:00:05+08:00",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "link": {
+          "state": "ONLINE",
+          "last_seen_at": "2026-11-26T09:00:05+08:00",
+          "latency_ms": 42
+        },
+        "pose": {
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:06+08:00",
+          "value": {
+            "x": 8.05,
+            "y": 0.02,
+            "yaw": 0.05,
+            "frame_id": "map"
+          },
+          "localization": "OK",
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "map_checksum": "sim-gazebo-r002-v1"
+        },
+        "battery_pct": {
+          "value": 87.5,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "smoke": {
+          "value": 12.0,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00",
+          "unit": "UNVERIFIED",
+          "unit_verified": false,
+          "raw_source_field": "sensor.smoke"
+        },
+        "temperature_c": {
+          "value": null,
+          "quality": "UNSUPPORTED",
+          "observed_at": null
+        },
+        "estop": {
+          "active": false,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "motion": {
+          "stationary": true,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:06+08:00"
+        },
+        "devices": [
+          {
+            "device": "LIDAR",
+            "state": "OK",
+            "quality": "LIVE",
+            "observed_at": "2026-11-26T09:00:05+08:00",
+            "fault_code": null
+          },
+          {
+            "device": "FIRE_SHIELD",
+            "state": "UNKNOWN",
+            "quality": "UNKNOWN",
+            "observed_at": null,
+            "fault_code": null
+          }
+        ],
+        "active_mission_id": null,
+        "scene": {
+          "loaded_scene_id": "a1000000-0000-4000-8000-000000000001",
+          "loaded_scene_version": 1,
+          "loaded_scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+          "load_state": "LOADED_CONFIRMED"
+        }
+      },
+      "now": "2026-11-26T09:00:07+08:00",
+      "expect": "MISSION_IDENTITY_MISMATCH"
+    },
+    {
+      "name": "R1C_3c_request_task_vehicle_mismatch",
+      "request": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "command_id": "f6000000-0000-4000-8000-000000000001",
+        "execution_gen": 1,
+        "idempotency_key": "web-v21-sim-0001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "mission_kind": "PATROL",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "route_snapshot": {
+          "route_id": "d1000000-0000-4000-8000-000000000001",
+          "start_index": 0,
+          "waypoints": [
+            {
+              "index": 0,
+              "point_id": "b1000000-0000-4000-8000-000000000001",
+              "pose": {
+                "x": 0.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 1,
+              "point_id": "b1000000-0000-4000-8000-000000000002",
+              "pose": {
+                "x": 4.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 2,
+              "point_id": "b1000000-0000-4000-8000-000000000003",
+              "pose": {
+                "x": 8.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "STOP"
+            }
+          ]
+        },
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:30+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      },
+      "task": {
+        "vehicle_id": "firebot-sim-r002-02",
+        "environment": "SIM",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "command_id": "f6000000-0000-4000-8000-000000000001",
+        "execution_gen": 1,
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "state": "SUCCEEDED",
+        "last_seq": 20,
+        "waypoint_index": 2,
+        "waypoint_total": 3,
+        "goal_id": "move_base-1732582805-8",
+        "goals_used": [
+          "move_base-1732582800-7",
+          "move_base-1732582805-8"
+        ],
+        "succeeded_reported_at": "2026-11-26T09:00:05+08:00"
+      },
+      "snapshot": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "VehicleSnapshot",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "generated_at": "2026-11-26T09:00:05+08:00",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "link": {
+          "state": "ONLINE",
+          "last_seen_at": "2026-11-26T09:00:05+08:00",
+          "latency_ms": 42
+        },
+        "pose": {
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:06+08:00",
+          "value": {
+            "x": 8.05,
+            "y": 0.02,
+            "yaw": 0.05,
+            "frame_id": "map"
+          },
+          "localization": "OK",
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "map_checksum": "sim-gazebo-r002-v1"
+        },
+        "battery_pct": {
+          "value": 87.5,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "smoke": {
+          "value": 12.0,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00",
+          "unit": "UNVERIFIED",
+          "unit_verified": false,
+          "raw_source_field": "sensor.smoke"
+        },
+        "temperature_c": {
+          "value": null,
+          "quality": "UNSUPPORTED",
+          "observed_at": null
+        },
+        "estop": {
+          "active": false,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "motion": {
+          "stationary": true,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:06+08:00"
+        },
+        "devices": [
+          {
+            "device": "LIDAR",
+            "state": "OK",
+            "quality": "LIVE",
+            "observed_at": "2026-11-26T09:00:05+08:00",
+            "fault_code": null
+          },
+          {
+            "device": "FIRE_SHIELD",
+            "state": "UNKNOWN",
+            "quality": "UNKNOWN",
+            "observed_at": null,
+            "fault_code": null
+          }
+        ],
+        "active_mission_id": null,
+        "scene": {
+          "loaded_scene_id": "a1000000-0000-4000-8000-000000000001",
+          "loaded_scene_version": 1,
+          "loaded_scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+          "load_state": "LOADED_CONFIRMED"
+        }
+      },
+      "now": "2026-11-26T09:00:07+08:00",
+      "expect": "MISSION_IDENTITY_MISMATCH"
+    },
+    {
+      "name": "R1C_4_task_still_at_first_waypoint",
+      "request": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "command_id": "f6000000-0000-4000-8000-000000000001",
+        "execution_gen": 1,
+        "idempotency_key": "web-v21-sim-0001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "mission_kind": "PATROL",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "route_snapshot": {
+          "route_id": "d1000000-0000-4000-8000-000000000001",
+          "start_index": 0,
+          "waypoints": [
+            {
+              "index": 0,
+              "point_id": "b1000000-0000-4000-8000-000000000001",
+              "pose": {
+                "x": 0.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 1,
+              "point_id": "b1000000-0000-4000-8000-000000000002",
+              "pose": {
+                "x": 4.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 2,
+              "point_id": "b1000000-0000-4000-8000-000000000003",
+              "pose": {
+                "x": 8.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "STOP"
+            }
+          ]
+        },
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:30+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      },
+      "task": {
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "command_id": "f6000000-0000-4000-8000-000000000001",
+        "execution_gen": 1,
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "state": "SUCCEEDED",
+        "last_seq": 20,
+        "waypoint_index": 0,
+        "waypoint_total": 3,
+        "goal_id": "move_base-1732582805-8",
+        "goals_used": [
+          "move_base-1732582800-7",
+          "move_base-1732582805-8"
+        ],
+        "succeeded_reported_at": "2026-11-26T09:00:05+08:00"
+      },
+      "snapshot": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "VehicleSnapshot",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "generated_at": "2026-11-26T09:00:05+08:00",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "link": {
+          "state": "ONLINE",
+          "last_seen_at": "2026-11-26T09:00:05+08:00",
+          "latency_ms": 42
+        },
+        "pose": {
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:06+08:00",
+          "value": {
+            "x": 8.05,
+            "y": 0.02,
+            "yaw": 0.05,
+            "frame_id": "map"
+          },
+          "localization": "OK",
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "map_checksum": "sim-gazebo-r002-v1"
+        },
+        "battery_pct": {
+          "value": 87.5,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "smoke": {
+          "value": 12.0,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00",
+          "unit": "UNVERIFIED",
+          "unit_verified": false,
+          "raw_source_field": "sensor.smoke"
+        },
+        "temperature_c": {
+          "value": null,
+          "quality": "UNSUPPORTED",
+          "observed_at": null
+        },
+        "estop": {
+          "active": false,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "motion": {
+          "stationary": true,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:06+08:00"
+        },
+        "devices": [
+          {
+            "device": "LIDAR",
+            "state": "OK",
+            "quality": "LIVE",
+            "observed_at": "2026-11-26T09:00:05+08:00",
+            "fault_code": null
+          },
+          {
+            "device": "FIRE_SHIELD",
+            "state": "UNKNOWN",
+            "quality": "UNKNOWN",
+            "observed_at": null,
+            "fault_code": null
+          }
+        ],
+        "active_mission_id": null,
+        "scene": {
+          "loaded_scene_id": "a1000000-0000-4000-8000-000000000001",
+          "loaded_scene_version": 1,
+          "loaded_scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+          "load_state": "LOADED_CONFIRMED"
+        }
+      },
+      "now": "2026-11-26T09:00:07+08:00",
+      "expect": "TARGET_WAYPOINT_NOT_REACHED"
+    },
+    {
+      "name": "R1C_4b_task_waypoint_total_differs_from_request",
+      "request": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "command_id": "f6000000-0000-4000-8000-000000000001",
+        "execution_gen": 1,
+        "idempotency_key": "web-v21-sim-0001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "mission_kind": "PATROL",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "route_snapshot": {
+          "route_id": "d1000000-0000-4000-8000-000000000001",
+          "start_index": 0,
+          "waypoints": [
+            {
+              "index": 0,
+              "point_id": "b1000000-0000-4000-8000-000000000001",
+              "pose": {
+                "x": 0.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 1,
+              "point_id": "b1000000-0000-4000-8000-000000000002",
+              "pose": {
+                "x": 4.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 2,
+              "point_id": "b1000000-0000-4000-8000-000000000003",
+              "pose": {
+                "x": 8.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "STOP"
+            }
+          ]
+        },
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:30+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      },
+      "task": {
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "command_id": "f6000000-0000-4000-8000-000000000001",
+        "execution_gen": 1,
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "state": "SUCCEEDED",
+        "last_seq": 20,
+        "waypoint_index": 3,
+        "waypoint_total": 4,
+        "goal_id": "move_base-1732582805-8",
+        "goals_used": [
+          "move_base-1732582800-7",
+          "move_base-1732582805-8"
+        ],
+        "succeeded_reported_at": "2026-11-26T09:00:05+08:00"
+      },
+      "snapshot": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "VehicleSnapshot",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "generated_at": "2026-11-26T09:00:05+08:00",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "link": {
+          "state": "ONLINE",
+          "last_seen_at": "2026-11-26T09:00:05+08:00",
+          "latency_ms": 42
+        },
+        "pose": {
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:06+08:00",
+          "value": {
+            "x": 8.05,
+            "y": 0.02,
+            "yaw": 0.05,
+            "frame_id": "map"
+          },
+          "localization": "OK",
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "map_checksum": "sim-gazebo-r002-v1"
+        },
+        "battery_pct": {
+          "value": 87.5,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "smoke": {
+          "value": 12.0,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00",
+          "unit": "UNVERIFIED",
+          "unit_verified": false,
+          "raw_source_field": "sensor.smoke"
+        },
+        "temperature_c": {
+          "value": null,
+          "quality": "UNSUPPORTED",
+          "observed_at": null
+        },
+        "estop": {
+          "active": false,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:05+08:00"
+        },
+        "motion": {
+          "stationary": true,
+          "quality": "LIVE",
+          "observed_at": "2026-11-26T09:00:06+08:00"
+        },
+        "devices": [
+          {
+            "device": "LIDAR",
+            "state": "OK",
+            "quality": "LIVE",
+            "observed_at": "2026-11-26T09:00:05+08:00",
+            "fault_code": null
+          },
+          {
+            "device": "FIRE_SHIELD",
+            "state": "UNKNOWN",
+            "quality": "UNKNOWN",
+            "observed_at": null,
+            "fault_code": null
+          }
+        ],
+        "active_mission_id": null,
+        "scene": {
+          "loaded_scene_id": "a1000000-0000-4000-8000-000000000001",
+          "loaded_scene_version": 1,
+          "loaded_scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+          "load_state": "LOADED_CONFIRMED"
+        }
+      },
+      "now": "2026-11-26T09:00:07+08:00",
+      "expect": "TARGET_WAYPOINT_NOT_REACHED"
     }
   ]
 }

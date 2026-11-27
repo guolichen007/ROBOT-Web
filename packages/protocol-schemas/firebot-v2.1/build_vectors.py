@@ -1277,6 +1277,18 @@ readiness_vectors["admission_cases"] = [
         "POSE_NOT_LIVE",
         snapshot=mutate(snap_loaded, ["pose", "localization"], "LOST"),
     ),
+    # --- WEB-R1C independent review (R1C-4 #5): a freshly generated snapshot can still carry an
+    # old pose observation; the pose itself must be fresh (and not from the future)
+    admit(
+        "R1C_5_fresh_snapshot_stale_pose_observation",
+        "POSE_STALE",
+        snapshot=mutate(snap_loaded, ["pose", "observed_at"], "2026-11-26T08:59:00+08:00"),
+    ),
+    admit(
+        "R1C_5b_pose_observation_from_future",
+        "POSE_FROM_FUTURE",
+        snapshot=mutate(snap_loaded, ["pose", "observed_at"], "2026-11-26T09:10:00+08:00"),
+    ),
 ]
 
 # confirm_mission_success(request, task, snapshot, now): the vehicle claim is never enough
@@ -1364,6 +1376,58 @@ feedback_vectors["success_cases"] = [
         "final_waypoint_pass_through_only",
         "FINAL_WAYPOINT_NOT_STOP",
         request=mutate(mreq, ["route_snapshot", "waypoints", 2, "arrival"], "PASS_THROUGH"),
+    ),
+    # --- WEB-R1C independent review: 5 false accepts of draft.3 (R1C-4)
+    success(
+        "R1C_1_ancient_motion_observation_not_stationary_evidence",
+        "MOTION_STALE",
+        snapshot=mutate(snap_arrived, ["motion", "observed_at"], "2026-11-26T08:00:00+08:00"),
+    ),
+    success(
+        # stillness sample is fresh (1.5 s old) but was taken BEFORE the vehicle claimed success
+        "R1C_1b_motion_predates_claim",
+        "MOTION_PREDATES_CLAIM",
+        task={**task_succeeded, "succeeded_reported_at": "2026-11-26T09:00:06.2+08:00"},
+        snapshot=mutate(
+            mutate(snap_arrived, ["pose", "observed_at"], "2026-11-26T09:00:06.5+08:00"),
+            ["motion", "observed_at"],
+            "2026-11-26T09:00:05.5+08:00",
+        ),
+    ),
+    success(
+        "R1C_2_pose_observed_in_future",
+        "POSE_FROM_FUTURE",
+        snapshot=mutate(snap_arrived, ["pose", "observed_at"], "2026-11-26T09:10:00+08:00"),
+    ),
+    success(
+        "R1C_2b_motion_observed_in_future",
+        "MOTION_FROM_FUTURE",
+        snapshot=mutate(snap_arrived, ["motion", "observed_at"], "2026-11-26T09:10:00+08:00"),
+    ),
+    success(
+        "R1C_3_request_task_mission_mismatch",
+        "MISSION_IDENTITY_MISMATCH",
+        request=mutate(mreq, ["mission_id"], "f1000000-0000-4000-8000-0000000000ff"),
+    ),
+    success(
+        "R1C_3b_request_task_command_mismatch",
+        "MISSION_IDENTITY_MISMATCH",
+        request=mutate(mreq, ["command_id"], COMMAND_OLD),
+    ),
+    success(
+        "R1C_3c_request_task_vehicle_mismatch",
+        "MISSION_IDENTITY_MISMATCH",
+        task={**task_succeeded, "vehicle_id": "firebot-sim-r002-02"},
+    ),
+    success(
+        "R1C_4_task_still_at_first_waypoint",
+        "TARGET_WAYPOINT_NOT_REACHED",
+        task={**task_succeeded, "waypoint_index": 0},
+    ),
+    success(
+        "R1C_4b_task_waypoint_total_differs_from_request",
+        "TARGET_WAYPOINT_NOT_REACHED",
+        task={**task_succeeded, "waypoint_total": 4, "waypoint_index": 3},
     ),
 ]
 

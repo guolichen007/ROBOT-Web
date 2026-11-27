@@ -41,7 +41,7 @@
     },
     "OperationReadiness": {
       "path": "vectors/OperationReadiness.vectors.json",
-      "sha256": "0a894a621af1f3c3a4ef68ea449d179daa8d2e6031c7d7a6bff16b6e0d606819",
+      "sha256": "3f12b38b69ae93432913f13e6465f1104b433069ef14396b601d33d546afa032",
       "case_sets": [
         "admission_cases",
         "invalid",
@@ -76,7 +76,7 @@
     },
     "MissionFeedback": {
       "path": "vectors/MissionFeedback.vectors.json",
-      "sha256": "749197f958f0aabade7ea32d7d3b84d0095dcfb700372361850cc73adb605bf5",
+      "sha256": "a138e244b7ef4919a230adb5a1eafa342843b03976d1e15fc3dde6a038f8df34",
       "case_sets": [
         "apply_cases",
         "invalid",
