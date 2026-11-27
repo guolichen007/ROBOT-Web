@@ -234,7 +234,13 @@ describe('WEB-R1C console layout', () => {
             task: { state: 'idle', patrol_paused: false },
           },
         } as RobotState['agent_state'],
-        operation_readiness: readiness('R001', { stop_motion: false, emergency_stop: false }),
+        operation_readiness: readiness('R001', {
+          start_vehicle: true,
+          shutdown_vehicle: true,
+          patrol_start: true,
+          stop_motion: false,
+          emergency_stop: false,
+        }),
       }),
     )
     postMock.mockResolvedValue({

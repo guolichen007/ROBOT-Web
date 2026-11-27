@@ -101,34 +101,39 @@ const trajectory = computed(() => {
 const readOnly = computed(
   () => robot.value?.integration?.source_kind === 'ROS_COMPAT' || robot.value?.enabled === false,
 )
-// WEB-R1B: OperationReadiness is the single authority (legacy keys only when the server lacks it;
-// a stale/unavailable answer disables everything).
+// WEB-R1C: server OperationReadiness is the ONLY control authority of the console — no legacy
+// robot_readiness fallback; unknown / expired / failed / other vehicle / other boot / permission
+// change → nothing allowed (useOperationReadiness).
 const ops = useOperationReadiness(robot)
 const opsReadiness = ops.readiness
 const opsAuthority = ops.authority
-const patrolReady = computed(() =>
-  ops.allowed('patrol_start', robot.value?.autonomous_task_ready?.patrol === true),
-)
-const returnReady = computed(() =>
-  ops.allowed('return_home', robot.value?.autonomous_task_ready?.return_dock === true),
-)
-const stopReady = computed(() =>
-  ops.allowed('stop_motion', robot.value?.safety_command_ready?.stop_motion === true),
-)
-const estopReady = computed(() =>
-  ops.allowed('emergency_stop', robot.value?.safety_command_ready?.emergency_stop === true),
-)
-const resetEstopReady = computed(() =>
-  ops.allowed('reset_estop', robot.value?.safety_command_ready?.reset_estop === true),
-)
-// WEB-R1C: ONE vehicle_agent v1 command tracker shared by the device tab and the task bar.
+const patrolReady = computed(() => ops.allowed('patrol_start'))
+const returnReady = computed(() => ops.allowed('return_home'))
+const stopReady = computed(() => ops.allowed('stop_motion'))
+const estopReady = computed(() => ops.allowed('emergency_stop'))
+const resetEstopReady = computed(() => ops.allowed('reset_estop'))
+const manualReady = computed(() => ops.allowed('manual_control'))
+// WEB-R1C: ONE vehicle_agent v1 command tracker shared by the device tab and the task bar; every
+// v1 button additionally requires the server decision for its contract action.
 const parkingSlots = computed(() => monitor.snapshot.parking_slots)
-const agent = useAgentCommands(selectedSlotId, parkingSlots)
+const V1_CONTRACT_ACTION: Record<string, string> = {
+  start: 'start_vehicle',
+  close: 'shutdown_vehicle',
+  patrol: 'patrol_start',
+  stop_patrol: 'patrol_pause',
+  resume_patrol: 'patrol_resume',
+  navigate: 'navigate_to_point',
+  stop_navigate: 'cancel_mission',
+  homing: 'return_home',
+}
+const agent = useAgentCommands(selectedSlotId, parkingSlots, (action) =>
+  ops.allowed(V1_CONTRACT_ACTION[action] ?? `__unknown_${action}`),
+)
 const agentBound = computed(() => robot.value?.agent_protocol === 'VEHICLE_AGENT_V1')
 // task bar: pause (canonical has no server pause yet → server reason shown) / continue / goal
 const pauseState = computed(() => ops.state('patrol_pause'))
 const pauseReady = computed(() => pauseState.value.allowed)
-const resumeReady = computed(() => patrolReady.value && Boolean(resumeTaskId.value))
+const resumeReady = computed(() => ops.allowed('patrol_resume') && Boolean(resumeTaskId.value))
 const navigateReady = computed(() => !navigationReason.value)
 const navigateTarget = computed(() => selectedSlot.value?.code || '')
 // visible (not tooltip-only) reasons for the task buttons that are unavailable right now
@@ -152,33 +157,17 @@ const protectiveStop = computed(() => {
       : entry.reasons.map((code) => reasonCodeLabel(code) || code).join('、') || '不可用',
   }
 })
-const readinessText = computed(() => {
-  const labels = [
-    ...new Set(
-      (robot.value?.readiness_reasons || []).map((code) => reasonCodeLabel(code) || '控制链路尚未就绪'),
-    ),
-  ].filter(Boolean)
-  return labels.join('、')
-})
-const controlReason = computed(
-  () =>
-    (readOnly.value ? '当前为只读接入，控制未开放' : '') ||
-    readinessText.value ||
-    (robot.value?.control_disabled_reason
-      ? reasonCodeLabel(robot.value.control_disabled_reason) || '控制链路未验证'
-      : '') ||
-    '控制链路未验证',
-)
+/** readable server reasons for one action (display only; the decision is ops.allowed) */
+const reasonText = (action: string) => [...new Set(ops.state(action).labels)].join('、')
 const dockReason = computed(() => {
-  if (ops.authority.value === 'STALE') return '服务端控制资格未及时更新，全部操作暂不可用'
+  if (readOnly.value) return '当前为只读接入，控制未开放'
+  const failure = ops.failure.value
+  if (failure) return `${reasonCodeLabel(failure) || failure}，全部操作暂不可用`
   const r = ops.readiness.value
-  if (ops.authority.value === 'SERVER' && r?.control_frozen) {
+  if (r?.control_frozen) {
     return `控制已冻结：${r.freeze_reasons.map((code) => reasonCodeLabel(code) || code).join('、')}`
   }
-  if (readOnly.value) return '当前为只读接入，控制未开放'
-  if (readinessText.value) return readinessText.value
-  const disabled = robot.value?.control_disabled_reason
-  if (disabled) return reasonCodeLabel(disabled) || '控制链路尚未就绪'
+  if (!patrolReady.value && !stopReady.value) return reasonText('stop_motion')
   return ''
 })
 const freshness = computed(() => {
@@ -202,20 +191,22 @@ const situation = computed(() =>
 )
 // 保持 Teleport host 稳定，避免动态 Teleport 生命周期触发 renderer 异常路径。
 const showSituationBanner = computed(() => Boolean(primaryAlarm.value) || situation.value !== 'NORMAL')
+// WEB-R1C: goal navigation = server navigate_to_point + local target-selection facts only
 const navigationReason = computed(() => {
   if (!selectedSlot.value) return '请先在地图选择目标车位'
   if (!selectedSlot.value.enabled) return '该车位已禁用'
-  if (robot.value?.agent_protocol === 'VEHICLE_AGENT_V1') {
-    return robot.value.vehicle_agent_ready?.navigate ? '' : '车辆导航或控制合同未就绪'
-  }
+  if (!ops.allowed('navigate_to_point')) return reasonText('navigate_to_point') || '控制资格未就绪'
+  if (robot.value?.agent_protocol === 'VEHICLE_AGENT_V1') return ''
   if (!selectedPreset.value) return '车位未显式关联 INSPECTION preset'
   if (activeTask.value) return `存在执行中任务：${activeTask.value.type}`
-  if (!robot.value?.autonomous_task_ready?.patrol) return controlReason.value
   return ''
 })
+// WEB-R1C: extinguishing has no contract action / server readiness in this release (ACTION_MATRIX:
+// 暂缓) → never enabled from the console, whatever legacy robot fields say.
 const extinguishReason = computed(() => {
   if (readOnly.value) return '当前为只读接入，控制未开放'
-  if (!robot.value?.autonomous_task_ready?.extinguish) return '控制链路尚未就绪'
+  if (ops.failure.value) return reasonCodeLabel(ops.failure.value) || ops.failure.value
+  if (!ops.allowed('extinguish')) return reasonCodeLabel('EXTINGUISH_DEFERRED')
   if (activeTask.value) return '当前已有执行中任务'
   return ''
 })
@@ -810,6 +801,7 @@ onUnmounted(() => {
             <ManualControl
               :robot="robot"
               :show-safety="false"
+              :server-allowed="manualReady"
               @notice="(message: string) => toast(message)"
             />
           </section>

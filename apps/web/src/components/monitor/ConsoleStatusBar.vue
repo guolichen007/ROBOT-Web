@@ -15,7 +15,7 @@ import type { OperationReadiness } from '@/types'
 
 const props = withDefaults(
   defineProps<{ readiness?: OperationReadiness | null; readinessAuthority?: string }>(),
-  { readiness: null, readinessAuthority: 'LEGACY' },
+  { readiness: null, readinessAuthority: 'UNKNOWN' },
 )
 const monitor = useMonitorStore()
 const { now } = useSystemClock()

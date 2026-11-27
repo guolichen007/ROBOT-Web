@@ -17,6 +17,8 @@ export interface RobotState {
   simulation?: { simulated: true; label: 'SIMULATED'; source: string } | null
   /** Contract 2.1 OperationReadiness (server-only source of truth); absent until the API provides it. */
   operation_readiness?: OperationReadiness | null
+  /** current vehicle boot session (DB authority); readiness for another boot is void */
+  boot_id?: string | null
   deployment_environment?: 'REAL' | 'SIM' | string
   agent_state?: AgentState
   id?: string

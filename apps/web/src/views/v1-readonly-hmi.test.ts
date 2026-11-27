@@ -1,7 +1,7 @@
 // G1-R1：只读 V1 设备（无硬件、控制禁用）与 R002 既有正常设备的 HMI 状态语义回归。
 // 关键语义：Agent 在线 ≠ 控制就绪；急停未验证 ≠ 未触发；无底盘不显示"待命"；
 // enabled=false 只读可监测、不可控制；R002 既有显示行为不变。
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, nextTick } from 'vue'
@@ -10,11 +10,25 @@ import MonitorView from './MonitorView.vue'
 import RobotsView from './RobotsView.vue'
 import { useMonitorStore } from '@/stores/monitor'
 import type { RobotState } from '@/types'
+import { serverReadiness } from '../../tests/fixtures/readiness'
 
+// WEB-R1C: readiness comes ONLY from the endpoint — answer it from the robot fixture's own
+// server answer (the snapshot copy is never trusted on its own).
+const { getMock } = vi.hoisted(() => ({ getMock: vi.fn() }))
 vi.mock('@/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/api')>()),
-  api: { get: vi.fn().mockResolvedValue({ data: null }), post: vi.fn() },
+  api: { get: getMock, post: vi.fn() },
 }))
+beforeEach(() => {
+  getMock.mockImplementation(async (url: string) => {
+    const m = /\/robots\/([^/]+)\/operation-readiness$/.exec(url)
+    if (!m) return { data: null }
+    const { useMonitorStore: store } = await import('@/stores/monitor')
+    const r = store().snapshot.robots.find((x) => x.vehicle_id === m[1])
+    if (!r?.operation_readiness) throw new Error('no readiness')
+    return { data: r.operation_readiness }
+  })
+})
 
 const ShellHarness = defineComponent({
   components: { MonitorView },
@@ -83,6 +97,12 @@ function baseRobot(overrides: Partial<RobotState> = {}): RobotState {
     },
     data_channels: {},
     sensor_profiles: [],
+    // WEB-R1C: the server answer for a v1 read-only device (V1 downlink disabled → frozen ALL)
+    operation_readiness: serverReadiness(
+      String(overrides.vehicle_id ?? 'firebot-vehicle-01'),
+      { stop_motion: false, emergency_stop: false, patrol_start: false },
+      { frozen: ['REAL_CONTROL_NOT_AUTHORIZED', 'V1_DOWNLINK_DISABLED'] },
+    ),
     ...overrides,
   }
 }
@@ -117,12 +137,15 @@ describe('V1 只读设备 HMI 语义（G1-R1）', () => {
     })
     await nextTick()
     await nextTick()
+    await flushPromises()
+    await nextTick()
 
     const text = wrapper.text()
     expect(text).toContain('只读监测') // 在线但无底盘 → 只读监测，不宣称待命
     expect(text).not.toContain('待命')
     // 控制未开放：控制链路未就绪提示存在（readiness 门），巡检按钮不可用
-    expect(text).toContain('控制链路')
+    // WEB-R1C：控制不可用的原因来自服务端 OperationReadiness（V1 下行未开启 → 冻结），不再读旧字段
+    expect(text).toContain('V1 下行未开启')
     // WEB-R1C：V1 车辆的底部任务栏渲染 vehicle_agent 按钮（共享同一命令实例），巡逻不可用
     const patrolButton = wrapper.find('[data-testid="console-task-group"] [data-action="patrol"]')
     expect(patrolButton.exists()).toBe(true)
@@ -156,6 +179,8 @@ describe('V1 只读设备 HMI 语义（G1-R1）', () => {
     })
     await nextTick()
     await nextTick()
+    await flushPromises()
+    await nextTick()
 
     expect(wrapper.text()).toContain('只读监测')
     expect(wrapper.text()).toContain('只读接入') // enabled=false → 控制路径关闭
@@ -177,6 +202,8 @@ describe('V1 只读设备 HMI 语义（G1-R1）', () => {
         safety_command_ready: { stop_motion: true },
         readiness_reasons: [],
         control_disabled_reason: null,
+        // WEB-R1C: the server authority is what enables the buttons (no legacy-field fallback)
+        operation_readiness: serverReadiness('R002', { patrol_start: true, stop_motion: true }),
         integration: {
           source_kind: 'MOCK',
           control_contract_verified: true,
@@ -222,6 +249,8 @@ describe('V1 只读设备 HMI 语义（G1-R1）', () => {
     })
     await nextTick()
     await nextTick()
+    await flushPromises()
+    await nextTick()
 
     const text = wrapper.text()
     expect(text).toContain('待命') // 既有正常设备行为不变
@@ -262,6 +291,8 @@ describe('RobotsView 急停文案语义（G1-R1）', () => {
     })
     await nextTick()
     await nextTick()
+    await flushPromises()
+    await nextTick()
 
     // 展开两行的详情（estop 文案位于折叠详情区）
     for (const button of wrapper.findAll('button').filter((b) => b.text().includes('详情'))) {
@@ -301,6 +332,8 @@ describe('RobotsView 只读设备可监控（G1-P2）', () => {
     })
     await nextTick()
     await nextTick()
+    await flushPromises()
+    await nextTick()
 
     const switchButtons = wrapper.findAll('button').filter((b) => b.text().includes('切换监控'))
     expect(switchButtons.length).toBeGreaterThan(0)
@@ -336,6 +369,8 @@ describe('RobotsView 只读设备可监控（G1-P2）', () => {
       },
     })
     await nextTick()
+    await nextTick()
+    await flushPromises()
     await nextTick()
 
     const switchButtons = wrapper.findAll('button').filter((b) => b.text().includes('切换监控'))
@@ -388,6 +423,8 @@ describe('V1 链路与硬件新鲜度分离（G1-P2）', () => {
     const wrapper = mountWith(robot)
     await nextTick()
     await nextTick()
+    await flushPromises()
+    await nextTick()
     const text = wrapper.text()
     expect(text).toContain('数据实时') // 链路 freshness 用服务端确认时间
     expect(text).not.toContain('数据离线')
@@ -402,6 +439,8 @@ describe('V1 链路与硬件新鲜度分离（G1-P2）', () => {
     })
     const wrapper = mountWith(robot)
     await nextTick()
+    await nextTick()
+    await flushPromises()
     await nextTick()
     expect(wrapper.text()).toContain('数据离线')
     wrapper.unmount()
@@ -436,6 +475,8 @@ describe('R001 只读设备选择全链路（G1-P2-RC1 P0-1）', () => {
       },
     })
     await nextTick()
+    await nextTick()
+    await flushPromises()
     await nextTick()
 
     const button = wrapper.findAll('button').find((b) => b.text().includes('切换监控'))

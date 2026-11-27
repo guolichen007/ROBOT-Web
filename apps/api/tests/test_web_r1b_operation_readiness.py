@@ -102,3 +102,109 @@ def test_v1_vehicle_keeps_independent_v1_freeze(client, monkeypatch) -> None:
         db.rollback()
     assert frozen and "V1_DOWNLINK_DISABLED" in reasons and scope == "ALL"
     assert "NOT_ALLOWLISTED" not in reasons  # 001 never depends on the Canonical allowlist
+
+
+# ---------------------------------------------------------------- WEB-R1C R1C-2
+R1C_ACTIONS = {
+    "patrol_pause",
+    "patrol_resume",
+    "navigate_to_point",
+    "start_vehicle",
+    "shutdown_vehicle",
+    "fire_shield_open",
+    "fire_shield_stop",
+    "fire_shield_close",
+}
+
+
+def test_r1c_every_console_action_is_server_decided_and_contract_valid(client, monkeypatch) -> None:
+    """The console renders pause/resume/goal/device buttons; each must have a server entry."""
+    s = get_settings()
+    monkeypatch.setattr(s, "downlink_frozen", False)
+    monkeypatch.setattr(s, "canonical_downlink_allowlist", "R002")
+    r = _ready(client)  # schema + semantic validation of the whole document
+    assert R1C_ACTIONS <= set(r["actions"])
+    # canonical vehicles: no pause / start / shutdown / fire-shield path exists → never allowed,
+    # each with an explicit reason code (contract: reasons minItems 1 when not allowed)
+    for name in ("patrol_pause", "start_vehicle", "shutdown_vehicle"):
+        assert r["actions"][name]["allowed"] is False and r["actions"][name]["reasons"]
+    for name in ("fire_shield_open", "fire_shield_stop", "fire_shield_close"):
+        assert r["actions"][name]["allowed"] is False
+        assert "DEVICE_FEEDBACK_CONTRACT_NOT_VERIFIED" in r["actions"][name]["reasons"]
+        assert r["actions"][name]["confirm"] == "HOLD"
+    # goal / resume share the canonical autonomous readiness — never more permissive than patrol
+    for name in ("navigate_to_point", "patrol_resume"):
+        assert r["actions"][name]["allowed"] <= r["actions"]["patrol_start"]["allowed"]
+
+
+def test_r1c_real_freeze_blocks_every_new_action(client, monkeypatch) -> None:
+    s = get_settings()
+    for k, v in {
+        "downlink_frozen": True,
+        "firebot_deployment_env": "REAL",
+        "canonical_downlink_allowlist": "",
+    }.items():
+        monkeypatch.setattr(s, k, v)
+    r = _ready(client)
+    for name in R1C_ACTIONS:
+        assert r["actions"][name]["allowed"] is False
+        assert "CONTROL_FROZEN" in r["actions"][name]["reasons"]
+
+
+def test_r1c_v1_vehicle_maps_v1_commands_without_canonical_fallback() -> None:
+    """vehicle_agent v1: start/close/patrol/... follow vehicle_agent_ready; canonical-only
+    actions (stop_motion, e-stop, manual) stay denied — no cross-protocol bypass."""
+    from datetime import UTC, datetime
+
+    from app.modules.commands.operation_readiness import operation_readiness
+
+    class R:  # minimal robot double (pure function under test)
+        vehicle_id = "R001"
+        agent_protocol = "VEHICLE_AGENT_V1"
+        enabled = True
+        online_state = "ONLINE"
+        boot_id = "11111111-1111-4111-8111-111111111111"
+
+    class S:
+        firebot_deployment_env = "REAL"
+        downlink_frozen = False
+        sim_downlink_enabled = False
+        canonical_downlink_allowlist_set: set[str] = set()
+
+        @staticmethod
+        def vehicle_downlink_allowed(_vid: str) -> bool:
+            return True
+
+    readiness = {
+        "vehicle_agent_ready": {"start": True, "close": False, "patrol": True, "navigate": False},
+        "safety_command_ready": {"stop_motion": False},
+        "readiness_reasons": [],
+    }
+    perms = {"robot.control.task", "robot.control.stop", "patrol.create", "robot.read"}
+    doc = operation_readiness(
+        R(), readiness, settings=S(), permissions=perms, now=datetime.now(UTC)
+    )
+    c.validate("OperationReadiness", doc)
+    a = doc["actions"]
+    assert a["start_vehicle"]["allowed"] is True
+    assert a["patrol_start"]["allowed"] is True
+    assert a["shutdown_vehicle"]["allowed"] is False and a["shutdown_vehicle"]["reasons"] == [
+        "NOT_READY"
+    ]
+    assert a["navigate_to_point"]["allowed"] is False
+    assert a["stop_motion"]["allowed"] is False  # canonical safety path is not a v1 path
+    # permission is still enforced per action
+    doc2 = operation_readiness(
+        R(), readiness, settings=S(), permissions={"robot.read"}, now=datetime.now(UTC)
+    )
+    assert doc2["actions"]["start_vehicle"]["allowed"] is False
+    assert "PERMISSION_DENIED" in doc2["actions"]["start_vehicle"]["reasons"]
+
+
+def test_r1c_snapshot_exposes_db_boot_id_for_readiness_binding(client) -> None:
+    snap = client.get("/api/v1/monitor/snapshot").json()
+    with SessionLocal() as db:
+        boot = db.scalar(select(Robot).where(Robot.vehicle_id == "R002")).boot_id
+    robot = next(r for r in snap["robots"] if r["vehicle_id"] == "R002")
+    assert robot["boot_id"] == boot
+    assert robot["operation_readiness"]["boot_id"] == boot

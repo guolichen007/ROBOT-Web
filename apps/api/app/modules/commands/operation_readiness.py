@@ -14,18 +14,48 @@ from app.core.config import is_synthetic_namespace
 
 CONTRACT_VERSION = "2.1.0-draft.3"
 VALIDITY = timedelta(seconds=2)
-# contract action -> (legacy readiness getter, permission)
+# contract action -> (legacy readiness getter, permission) for CANONICAL / MOCK vehicles
 ACTIONS: dict[str, tuple[tuple[str, str | None], str]] = {
     "stop_motion": (("safety_command_ready", "stop_motion"), "robot.control.stop"),
     "emergency_stop": (("safety_command_ready", "emergency_stop"), "robot.control.estop"),
     "reset_estop": (("safety_command_ready", "reset_estop"), "robot.control.reset_estop"),
     "patrol_start": (("autonomous_task_ready", "patrol"), "patrol.create"),
+    # canonical "continue patrol" re-plans from the server-kept resume point (same readiness)
+    "patrol_resume": (("autonomous_task_ready", "patrol"), "patrol.create"),
+    "navigate_to_point": (("autonomous_task_ready", "patrol"), "robot.control.task"),
     "return_home": (("autonomous_task_ready", "return_dock"), "patrol.create"),
     "manual_control": (("manual_control_ready", None), "robot.control.manual"),
     # not implemented server-side yet: always unavailable, never faked
     "protective_stop": (("", None), "robot.control.stop"),
+    "patrol_pause": (("", None), "robot.control.stop"),
+    "start_vehicle": (("", None), "robot.control.task"),
+    "shutdown_vehicle": (("", None), "robot.control.stop"),
+    "fire_shield_open": (("", None), "robot.control.device"),
+    "fire_shield_stop": (("", None), "robot.control.device"),
+    "fire_shield_close": (("", None), "robot.control.device"),
 }
-NOT_IMPLEMENTED = {"protective_stop": "PROTECTIVE_STOP_NOT_IMPLEMENTED"}
+# WEB-R1C: vehicle_agent v1 vehicles — contract action -> (v1 command, permission). The v1
+# permission mapping is the one enforced by app/modules/commands/vehicle_agent_router.py.
+V1_ACTIONS: dict[str, tuple[str, str]] = {
+    "start_vehicle": ("start", "robot.control.task"),
+    "shutdown_vehicle": ("close", "robot.control.stop"),
+    "patrol_start": ("patrol", "patrol.create"),
+    "patrol_pause": ("stop_patrol", "robot.control.stop"),
+    "patrol_resume": ("resume_patrol", "patrol.create"),
+    "navigate_to_point": ("navigate", "robot.control.task"),
+    "cancel_mission": ("stop_navigate", "robot.control.stop"),
+    "return_home": ("homing", "robot.control.task"),
+}
+NOT_IMPLEMENTED = {
+    "protective_stop": "PROTECTIVE_STOP_NOT_IMPLEMENTED",
+    "patrol_pause": "PATROL_PAUSE_NOT_IMPLEMENTED",
+    "start_vehicle": "ACTION_NOT_SUPPORTED_BY_PROTOCOL",
+    "shutdown_vehicle": "ACTION_NOT_SUPPORTED_BY_PROTOCOL",
+    # R002_OPERATION_CONTRACT §4: no fire-shield driver / limit-switch feedback in this release
+    "fire_shield_open": "DEVICE_FEEDBACK_CONTRACT_NOT_VERIFIED",
+    "fire_shield_stop": "DEVICE_FEEDBACK_CONTRACT_NOT_VERIFIED",
+    "fire_shield_close": "DEVICE_FEEDBACK_CONTRACT_NOT_VERIFIED",
+}
 STOP_CLASS = {"stop_motion", "protective_stop"}
 
 
@@ -67,13 +97,24 @@ def operation_readiness(
     frozen, freeze_reasons, scope = freeze_state(robot, settings)
     exempt = STOP_CLASS if scope == "ALL_EXCEPT_STOP_MOTION" else set()
     online = robot.enabled and robot.online_state == "ONLINE"
+    v1 = robot.agent_protocol == "VEHICLE_AGENT_V1"
+    v1_ready = readiness.get("vehicle_agent_ready") or {}
     actions: dict[str, Any] = {}
-    for name, (key, permission) in ACTIONS.items():
+    for name in ACTIONS.keys() | V1_ACTIONS.keys():
         reasons: list[str] = []
-        if name in NOT_IMPLEMENTED:
-            reasons.append(NOT_IMPLEMENTED[name])
-        elif not _legacy(readiness, key):
-            reasons.extend(readiness.get("readiness_reasons") or ["NOT_READY"])
+        if v1 and name in V1_ACTIONS:
+            command, permission = V1_ACTIONS[name]
+            if v1_ready.get(command) is not True:
+                reasons.append("NOT_READY")
+        elif name not in ACTIONS:
+            reasons.append("ACTION_NOT_SUPPORTED_BY_PROTOCOL")
+            permission = V1_ACTIONS[name][1]
+        else:
+            key, permission = ACTIONS[name]
+            if name in NOT_IMPLEMENTED:
+                reasons.append(NOT_IMPLEMENTED[name])
+            elif not _legacy(readiness, key):
+                reasons.extend(readiness.get("readiness_reasons") or ["NOT_READY"])
         if not online:
             reasons.append(f"ROBOT_{robot.online_state or 'UNKNOWN'}")
         if robot.boot_id is None and name != "emergency_stop":
@@ -89,8 +130,11 @@ def operation_readiness(
             "reasons": reasons,
             "required_permission": permission,
             "permitted_for_user": permitted and not reasons,
-            "confirm": "HOLD" if name in {"emergency_stop", "reset_estop"} else "CLICK",
+            "confirm": "HOLD"
+            if name in {"emergency_stop", "reset_estop"} or name.startswith("fire_shield_")
+            else "CLICK",
         }
+    actions = dict(sorted(actions.items()))
     return {
         "contract_version": CONTRACT_VERSION,
         "kind": "OperationReadiness",

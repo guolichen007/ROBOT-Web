@@ -1,15 +1,29 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { defineComponent, nextTick } from 'vue'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import MonitorView from './MonitorView.vue'
 import { useMonitorStore } from '@/stores/monitor'
 import type { RobotState } from '@/types'
+import { serverReadiness } from '../../tests/fixtures/readiness'
 
+// WEB-R1C: readiness comes ONLY from the endpoint — answer it from the robot fixture's own
+// server answer (the snapshot copy is never trusted on its own).
+const { getMock } = vi.hoisted(() => ({ getMock: vi.fn() }))
 vi.mock('@/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/api')>()),
-  api: { get: vi.fn().mockResolvedValue({ data: null }), post: vi.fn() },
+  api: { get: getMock, post: vi.fn() },
 }))
+beforeEach(() => {
+  getMock.mockImplementation(async (url: string) => {
+    const m = /\/robots\/([^/]+)\/operation-readiness$/.exec(url)
+    if (!m) return { data: null }
+    const { useMonitorStore: store } = await import('@/stores/monitor')
+    const r = store().snapshot.robots.find((x) => x.vehicle_id === m[1])
+    if (!r?.operation_readiness) throw new Error('no readiness')
+    return { data: r.operation_readiness }
+  })
+})
 
 // 真实 App shell mount 拓扑：target(#workspace-alert) 与 MonitorView 在同一个父级 mount tick 创建。
 // 不提前 document.body.appendChild(target)，避免掩盖 Teleport target 尚未入 document 的根因。
@@ -56,6 +70,7 @@ const readyRobot = (): RobotState => ({
   safety_command_ready: { stop_motion: true },
   readiness_reasons: [],
   control_disabled_reason: null,
+  operation_readiness: serverReadiness('R001', { patrol_start: true, stop_motion: true }),
   integration: {
     source_kind: 'MOCK',
     control_contract_verified: true,
@@ -123,6 +138,8 @@ describe('MonitorView renderer regression', () => {
     store.activeRobotId = 'R001'
     store.connected = true
     await nextTick()
+    await nextTick()
+    await flushPromises()
     await nextTick()
 
     const text = wrapper.text()

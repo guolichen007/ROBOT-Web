@@ -5,7 +5,10 @@ import { newUuid } from '@/lib/id'
 import { useAuthStore } from '@/stores/auth'
 import type { RobotState } from '@/types'
 
-const props = withDefaults(defineProps<{ robot?: RobotState; showSafety?: boolean }>(), { showSafety: true })
+const props = withDefaults(
+  defineProps<{ robot?: RobotState; showSafety?: boolean; serverAllowed?: boolean | null }>(),
+  { showSafety: true, serverAllowed: null },
+)
 const emit = defineEmits<{ notice: [message: string, tone?: string] }>()
 const auth = useAuthStore()
 const lease = ref<{ lease_id: string; control_session_id: string; expires_at: string } | null>(null)
@@ -17,8 +20,11 @@ let pointerHeld = false
 
 const supports = (command: string): boolean => Boolean(props.robot?.supported_commands?.includes(command))
 const safetyReady = (command: string): boolean => props.robot?.safety_command_ready?.[command] === true
+// WEB-R1C: on the console the server OperationReadiness.manual_control decision is REQUIRED on top
+// of the local checks (it can only restrict further; null = standalone use outside the console).
 const available = computed(
   () =>
+    props.serverAllowed !== false &&
     props.robot?.online_state === 'ONLINE' &&
     !props.robot.estop_active &&
     props.robot.manual_control_ready === true &&
