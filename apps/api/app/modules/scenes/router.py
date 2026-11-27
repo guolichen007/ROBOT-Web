@@ -40,6 +40,7 @@ from app.db.models import (
     SceneRouteCorridor,
     SceneRoutePoint,
     Site,
+    Task,
 )
 from app.modules.scenes.navmap import NavMapError, bind_image, parse_map_yaml, parse_raster
 
@@ -1261,3 +1262,182 @@ def request_scene_load(
     )
     db.commit()
     return load.payload_json
+
+
+class SimMissionIn(BaseModel):
+    vehicle_id: str = Field(min_length=1, max_length=64)
+    route_id: str = Field(pattern=UUID)
+
+
+@router.post("/{scene_id}/sim-missions", status_code=201)
+def create_sim_mission(
+    scene_id: str,
+    payload: SimMissionIn,
+    request: Request,
+    db: DbSession,
+    auth: AuthContext = Depends(require_permission("patrol.create")),
+) -> dict:
+    """WEB-R1C R1C-4: admit a PATROL MissionRequest on the isolated SIM stack only.
+
+    Admission = contracts_v21.mission_admissible over the platform's OWN snapshot + server
+    OperationReadiness + the vehicle's CONFIRMED loaded scene. The request is frozen into the
+    task (route snapshot incl. every waypoint's arrival); no platform->vehicle publish happens
+    here — the SIM executor reads it from GET /sim-missions/{mission_id}."""
+    from app.core.config import is_synthetic_namespace
+    from app.modules.commands.operation_readiness import operation_readiness
+    from app.modules.commands.readiness import robot_readiness
+    from app.modules.commands.service import task_code
+    from app.modules.robots.router import find_robot
+    from services import contracts_v21 as c
+    from services.sim_v21 import SIM_MISSION_TYPE, vehicle_snapshot
+
+    settings = get_settings()
+    version = _v2(db, scene_id)
+    robot = find_robot(db, payload.vehicle_id, auth)
+    if not is_synthetic_namespace(robot.vehicle_id) or settings.firebot_deployment_env != "SIM":
+        raise PlatformError("SIM_ONLY", "本期任务反馈接线只在隔离 SIM 环境", status_code=409)
+    manifest = _manifest_or_none(db, version)
+    now = datetime.now(UTC)
+    snapshot = vehicle_snapshot(db, robot, now)
+    readiness = operation_readiness(
+        robot,
+        robot_readiness(db, robot),
+        settings=settings,
+        permissions=set(auth.permissions),
+        now=now,
+    )
+    readiness["based_on_snapshot_at"] = snapshot["generated_at"]
+    ok, code = c.mission_admissible(manifest, snapshot, readiness, "patrol_start", now=now)
+    if not ok:
+        raise PlatformError(code, f"任务未准入：{code}", status_code=409, details={"code": code})
+    assert manifest is not None
+    route = next((r for r in manifest["routes"] if r["route_id"] == payload.route_id), None)
+    if route is None:
+        raise PlatformError("ROUTE_NOT_FOUND", "路线不存在", status_code=404)
+    arrivals = route_arrivals(db, scene_id)[route["route_id"]]
+    points = {p["point_id"]: p for p in manifest["points"]}
+    mission_id, command_id = str(uuid4()), str(uuid4())
+    req = {
+        "contract_version": c.CONTRACT_VERSION,
+        "kind": "MissionRequest",
+        "mission_id": mission_id,
+        "idempotency_key": f"sim-{mission_id}",
+        "vehicle_id": robot.vehicle_id,
+        "environment": "SIM",
+        "target_boot_id": robot.boot_id,
+        "mission_kind": "PATROL",
+        "scene_id": manifest["scene_id"],
+        "scene_version": manifest["scene_version"],
+        "scene_digest": manifest["digest"],
+        "route_snapshot": {
+            "route_id": route["route_id"],
+            "start_index": 0,
+            "waypoints": [
+                {
+                    "index": i,
+                    "point_id": ref,
+                    "pose": points[ref]["pose"],
+                    "arrival": arrivals[i],
+                }
+                for i, ref in enumerate(route["point_refs"])
+            ],
+        },
+        "nav_map_checksum": manifest["nav_map"]["map_checksum"],
+        "resume_of": None,
+        "issued_at": now.isoformat(),
+        "expires_at": (now + timedelta(seconds=120)).isoformat(),
+        "operator_id": auth.user.id,
+        "command_id": command_id,
+        "execution_gen": 1,
+    }
+    c.validate("MissionRequest", req)
+    task = Task(
+        task_code=task_code("S"),
+        robot_id=robot.id,
+        type=SIM_MISSION_TYPE,
+        status="QUEUED",
+        phase="DISPATCHED",
+        progress=0,
+        target_pose_snapshot_json=req["route_snapshot"]["waypoints"][-1]["pose"],
+        map_id_snapshot=version.map_id,
+        map_version_snapshot=version.version,
+        semantic_revision_snapshot=manifest["scene_version"],
+        parameters_json={
+            "mission_id": mission_id,
+            "request": req,
+            "v21": {
+                "vehicle_id": robot.vehicle_id,
+                "environment": "SIM",
+                "mission_id": mission_id,
+                "command_id": command_id,
+                "execution_gen": 1,
+                "boot_id": robot.boot_id,
+                "state": "DISPATCHED",
+                "last_seq": None,
+                "waypoint_index": None,
+                "waypoint_total": len(route["point_refs"]),
+                "goal_id": None,
+                "goals_used": [],
+            },
+        },
+        created_by=auth.user.id,
+    )
+    db.add(task)
+    write_audit(
+        db,
+        action="SIM_MISSION_ADMIT",
+        resource_type="TASK",
+        user_id=auth.user.id,
+        resource_id=mission_id,
+        after={"scene_digest": manifest["digest"], "vehicle_id": robot.vehicle_id},
+        **request_meta(request),
+    )
+    db.commit()
+    return {"task_id": task.id, "mission_request": req}
+
+
+def _manifest_or_none(db, version: MapVersion) -> dict | None:
+    if version.status != "PUBLISHED" or not version.scene_asset_id:
+        return None
+    doc = json.loads(_verified_asset_bytes(db, version))
+    doc.pop("route_arrivals", None)
+    return doc
+
+
+@router.get("/sim-missions/{mission_id}")
+def read_sim_mission(
+    mission_id: str, db: DbSession, _: AuthContext = Depends(require_permission("robot.read"))
+) -> dict:
+    from services.sim_v21 import SIM_MISSION_TYPE
+
+    task = db.scalar(
+        select(Task).where(
+            Task.type == SIM_MISSION_TYPE,
+            Task.parameters_json["mission_id"].as_string() == mission_id,
+        )
+    )
+    if task is None:
+        raise PlatformError("MISSION_NOT_FOUND", "任务不存在", status_code=404)
+    p = task.parameters_json
+    return {
+        "task_id": task.id,
+        "status": task.status,
+        "phase": task.phase,
+        "progress": task.progress,
+        "mission_request": p["request"],
+        "state": p["v21"],
+        "confirm_code": p.get("confirm_code"),
+        "rejected": p.get("rejected", {}),
+    }
+
+
+@router.get("/sim-vehicles/{vehicle_id}/loaded-scene")
+def sim_vehicle_scene(
+    vehicle_id: str, db: DbSession, auth: AuthContext = Depends(require_permission("robot.read"))
+) -> dict:
+    """VehicleSnapshot.scene as persisted (confirmed load only counts on the current boot)."""
+    from app.modules.robots.router import find_robot
+    from services.sim_v21 import scene_state
+
+    robot = find_robot(db, vehicle_id, auth)
+    return {**scene_state(robot, db), "latest_load_id": robot.latest_scene_load_id}

@@ -169,6 +169,10 @@ def accept_boot_session(db, robot: Robot, msg: dict, received: datetime) -> bool
         if current and current.ended_at is None:
             current.ended_at = received
         invalidate_old_boot_leases(db, robot, boot_id)
+        # WEB-R1C: a reboot voids the confirmed scene load (must be re-loaded + re-confirmed)
+        from services.sim_v21 import clear_loaded_scene
+
+        clear_loaded_scene(robot)
     if not session:
         db.add(
             RobotBootSession(
@@ -270,6 +274,7 @@ def handle_location(
             "site_code": msg["site_code"],
             "map_code": msg["map_code"],
             "map_version": msg["map_version"],
+            "map_checksum": msg.get("map_checksum"),
             "frame_id": msg["frame_id"],
             "parking_slot_code": msg.get("parking_slot_code"),
             "localization_status": (
@@ -288,6 +293,12 @@ def handle_location(
     if msg.get("battery") is not None:
         robot.battery = float(msg["battery"])
     robot.current_map_version = msg["map_version"]
+    if settings.firebot_deployment_env == "SIM":
+        # WEB-R1C: retry platform-side success confirmation with this fresh sample
+        from services.sim_v21 import confirm_pending
+
+        redis.set(f"robot:{robot.vehicle_id}:latest", json.dumps(latest, ensure_ascii=False))
+        confirm_pending(db, robot, received)
     reported_map = db.scalar(
         select(Map).where(Map.site_id == robot.site_id, Map.code == msg["map_code"])
     )
@@ -935,6 +946,10 @@ def process(topic: str, payload: bytes) -> None:
         return
     if process_internal_compat(topic, payload, received):
         return
+    from services.sim_v21 import process as process_sim_v21
+
+    if process_sim_v21(topic, payload):  # WEB-R1C: isolated SIM V2.1 namespace only
+        return
     try:
         msg = json.loads(payload.decode("utf-8"))
         if json_depth(msg) > settings.max_json_depth:
@@ -1207,6 +1222,12 @@ def on_connect(client, userdata, flags, reason_code, properties):
             client.subscribe(f"_platform/vehicle-agent-v1/+/{topic}", qos=1)
         for topic in COMPAT_REALTIME_TOPICS:
             client.subscribe(f"_platform/compat/+/{topic}", qos=1)
+    if durable and settings.firebot_deployment_env == "SIM":
+        # WEB-R1C: V2.1 SIM namespace; never subscribed in a REAL deployment
+        from services.sim_v21 import KINDS, TOPIC_PREFIX
+
+        for kind in KINDS:
+            client.subscribe(f"{TOPIC_PREFIX}+/{kind}", qos=1)
     logger.info("MQTT ingress %s connected", "durable" if durable else "realtime")
 
 
