@@ -19,6 +19,7 @@ from app.db.session import SessionLocal
 from redis.exceptions import ResponseError
 from sqlalchemy import func, select
 
+from services.dispatch_gate import GateDenied, final_publish_gate
 from services.protocol import validate_message
 
 settings = get_settings()
@@ -85,7 +86,7 @@ def client_for(profile: str) -> mqtt.Client:
         ) from exc
 
 
-def publish_command(payload: dict, qos: int) -> None:
+def publish_command(payload: dict, qos: int, path: str = "outbox") -> None:
     validate_message(payload)
     expires = datetime.fromisoformat(payload["expires_at"])
     now = datetime.now(UTC)
@@ -106,6 +107,7 @@ def publish_command(payload: dict, qos: int) -> None:
 
     # 未知 profile → RoutingError（fail-closed，进入退避重试并记录 last_error，不回退）
     profile = transport_profile(payload["vehicle_id"])
+    claim: str | None = None
     with SessionLocal() as db:
         robot = db.scalar(select(Robot).where(Robot.vehicle_id == payload["vehicle_id"]))
         if robot is None:
@@ -145,6 +147,24 @@ def publish_command(payload: dict, qos: int) -> None:
             raise ValueError("v1 command forbidden on legacy transport")
         elif robot.agent_protocol == "ROS_COMPAT":
             raise ValueError("ROS_COMPAT downlink is not implemented")
+        else:
+            # WEB-R1A final gate: CANONICAL_MQTT only (V1/001 branch above is unchanged).
+            claim = final_publish_gate(
+                payload, robot, db=db, redis=redis, settings=settings, now=now, path=path
+            )
+    try:
+        _publish_to_broker(profile, destination, payload, qos, expiry_interval)
+    except Exception:
+        if claim:
+            redis.delete(claim)  # broker failure is retryable; only a real publish consumes it
+        raise
+
+
+def _publish_to_broker(
+    profile: str, destination: str, payload: dict, qos: int, expiry_interval: int
+) -> None:
+    from app.core.vehicle_routing import DEFAULT_PROFILE
+
     target = client_for(profile)
     if profile != DEFAULT_PROFILE and not target.is_connected():
         # 独立 Broker 未连接：拒绝（退避重试），绝不改走默认 Broker
@@ -192,7 +212,7 @@ def manual_loop() -> None:
                     payload = json.loads(message["data"])
                     if datetime.fromisoformat(payload["expires_at"]) <= datetime.now(UTC):
                         continue
-                    publish_command(payload, qos=0)
+                    publish_command(payload, qos=0, path="manual")
                     backoff = 0.5
                 except Exception:
                     logger.warning("manual pulse dropped", exc_info=True)
@@ -257,10 +277,17 @@ def process_safety_events(events: list) -> None:
                     select(Command).where(Command.command_id == payload["command_id"])
                 )
                 try:
-                    publish_command(payload, qos=1)
+                    publish_command(payload, qos=1, path="safety")
                     if command:
                         command.lifecycle_status = "PUBLISHED"
                         command.published_at = datetime.now(UTC)
+                        queue_event(db, "command.updated", serialize_model(command))
+                    acknowledge = True
+                except GateDenied as exc:
+                    if command:
+                        command.lifecycle_status = "GATE_REJECTED"
+                        command.ack_reason = exc.code
+                        command.terminal_at = datetime.now(UTC)
                         queue_event(db, "command.updated", serialize_model(command))
                     acknowledge = True
                 except TimeoutError:
@@ -316,6 +343,14 @@ def dispatch_next() -> bool:
             if command:
                 command.lifecycle_status = "PUBLISHED"
                 command.published_at = row.published_at
+                queue_event(db, "command.updated", serialize_model(command))
+        except GateDenied as exc:
+            row.status = "REJECTED"
+            row.last_error = exc.code
+            if command:
+                command.lifecycle_status = "GATE_REJECTED"
+                command.ack_reason = exc.code
+                command.terminal_at = datetime.now(UTC)
                 queue_event(db, "command.updated", serialize_model(command))
         except TimeoutError:
             row.status = "EXPIRED"

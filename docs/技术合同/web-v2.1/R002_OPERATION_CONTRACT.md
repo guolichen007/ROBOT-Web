@@ -85,23 +85,31 @@
 
 映射 ingress `external_goal_id`（`services/mqtt-ingress/main.py:604`），补 planner_state、localization、obstacle、distance_to_goal、recovery_count。`planner_state=BLOCKED` 必须 `obstacle.blocked=true`。
 
-## 7. Dispatcher 最终发布门禁（P0，待审查后实施）
+## 7. Dispatcher 最终发布门禁（WEB-R1A 已在候选分支实施，待独立审查）
 
-**现象**：三条下发路径——Outbox（`dispatch_next`）、Redis 人工控制 pubsub（`manual_loop`，QoS0）、Redis 安全命令 Stream（`process_safety_events`）——都汇入 `services/command-dispatcher/main.py:publish_command()`。VEHICLE_AGENT_V1 分支有全局开关、逐车 allowlist、boot 比对；**CANONICAL_MQTT 分支只做 schema 与过期检查**，无逐车 allowlist、无 `target_boot_id==robot.boot_id`、无环境隔离、无控制冻结。门禁只在 API 层（readiness），绕过 API 写入 Outbox/Redis 即可下发。
+**单点**：`services/dispatch_gate.py:final_publish_gate()`，由 `services/command-dispatcher/main.py:publish_command(payload, qos, path)` 在 CANONICAL_MQTT 分支、`client.publish` 之前调用。三入口均经过：Outbox（`dispatch_next`，path=outbox）、Redis 人工控制 pubsub（`manual_loop`，path=manual）、Redis 安全 Stream（`process_safety_events`，path=safety）。
 
-**根因**：最终发布点没有独立于 API 的 fail-closed 校验。
+**范围**：仅 CANONICAL_MQTT。VEHICLE_AGENT_V1 分支（001 独立接入）与 ROS_COMPAT 拒绝逻辑**未改动**；001 不加入 Canonical 白名单。
 
-**精确修法（单点，覆盖三路径）**：在 `publish_command()` 解析 `robot` 之后、`target.publish` 之前，对所有协议执行 `final_publish_gate(payload, robot, settings)`：
-```
-deny unless settings.canonical_downlink_allowed(robot.vehicle_id)      # 新逐车白名单，默认空
-deny if payload.cmd != "emergency_stop" and payload.target_boot_id != robot.boot_id
-deny if is_sim_namespace(robot.vehicle_id) != (deployment_env == "SIM")  # SIM/REAL 隔离
-deny if robot.control_frozen                                            # 冻结标志
-on deny: raise GateDenied(code) -> Outbox: FAILED 终态(不重试)；manual: 丢弃+计数；safety: 置 REJECTED 并 xack
-```
-测试仅反证根因：对三条路径各构造一条绕过 API 的 payload，断言 0 次 `client.publish`。
-**DO_NOT_TOUCH**：V1 分支既有校验顺序；001 的 `transport_profile`；Outbox 排序与退避。
-**兼容影响**：001 若走 Canonical 下行，部署前必须把 001 显式加入新白名单，否则 001 下行被拒——这正是需要独立审查与 OWNER 决定的原因。emergency_stop 是否也受白名单约束，需 OWNER 决定（建议：受白名单约束，但 boot 不必匹配）。
+**配置**（`apps/api/app/core/config.py`）：`FIREBOT_DEPLOYMENT_ENV=REAL|SIM`（默认 REAL）、`CANONICAL_DOWNLINK_ALLOWLIST`（默认空 = REAL 默认拒绝）、`DOWNLINK_FROZEN`（默认 false）。仅 `compose.test.yml` 测试栈放行 mock 车 `R001,R002`。
+
+| 顺序 | 拒绝码 | 条件 |
+|---|---|---|
+| 1 | FG_DOWNLINK_FROZEN | `DOWNLINK_FROZEN=true` |
+| 2 | FG_ENV_INVALID / FG_ENV_MISMATCH | 环境非 REAL/SIM；SIM 环境只放 `firebot-sim-*`，REAL 环境拒绝 `firebot-sim-*` |
+| 3 | FG_ENV_CREDENTIALS | SIM 环境却连接生产 Broker（`firebot.youdaozd.com`） |
+| 4 | FG_NOT_ALLOWLISTED | 车辆不在 Canonical 白名单 |
+| 5 | FG_IDENTITY_MISMATCH | payload 车辆与解析车辆不一致 |
+| 6 | FG_BOOT_MISMATCH | `target_boot_id != robot.boot_id`（仅 emergency_stop 可为 null） |
+| 7 | FG_EXPIRED / FG_TTL_INVALID | 已过期；签发超前 >2 s、TTL >240 s 或 expires≤issued（过期在门禁前已由原逻辑转 EXPIRED） |
+| 8 | FG_UNAUTHORIZED | 非人工命令：须有同车、同 cmd、**payload 逐字节相等**、生命周期为 QUEUED(outbox)/CREATED(safety) 的 Command 行；人工控制：须走 manual 路径且 Redis 租约 lease_id/control_session_id/user 全匹配；路径与命令类型交叉注入一律拒绝 |
+| 9 | FG_REPLAY | `dispatch:fg:claim:{command_id}` 已存在（SET NX）；Broker 发布失败会释放 claim，重试不算重放 |
+
+**拒绝处理**：Outbox → `REJECTED`（不重试）+ Command `GATE_REJECTED`/`ack_reason=码`；安全 Stream → Command `GATE_REJECTED` 并 xack；人工 → 丢帧。每次拒绝计数 `dispatch:fg:denied:{path}:{code}` 并记日志。
+
+**证据**：`apps/api/tests/test_web_r1a_final_publish_gate.py` 27 项（每项断言捕获客户端 0 次 publish）；11 个门禁变异体全部被杀死。
+
+**部署影响（需 OWNER 知悉）**：部署后在未配置白名单前，所有 Canonical 下行（含 R002 停止/急停/任务）均被门禁拒绝，界面显示 `GATE_REJECTED`；这正是当前 REAL 控制 NO-GO 的预期。原 `test_legacy_canonical_transport_and_v1_mutual_exclusion` 中“无授权 Command 直发 R002 成功”的断言已改为断言被拒（有意的语义变更）。
 
 ## 8. 兼容性汇总
 
@@ -112,5 +120,5 @@ on deny: raise GateDenied(code) -> Outbox: FAILED 终态(不重试)；manual: �
 | task_status 扩展（goal_id、WAITING_OBSTACLE、PAUSED、final_pose） | 1.3→1.4 | 车端/ingress | 未冻结 |
 | patrol params 增加 scene_*、map_checksum | 1.3 params 内容 | 车端校验 | 未冻结 |
 | `robot.control.device` 权限 | RBAC | seed/角色 | 未冻结 |
-| dispatcher 最终门禁 | 控制路径 | 001 需白名单 | 待审查 |
+| dispatcher 最终门禁 | 控制路径 | 001 走 V1 不受影响；Canonical 默认全拒 | **已实施（候选分支），待审查** |
 | 地图子资源跨版本修复 | API 行为收紧 | 旧客户端若依赖迁移将 409 | **已实施** |

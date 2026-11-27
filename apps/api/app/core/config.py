@@ -88,6 +88,13 @@ class Settings(BaseSettings):
     # G1-P2 专属 Adapter/Ingress 的 vehicle_id 白名单（逗号分隔；空=不限）。
     # 独立 Broker 专属实例只处理白名单车辆，非目标车辆消息直接丢弃，不落入共享 PG/Redis。
     vehicle_agent_scope_vehicle_ids: str = ""
+    # WEB-R1A 最终发布门禁（services/dispatch_gate.py，仅 CANONICAL_MQTT 路径）：
+    #   FIREBOT_DEPLOYMENT_ENV=REAL|SIM —— SIM 只放行 firebot-sim-* 车辆且禁止连接生产 Broker；
+    #   CANONICAL_DOWNLINK_ALLOWLIST —— 默认空 = REAL 默认拒绝（001 走 V1，不得列入）；
+    #   DOWNLINK_FROZEN=true —— 冻结全部 Canonical 下行。
+    firebot_deployment_env: str = "REAL"
+    canonical_downlink_allowlist: str = ""
+    downlink_frozen: bool = False
     # G2 逐车路由/执行档（API、Dispatcher、Adapter 三侧必须读取同一份配置）：
     #   VEHICLE_TRANSPORT_PROFILES="firebot-vehicle-01=r001-independent-v1"（未列出=default）
     #   TRANSPORT_PROFILE_ADAPTERS="r001-independent-v1=r001-dedicated-adapter"
@@ -160,6 +167,12 @@ class Settings(BaseSettings):
     def is_simulated_vehicle(self, vehicle_id: str) -> bool:
         listed = {v.strip() for v in self.simulated_vehicle_ids.split(",") if v.strip()}
         return vehicle_id in listed and is_synthetic_namespace(vehicle_id)
+
+    @property
+    def canonical_downlink_allowlist_set(self) -> frozenset[str]:
+        return frozenset(
+            v.strip() for v in self.canonical_downlink_allowlist.split(",") if v.strip()
+        )
 
     def vehicle_downlink_allowed(self, vehicle_id: str) -> bool:
         """global downlink=true 且 vehicle_id 在 allowlist 中才允许下行。"""
