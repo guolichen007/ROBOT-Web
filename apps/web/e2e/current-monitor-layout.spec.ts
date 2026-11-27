@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 import { loginPage } from './helpers/auth'
 import { ensureRobotIdle } from './helpers/robot-state'
 import { assertControlDockVisible } from './helpers/control-dock'
+import { CONSOLE_VIEWPORTS, assertConsoleLayout, assertPanelOnlyOnConsole } from './helpers/console-layout'
 
 // 当前监控布局（current monitor layout）：只校验当前稳定合同，不复刻历史 ui-gate2 几何常量。
 // 真实 emergency_stop / reset_estop 未实现，软件急停这里只校验可见性，不做锁存/复位流程。
@@ -68,4 +69,21 @@ test('four KPI cards without temperature keep desktop and mobile layout', async 
     expect(video.width).toBeGreaterThan(150)
     expect(video.x + video.width).toBeLessThanOrEqual(viewport.width + 1)
   }
+})
+
+// WEB-R1C：OWNER 批准布局在三档分辨率上的完整几何验收（与 vehicle-agent-mock 同一 helper），
+// 外加“左侧控制面板仅在综合控制台显示，其他页面保持原有导航”。
+test('R1C OWNER layout: left control panel, stacked videos, fixed task bar at 3 viewports', async ({
+  page,
+  request,
+}) => {
+  await ensureRobotIdle(request, 'R001')
+  await loginPage(page, request)
+  await expect(page.getByRole('heading', { name: '停车场二维地图' })).toBeVisible()
+  for (const viewport of CONSOLE_VIEWPORTS) {
+    await page.setViewportSize(viewport)
+    await assertConsoleLayout(page, viewport)
+    await page.screenshot({ path: `artifacts/r1c-console-${viewport.width}x${viewport.height}.png` })
+  }
+  await assertPanelOnlyOnConsole(page)
 })

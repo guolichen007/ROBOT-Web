@@ -1,6 +1,13 @@
 import { computed, onUnmounted, ref, watch, type Ref } from 'vue'
 import { api } from '@/lib/api'
+import { reasonCodeLabel } from '@/lib/ui-labels'
 import type { OperationReadiness, RobotState } from '@/types'
+
+export interface ActionState {
+  allowed: boolean
+  reasons: string[]
+  labels: string[]
+}
 
 /**
  * WEB-R1B: poll the server OperationReadiness for the active vehicle (valid ~2 s).
@@ -58,5 +65,26 @@ export function useOperationReadiness(robot: Ref<RobotState | undefined>, interv
     if (authority.value === 'STALE') return ['READINESS_STALE']
     return latest.value?.actions[action]?.reasons ?? []
   }
-  return { readiness: latest, authority, allowed, reasons }
+  /** Server decision for one contract action, with readable reasons (never computed locally). */
+  function state(action: string): ActionState {
+    const entry = authority.value === 'SERVER' ? latest.value!.actions[action] : undefined
+    const codes =
+      authority.value === 'STALE'
+        ? ['READINESS_STALE']
+        : authority.value === 'LEGACY'
+          ? ['READINESS_UNKNOWN']
+          : !entry
+            ? ['ACTION_NOT_PROVIDED']
+            : entry.allowed
+              ? []
+              : entry.reasons.length
+                ? entry.reasons
+                : ['NOT_READY']
+    return {
+      allowed: entry?.allowed === true,
+      reasons: codes,
+      labels: codes.map((code) => reasonCodeLabel(code) || code),
+    }
+  }
+  return { readiness: latest, authority, allowed, reasons, state }
 }

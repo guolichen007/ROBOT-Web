@@ -2,12 +2,14 @@ import { expect, type Page } from '@playwright/test'
 
 // OperationsCommandDock 的 state-dependent 动态标签合同。
 // 不锁死瞬时状态，只验证 production 明确定义的合法 label 集合。
-const PATROL_LABELS = /^(开始巡检|继续巡检|● 巡检中|正在启动…)$/
+// WEB-R1C：任务操作栏固定在底部，安全组常驻——无需切换任何页签即可见。
+const PATROL_LABELS = /^(开始巡检|● 巡检中|正在启动…)$/
+const PAUSE_LABELS = /^(暂停巡检|继续巡检|正在暂停…|正在继续…)$/
+const GOAL_LABELS = /^(目标导航|前往 .+|正在下发…)$/
 const STOP_LABELS = /^(停止|已停止|● 停止中)$/
 const HOME_LABELS = /^(返回等待区|已在等待区|继续返回|● 返回中)$/
 
 export async function assertControlDockVisible(page: Page): Promise<void> {
-  await page.getByRole('button', { name: '手动控制', exact: true }).click()
   const dock = page.locator('.operations-command-dock')
   await expect(dock).toBeVisible()
 
@@ -18,6 +20,8 @@ export async function assertControlDockVisible(page: Page): Promise<void> {
   expect(matchAny(PATROL_LABELS), `patrol button label not legal, got ${JSON.stringify(normalized)}`).toBe(
     true,
   )
+  expect(matchAny(PAUSE_LABELS), `pause/resume label not legal, got ${JSON.stringify(normalized)}`).toBe(true)
+  expect(matchAny(GOAL_LABELS), `goal label not legal, got ${JSON.stringify(normalized)}`).toBe(true)
   expect(matchAny(STOP_LABELS), `stop button label not legal, got ${JSON.stringify(normalized)}`).toBe(true)
   expect(matchAny(HOME_LABELS), `home button label not legal, got ${JSON.stringify(normalized)}`).toBe(true)
 

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { CONSOLE_VIEWPORTS, assertConsoleLayout } from './helpers/console-layout'
+import { CONSOLE_VIEWPORTS, assertConsoleLayout, assertPanelOnlyOnConsole } from './helpers/console-layout'
 
 test.skip(process.env.VEHICLE_AGENT_MOCK_E2E !== '1', 'requires isolated vehicle_agent mock runtime')
 
@@ -26,8 +26,10 @@ test('Browser → API → Outbox → adapter → mock → ACK/status → WS and 
   await expect(page.getByRole('heading', { name: '红外热成像', exact: true })).toBeVisible()
   await expect(page.locator('.video-tabs')).toHaveCount(0)
 
-  // WEB-V2.1 approved layout (replaces the pre-V2.1 horizontal three-column contract with stricter
-  // geometry: dominance, column stacking, fixed stop entries, occlusion, no overlap) at 3 viewports.
+  // WEB-R1C OWNER-approved layout (left control panel below 系统设置, stacked videos on the right,
+  // fixed bottom task bar with an always-visible safety group) at 3 viewports. The vehicle_agent
+  // task buttons render in the bottom bar and start/close in the left 设备 tab, from ONE shared
+  // command tracker (no second copy of command state).
   for (const viewport of CONSOLE_VIEWPORTS) {
     await page.setViewportSize(viewport)
     await assertConsoleLayout(page, viewport)
@@ -105,5 +107,7 @@ test('Browser → API → Outbox → adapter → mock → ACK/status → WS and 
   await request.post(scenarioUrl, { data: { action: 'arrive' } })
   await expect(page.getByTestId('agent-task-state')).toHaveText('IDLE / 空闲')
   await act('close')
+  // the left panel exists only on the console; other pages keep their navigation untouched
+  await assertPanelOnlyOnConsole(page)
   expect(errors).toEqual([])
 })

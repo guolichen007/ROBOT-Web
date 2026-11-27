@@ -107,25 +107,29 @@ describe('fail-closed control (ROS_COMPAT real vehicle)', () => {
   it('OperationsCommandDock allows safe STOP when IDLE and stopReady is true', () => {
     // IDLE（静止）不是 STOP 的禁用条件：首个实车安全验收需要在静止态发 STOP。
     const wrapper = mountDock({ vehicleState: 'IDLE', stopReady: true })
-    const stop = wrapper.findAll('button')[1]
+    // WEB-R1C: STOP lives in the always-visible safety group (no longer button index 1)
+    const stop = wrapper.find('[data-testid="console-safety-group"] .dock-stop')
     expect(stop.attributes('disabled')).toBeUndefined()
   })
 
   it('OperationsCommandDock disables STOP while STOPPING', () => {
     const wrapper = mountDock({ vehicleState: 'STOPPING', stopReady: true })
-    const stop = wrapper.findAll('button')[1]
+    // WEB-R1C: STOP lives in the always-visible safety group (no longer button index 1)
+    const stop = wrapper.find('[data-testid="console-safety-group"] .dock-stop')
     expect(stop.attributes('disabled')).toBeDefined()
   })
 
   it('OperationsCommandDock locks STOP on ERROR_STOP_UNCONFIRMED', () => {
     const wrapper = mountDock({ vehicleState: 'ERROR_STOP_UNCONFIRMED', stopReady: true })
-    const stop = wrapper.findAll('button')[1]
+    // WEB-R1C: STOP lives in the always-visible safety group (no longer button index 1)
+    const stop = wrapper.find('[data-testid="console-safety-group"] .dock-stop')
     expect(stop.attributes('disabled')).toBeDefined()
   })
 
   it('OperationsCommandDock disables STOP when stopReady is false', () => {
     const wrapper = mountDock({ vehicleState: 'IDLE', stopReady: false })
-    const stop = wrapper.findAll('button')[1]
+    // WEB-R1C: STOP lives in the always-visible safety group (no longer button index 1)
+    const stop = wrapper.find('[data-testid="console-safety-group"] .dock-stop')
     expect(stop.attributes('disabled')).toBeDefined()
   })
 

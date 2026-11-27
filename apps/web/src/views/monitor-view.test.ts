@@ -16,6 +16,7 @@ vi.mock('@/lib/api', async (importOriginal) => ({
 const ShellHarness = defineComponent({
   components: { MonitorView },
   template: `
+    <aside class="sidebar"><div id="sidebar-console-slot"></div></aside>
     <main class="workspace">
       <div id="workspace-alert" class="workspace-alert"></div>
       <section class="page">

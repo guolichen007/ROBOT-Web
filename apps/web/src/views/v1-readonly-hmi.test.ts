@@ -19,6 +19,7 @@ vi.mock('@/lib/api', async (importOriginal) => ({
 const ShellHarness = defineComponent({
   components: { MonitorView },
   template: `
+    <aside class="sidebar"><div id="sidebar-console-slot"></div></aside>
     <main class="workspace">
       <div id="workspace-alert" class="workspace-alert"></div>
       <section class="page"><MonitorView /></section>
@@ -122,8 +123,11 @@ describe('V1 只读设备 HMI 语义（G1-R1）', () => {
     expect(text).not.toContain('待命')
     // 控制未开放：控制链路未就绪提示存在（readiness 门），巡检按钮不可用
     expect(text).toContain('控制链路')
-    const patrolButton = wrapper.findAll('button').find((b) => b.text().includes('开始巡检'))
-    expect(patrolButton?.attributes('disabled')).toBeDefined()
+    // WEB-R1C：V1 车辆的底部任务栏渲染 vehicle_agent 按钮（共享同一命令实例），巡逻不可用
+    const patrolButton = wrapper.find('[data-testid="console-task-group"] [data-action="patrol"]')
+    expect(patrolButton.exists()).toBe(true)
+    expect(patrolButton.attributes('disabled')).toBeDefined()
+    expect(wrapper.findAll('[data-action="patrol"]')).toHaveLength(1) // no duplicate copy elsewhere
     wrapper.unmount()
   })
 

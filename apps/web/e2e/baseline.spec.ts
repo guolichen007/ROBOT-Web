@@ -50,7 +50,8 @@ test('industrial operations home shows map, roof camera and current control dock
   await expect(page.getByText('数据实时').first()).toBeVisible()
   // 控制 dock 用 state-dependent 动态标签合同，不锁死瞬时标签
   await assertControlDockVisible(page)
-  await expect(page.getByRole('button', { name: '手动控制', exact: true })).toHaveCount(1)
+  // WEB-R1C：左侧车辆控制面板页签为 设备 / 手动 / 监测
+  await expect(page.getByRole('button', { name: '手动', exact: true })).toHaveCount(1)
   await expect(page.locator('.hmi-kpis')).toContainText('烟雾')
   expect(getRuntimeErrors()).toEqual([])
 })
@@ -116,7 +117,6 @@ test('stop patrol waits for task cancellation, stop ACK and five fresh stationar
   expect(getRuntimeErrors()).toEqual([])
 
   try {
-    await page.getByRole('button', { name: '手动控制', exact: true }).click()
     const startButton = page.getByRole('button', { name: '开始巡检' })
     await expect(startButton).toBeEnabled({ timeout: 10_000 })
     await startButton.click()
@@ -141,7 +141,6 @@ test('stop patrol waits for task cancellation, stop ACK and five fresh stationar
         response.request().method() === 'POST' &&
         new URL(response.url()).pathname.endsWith('/api/v1/robots/R001/stop-operation'),
     )
-    await page.getByRole('button', { name: '手动控制', exact: true }).click()
     await page.getByRole('button', { name: '停止', exact: true }).click()
 
     const stopResponse = await stopResponsePromise
@@ -202,7 +201,6 @@ test('patrol report PDF and Excel use authenticated browser downloads', async ({
     let tasks = (await tasksResponse.json()) as Array<{ id: string; type: string; status: string }>
     let task = tasks.find((item) => item.type === 'PATROL' && item.status === 'SUCCEEDED')
     if (!task) {
-      await page.getByRole('button', { name: '手动控制', exact: true }).click()
       await page.getByRole('button', { name: '开始巡检' }).click()
       await ensureRobotIdle(request, 'R001')
       tasksResponse = await request.get('/api/v1/tasks?limit=1000', {

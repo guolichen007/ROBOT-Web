@@ -355,7 +355,8 @@
 }
 
 /* ============================================================================
- * WEB-R1A 综合控制台（DESIGN.md §3.1）：地图主导 / 右侧双视频 + 控制栏 / 底部固定操作区。
+ * WEB-R1C 综合控制台（DESIGN.md §3.1，OWNER 批准布局）：左侧系统设置下方车辆控制面板 /
+ * 中间地图主导 / 右侧仅双视频纵向 / 底部固定任务操作栏（安全组常驻）。
  * 仅作用于 .console-v21；放在本文件末尾以覆盖上方旧断点。只用 --yd-* 令牌。
  * ==========================================================================*/
 .yd-monitor-view.console-v21,
@@ -389,7 +390,8 @@
 }
 .console-v21 .yd-monitor-core,
 .console-v21 .yd-monitor-core:has(.console-side) {
-  grid-template-columns: minmax(0, 2.4fr) minmax(320px, 1fr);
+  /* video column sized so each pane is ~16:9 at the available height; map takes the rest */
+  grid-template-columns: minmax(0, 1fr) clamp(260px, 25vw, 520px);
   grid-template-rows: minmax(0, 1fr);
   gap: 8px;
 }
@@ -401,37 +403,160 @@
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: minmax(200px, 1fr) minmax(0, 1fr);
-  gap: 8px;
+  grid-template-rows: minmax(0, 1fr);
+}
+/* two panes stacked: front monitoring camera on top, thermal below; video keeps its own
+ * aspect ratio (object-fit: contain in .video-stage video — never stretched or cropped) */
+.console-v21 .video-surveillance {
+  grid-template-rows: 36px minmax(0, 1fr);
 }
 .console-v21 .video-grid {
-  grid-template-rows: none;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: repeat(2, minmax(0, 1fr));
   gap: 8px;
   padding: 8px;
 }
+.console-v21 .hmi-camera {
+  grid-template-rows: 22px minmax(0, 1fr);
+  gap: 4px;
+}
+.console-v21 .video-stage {
+  margin: 0;
+}
+.console-v21 .video-placeholder {
+  min-height: 0;
+}
 .console-action-bar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(200px, 260px);
-  gap: 8px;
-  align-items: stretch;
+  display: block;
   min-width: 0;
 }
 .console-action-bar .operations-command-dock {
   margin: 0;
   min-width: 0;
+  padding: 8px 10px;
+  gap: 4px;
+}
+.console-action-bar .dock-hint {
+  color: var(--yd-text-2);
+  font-weight: 400;
+}
+.console-action-bar .dock-rows {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: stretch;
+  min-width: 0;
+}
+.console-action-bar .dock-task {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  min-width: 0;
+}
+.console-action-bar .dock-task .t-button,
+.console-action-bar .dock-safety .t-button {
+  height: auto;
+  min-height: var(--yd-touch-target, 44px);
+  font-size: 14px;
+  border-radius: var(--yd-radius-sm);
+}
+.console-action-bar .dock-task .t-button--variant-base.t-button--theme-primary {
+  background: linear-gradient(90deg, #287dff, #0d61f4);
+}
+.console-action-bar .dock-safety {
+  display: grid;
+  grid-template-columns: 104px 148px minmax(170px, 210px);
+  gap: 8px;
+  padding-left: 10px;
+  border-left: 1px solid var(--yd-border);
+}
+.console-action-bar .dock-safety .dock-stop {
+  border: 2px solid var(--yd-danger);
+  color: var(--yd-danger);
+}
+.console-action-bar .dock-safety .dock-stop.t-is-disabled,
+.console-action-bar .dock-safety .dock-stop:disabled {
+  border-color: var(--yd-border-strong);
+  color: var(--yd-text-3);
+}
+.console-action-bar .hold-estop {
+  min-height: var(--yd-touch-target, 44px);
+  height: auto;
+}
+/* V1 vehicles: the vehicle_agent task buttons replace the canonical task group (same row) */
+.hmi-agent-bar {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 6px;
+  align-items: stretch;
+  grid-column: 1 / -1;
+  min-width: 0;
+  position: relative;
+}
+.hmi-agent-bar button {
+  min-width: 0;
+  min-height: var(--yd-touch-target, 44px);
+  padding: 0 4px;
+  border: 1px solid #276dac;
+  background: #2777bb;
+  color: #fff;
+  border-radius: var(--yd-radius-sm);
+  font: inherit;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hmi-agent-bar .hmi-command-stop {
+  color: #4d6076;
+  background: var(--yd-surface);
+  border-color: #c8d2df;
+}
+.hmi-agent-bar button:disabled {
+  color: #9aa7b5;
+  background: #f3f5f7;
+  border-color: #e0e5eb;
+  cursor: not-allowed;
+}
+.hmi-agent-bar button[aria-busy='true'] {
+  color: #2676ba;
+  background: #eef6ff;
+}
+.hmi-agent-bar button:focus-visible {
+  outline: 2px solid var(--yd-primary);
+  outline-offset: 2px;
+}
+.hmi-slot-label--bar {
+  margin: 0;
+  display: grid;
+  gap: 0;
+  font-size: 11px;
+  min-width: 0;
+}
+.hmi-slot-label--bar select {
+  height: 30px;
+  min-width: 0;
+}
+/* transient command error floats above the bar (role=alert) instead of adding a layout row */
+.hmi-agent-bar .hmi-command-error {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  max-width: 100%;
+  margin: 0;
+  padding: 4px 8px;
+  z-index: 5;
+  box-shadow: var(--yd-shadow-sm);
 }
 .console-protective {
   display: grid;
   align-content: center;
-  gap: 4px;
-  padding: 8px 12px;
-  background: var(--yd-surface);
-  border: 1px solid var(--yd-danger-border);
-  border-radius: var(--yd-radius-md);
+  gap: 2px;
+  min-width: 0;
 }
 .protective-stop {
-  min-height: 44px;
+  min-height: 36px;
   border: 2px solid var(--yd-danger);
   border-radius: var(--yd-radius-sm);
   background: var(--yd-danger-soft);
@@ -453,8 +578,12 @@
 }
 .console-protective small {
   color: var(--yd-text-2);
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: 11px;
+  line-height: 1.25;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 .hmi-manual-controls .control-panel {
   border: 0;
@@ -566,19 +695,23 @@
 body.has-alarm-popup:has(.console-v21) .alarm-popup {
   right: auto;
   left: calc(var(--yd-sidebar-width) + 24px);
-  bottom: 96px;
-  width: min(360px, calc(100vw - var(--yd-sidebar-width) - 48px));
+  bottom: 112px;
+  width: min(340px, calc(100vw - var(--yd-sidebar-width) - 48px));
 }
 @media (max-width: 1400px) and (max-height: 860px) {
   .console-v21 .yd-monitor-core,
   .console-v21 .yd-monitor-core:has(.console-side) {
-    grid-template-columns: minmax(0, 1.9fr) minmax(300px, 1fr);
+    grid-template-columns: minmax(0, 1fr) 280px;
   }
   .console-v21 .yd-monitor-core > .operations-map-panel {
     min-height: 300px;
   }
-  .console-side {
-    grid-template-rows: minmax(176px, 0.9fr) minmax(0, 1fr);
+  .console-action-bar .dock-safety {
+    grid-template-columns: 92px 132px minmax(150px, 176px);
+  }
+  .console-action-bar .dock-task .t-button {
+    font-size: 13px;
+    padding: 0 6px;
   }
   .app-shell:has(.console-v21) .topbar {
     height: 50px;
@@ -598,8 +731,8 @@ body.has-alarm-popup:has(.console-v21) .alarm-popup {
     display: none;
   }
   body.has-alarm-popup:has(.console-v21) .alarm-popup {
-    bottom: 88px;
-    width: 320px;
+    bottom: 104px;
+    width: 300px;
   }
 }
 @media (max-width: 1100px) {
@@ -607,7 +740,7 @@ body.has-alarm-popup:has(.console-v21) .alarm-popup {
   .console-v21 .yd-monitor-core:has(.console-side) {
     grid-template-columns: 1fr;
   }
-  .console-action-bar {
+  .console-action-bar .dock-rows {
     grid-template-columns: 1fr;
   }
 }
@@ -628,4 +761,208 @@ body.has-alarm-popup:has(.scene-editor) .alarm-popup {
 /* keep every asset-tree item reachable (scrollable) above the popup */
 body.has-alarm-popup .scene-editor .se-tree {
   padding-bottom: 300px;
+}
+
+/* ============================================================================
+ * WEB-R1C 左侧车辆控制面板（应用 Shell 插槽 #sidebar-console-slot，仅综合控制台填充）。
+ * 控制台上侧栏加宽并压缩导航密度；其他页面侧栏、导航完全不变（插槽隐藏且为空）。
+ * ==========================================================================*/
+.app-shell:has(.sidebar--console) {
+  --yd-sidebar-width: 248px;
+}
+.sidebar--console .brand {
+  height: 60px;
+  padding: 8px 20px 6px;
+}
+.sidebar--console .brand-logo {
+  width: 132px;
+}
+.sidebar--console nav {
+  flex: 0 1 auto;
+  padding: 6px 10px;
+  gap: 2px;
+}
+.sidebar--console .nav-item {
+  min-height: 34px;
+  font-size: 13px;
+  gap: 10px;
+  padding: 0 12px;
+}
+.sidebar--console .nav-sub-item {
+  min-height: 30px;
+}
+.sidebar--console .sidebar-wave,
+.sidebar--console .sidebar-foot {
+  display: none;
+}
+.sidebar-console-slot {
+  flex: 1 1 auto;
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--yd-border);
+}
+.console-control-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--yd-surface);
+}
+.console-panel-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  flex: 0 0 auto;
+  border-bottom: 1px solid var(--yd-border-soft);
+}
+.console-panel-tabs button {
+  min-height: 38px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: var(--yd-text-2);
+  font: inherit;
+  font-size: 13px;
+}
+.console-panel-tabs button[aria-selected='true'] {
+  border-bottom-color: var(--yd-primary);
+  color: var(--yd-primary);
+  font-weight: 700;
+}
+.console-panel-tabs button:focus-visible,
+.device-actions button:focus-visible {
+  outline: 2px solid var(--yd-primary);
+  outline-offset: -2px;
+}
+.console-panel-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 10px;
+}
+.console-panel-section {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+/* the monitoring tab reuses the old rail cards in a narrow column */
+.console-control-panel .panel {
+  box-shadow: none;
+}
+.console-control-panel .yd-patrol-card {
+  grid-template-columns: 1fr;
+  padding: 10px;
+}
+.console-control-panel .yd-patrol-card .patrol-art {
+  display: none;
+}
+.console-control-panel .ds-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.console-control-panel .hmi-command-grid {
+  gap: 6px;
+}
+.console-control-panel .hmi-command-grid button {
+  min-height: 36px;
+  font-size: 12px;
+}
+.console-control-panel .hmi-auto-controls h3,
+.console-control-panel .hmi-diagnostics h3 {
+  margin: 8px 0 6px;
+}
+.device-tab {
+  display: grid;
+  gap: 10px;
+}
+.device-block {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--yd-border-soft);
+  border-radius: var(--yd-radius-sm);
+}
+.device-block h3 {
+  margin: 0;
+  font-size: 13px;
+  color: var(--yd-text);
+}
+.device-block .hmi-auto-controls .hmi-task {
+  padding: 6px 8px;
+  gap: 2px;
+}
+.device-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+.device-actions--3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.device-actions button {
+  min-height: 36px;
+  border: 1px solid #276dac;
+  background: #2777bb;
+  color: #fff;
+  border-radius: var(--yd-radius-sm);
+  font: inherit;
+  font-size: 13px;
+}
+.device-actions button:disabled {
+  color: #9aa7b5;
+  background: #f3f5f7;
+  border-color: #e0e5eb;
+  cursor: not-allowed;
+}
+.device-reason {
+  color: var(--yd-text-2);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.device-feedback {
+  margin: 0;
+  display: grid;
+  gap: 2px;
+  font-size: 12px;
+}
+.device-feedback div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.device-feedback dt {
+  color: var(--yd-text-2);
+}
+.device-feedback dd {
+  margin: 0;
+  color: var(--yd-text);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.device-feedback dd[data-quality='UNKNOWN'],
+.device-feedback dd[data-quality='NOT_CONNECTED'] {
+  color: var(--yd-text-3);
+}
+@media (max-width: 1400px) and (max-height: 860px) {
+  .app-shell:has(.sidebar--console) {
+    --yd-sidebar-width: 232px;
+  }
+  .sidebar--console .brand {
+    height: 48px;
+    padding: 6px 16px 4px;
+  }
+  .sidebar--console .brand-logo {
+    width: 112px;
+  }
+  .sidebar--console .nav-item {
+    min-height: 30px;
+  }
+  .sidebar--console .nav-sub-item {
+    min-height: 28px;
+  }
+}
+@media (max-width: 760px) {
+  .sidebar-console-slot {
+    min-height: 0;
+  }
 }

@@ -248,7 +248,7 @@ function onUserMenuClick(data: { value?: unknown }): void {
   <RouterView v-slot="{ Component }">
     <component :is="Component" v-if="isLogin" :key="route.path" />
     <div v-else class="app-shell">
-      <aside class="sidebar">
+      <aside class="sidebar" :class="{ 'sidebar--console': isMonitor }">
         <div class="brand">
           <img class="brand-logo" :src="brandLogo" alt="友道智造" />
         </div>
@@ -289,6 +289,9 @@ function onUserMenuClick(data: { value?: unknown }): void {
             </div>
           </template>
         </nav>
+        <!-- WEB-R1C：系统设置下方的车辆控制面板插槽。宿主常驻（v-show），只有综合控制台
+             （MonitorView）通过 Teleport 填充；其他页面为空且隐藏，导航保持原样。 -->
+        <div v-show="isMonitor" id="sidebar-console-slot" class="sidebar-console-slot"></div>
         <img class="sidebar-wave" :src="techWave" alt="" aria-hidden="true" />
         <div class="sidebar-foot">科技赋能&nbsp;&nbsp;领航未来</div>
       </aside>
