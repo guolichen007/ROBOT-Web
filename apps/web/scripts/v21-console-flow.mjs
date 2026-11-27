@@ -1,4 +1,4 @@
-/* global process, console */
+/* global process, console, document */
 // Firebot WEB-R1A — comprehensive console real-browser flow (isolated SIM stack only).
 // usage: node scripts/v21-console-flow.mjs <outDir>
 // States are produced by the REAL stack (API + PostgreSQL + Redis + mosquitto + ingress +

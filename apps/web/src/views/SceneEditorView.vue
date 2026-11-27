@@ -41,7 +41,18 @@
       </div>
     </header>
 
-    <p v-if="error" class="se-error" role="alert" data-testid="se-error">{{ error }}</p>
+    <p v-if="error" class="se-error" role="alert" data-testid="se-error">
+      <span>{{ error }}</span>
+      <button
+        type="button"
+        class="se-error-close"
+        data-testid="se-error-dismiss"
+        aria-label="关闭提示"
+        @click="error = ''"
+      >
+        ×
+      </button>
+    </p>
 
     <div v-if="!editor" class="se-empty">
       <p>
@@ -173,7 +184,13 @@
               step="0.01"
               :value="selected.pose.x"
               data-testid="se-x"
-              @change="patch({ x: num($event) })"
+              @change="
+                commitNumber(
+                  $event,
+                  (v) => ({ x: v }),
+                  () => String(selected!.pose.x),
+                )
+              "
           /></label>
           <label
             >Y（米）<input
@@ -181,7 +198,13 @@
               step="0.01"
               :value="selected.pose.y"
               data-testid="se-y"
-              @change="patch({ y: num($event) })"
+              @change="
+                commitNumber(
+                  $event,
+                  (v) => ({ y: v }),
+                  () => String(selected!.pose.y),
+                )
+              "
           /></label>
           <label
             >yaw（度，0=+X 逆时针）<input
@@ -189,7 +212,13 @@
               step="1"
               :value="((selected.pose.yaw * 180) / Math.PI).toFixed(1)"
               data-testid="se-yaw"
-              @change="patch({ yaw: (num($event) * Math.PI) / 180 })"
+              @change="
+                commitNumber(
+                  $event,
+                  (v) => ({ yaw: (v * Math.PI) / 180 }),
+                  () => ((selected!.pose.yaw * 180) / Math.PI).toFixed(1),
+                )
+              "
           /></label>
           <p class="se-meta">来源：{{ taughtLabel[selected.taught_from ?? 'MANUAL_INPUT'] }} · frame=map</p>
           <button
@@ -295,14 +324,17 @@ const adapter = new MapAdapter({ width_m: 1, height_m: 1, origin_x: 0, origin_y:
 let observer: ResizeObserver | null = null
 let seq = 1
 
-function act(fn: () => void): void {
+function act(fn: () => void): boolean {
+  let ok = true
   try {
     error.value = ''
     fn()
   } catch (e) {
     error.value = `操作被拒绝：${(e as Error).message}`
+    ok = false
   }
   triggerRef(editor)
+  return ok
 }
 
 const statusText = computed(() =>
@@ -321,8 +353,9 @@ const groups = computed(() => {
 const selected = computed<ScenePoint | undefined>(() =>
   editor.value?.scene.points.find((p) => p.point_id === selectedId.value),
 )
+// 默认巡检路线只取巡检点；返航/等待/过渡点不得被自动并入巡检路线
 const routeCandidates = computed(
-  () => editor.value?.scene.points.filter((p) => p.kind !== 'FIRE_OPERATION') ?? [],
+  () => editor.value?.scene.points.filter((p) => p.kind === 'INSPECTION') ?? [],
 )
 const cursorText = computed(() =>
   cursor.value
@@ -410,11 +443,31 @@ function onCanvasClick(e: MouseEvent): void {
   })
   addKind.value = null
 }
-function num(e: Event): number {
-  return Number((e.target as HTMLInputElement).value)
+/**
+ * Precise numeric input. Empty / non-numeric text is REJECTED (never coerced to 0) and the
+ * field is restored to the model value so the screen never shows a value the model lacks.
+ */
+function commitNumber(
+  e: Event,
+  build: (value: number) => Parameters<SceneEditor['updatePoint']>[1],
+  current: () => string,
+): void {
+  const el = e.target as HTMLInputElement
+  const raw = el.value.trim()
+  const restore = () => {
+    el.value = current()
+  }
+  if (!selected.value) return
+  if (raw === '') {
+    error.value = '操作被拒绝：EMPTY_INPUT: 坐标/角度不能为空，未修改'
+    restore()
+    return
+  }
+  if (!patch(build(Number(raw)))) restore()
 }
-function patch(p: Parameters<SceneEditor['updatePoint']>[1]): void {
-  if (selected.value) act(() => editor.value!.updatePoint(selected.value!.point_id, p))
+function patch(p: Parameters<SceneEditor['updatePoint']>[1]): boolean {
+  if (!selected.value) return false
+  return act(() => editor.value!.updatePoint(selected.value!.point_id, p))
 }
 function addRoute(): void {
   act(() =>
@@ -606,7 +659,19 @@ input:focus-visible {
   outline: 2px solid var(--yd-primary);
   outline-offset: 2px;
 }
+.se-error-close {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  color: inherit;
+  font-size: 18px;
+  cursor: pointer;
+  min-height: 0;
+}
 .se-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin: 0;
   padding: 8px 12px;
   border: 1px solid var(--yd-danger-border);

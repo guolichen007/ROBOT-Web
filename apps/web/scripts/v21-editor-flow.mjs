@@ -25,11 +25,13 @@ const px = Buffer.alloc(W * H, 254)
 for (let r = 0; r < H; r++)
   for (let c = 0; c < W; c++) if (r < 4 || c < 4 || r >= H - 4 || c >= W - 4) px[r * W + c] = 0
 writeFileSync(join(fx, 'sim_r002_gz.pgm'), Buffer.concat([header, px]))
-const yaml = 'image: sim_r002_gz.pgm\nresolution: 0.05\norigin: [-10.0, -5.0, 0.0]\nnegate: 0\noccupied_thresh: 0.65\nfree_thresh: 0.196\n'
+const yaml =
+  'image: sim_r002_gz.pgm\nresolution: 0.05\norigin: [-10.0, -5.0, 0.0]\nnegate: 0\noccupied_thresh: 0.65\nfree_thresh: 0.196\n'
 writeFileSync(join(fx, 'sim_r002_gz.yaml'), yaml)
 writeFileSync(join(fx, 'evil.yaml'), yaml.replace('sim_r002_gz.pgm', '../sim_r002_gz.pgm'))
 
 const results = []
+let alarmRaised = false
 const check = (name, fn) => {
   fn()
   results.push(name)
@@ -46,7 +48,10 @@ for (const [w, h] of [
   page.on('pageerror', (e) => pageErrors.push(String(e)))
   const writes = []
   page.on('request', (r) => {
-    if (r.method() !== 'GET' && /\/api\/v1\/(robots|tasks|commands|map-versions|parking-slots|inspection-points|alarms)/.test(r.url()))
+    if (
+      r.method() !== 'GET' &&
+      /\/api\/v1\/(robots|tasks|commands|map-versions|parking-slots|inspection-points|alarms)/.test(r.url())
+    )
       writes.push(`${r.method()} ${r.url()}`)
   })
   let login
@@ -55,6 +60,30 @@ for (const [w, h] of [
     if (login.ok()) break
   }
   assert.equal(login.status(), 200, 'login')
+  if (!alarmRaised) {
+    const token = (await login.json()).access_token
+    const csrf = (await ctx.cookies()).find((c) => c.name === 'csrf_token')?.value || ''
+    const snap = await (
+      await page.request.get('/api/v1/monitor/snapshot', { headers: { Authorization: `Bearer ${token}` } })
+    ).json()
+    const slot = snap.parking_slots?.[0]
+    const raised = await page.request.post('/api/v1/alarms/manual', {
+      data: {
+        parking_slot_id: slot.id,
+        fire_type: 'smoke',
+        map_version: snap.map_version.version,
+        severity: 'HIGH',
+        note: 'R1A editor occlusion check',
+      },
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'X-CSRF-Token': csrf,
+        'Idempotency-Key': `r1a-alarm-${Date.now()}`,
+      },
+    })
+    assert.ok(raised.status() < 300, `manual alarm ${raised.status()}`)
+    alarmRaised = true
+  }
   await page.goto('/maps/editor', { waitUntil: 'networkidle' })
   await page.getByTestId('scene-editor').waitFor()
   const tag = `${w}x${h}`
@@ -67,7 +96,9 @@ for (const [w, h] of [
   check(`${tag} NEG_YAML_TRAVERSAL`, () => {})
 
   // import the real pair
-  await page.getByTestId('se-import').setInputFiles([join(fx, 'sim_r002_gz.yaml'), join(fx, 'sim_r002_gz.pgm')])
+  await page
+    .getByTestId('se-import')
+    .setInputFiles([join(fx, 'sim_r002_gz.yaml'), join(fx, 'sim_r002_gz.pgm')])
   await page.getByTestId('se-canvas').waitFor()
   await page.getByText('400×300 px').waitFor()
   check(`${tag} IMPORT_META`, () => {})
@@ -114,27 +145,44 @@ for (const [w, h] of [
   const yAfter = await page.getByTestId('se-point-INSP-03').getAttribute('transform')
   assert.notEqual(yAfter, yBefore, 'drag moved the point')
   await page.getByTestId('se-undo').click()
-  assert.equal(await page.getByTestId('se-point-INSP-03').getAttribute('transform'), yBefore, 'single undo restores drag')
+  assert.equal(
+    await page.getByTestId('se-point-INSP-03').getAttribute('transform'),
+    yBefore,
+    'single undo restores drag',
+  )
   await page.getByTestId('se-redo').click()
   assert.equal(await page.getByTestId('se-point-INSP-03').getAttribute('transform'), yAfter)
   check(`${tag} DRAG_UNDO_REDO_ONE_STEP`, () => {})
 
   // route + delete referenced point refused
   await page.getByTestId('se-add-route').click()
-  await page.getByText(/R-\d+ · 3 点/).waitFor()
+  // HOME-01 must not enter the default patrol route: only the 2 inspection points
+  await page.getByText(/R-\d+ · 2 点/).waitFor()
   await page.locator('[data-testid="se-point-INSP-02"] circle').click()
   await page.getByTestId('se-delete').click()
   assert.match(await page.getByTestId('se-error').innerText(), /POINT_REFERENCED_BY_ROUTE/)
   await page.getByTestId('se-point-INSP-02').waitFor()
   check(`${tag} NEG_DELETE_REFERENCED_POINT`, () => {})
 
-  // NaN-ish precise input refused (empty -> 0 is allowed; letters -> NaN)
+  // empty precise input is rejected (never coerced to 0) and the field is restored
+  await page.locator('[data-testid="se-point-INSP-02"] circle').click()
+  await page.getByTestId('se-x').fill('')
+  await page.getByTestId('se-x').press('Enter')
+  assert.match(await page.getByTestId('se-error').innerText(), /不能为空/)
+  assert.equal(await page.getByTestId('se-x').inputValue(), '1.25')
+  check(`${tag} NEG_EMPTY_INPUT_NOT_ZERO`, () => {})
+  await page.getByTestId('se-error-dismiss').click()
+  assert.equal(await page.getByTestId('se-error').count(), 0)
+  check(`${tag} ERROR_DISMISS_RECOVERY`, () => {})
+
+  // non-numeric precise input refused and restored
   await page.getByTestId('se-x').evaluate((el) => {
     el.type = 'text'
     el.value = 'abc'
     el.dispatchEvent(new Event('change'))
   })
   assert.match(await page.getByTestId('se-error').innerText(), /NON_FINITE_NUMBER/)
+  assert.equal(await page.getByTestId('se-x').inputValue(), '1.25')
   check(`${tag} NEG_NON_FINITE_INPUT`, () => {})
 
   // validation: traversability never auto-passes
@@ -144,6 +192,20 @@ for (const [w, h] of [
   assert.doesNotMatch(issues, /缺少返航点/)
   check(`${tag} VALIDATE_PENDING_TRAVERSABILITY`, () => {})
 
+  const popup = page.getByTestId('alarm-popup')
+  await popup.waitFor({ timeout: 8000 })
+  const pb = await popup.boundingBox()
+  for (const id of ['se-inspector', 'se-validate', 'se-undo', 'se-canvas']) {
+    const b = await page.getByTestId(id).boundingBox()
+    const overlap = !(
+      pb.y + pb.height <= b.y ||
+      pb.y >= b.y + b.height ||
+      pb.x + pb.width <= b.x ||
+      pb.x >= b.x + b.width
+    )
+    assert.equal(overlap, false, `${tag} alarm popup overlaps ${id}`)
+  }
+  check(`${tag} ALARM_POPUP_NOT_OCCLUDING`, () => {})
   await page.locator('[data-testid="se-point-INSP-03"] circle').click()
   await page.screenshot({ path: join(out, `web2_editor_${tag}.png`) })
 

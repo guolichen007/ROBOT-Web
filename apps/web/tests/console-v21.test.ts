@@ -60,7 +60,7 @@ describe('ConsoleStatusBar — unknown is explicit, dimensions are independent',
       robot({
         server_received_at: new Date().toISOString(),
         data_channels: { estop: { support_state: 'NOT_CONNECTED' } },
-      } as Partial<RobotState>),
+      } as unknown as Partial<RobotState>),
     )
     const safety = w.get('[data-dim="safety"]')
     expect(safety.attributes('data-level')).toBe('unknown')
@@ -73,7 +73,7 @@ describe('ConsoleStatusBar — unknown is explicit, dimensions are independent',
         estop_active: true,
         server_received_at: new Date().toISOString(),
         data_channels: { estop: { support_state: 'NOT_CONNECTED' } },
-      } as Partial<RobotState>),
+      } as unknown as Partial<RobotState>),
     )
     const safety = w.get('[data-dim="safety"]')
     expect(safety.attributes('data-level')).toBe('bad')

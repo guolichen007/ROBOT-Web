@@ -606,3 +606,21 @@ body.has-alarm-popup .alarm-popup {
     grid-template-columns: 1fr;
   }
 }
+
+/* scene editor: the fire popup must not cover the inspector (right) or toolbar (top) */
+/* the popup sits inside the asset-tree column (bottom), never over the canvas working area */
+body.has-alarm-popup:has(.scene-editor) .alarm-popup {
+  right: auto;
+  left: calc(var(--yd-sidebar-width) + 12px);
+  bottom: 20px;
+  width: 232px;
+}
+@media (max-width: 1400px) {
+  body.has-alarm-popup:has(.scene-editor) .alarm-popup {
+    width: 196px;
+  }
+}
+/* keep every asset-tree item reachable (scrollable) above the popup */
+body.has-alarm-popup .scene-editor .se-tree {
+  padding-bottom: 300px;
+}
