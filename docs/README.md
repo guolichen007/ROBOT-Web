@@ -41,5 +41,5 @@
 - G3 媒体与红外模拟联通：[G3-媒体与红外模拟联通.md](开发验收/G3-媒体与红外模拟联通.md)
 - G3-R2 取消独立温度 / 保留双路视频（硬件需求变更 · PRD / 硬件清单 / G3G4 验收 / Preview / 车端交接）：[G3-R2-取消独立温度保留双路视频.md](开发验收/G3-R2-取消独立温度保留双路视频.md)
 - G4 真实相机接入对接清单（现状审查 / 缺口 / 车端 CC 回填问题）：[G4-真实相机接入对接清单.md](开发验收/G4-真实相机接入对接清单.md)
-- Web V2.1（DRAFT，未冻结）：[设计系统 DESIGN.md](../DESIGN.md) · [需求](开发验收/web-v2.1/WEB_V2_1_REQUIREMENTS.md) · [动作矩阵](开发验收/web-v2.1/WEB_V2_1_ACTION_MATRIX.md) · [验收矩阵](开发验收/web-v2.1/R002_ACCEPTANCE_MATRIX.md) · [WEB-0 合同差距与实施报告](开发验收/web-v2.1/WEB0_合同差距与实施报告.md)
+- Web V2.1（DRAFT，未冻结）：[设计系统 DESIGN.md](../DESIGN.md) · [需求](开发验收/web-v2.1/WEB_V2_1_REQUIREMENTS.md) · [动作矩阵](开发验收/web-v2.1/WEB_V2_1_ACTION_MATRIX.md) · [验收矩阵](开发验收/web-v2.1/R002_ACCEPTANCE_MATRIX.md) · [WEB-0 合同差距与实施报告](开发验收/web-v2.1/WEB0_合同差距与实施报告.md) · [WEB-R1A 阶段报告](开发验收/web-v2.1/WEB_R1A_阶段执行报告.md)
 - Web V2.1 合同（DRAFT）：[R002 场景合同](技术合同/web-v2.1/R002_SCENE_CONTRACT.md) · [R002 操作合同](技术合同/web-v2.1/R002_OPERATION_CONTRACT.md) · [0011 迁移设计](技术合同/web-v2.1/SCENE_0011_MIGRATION_DESIGN.md) · [VM 交接包](../packages/protocol-schemas/firebot-v2.1/handoff/README.md)
