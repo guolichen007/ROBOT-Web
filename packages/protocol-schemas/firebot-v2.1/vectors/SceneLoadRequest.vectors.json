@@ -3,7 +3,7 @@
     {
       "name": "sim_load",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadRequest",
         "load_id": "f5000000-0000-4000-8000-000000000001",
         "vehicle_id": "firebot-sim-r002-01",
@@ -23,7 +23,7 @@
     {
       "name": "missing_load_id",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadRequest",
         "vehicle_id": "firebot-sim-r002-01",
         "environment": "SIM",
@@ -41,7 +41,7 @@
     {
       "name": "real_vehicle_in_sim",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadRequest",
         "load_id": "f5000000-0000-4000-8000-000000000001",
         "vehicle_id": "firebot-vehicle-02",
@@ -60,7 +60,7 @@
     {
       "name": "expires_before_issued",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadRequest",
         "load_id": "f5000000-0000-4000-8000-000000000001",
         "vehicle_id": "firebot-sim-r002-01",

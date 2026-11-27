@@ -3,7 +3,7 @@
     {
       "name": "sim_loaded",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadReceipt",
         "receipt_id": "f4000000-0000-4000-8000-000000000001",
         "load_id": "f5000000-0000-4000-8000-000000000001",
@@ -24,7 +24,7 @@
     {
       "name": "sim_rejected",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadReceipt",
         "receipt_id": "f4000000-0000-4000-8000-000000000001",
         "load_id": "f5000000-0000-4000-8000-000000000001",
@@ -47,7 +47,7 @@
     {
       "name": "loaded_with_reason",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadReceipt",
         "receipt_id": "f4000000-0000-4000-8000-000000000001",
         "load_id": "f5000000-0000-4000-8000-000000000001",
@@ -69,7 +69,7 @@
     {
       "name": "rejected_without_reason",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadReceipt",
         "receipt_id": "f4000000-0000-4000-8000-000000000001",
         "load_id": "f5000000-0000-4000-8000-000000000001",
@@ -91,7 +91,7 @@
     {
       "name": "loaded_without_loaded_at",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadReceipt",
         "receipt_id": "f4000000-0000-4000-8000-000000000001",
         "load_id": "f5000000-0000-4000-8000-000000000001",
@@ -112,7 +112,7 @@
     {
       "name": "digest_not_hex",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadReceipt",
         "receipt_id": "f4000000-0000-4000-8000-000000000001",
         "load_id": "f5000000-0000-4000-8000-000000000001",
@@ -134,7 +134,7 @@
     {
       "name": "missing_load_id",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadReceipt",
         "receipt_id": "f4000000-0000-4000-8000-000000000001",
         "vehicle_id": "firebot-sim-r002-01",
@@ -157,7 +157,7 @@
     {
       "name": "exact_match",
       "request": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadRequest",
         "load_id": "f5000000-0000-4000-8000-000000000001",
         "vehicle_id": "firebot-sim-r002-01",
@@ -172,7 +172,7 @@
         "operator_id": "11111111-2222-4333-8444-555555555555"
       },
       "receipt": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadReceipt",
         "receipt_id": "f4000000-0000-4000-8000-000000000001",
         "load_id": "f5000000-0000-4000-8000-000000000001",
@@ -195,7 +195,7 @@
     {
       "name": "CE3_other_vehicle",
       "request": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadRequest",
         "load_id": "f5000000-0000-4000-8000-000000000001",
         "vehicle_id": "firebot-sim-r002-01",
@@ -210,7 +210,7 @@
         "operator_id": "11111111-2222-4333-8444-555555555555"
       },
       "receipt": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadReceipt",
         "receipt_id": "f4000000-0000-4000-8000-000000000001",
         "load_id": "f5000000-0000-4000-8000-000000000001",
@@ -233,7 +233,7 @@
     {
       "name": "CE3_other_load_operation",
       "request": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadRequest",
         "load_id": "f5000000-0000-4000-8000-000000000001",
         "vehicle_id": "firebot-sim-r002-01",
@@ -248,7 +248,7 @@
         "operator_id": "11111111-2222-4333-8444-555555555555"
       },
       "receipt": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadReceipt",
         "receipt_id": "f4000000-0000-4000-8000-000000000001",
         "load_id": "f5000000-0000-4000-8000-000000000002",
@@ -271,7 +271,7 @@
     {
       "name": "receipt_before_request_issued",
       "request": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadRequest",
         "load_id": "f5000000-0000-4000-8000-000000000001",
         "vehicle_id": "firebot-sim-r002-01",
@@ -286,7 +286,7 @@
         "operator_id": "11111111-2222-4333-8444-555555555555"
       },
       "receipt": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadReceipt",
         "receipt_id": "f4000000-0000-4000-8000-000000000001",
         "load_id": "f5000000-0000-4000-8000-000000000001",
@@ -309,7 +309,7 @@
     {
       "name": "receipt_after_request_expired",
       "request": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadRequest",
         "load_id": "f5000000-0000-4000-8000-000000000001",
         "vehicle_id": "firebot-sim-r002-01",
@@ -324,7 +324,7 @@
         "operator_id": "11111111-2222-4333-8444-555555555555"
       },
       "receipt": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadReceipt",
         "receipt_id": "f4000000-0000-4000-8000-000000000001",
         "load_id": "f5000000-0000-4000-8000-000000000001",
@@ -347,7 +347,7 @@
     {
       "name": "vehicle_rebooted_since_receipt",
       "request": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadRequest",
         "load_id": "f5000000-0000-4000-8000-000000000001",
         "vehicle_id": "firebot-sim-r002-01",
@@ -362,7 +362,7 @@
         "operator_id": "11111111-2222-4333-8444-555555555555"
       },
       "receipt": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadReceipt",
         "receipt_id": "f4000000-0000-4000-8000-000000000001",
         "load_id": "f5000000-0000-4000-8000-000000000001",
@@ -385,7 +385,7 @@
     {
       "name": "boot_unknown",
       "request": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadRequest",
         "load_id": "f5000000-0000-4000-8000-000000000001",
         "vehicle_id": "firebot-sim-r002-01",
@@ -400,7 +400,7 @@
         "operator_id": "11111111-2222-4333-8444-555555555555"
       },
       "receipt": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadReceipt",
         "receipt_id": "f4000000-0000-4000-8000-000000000001",
         "load_id": "f5000000-0000-4000-8000-000000000001",
@@ -423,7 +423,7 @@
     {
       "name": "digest_mismatch",
       "request": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadRequest",
         "load_id": "f5000000-0000-4000-8000-000000000001",
         "vehicle_id": "firebot-sim-r002-01",
@@ -438,7 +438,7 @@
         "operator_id": "11111111-2222-4333-8444-555555555555"
       },
       "receipt": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadReceipt",
         "receipt_id": "f4000000-0000-4000-8000-000000000001",
         "load_id": "f5000000-0000-4000-8000-000000000001",
@@ -461,7 +461,7 @@
     {
       "name": "request_for_other_scene_version",
       "request": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadRequest",
         "load_id": "f5000000-0000-4000-8000-000000000001",
         "vehicle_id": "firebot-sim-r002-01",
@@ -476,7 +476,7 @@
         "operator_id": "11111111-2222-4333-8444-555555555555"
       },
       "receipt": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadReceipt",
         "receipt_id": "f4000000-0000-4000-8000-000000000001",
         "load_id": "f5000000-0000-4000-8000-000000000001",
@@ -499,7 +499,7 @@
     {
       "name": "rejected_receipt",
       "request": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadRequest",
         "load_id": "f5000000-0000-4000-8000-000000000001",
         "vehicle_id": "firebot-sim-r002-01",
@@ -514,7 +514,7 @@
         "operator_id": "11111111-2222-4333-8444-555555555555"
       },
       "receipt": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneLoadReceipt",
         "receipt_id": "f4000000-0000-4000-8000-000000000001",
         "load_id": "f5000000-0000-4000-8000-000000000001",
@@ -533,6 +533,1408 @@
       },
       "current_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
       "expect": "RECEIPT_REJECTED"
+    }
+  ],
+  "state_cases": [
+    {
+      "name": "latest_load_confirmed_ok",
+      "vehicle_scene": {
+        "current_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "latest_request": {
+          "contract_version": "2.1.0-draft.3",
+          "kind": "SceneLoadRequest",
+          "load_id": "f5000000-0000-4000-8000-000000000001",
+          "vehicle_id": "firebot-sim-r002-01",
+          "environment": "SIM",
+          "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+          "scene_id": "a1000000-0000-4000-8000-000000000001",
+          "scene_version": 1,
+          "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+          "nav_map_checksum": "sim-gazebo-r002-v1",
+          "issued_at": "2026-11-26T09:00:00+08:00",
+          "expires_at": "2026-11-26T09:01:00+08:00",
+          "operator_id": "11111111-2222-4333-8444-555555555555"
+        },
+        "state": "PENDING",
+        "loaded_scene_id": null,
+        "loaded_scene_version": null,
+        "loaded_scene_digest": null
+      },
+      "manifest": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "PUBLISHED",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": "2026-11-26T09:00:05+08:00",
+        "published_by": "11111111-2222-4333-8444-555555555555"
+      },
+      "receipt": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "SceneLoadReceipt",
+        "receipt_id": "f4000000-0000-4000-8000-000000000001",
+        "load_id": "f5000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 10,
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "result": "LOADED",
+        "reason_code": null,
+        "loaded_at": "2026-11-26T09:00:05+08:00",
+        "reported_at": "2026-11-26T09:00:05+08:00"
+      },
+      "expect": "OK"
+    },
+    {
+      "name": "old_load_receipt_after_newer_request",
+      "vehicle_scene": {
+        "current_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "latest_request": {
+          "contract_version": "2.1.0-draft.3",
+          "kind": "SceneLoadRequest",
+          "load_id": "f5000000-0000-4000-8000-000000000002",
+          "vehicle_id": "firebot-sim-r002-01",
+          "environment": "SIM",
+          "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+          "scene_id": "a1000000-0000-4000-8000-000000000001",
+          "scene_version": 2,
+          "scene_digest": "b89ac1d5ccfd95b4c0538b3529c6ecf34701d4d1dc26319a3a4e121fdebb8d63",
+          "nav_map_checksum": "sim-gazebo-r002-v1",
+          "issued_at": "2026-11-26T09:00:00+08:00",
+          "expires_at": "2026-11-26T09:01:00+08:00",
+          "operator_id": "11111111-2222-4333-8444-555555555555"
+        },
+        "state": "PENDING",
+        "loaded_scene_id": null,
+        "loaded_scene_version": null,
+        "loaded_scene_digest": null
+      },
+      "manifest": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 2,
+        "base_scene_version": null,
+        "status": "PUBLISHED",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": "b89ac1d5ccfd95b4c0538b3529c6ecf34701d4d1dc26319a3a4e121fdebb8d63",
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": "2026-11-26T09:00:05+08:00",
+        "published_by": "11111111-2222-4333-8444-555555555555"
+      },
+      "receipt": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "SceneLoadReceipt",
+        "receipt_id": "f4000000-0000-4000-8000-000000000001",
+        "load_id": "f5000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 10,
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "result": "LOADED",
+        "reason_code": null,
+        "loaded_at": "2026-11-26T09:00:05+08:00",
+        "reported_at": "2026-11-26T09:00:05+08:00"
+      },
+      "expect": "RECEIPT_STALE_LOAD"
+    },
+    {
+      "name": "duplicate_after_final",
+      "vehicle_scene": {
+        "current_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "latest_request": {
+          "contract_version": "2.1.0-draft.3",
+          "kind": "SceneLoadRequest",
+          "load_id": "f5000000-0000-4000-8000-000000000001",
+          "vehicle_id": "firebot-sim-r002-01",
+          "environment": "SIM",
+          "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+          "scene_id": "a1000000-0000-4000-8000-000000000001",
+          "scene_version": 1,
+          "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+          "nav_map_checksum": "sim-gazebo-r002-v1",
+          "issued_at": "2026-11-26T09:00:00+08:00",
+          "expires_at": "2026-11-26T09:01:00+08:00",
+          "operator_id": "11111111-2222-4333-8444-555555555555"
+        },
+        "state": "LOADED_CONFIRMED",
+        "loaded_scene_id": null,
+        "loaded_scene_version": null,
+        "loaded_scene_digest": null
+      },
+      "manifest": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "PUBLISHED",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": "2026-11-26T09:00:05+08:00",
+        "published_by": "11111111-2222-4333-8444-555555555555"
+      },
+      "receipt": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "SceneLoadReceipt",
+        "receipt_id": "f4000000-0000-4000-8000-000000000001",
+        "load_id": "f5000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 10,
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "result": "LOADED",
+        "reason_code": null,
+        "loaded_at": "2026-11-26T09:00:05+08:00",
+        "reported_at": "2026-11-26T09:00:05+08:00"
+      },
+      "expect": "RECEIPT_ALREADY_FINAL"
+    },
+    {
+      "name": "same_scene_version_other_digest",
+      "vehicle_scene": {
+        "current_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "latest_request": {
+          "contract_version": "2.1.0-draft.3",
+          "kind": "SceneLoadRequest",
+          "load_id": "f5000000-0000-4000-8000-000000000001",
+          "vehicle_id": "firebot-sim-r002-01",
+          "environment": "SIM",
+          "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+          "scene_id": "a1000000-0000-4000-8000-000000000001",
+          "scene_version": 1,
+          "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+          "nav_map_checksum": "sim-gazebo-r002-v1",
+          "issued_at": "2026-11-26T09:00:00+08:00",
+          "expires_at": "2026-11-26T09:01:00+08:00",
+          "operator_id": "11111111-2222-4333-8444-555555555555"
+        },
+        "state": "PENDING",
+        "loaded_scene_id": null,
+        "loaded_scene_version": null,
+        "loaded_scene_digest": null
+      },
+      "manifest": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "PUBLISHED",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": "2026-11-26T09:00:05+08:00",
+        "published_by": "11111111-2222-4333-8444-555555555555"
+      },
+      "receipt": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "SceneLoadReceipt",
+        "receipt_id": "f4000000-0000-4000-8000-000000000001",
+        "load_id": "f5000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 10,
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "0000000000000000000000000000000000000000000000000000000000000000",
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "result": "LOADED",
+        "reason_code": null,
+        "loaded_at": "2026-11-26T09:00:05+08:00",
+        "reported_at": "2026-11-26T09:00:05+08:00"
+      },
+      "expect": "RECEIPT_DIGEST_MISMATCH"
+    },
+    {
+      "name": "receipt_from_previous_boot",
+      "vehicle_scene": {
+        "current_boot_id": "0b0b0b0b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "latest_request": {
+          "contract_version": "2.1.0-draft.3",
+          "kind": "SceneLoadRequest",
+          "load_id": "f5000000-0000-4000-8000-000000000001",
+          "vehicle_id": "firebot-sim-r002-01",
+          "environment": "SIM",
+          "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+          "scene_id": "a1000000-0000-4000-8000-000000000001",
+          "scene_version": 1,
+          "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+          "nav_map_checksum": "sim-gazebo-r002-v1",
+          "issued_at": "2026-11-26T09:00:00+08:00",
+          "expires_at": "2026-11-26T09:01:00+08:00",
+          "operator_id": "11111111-2222-4333-8444-555555555555"
+        },
+        "state": "PENDING",
+        "loaded_scene_id": null,
+        "loaded_scene_version": null,
+        "loaded_scene_digest": null
+      },
+      "manifest": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "PUBLISHED",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": "2026-11-26T09:00:05+08:00",
+        "published_by": "11111111-2222-4333-8444-555555555555"
+      },
+      "receipt": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "SceneLoadReceipt",
+        "receipt_id": "f4000000-0000-4000-8000-000000000001",
+        "load_id": "f5000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 10,
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "result": "LOADED",
+        "reason_code": null,
+        "loaded_at": "2026-11-26T09:00:05+08:00",
+        "reported_at": "2026-11-26T09:00:05+08:00"
+      },
+      "expect": "RECEIPT_STALE_BOOT_ID"
+    },
+    {
+      "name": "rejected_receipt_is_final",
+      "vehicle_scene": {
+        "current_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "latest_request": {
+          "contract_version": "2.1.0-draft.3",
+          "kind": "SceneLoadRequest",
+          "load_id": "f5000000-0000-4000-8000-000000000001",
+          "vehicle_id": "firebot-sim-r002-01",
+          "environment": "SIM",
+          "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+          "scene_id": "a1000000-0000-4000-8000-000000000001",
+          "scene_version": 1,
+          "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+          "nav_map_checksum": "sim-gazebo-r002-v1",
+          "issued_at": "2026-11-26T09:00:00+08:00",
+          "expires_at": "2026-11-26T09:01:00+08:00",
+          "operator_id": "11111111-2222-4333-8444-555555555555"
+        },
+        "state": "PENDING",
+        "loaded_scene_id": null,
+        "loaded_scene_version": null,
+        "loaded_scene_digest": null
+      },
+      "manifest": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "base_scene_version": null,
+        "status": "PUBLISHED",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": "2026-11-26T09:00:05+08:00",
+        "published_by": "11111111-2222-4333-8444-555555555555"
+      },
+      "receipt": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "SceneLoadReceipt",
+        "receipt_id": "f4000000-0000-4000-8000-000000000001",
+        "load_id": "f5000000-0000-4000-8000-000000000001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 10,
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "result": "REJECTED",
+        "reason_code": "NAV_MAP_CHECKSUM_MISMATCH",
+        "loaded_at": null,
+        "reported_at": "2026-11-26T09:00:05+08:00"
+      },
+      "expect": "RECEIPT_REJECTED"
+    },
+    {
+      "name": "newer_load_confirmed_ok",
+      "vehicle_scene": {
+        "current_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "latest_request": {
+          "contract_version": "2.1.0-draft.3",
+          "kind": "SceneLoadRequest",
+          "load_id": "f5000000-0000-4000-8000-000000000002",
+          "vehicle_id": "firebot-sim-r002-01",
+          "environment": "SIM",
+          "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+          "scene_id": "a1000000-0000-4000-8000-000000000001",
+          "scene_version": 2,
+          "scene_digest": "b89ac1d5ccfd95b4c0538b3529c6ecf34701d4d1dc26319a3a4e121fdebb8d63",
+          "nav_map_checksum": "sim-gazebo-r002-v1",
+          "issued_at": "2026-11-26T09:00:00+08:00",
+          "expires_at": "2026-11-26T09:01:00+08:00",
+          "operator_id": "11111111-2222-4333-8444-555555555555"
+        },
+        "state": "PENDING",
+        "loaded_scene_id": null,
+        "loaded_scene_version": null,
+        "loaded_scene_digest": null
+      },
+      "manifest": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "SceneManifest",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 2,
+        "base_scene_version": null,
+        "status": "PUBLISHED",
+        "site_code": "SIM_GAZEBO",
+        "nav_map": {
+          "map_code": "SIM_GAZEBO_R002",
+          "map_version": "sim-1",
+          "frame_id": "map",
+          "resolution_m_per_px": 0.05,
+          "origin": {
+            "x": -10.0,
+            "y": -10.0,
+            "yaw": 0.0,
+            "frame_id": "map"
+          },
+          "width_px": 400,
+          "height_px": 400,
+          "image_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "yaml_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "map_checksum": "sim-gazebo-r002-v1",
+          "occupied_thresh": 0.65,
+          "free_thresh": 0.196,
+          "negate": 0
+        },
+        "points": [
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000001",
+            "code": "HOME",
+            "kind": "RETURN_HOME",
+            "pose": {
+              "x": 0.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "taught_from": "MANUAL_INPUT"
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000002",
+            "code": "INSP-01",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 4.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01",
+            "xy_tolerance_m": 0.2,
+            "yaw_tolerance_rad": 0.15
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000003",
+            "code": "INSP-02",
+            "kind": "INSPECTION",
+            "pose": {
+              "x": 8.0,
+              "y": 0.0,
+              "yaw": 0.0,
+              "frame_id": "map"
+            }
+          },
+          {
+            "point_id": "b1000000-0000-4000-8000-000000000004",
+            "code": "FIRE-01",
+            "kind": "FIRE_OPERATION",
+            "pose": {
+              "x": 4.0,
+              "y": 1.0,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "parking_slot_code": "S-01"
+          }
+        ],
+        "parking_slots": [
+          {
+            "slot_id": "c1000000-0000-4000-8000-000000000001",
+            "code": "S-01",
+            "center": {
+              "x": 4.0,
+              "y": 2.5,
+              "yaw": 1.5708,
+              "frame_id": "map"
+            },
+            "enabled": true,
+            "polygon": [
+              {
+                "x": 2.8,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 1.5
+              },
+              {
+                "x": 5.2,
+                "y": 3.5
+              },
+              {
+                "x": 2.8,
+                "y": 3.5
+              }
+            ]
+          }
+        ],
+        "routes": [
+          {
+            "route_id": "d1000000-0000-4000-8000-000000000001",
+            "code": "R-MAIN",
+            "point_refs": [
+              "b1000000-0000-4000-8000-000000000001",
+              "b1000000-0000-4000-8000-000000000002",
+              "b1000000-0000-4000-8000-000000000003"
+            ],
+            "closed": false,
+            "corridor_refs": [
+              "e1000000-0000-4000-8000-000000000001"
+            ]
+          }
+        ],
+        "corridors": [
+          {
+            "corridor_id": "e1000000-0000-4000-8000-000000000001",
+            "code": "LANE-1",
+            "kind": "RIGHT_LANE",
+            "centerline": [
+              {
+                "x": 0.0,
+                "y": -0.5
+              },
+              {
+                "x": 8.0,
+                "y": -0.5
+              }
+            ],
+            "width_m": 1.6
+          }
+        ],
+        "validation": {
+          "schema_ok": true,
+          "references_ok": true,
+          "traversability": "PENDING_VERIFICATION",
+          "traversability_evidence": null,
+          "checked_at": "2026-11-26T09:00:00+08:00",
+          "issues": []
+        },
+        "digest": "b89ac1d5ccfd95b4c0538b3529c6ecf34701d4d1dc26319a3a4e121fdebb8d63",
+        "created_at": "2026-11-26T09:00:00+08:00",
+        "published_at": "2026-11-26T09:00:05+08:00",
+        "published_by": "11111111-2222-4333-8444-555555555555"
+      },
+      "receipt": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "SceneLoadReceipt",
+        "receipt_id": "f4000000-0000-4000-8000-000000000002",
+        "load_id": "f5000000-0000-4000-8000-000000000002",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "seq": 10,
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 2,
+        "scene_digest": "b89ac1d5ccfd95b4c0538b3529c6ecf34701d4d1dc26319a3a4e121fdebb8d63",
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "result": "LOADED",
+        "reason_code": null,
+        "loaded_at": "2026-11-26T09:00:05+08:00",
+        "reported_at": "2026-11-26T09:00:05+08:00"
+      },
+      "expect": "OK"
     }
   ]
 }

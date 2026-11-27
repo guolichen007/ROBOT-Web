@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://firebot.local/schemas/firebot-web-v2.1.contracts.schema.json",
-  "title": "Firebot Web V2.1 Contracts (DRAFT.2, NOT FROZEN)",
-  "description": "contract_version=2.1.0-draft.2. Platform-level contracts for R002 Web V2.1. Not a replacement of Canonical MQTT 1.3 (firebot-message-1.3.schema.json); see docs/技术合同/web-v2.1/R002_*_CONTRACT.md for wire mapping. Parsers MUST reject NaN/Infinity literals (RFC 8259) before schema validation.",
+  "title": "Firebot Web V2.1 Contracts (DRAFT.3, NOT FROZEN)",
+  "description": "contract_version=2.1.0-draft.3. Platform-level contracts for R002 Web V2.1. Not a replacement of Canonical MQTT 1.3 (firebot-message-1.3.schema.json); see docs/技术合同/web-v2.1/R002_*_CONTRACT.md for wire mapping. Parsers MUST reject NaN/Infinity literals (RFC 8259) before schema validation.",
   "$defs": {
     "contractVersion": {
-      "const": "2.1.0-draft.2"
+      "const": "2.1.0-draft.3"
     },
     "uuid": {
       "type": "string",
@@ -446,7 +446,8 @@
         "battery_pct",
         "estop",
         "active_mission_id",
-        "scene"
+        "scene",
+        "motion"
       ],
       "allOf": [
         {
@@ -617,6 +618,11 @@
               },
               "observed_at": {
                 "$ref": "#/$defs/ts"
+              },
+              "map_checksum": {
+                "type": "string",
+                "minLength": 8,
+                "maxLength": 128
               }
             }
           },
@@ -808,6 +814,75 @@
               }
             }
           }
+        },
+        "motion": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "stationary",
+            "quality",
+            "observed_at"
+          ],
+          "properties": {
+            "stationary": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "quality": {
+              "$ref": "#/$defs/quality"
+            },
+            "observed_at": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ts"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "linear_mps": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "angular_radps": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          },
+          "if": {
+            "properties": {
+              "quality": {
+                "enum": [
+                  "LIVE",
+                  "STALE"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "stationary": {
+                "type": "boolean"
+              },
+              "observed_at": {
+                "$ref": "#/$defs/ts"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "stationary": {
+                "type": "null"
+              }
+            }
+          }
         }
       },
       "x-tier": "core"
@@ -826,11 +901,33 @@
         "control_frozen",
         "freeze_reasons",
         "control_owner",
-        "actions"
+        "actions",
+        "source",
+        "based_on_snapshot_at",
+        "freeze_scope"
       ],
       "allOf": [
         {
           "$ref": "#/$defs/envBinding"
+        },
+        {
+          "if": {
+            "properties": {
+              "environment": {
+                "const": "REAL"
+              },
+              "control_frozen": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "freeze_scope": {
+                "const": "ALL"
+              }
+            }
+          }
         }
       ],
       "properties": {
@@ -924,6 +1021,31 @@
               "$ref": "#/$defs/actionReadiness"
             }
           }
+        },
+        "source": {
+          "enum": [
+            "SERVER_OPERATION_READINESS",
+            "LEGACY_ROBOT_READINESS"
+          ],
+          "description": "Only SERVER_OPERATION_READINESS may admit motion. LEGACY = robot_readiness() compatibility projection, display only."
+        },
+        "based_on_snapshot_at": {
+          "$ref": "#/$defs/ts",
+          "description": "VehicleSnapshot.generated_at this evaluation used"
+        },
+        "freeze_scope": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "enum": [
+                "ALL",
+                "ALL_EXCEPT_STOP_MOTION"
+              ]
+            }
+          ],
+          "description": "ALL: nothing allowed (REAL default, incl. software e-stop). ALL_EXCEPT_STOP_MOTION: only stop_motion/protective_stop (SIM)."
         }
       },
       "if": {
@@ -937,13 +1059,25 @@
         "properties": {
           "freeze_reasons": {
             "minItems": 1
+          },
+          "freeze_scope": {
+            "enum": [
+              "ALL",
+              "ALL_EXCEPT_STOP_MOTION"
+            ]
           }
-        }
+        },
+        "required": [
+          "freeze_scope"
+        ]
       },
       "else": {
         "properties": {
           "freeze_reasons": {
             "maxItems": 0
+          },
+          "freeze_scope": {
+            "type": "null"
           }
         }
       },
@@ -1573,6 +1707,23 @@
         },
         "pose": {
           "$ref": "#/$defs/pose"
+        },
+        "arrival": {
+          "enum": [
+            "PASS_THROUGH",
+            "STOP"
+          ],
+          "description": "PASS_THROUGH = reached without stopping; STOP = must stop and is a success anchor. Default PASS_THROUGH except the last waypoint."
+        },
+        "xy_tolerance_m": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 2
+        },
+        "yaw_tolerance_rad": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 3.1415927
         }
       }
     },
@@ -1595,7 +1746,8 @@
         "expires_at",
         "operator_id",
         "command_id",
-        "execution_gen"
+        "execution_gen",
+        "nav_map_checksum"
       ],
       "allOf": [
         {
@@ -1639,6 +1791,35 @@
               "required": [
                 "route_snapshot"
               ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "mission_kind": {
+                "const": "PATROL"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "route_snapshot": {
+                "properties": {
+                  "waypoints": {
+                    "contains": {
+                      "properties": {
+                        "arrival": {
+                          "const": "STOP"
+                        }
+                      },
+                      "required": [
+                        "arrival"
+                      ]
+                    }
+                  }
+                }
+              }
             }
           }
         }
@@ -1754,6 +1935,11 @@
           "minimum": 1,
           "maximum": 1000,
           "description": "execution generation; +1 on every resume/re-dispatch of the same mission"
+        },
+        "nav_map_checksum": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 128
         }
       },
       "x-tier": "core"
@@ -1829,11 +2015,15 @@
           },
           "then": {
             "required": [
-              "final_pose"
+              "final_pose",
+              "stationary"
             ],
             "properties": {
               "progress": {
                 "const": 100
+              },
+              "stationary": {
+                "const": true
               }
             }
           }
@@ -1966,6 +2156,12 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 1000
+        },
+        "stationary": {
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "x-tier": "core"

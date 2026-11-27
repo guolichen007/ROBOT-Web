@@ -1,6 +1,6 @@
 # R002_SCENE_CONTRACT — 地图场景、发布与车端加载合同
 
-> CONTRACT_VERSION=`2.1.0-draft.2` · 状态：**DRAFT，未冻结**（须独立审查后冻结） · 基线 `23854b0`
+> CONTRACT_VERSION=`2.1.0-draft.3` · 状态：**DRAFT，未冻结**（须独立审查后冻结） · 基线 `23854b0`
 > 机器可读：[firebot-web-v2.1.contracts.schema.json](../../../packages/protocol-schemas/firebot-v2.1/firebot-web-v2.1.contracts.schema.json)（`$defs/SceneManifest`、`$defs/SceneLoadReceipt`）；样例/向量：[vectors/](../../../packages/protocol-schemas/firebot-v2.1/vectors/)；语义规则：[contracts_v21.py](../../../services/contracts_v21.py)。
 > 上位合同：[地图坐标合同.md](../地图坐标合同.md)、[MQTT协议.md](../MQTT协议.md)、[FIREBOT_BRIDGE_CONTRACT_1.3.md](../FIREBOT_BRIDGE_CONTRACT_1.3.md)。冲突时上位合同优先。
 

@@ -1,4 +1,4 @@
-"""Firebot Web V2.1 contract helpers (DRAFT 2.1.0-draft.2, NOT FROZEN).
+"""Firebot Web V2.1 contract helpers (DRAFT 2.1.0-draft.3, NOT FROZEN).
 
 Pure functions only: no DB, no MQTT, no network. Safe to import from API, workers
 and tests. Real wire protocol stays Canonical MQTT 1.3 until an independent review
@@ -17,7 +17,7 @@ from typing import Any
 
 from jsonschema import Draft202012Validator, FormatChecker
 
-CONTRACT_VERSION = "2.1.0-draft.2"
+CONTRACT_VERSION = "2.1.0-draft.3"
 CONTRACTS = (
     "VehicleSnapshot",
     "OperationReadiness",
@@ -57,6 +57,16 @@ GOAL_REQUIRED_STATES = frozenset({"EXECUTING", "WAITING_OBSTACLE", "SUCCEEDED"})
 FEEDBACK_MAX_AGE_S = 10.0
 SNAPSHOT_MAX_AGE_S = 5.0
 CLOCK_SKEW_S = 2.0
+SUCCESS_POSE_MAX_AGE_S = 2.0
+DEFAULT_XY_TOL_M = 0.2
+DEFAULT_YAW_TOL_RAD = 0.15
+# Under a freeze only these may still be allowed, per scope. REAL freeze = ALL (incl. software
+# e-stop: unauthorised remote e-stop is a remote command too; field e-stop is physical).
+FREEZE_EXEMPT: dict[str, frozenset[str]] = {
+    "ALL": frozenset(),
+    "ALL_EXCEPT_STOP_MOTION": frozenset({"stop_motion", "protective_stop"}),
+}
+MOTION_ACTIONS = frozenset({"patrol_start", "patrol_resume", "navigate_to_point", "return_home"})
 # Business thresholds (display/alarm rules). Smoke threshold only applies when unit verified as ppm.
 BATTERY_LOW_PCT = 50.0
 TEMPERATURE_HIGH_C = 80.0
@@ -238,14 +248,16 @@ def _scene_rules(manifest: dict[str, Any]) -> None:
 
 def _readiness_rules(r: dict[str, Any]) -> None:
     _ts_order(r["evaluated_at"], r["valid_until"], "READINESS_VALID_UNTIL_BEFORE_EVALUATED")
+    _ts_order(r["based_on_snapshot_at"], r["evaluated_at"], "READINESS_BEFORE_ITS_SNAPSHOT")
     if r["control_frozen"]:
+        exempt = FREEZE_EXEMPT[r["freeze_scope"]]
         for name, action in r["actions"].items():
-            if action["allowed"] and name not in {
-                "stop_motion",
-                "protective_stop",
-                "emergency_stop",
-            }:
+            if action["allowed"] and name not in exempt:
                 raise ContractError("FROZEN_BUT_ACTION_ALLOWED", name)
+    if r["source"] != "SERVER_OPERATION_READINESS":
+        for name in MOTION_ACTIONS:
+            if r["actions"].get(name, {}).get("allowed"):
+                raise ContractError("LEGACY_READINESS_CANNOT_ALLOW_MOTION", name)
     if r["boot_id"] is None:
         for name, action in r["actions"].items():
             if action["allowed"] and name != "emergency_stop":
@@ -355,6 +367,8 @@ def apply_feedback(
     current_wp = task.get("waypoint_index")
     if current_wp is not None and f["waypoint_index"] < current_wp:
         return False, "WAYPOINT_REGRESSION", task
+    if f["waypoint_index"] > (-1 if current_wp is None else current_wp) + 1:
+        return False, "WAYPOINT_SKIPPED", task  # pass-through points are still reported in order
     same_wp = current_wp is not None and f["waypoint_index"] == current_wp
     bound = task.get("goal_id") if same_wp else None
     if bound is not None:
@@ -364,6 +378,13 @@ def apply_feedback(
             return False, "STALE_GOAL_ID", task
     if f["state"] in GOAL_REQUIRED_STATES and not f.get("goal_id"):
         return False, "GOAL_REQUIRED", task
+    used = list(task.get("goals_used") or [])
+    if task.get("goal_id") and task["goal_id"] not in used:
+        used.append(task["goal_id"])  # the currently bound goal is always "used"
+    if not same_wp and f.get("goal_id") and f["goal_id"] in used:
+        return False, "GOAL_REUSED", task  # a new waypoint needs a new nav goal
+    if f["state"] == "SUCCEEDED" and f["waypoint_index"] != f["waypoint_total"] - 1:
+        return False, "INTERMEDIATE_SUCCEEDED", task
     if f["state"] not in MISSION_TRANSITIONS.get(task["state"], frozenset()):
         return False, "ILLEGAL_TRANSITION", task
     nxt = dict(task)
@@ -372,9 +393,56 @@ def apply_feedback(
         last_seq=f["seq"],
         waypoint_index=f["waypoint_index"],
         goal_id=f.get("goal_id") or bound,
+        goals_used=used + [f["goal_id"]] if f.get("goal_id") and f["goal_id"] not in used else used,
         progress=f["progress"],
+        succeeded_reported_at=f["observed_at"] if f["state"] == "SUCCEEDED" else None,
     )
     return True, "OK", nxt
+
+
+def _angle_diff(a: float, b: float) -> float:
+    return abs((a - b + math.pi) % (2 * math.pi) - math.pi)
+
+
+def confirm_mission_success(
+    request: dict[str, Any], task: dict[str, Any], snapshot: dict[str, Any], *, now: datetime
+) -> tuple[bool, str]:
+    """Platform-side success: the vehicle's SUCCEEDED is a claim. Success requires the last
+    must-reach (STOP) waypoint, the platform's own fresh pose within tolerance, measured
+    stillness and the same nav map, all observed after the claim."""
+    if task["state"] != "SUCCEEDED" or not task.get("succeeded_reported_at"):
+        return False, "NOT_REPORTED_SUCCEEDED"
+    if request["mission_kind"] == "PATROL":
+        last = request["route_snapshot"]["waypoints"][-1]
+        if last.get("arrival", "PASS_THROUGH") != "STOP":
+            return False, "FINAL_WAYPOINT_NOT_STOP"
+        target, wp = last["pose"], last
+    else:
+        target, wp = request["target"]["pose"], request["target"]
+    if snapshot["vehicle_id"] != request["vehicle_id"] or snapshot["boot_id"] != task["boot_id"]:
+        return False, "SNAPSHOT_IDENTITY_MISMATCH"
+    if snapshot["link"]["state"] != "ONLINE":
+        return False, "LINK_NOT_ONLINE"
+    pose, motion = snapshot["pose"], snapshot["motion"]
+    if pose["quality"] != "LIVE" or pose["localization"] != "OK" or pose["value"] is None:
+        return False, "POSE_NOT_LIVE"
+    if pose["map_checksum"] != request["nav_map_checksum"]:
+        return False, "NAV_MAP_MISMATCH"
+    observed = _ts(pose["observed_at"])
+    if (now - observed).total_seconds() > SUCCESS_POSE_MAX_AGE_S:
+        return False, "POSE_STALE"
+    if observed < _ts(task["succeeded_reported_at"]):
+        return False, "POSE_PREDATES_CLAIM"
+    if motion["quality"] != "LIVE" or motion["stationary"] is not True:
+        return False, "NOT_STATIONARY"
+    value = pose["value"]
+    if math.hypot(value["x"] - target["x"], value["y"] - target["y"]) > wp.get(
+        "xy_tolerance_m", DEFAULT_XY_TOL_M
+    ):
+        return False, "POSITION_OUT_OF_TOLERANCE"
+    if _angle_diff(value["yaw"], target["yaw"]) > wp.get("yaw_tolerance_rad", DEFAULT_YAW_TOL_RAD):
+        return False, "YAW_OUT_OF_TOLERANCE"
+    return True, "OK"
 
 
 def feedback_applies(
@@ -432,6 +500,35 @@ def scene_load_confirms(
     return True, "OK"
 
 
+def apply_scene_receipt(
+    vehicle_scene: dict[str, Any], manifest: dict[str, Any], receipt: dict[str, Any]
+) -> tuple[bool, str, dict[str, Any]]:
+    """vehicle_scene: {current_boot_id, latest_request, state (PENDING|LOADED_CONFIRMED|
+    LOAD_REJECTED), loaded_scene_id/version/digest}. A stale or duplicate receipt
+    never overwrites a newer load or an already-final result."""
+    latest = vehicle_scene["latest_request"]
+    if receipt["load_id"] != latest["load_id"]:
+        return False, "RECEIPT_STALE_LOAD", vehicle_scene
+    if vehicle_scene["state"] != "PENDING":
+        return False, "RECEIPT_ALREADY_FINAL", vehicle_scene
+    ok, code = scene_load_confirms(
+        manifest, latest, receipt, current_boot_id=vehicle_scene["current_boot_id"]
+    )
+    nxt = dict(vehicle_scene)
+    if not ok:
+        if code in {"RECEIPT_REJECTED", "RECEIPT_FAILED"}:
+            nxt.update(state="LOAD_REJECTED", reason=code)
+            return True, code, nxt
+        return False, code, vehicle_scene
+    nxt.update(
+        state="LOADED_CONFIRMED",
+        loaded_scene_id=manifest["scene_id"],
+        loaded_scene_version=manifest["scene_version"],
+        loaded_scene_digest=manifest["digest"],
+    )
+    return True, "OK", nxt
+
+
 def mission_admissible(
     manifest: dict[str, Any] | None,
     snapshot: dict[str, Any],
@@ -451,8 +548,14 @@ def mission_admissible(
         return False, "READINESS_EXPIRED"
     if (_ts(readiness["evaluated_at"]) - now).total_seconds() > CLOCK_SKEW_S:
         return False, "READINESS_FROM_FUTURE"
+    if readiness["source"] != "SERVER_OPERATION_READINESS":
+        return False, "READINESS_NOT_AUTHORITATIVE"
+    if (_ts(snapshot["generated_at"]) - now).total_seconds() > CLOCK_SKEW_S:
+        return False, "SNAPSHOT_FROM_FUTURE"
     if (now - _ts(snapshot["generated_at"])).total_seconds() > snapshot_max_age_s:
         return False, "SNAPSHOT_STALE"
+    if readiness["based_on_snapshot_at"] != snapshot["generated_at"]:
+        return False, "READINESS_NOT_FROM_THIS_SNAPSHOT"
     if (
         readiness["vehicle_id"] != snapshot["vehicle_id"]
         or readiness["environment"] != snapshot["environment"]
@@ -461,6 +564,13 @@ def mission_admissible(
         return False, "READINESS_SNAPSHOT_MISMATCH"
     if snapshot["boot_id"] is None:
         return False, "BOOT_UNKNOWN"
+    if snapshot["link"]["state"] != "ONLINE":
+        return False, "LINK_NOT_ONLINE"
+    pose = snapshot["pose"]
+    if pose["quality"] != "LIVE" or pose["localization"] != "OK":
+        return False, "POSE_NOT_LIVE"
+    if pose["map_checksum"] != manifest["nav_map"]["map_checksum"]:
+        return False, "NAV_MAP_MISMATCH"
     if readiness["control_frozen"]:
         return False, "CONTROL_FROZEN"
     scene = snapshot["scene"]

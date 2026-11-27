@@ -95,6 +95,7 @@ snap_sim = {
     "smoke": obs(12.0, unit="UNVERIFIED", unit_verified=False, raw_source_field="sensor.smoke"),
     "temperature_c": obs(None, "UNSUPPORTED"),
     "estop": {"active": False, "quality": "LIVE", "observed_at": T1},
+    "motion": {"stationary": True, "quality": "LIVE", "observed_at": T1},
     "devices": [
         {
             "device": "LIDAR",
@@ -140,6 +141,7 @@ snap_real_unknown = {
     "smoke": obs(None, "UNKNOWN", unit="UNVERIFIED", unit_verified=False),
     "temperature_c": obs(None, "UNSUPPORTED"),
     "estop": {"active": None, "quality": "UNKNOWN", "observed_at": None},
+    "motion": {"stationary": None, "quality": "UNKNOWN", "observed_at": None},
     "devices": [],
     "active_mission_id": None,
     "scene": {
@@ -171,6 +173,11 @@ snapshot_vectors = {
             mutate(snap_sim, ["scene", "load_state"], "LOADED_CONFIRMED"),
         ),
         inv("estop_unknown_but_false", mutate(snap_real_unknown, ["estop", "active"], False)),
+        inv(
+            "motion_unknown_but_stationary",
+            mutate(snap_real_unknown, ["motion", "stationary"], True),
+        ),
+        inv("live_pose_without_map_checksum", mutate(snap_sim, ["pose", "map_checksum"], None)),
     ],
     "invalid_raw": [
         {
@@ -211,7 +218,10 @@ ready_real_deny = {
     "evaluated_at": T1,
     "valid_until": T2,
     "boot_id": None,
+    "source": "SERVER_OPERATION_READINESS",
+    "based_on_snapshot_at": T1,
     "control_frozen": True,
+    "freeze_scope": "ALL",
     "freeze_reasons": ["REAL_CONTROL_NOT_AUTHORIZED", "ROBOT_BOOT_SESSION_UNKNOWN"],
     "control_owner": None,
     "actions": {
@@ -237,7 +247,10 @@ ready_sim = {
     "evaluated_at": T1,
     "valid_until": T2,
     "boot_id": BOOT,
+    "source": "SERVER_OPERATION_READINESS",
+    "based_on_snapshot_at": T1,
     "control_frozen": False,
+    "freeze_scope": None,
     "freeze_reasons": [],
     "control_owner": {
         "user_id": OPER,
@@ -255,10 +268,23 @@ ready_sim = {
         "manual_control": act(False, "robot.control.manual", ["CONTROL_LEASE_REQUIRED"]),
     },
 }
+ready_sim_frozen_stop_only = {
+    **ready_sim,
+    "control_frozen": True,
+    "freeze_scope": "ALL_EXCEPT_STOP_MOTION",
+    "freeze_reasons": ["SIM_EXERCISE_FREEZE"],
+    "actions": {
+        "stop_motion": act(True, "robot.control.stop"),
+        "protective_stop": act(True, "robot.control.stop"),
+        "emergency_stop": act(False, "robot.control.estop", ["CONTROL_FROZEN"], "HOLD"),
+        "patrol_start": act(False, "patrol.create", ["CONTROL_FROZEN"]),
+    },
+}
 readiness_vectors = {
     "valid": [
         {"name": "real_default_deny", "payload": ready_real_deny},
         {"name": "sim_ready", "payload": ready_sim},
+        {"name": "sim_frozen_stop_motion_only", "payload": ready_sim_frozen_stop_only},
     ],
     "invalid": [
         inv(
@@ -622,11 +648,12 @@ mreq = {
         "route_id": ROUTE,
         "start_index": 0,
         "waypoints": [
-            {"index": 0, "point_id": P[0], "pose": points[0]["pose"]},
-            {"index": 1, "point_id": P[1], "pose": points[1]["pose"]},
-            {"index": 2, "point_id": P[2], "pose": points[2]["pose"]},
+            {"index": 0, "point_id": P[0], "pose": points[0]["pose"], "arrival": "PASS_THROUGH"},
+            {"index": 1, "point_id": P[1], "pose": points[1]["pose"], "arrival": "PASS_THROUGH"},
+            {"index": 2, "point_id": P[2], "pose": points[2]["pose"], "arrival": "STOP"},
         ],
     },
+    "nav_map_checksum": nav["map_checksum"],
     "resume_of": None,
     "issued_at": T0,
     "expires_at": T2,
@@ -683,6 +710,11 @@ mission_vectors = {
         ),
         inv("pixel_pose_frame", mutate(mreq_nav, ["target", "pose", "frame_id"], "screen")),
         inv("short_idempotency_key", mutate(mreq, ["idempotency_key"], "k")),
+        inv("missing_nav_map_checksum", mutate(mreq, ["nav_map_checksum"], None, delete=True)),
+        inv(
+            "patrol_without_any_stop_waypoint",
+            mutate(mreq, ["route_snapshot", "waypoints", 2, "arrival"], "PASS_THROUGH"),
+        ),
     ],
 }
 
@@ -735,6 +767,7 @@ fb_done = {
     "goal_id": GOAL2,
     "current_point_id": P[2],
     "final_pose": points[2]["pose"],
+    "stationary": True,
 }
 fb_fail = {
     **fb,
@@ -759,6 +792,7 @@ task_exec = {
     "waypoint_index": 1,
     "waypoint_total": 3,
     "goal_id": GOAL1,
+    "goals_used": [GOAL1],
 }
 task_dispatched = {
     **task_exec,
@@ -766,6 +800,7 @@ task_dispatched = {
     "last_seq": None,
     "waypoint_index": None,
     "goal_id": None,
+    "goals_used": [],
 }
 
 
@@ -789,6 +824,7 @@ feedback_vectors = {
         inv("obstacle_without_since", mutate(fb_wait, ["obstacle_since"], None, delete=True)),
         inv("succeeded_progress_not_100", mutate(fb_done, ["progress"], 90)),
         inv("succeeded_without_final_pose", mutate(fb_done, ["final_pose"], None, delete=True)),
+        inv("succeeded_not_stationary", mutate(fb_done, ["stationary"], False)),
         inv("executing_without_goal", mutate(fb, ["goal_id"], None)),
         inv("missing_command_id", mutate(fb, ["command_id"], None, delete=True)),
         inv("missing_execution_gen", mutate(fb, ["execution_gen"], None, delete=True)),
@@ -807,6 +843,35 @@ feedback_vectors = {
             "OK",
             {**fb, "seq": 23, "waypoint_index": 2, "goal_id": GOAL2, "current_point_id": P[2]},
         ),
+        # --- R1B independent review: draft.2 false accepts (#1 #2 #3)
+        apply_case(
+            "R1B_1_waypoint_jump_0_to_2",
+            "WAYPOINT_SKIPPED",
+            {**fb, "seq": 22, "waypoint_index": 2, "goal_id": GOAL2},
+            task={**task_exec, "waypoint_index": 0},
+        ),
+        apply_case(
+            "R1B_2_goal_reused_on_new_waypoint",
+            "GOAL_REUSED",
+            {**fb, "seq": 22, "waypoint_index": 2, "goal_id": GOAL1},
+        ),
+        apply_case(
+            "R1B_2b_goal_reused_task_without_goals_used",
+            "GOAL_REUSED",
+            {**fb, "seq": 22, "waypoint_index": 2, "goal_id": GOAL1},
+            task={k: v for k, v in task_exec.items() if k != "goals_used"},
+        ),
+        apply_case(
+            "R1B_3_intermediate_succeeded",
+            "INTERMEDIATE_SUCCEEDED",
+            {**fb_done, "seq": 22, "waypoint_index": 1, "goal_id": GOAL1},
+        ),
+        apply_case(
+            "pass_through_point_reported_in_order_ok",
+            "OK",
+            {**fb, "seq": 22, "waypoint_index": 1, "goal_id": GOAL1, "progress": 50},
+            task={**task_exec, "waypoint_index": 0, "goal_id": "g0", "goals_used": ["g0"]},
+        ),
         # --- the 5 reviewed counterexamples (CE1, CE2) + new HF1 cases
         apply_case(
             "CE1_bound_goal_null_goal_feedback",
@@ -822,12 +887,12 @@ feedback_vectors = {
             "accepted_straight_to_succeeded",
             "ILLEGAL_TRANSITION",
             {**fb_done, "seq": 21},
-            task={**task_exec, "state": "ACCEPTED", "goal_id": None, "waypoint_index": 0},
+            task={**task_exec, "state": "ACCEPTED", "goal_id": None, "waypoint_index": 1},
         ),
         apply_case(
             "dispatched_straight_to_executing",
             "ILLEGAL_TRANSITION",
-            fb,
+            {**fb, "waypoint_index": 0},
             task=task_dispatched,
         ),
         apply_case("old_goal_same_waypoint", "STALE_GOAL_ID", {**fb, "seq": 22, "goal_id": "x"}),
@@ -1169,8 +1234,208 @@ readiness_vectors["admission_cases"] = [
     admit(
         "frozen",
         "CONTROL_FROZEN",
-        readiness={**ready_sim, "control_frozen": True, "freeze_reasons": ["OWNER_FREEZE"]},
+        readiness={
+            **ready_sim,
+            "control_frozen": True,
+            "freeze_scope": "ALL",
+            "freeze_reasons": ["OWNER_FREEZE"],
+        },
     ),
+    # --- R1B independent review: draft.2 false accepts (#4 #5 #6) + readiness authority
+    admit(
+        "R1B_4_snapshot_map_checksum_mismatch",
+        "NAV_MAP_MISMATCH",
+        snapshot=mutate(snap_loaded, ["pose", "map_checksum"], "some-other-map-v9"),
+    ),
+    admit(
+        "R1B_5_snapshot_10min_future",
+        "SNAPSHOT_FROM_FUTURE",
+        snapshot=mutate(snap_loaded, ["generated_at"], "2026-11-26T09:10:05+08:00"),
+    ),
+    admit(
+        "R1B_6a_offline_link_with_valid_readiness",
+        "LINK_NOT_ONLINE",
+        snapshot=mutate(snap_loaded, ["link", "state"], "OFFLINE"),
+    ),
+    admit(
+        "R1B_6b_stale_pose_with_valid_readiness",
+        "POSE_NOT_LIVE",
+        snapshot=mutate(snap_loaded, ["pose", "quality"], "STALE"),
+    ),
+    admit(
+        "readiness_older_than_snapshot",
+        "READINESS_NOT_FROM_THIS_SNAPSHOT",
+        snapshot=mutate(snap_loaded, ["generated_at"], "2026-11-26T09:00:06+08:00"),
+    ),
+    admit(
+        "legacy_readiness_source_never_admits",
+        "READINESS_NOT_AUTHORITATIVE",
+        readiness={**ready_sim, "source": "LEGACY_ROBOT_READINESS"},
+    ),
+    admit(
+        "localization_lost",
+        "POSE_NOT_LIVE",
+        snapshot=mutate(snap_loaded, ["pose", "localization"], "LOST"),
+    ),
+]
+
+# confirm_mission_success(request, task, snapshot, now): the vehicle claim is never enough
+SUCCESS_AT = "2026-11-26T09:00:05+08:00"
+task_succeeded = {
+    **task_exec,
+    "state": "SUCCEEDED",
+    "waypoint_index": 2,
+    "goal_id": GOAL2,
+    "goals_used": [GOAL1, GOAL2],
+    "succeeded_reported_at": SUCCESS_AT,
+}
+snap_arrived = copy.deepcopy(snap_loaded)
+snap_arrived["pose"]["observed_at"] = "2026-11-26T09:00:06+08:00"
+snap_arrived["pose"]["value"] = pose(8.05, 0.02, 0.05)
+snap_arrived["motion"] = {
+    "stationary": True,
+    "quality": "LIVE",
+    "observed_at": "2026-11-26T09:00:06+08:00",
+}
+SUCCESS_NOW = "2026-11-26T09:00:07+08:00"
+
+
+def success(
+    name, expect, request=mreq, task=task_succeeded, snapshot=snap_arrived, now=SUCCESS_NOW
+):
+    return {
+        "name": name,
+        "request": request,
+        "task": task,
+        "snapshot": snapshot,
+        "now": now,
+        "expect": expect,
+    }
+
+
+feedback_vectors["success_cases"] = [
+    success("arrived_still_in_tolerance_ok", "OK"),
+    success("not_reported_succeeded", "NOT_REPORTED_SUCCEEDED", task={**task_exec}),
+    success(
+        "position_30cm_off",
+        "POSITION_OUT_OF_TOLERANCE",
+        snapshot=mutate(snap_arrived, ["pose", "value", "x"], 8.3),
+    ),
+    success(
+        "yaw_off",
+        "YAW_OUT_OF_TOLERANCE",
+        snapshot=mutate(snap_arrived, ["pose", "value", "yaw"], 0.6),
+    ),
+    success("pose_stale", "POSE_STALE", now="2026-11-26T09:00:09+08:00"),
+    success(
+        "pose_before_claim",
+        "POSE_PREDATES_CLAIM",
+        task={**task_succeeded, "succeeded_reported_at": "2026-11-26T09:00:06.5+08:00"},
+    ),
+    success(
+        "still_moving",
+        "NOT_STATIONARY",
+        snapshot=mutate(snap_arrived, ["motion", "stationary"], False),
+    ),
+    success(
+        "stillness_unknown",
+        "NOT_STATIONARY",
+        snapshot=mutate(
+            mutate(
+                mutate(snap_arrived, ["motion", "quality"], "UNKNOWN"),
+                ["motion", "stationary"],
+                None,
+            ),
+            ["motion", "observed_at"],
+            None,
+        ),
+    ),
+    success(
+        "other_nav_map",
+        "NAV_MAP_MISMATCH",
+        snapshot=mutate(snap_arrived, ["pose", "map_checksum"], "some-other-map-v9"),
+    ),
+    success(
+        "link_offline",
+        "LINK_NOT_ONLINE",
+        snapshot=mutate(snap_arrived, ["link", "state"], "OFFLINE"),
+    ),
+    success(
+        "final_waypoint_pass_through_only",
+        "FINAL_WAYPOINT_NOT_STOP",
+        request=mutate(mreq, ["route_snapshot", "waypoints", 2, "arrival"], "PASS_THROUGH"),
+    ),
+]
+
+# apply_scene_receipt(vehicle_scene, manifest, receipt): only the latest load on the current boot
+scene_pub_v2 = copy.deepcopy(scene_pub)
+scene_pub_v2["scene_version"] = 2
+scene_pub_v2["digest"] = scene_digest(scene_pub_v2)
+load_req_v2 = {
+    **load_req,
+    "load_id": LOAD_OTHER,
+    "scene_version": 2,
+    "scene_digest": scene_pub_v2["digest"],
+}
+receipt_v2 = {
+    **receipt_ok,
+    "receipt_id": "f4000000-0000-4000-8000-000000000002",
+    "load_id": LOAD_OTHER,
+    "scene_version": 2,
+    "scene_digest": scene_pub_v2["digest"],
+}
+
+
+def vstate(latest, state="PENDING", boot=BOOT) -> dict:
+    return {
+        "current_boot_id": boot,
+        "latest_request": latest,
+        "state": state,
+        "loaded_scene_id": None,
+        "loaded_scene_version": None,
+        "loaded_scene_digest": None,
+    }
+
+
+def st(name, expect, state, receipt, manifest=scene_pub):
+    return {
+        "name": name,
+        "vehicle_scene": state,
+        "manifest": manifest,
+        "receipt": receipt,
+        "expect": expect,
+    }
+
+
+receipt_vectors["state_cases"] = [
+    st("latest_load_confirmed_ok", "OK", vstate(load_req), receipt_ok),
+    st(
+        "old_load_receipt_after_newer_request",
+        "RECEIPT_STALE_LOAD",
+        vstate(load_req_v2),
+        receipt_ok,
+        scene_pub_v2,
+    ),
+    st(
+        "duplicate_after_final",
+        "RECEIPT_ALREADY_FINAL",
+        vstate(load_req, "LOADED_CONFIRMED"),
+        receipt_ok,
+    ),
+    st(
+        "same_scene_version_other_digest",
+        "RECEIPT_DIGEST_MISMATCH",
+        vstate(load_req),
+        mutate(receipt_ok, ["scene_digest"], "0" * 64),
+    ),
+    st(
+        "receipt_from_previous_boot",
+        "RECEIPT_STALE_BOOT_ID",
+        vstate(load_req, boot=BOOT_OLD),
+        receipt_ok,
+    ),
+    st("rejected_receipt_is_final", "RECEIPT_REJECTED", vstate(load_req), receipt_rej),
+    st("newer_load_confirmed_ok", "OK", vstate(load_req_v2), receipt_v2, scene_pub_v2),
 ]
 
 ALL = {

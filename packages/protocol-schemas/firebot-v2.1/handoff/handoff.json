@@ -1,9 +1,9 @@
 {
-  "contract_version": "2.1.0-draft.2",
+  "contract_version": "2.1.0-draft.3",
   "status": "DRAFT_NOT_FROZEN",
   "schema": {
     "path": "firebot-web-v2.1.contracts.schema.json",
-    "sha256": "3a0f8acfcc71eabf653a0945281ee0f1d0517ddc7be361d633da1517957918b7"
+    "sha256": "54f4a1b5043e81ad79f4936b4699007495310d3bc825db778bccb3e1c4403c02"
   },
   "core_contracts": [
     "VehicleSnapshot",
@@ -31,7 +31,7 @@
   "case_files": {
     "VehicleSnapshot": {
       "path": "vectors/VehicleSnapshot.vectors.json",
-      "sha256": "07138c406c5db3f02d982cebadf0e1143375dc3c66514b03139eb39233d0233e",
+      "sha256": "6e378e612687c62e41ef548657720d1fa34edf280718d811f4131dca7111f032",
       "case_sets": [
         "invalid",
         "invalid_raw",
@@ -41,7 +41,7 @@
     },
     "OperationReadiness": {
       "path": "vectors/OperationReadiness.vectors.json",
-      "sha256": "fad1ecc2a3c55cf8f879eff2c657bf98bacc7bc46b5d8bc58c855dc2bf2366e0",
+      "sha256": "0a894a621af1f3c3a4ef68ea449d179daa8d2e6031c7d7a6bff16b6e0d606819",
       "case_sets": [
         "admission_cases",
         "invalid",
@@ -50,7 +50,7 @@
     },
     "SceneManifest": {
       "path": "vectors/SceneManifest.vectors.json",
-      "sha256": "2efa36a7702a7222e6d92e0e761e2cf518de80eaa1fb28a9723e19ce371fe009",
+      "sha256": "ade469cfc90f98618367db75ab38ac1c10f2ba47977d870c5492f17918e4c06e",
       "case_sets": [
         "invalid",
         "valid"
@@ -58,16 +58,17 @@
     },
     "SceneLoadReceipt": {
       "path": "vectors/SceneLoadReceipt.vectors.json",
-      "sha256": "99d9c144e89c2a86b4790c86e23165212daa2a334ef609fec61422efa0850b64",
+      "sha256": "485db69bb49d32d52f1c8d76709ee8c8aea091cd36b8a7071042623ceb9a6473",
       "case_sets": [
         "confirm_cases",
         "invalid",
+        "state_cases",
         "valid"
       ]
     },
     "MissionRequest": {
       "path": "vectors/MissionRequest.vectors.json",
-      "sha256": "435d729b087a47c14feae9f8f3386c14aed3b305f1011e98fa9054b71560b457",
+      "sha256": "3c6b5593268b5fcd7e63672c8ba4dfc3c8d91c9f5abba9887343c783573fc27a",
       "case_sets": [
         "invalid",
         "valid"
@@ -75,16 +76,17 @@
     },
     "MissionFeedback": {
       "path": "vectors/MissionFeedback.vectors.json",
-      "sha256": "1c891bb627d5eea8abc641d090e027f1a390bf5a88b9edabd622b32682f414c9",
+      "sha256": "749197f958f0aabade7ea32d7d3b84d0095dcfb700372361850cc73adb605bf5",
       "case_sets": [
         "apply_cases",
         "invalid",
+        "success_cases",
         "valid"
       ]
     },
     "NavigationDiagnostics": {
       "path": "vectors/NavigationDiagnostics.vectors.json",
-      "sha256": "453768e1e6336a7a74d9332c11f31bdc6329987aace3a7e34269245980f063fd",
+      "sha256": "fb1d0cf7792c8a9776920c57b06e5fc83265d19b2e4c066ddd8893dd14b4380a",
       "case_sets": [
         "invalid",
         "valid"
@@ -92,7 +94,7 @@
     },
     "SceneLoadRequest": {
       "path": "vectors/SceneLoadRequest.vectors.json",
-      "sha256": "3289f8a476530884fbe7c69ed3efd5bb2ba69f71b2b32ae566d15a70375e676c",
+      "sha256": "b8bfd0fb56c44e86bcf0051d9a2a794aa10d251b14cc853c68bf3c27a778c7bf",
       "case_sets": [
         "invalid",
         "valid"

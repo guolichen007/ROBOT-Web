@@ -3,7 +3,7 @@
     {
       "name": "blocked",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "NavigationDiagnostics",
         "vehicle_id": "firebot-sim-r002-01",
         "environment": "SIM",
@@ -31,7 +31,7 @@
     {
       "name": "idle_unknown_obstacle",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "NavigationDiagnostics",
         "vehicle_id": "firebot-sim-r002-01",
         "environment": "SIM",
@@ -61,7 +61,7 @@
     {
       "name": "blocked_but_not_blocked",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "NavigationDiagnostics",
         "vehicle_id": "firebot-sim-r002-01",
         "environment": "SIM",
@@ -90,7 +90,7 @@
     {
       "name": "negative_distance",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "NavigationDiagnostics",
         "vehicle_id": "firebot-sim-r002-01",
         "environment": "SIM",
@@ -119,7 +119,7 @@
     {
       "name": "missing_localization",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "NavigationDiagnostics",
         "vehicle_id": "firebot-sim-r002-01",
         "environment": "SIM",

@@ -3,7 +3,7 @@
     {
       "name": "sim_patrol",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "MissionRequest",
         "mission_id": "f1000000-0000-4000-8000-000000000001",
         "command_id": "f6000000-0000-4000-8000-000000000001",
@@ -28,7 +28,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 1,
@@ -38,7 +39,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 2,
@@ -48,10 +50,12 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "STOP"
             }
           ]
         },
+        "nav_map_checksum": "sim-gazebo-r002-v1",
         "resume_of": null,
         "issued_at": "2026-11-26T09:00:00+08:00",
         "expires_at": "2026-11-26T09:00:30+08:00",
@@ -61,7 +65,7 @@
     {
       "name": "sim_patrol_resume_gen2",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "MissionRequest",
         "mission_id": "f1000000-0000-4000-8000-000000000001",
         "command_id": "f6000000-0000-4000-8000-000000000003",
@@ -86,7 +90,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 1,
@@ -96,7 +101,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 2,
@@ -106,10 +112,12 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "STOP"
             }
           ]
         },
+        "nav_map_checksum": "sim-gazebo-r002-v1",
         "resume_of": "f1000000-0000-4000-8000-000000000001",
         "issued_at": "2026-11-26T09:00:00+08:00",
         "expires_at": "2026-11-26T09:00:30+08:00",
@@ -119,7 +127,7 @@
     {
       "name": "sim_return_home",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "MissionRequest",
         "mission_id": "f1000000-0000-4000-8000-000000000001",
         "command_id": "f6000000-0000-4000-8000-000000000001",
@@ -132,6 +140,7 @@
         "scene_id": "a1000000-0000-4000-8000-000000000001",
         "scene_version": 1,
         "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "nav_map_checksum": "sim-gazebo-r002-v1",
         "resume_of": null,
         "issued_at": "2026-11-26T09:00:00+08:00",
         "expires_at": "2026-11-26T09:00:30+08:00",
@@ -152,7 +161,7 @@
     {
       "name": "patrol_without_route",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "MissionRequest",
         "mission_id": "f1000000-0000-4000-8000-000000000001",
         "command_id": "f6000000-0000-4000-8000-000000000001",
@@ -165,6 +174,7 @@
         "scene_id": "a1000000-0000-4000-8000-000000000001",
         "scene_version": 1,
         "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "nav_map_checksum": "sim-gazebo-r002-v1",
         "resume_of": null,
         "issued_at": "2026-11-26T09:00:00+08:00",
         "expires_at": "2026-11-26T09:00:30+08:00",
@@ -175,7 +185,7 @@
     {
       "name": "return_home_with_route",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "MissionRequest",
         "mission_id": "f1000000-0000-4000-8000-000000000001",
         "command_id": "f6000000-0000-4000-8000-000000000001",
@@ -188,6 +198,7 @@
         "scene_id": "a1000000-0000-4000-8000-000000000001",
         "scene_version": 1,
         "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "nav_map_checksum": "sim-gazebo-r002-v1",
         "resume_of": null,
         "issued_at": "2026-11-26T09:00:00+08:00",
         "expires_at": "2026-11-26T09:00:30+08:00",
@@ -213,7 +224,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 1,
@@ -223,7 +235,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 2,
@@ -233,7 +246,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "STOP"
             }
           ]
         }
@@ -243,7 +257,7 @@
     {
       "name": "missing_target_boot",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "MissionRequest",
         "mission_id": "f1000000-0000-4000-8000-000000000001",
         "command_id": "f6000000-0000-4000-8000-000000000001",
@@ -267,7 +281,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 1,
@@ -277,7 +292,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 2,
@@ -287,10 +303,12 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "STOP"
             }
           ]
         },
+        "nav_map_checksum": "sim-gazebo-r002-v1",
         "resume_of": null,
         "issued_at": "2026-11-26T09:00:00+08:00",
         "expires_at": "2026-11-26T09:00:30+08:00",
@@ -301,7 +319,7 @@
     {
       "name": "missing_command_id",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "MissionRequest",
         "mission_id": "f1000000-0000-4000-8000-000000000001",
         "execution_gen": 1,
@@ -325,7 +343,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 1,
@@ -335,7 +354,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 2,
@@ -345,10 +365,12 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "STOP"
             }
           ]
         },
+        "nav_map_checksum": "sim-gazebo-r002-v1",
         "resume_of": null,
         "issued_at": "2026-11-26T09:00:00+08:00",
         "expires_at": "2026-11-26T09:00:30+08:00",
@@ -359,7 +381,7 @@
     {
       "name": "execution_gen_zero",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "MissionRequest",
         "mission_id": "f1000000-0000-4000-8000-000000000001",
         "command_id": "f6000000-0000-4000-8000-000000000001",
@@ -384,7 +406,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 1,
@@ -394,7 +417,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 2,
@@ -404,10 +428,12 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "STOP"
             }
           ]
         },
+        "nav_map_checksum": "sim-gazebo-r002-v1",
         "resume_of": null,
         "issued_at": "2026-11-26T09:00:00+08:00",
         "expires_at": "2026-11-26T09:00:30+08:00",
@@ -418,7 +444,7 @@
     {
       "name": "resume_without_new_gen",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "MissionRequest",
         "mission_id": "f1000000-0000-4000-8000-000000000001",
         "command_id": "f6000000-0000-4000-8000-000000000003",
@@ -443,7 +469,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 1,
@@ -453,7 +480,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 2,
@@ -463,10 +491,12 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "STOP"
             }
           ]
         },
+        "nav_map_checksum": "sim-gazebo-r002-v1",
         "resume_of": "f1000000-0000-4000-8000-000000000001",
         "issued_at": "2026-11-26T09:00:00+08:00",
         "expires_at": "2026-11-26T09:00:30+08:00",
@@ -477,7 +507,7 @@
     {
       "name": "real_vehicle_in_sim",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "MissionRequest",
         "mission_id": "f1000000-0000-4000-8000-000000000001",
         "command_id": "f6000000-0000-4000-8000-000000000001",
@@ -502,7 +532,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 1,
@@ -512,7 +543,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 2,
@@ -522,10 +554,12 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "STOP"
             }
           ]
         },
+        "nav_map_checksum": "sim-gazebo-r002-v1",
         "resume_of": null,
         "issued_at": "2026-11-26T09:00:00+08:00",
         "expires_at": "2026-11-26T09:00:30+08:00",
@@ -536,7 +570,7 @@
     {
       "name": "waypoint_index_gap",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "MissionRequest",
         "mission_id": "f1000000-0000-4000-8000-000000000001",
         "command_id": "f6000000-0000-4000-8000-000000000001",
@@ -561,7 +595,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 1,
@@ -571,7 +606,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 5,
@@ -581,10 +617,12 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "STOP"
             }
           ]
         },
+        "nav_map_checksum": "sim-gazebo-r002-v1",
         "resume_of": null,
         "issued_at": "2026-11-26T09:00:00+08:00",
         "expires_at": "2026-11-26T09:00:30+08:00",
@@ -595,7 +633,7 @@
     {
       "name": "start_out_of_range",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "MissionRequest",
         "mission_id": "f1000000-0000-4000-8000-000000000001",
         "command_id": "f6000000-0000-4000-8000-000000000001",
@@ -620,7 +658,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 1,
@@ -630,7 +669,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 2,
@@ -640,10 +680,12 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "STOP"
             }
           ]
         },
+        "nav_map_checksum": "sim-gazebo-r002-v1",
         "resume_of": null,
         "issued_at": "2026-11-26T09:00:00+08:00",
         "expires_at": "2026-11-26T09:00:30+08:00",
@@ -654,7 +696,7 @@
     {
       "name": "expires_before_issued",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "MissionRequest",
         "mission_id": "f1000000-0000-4000-8000-000000000001",
         "command_id": "f6000000-0000-4000-8000-000000000001",
@@ -679,7 +721,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 1,
@@ -689,7 +732,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 2,
@@ -699,10 +743,12 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "STOP"
             }
           ]
         },
+        "nav_map_checksum": "sim-gazebo-r002-v1",
         "resume_of": null,
         "issued_at": "2026-11-26T09:00:00+08:00",
         "expires_at": "2026-11-26T08:00:00+08:00",
@@ -713,7 +759,7 @@
     {
       "name": "pixel_pose_frame",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "MissionRequest",
         "mission_id": "f1000000-0000-4000-8000-000000000001",
         "command_id": "f6000000-0000-4000-8000-000000000001",
@@ -726,6 +772,7 @@
         "scene_id": "a1000000-0000-4000-8000-000000000001",
         "scene_version": 1,
         "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "nav_map_checksum": "sim-gazebo-r002-v1",
         "resume_of": null,
         "issued_at": "2026-11-26T09:00:00+08:00",
         "expires_at": "2026-11-26T09:00:30+08:00",
@@ -745,7 +792,7 @@
     {
       "name": "short_idempotency_key",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "MissionRequest",
         "mission_id": "f1000000-0000-4000-8000-000000000001",
         "command_id": "f6000000-0000-4000-8000-000000000001",
@@ -770,7 +817,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 1,
@@ -780,7 +828,8 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "PASS_THROUGH"
             },
             {
               "index": 2,
@@ -790,10 +839,137 @@
                 "y": 0.0,
                 "yaw": 0.0,
                 "frame_id": "map"
-              }
+              },
+              "arrival": "STOP"
             }
           ]
         },
+        "nav_map_checksum": "sim-gazebo-r002-v1",
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:30+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "missing_nav_map_checksum",
+      "payload": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "command_id": "f6000000-0000-4000-8000-000000000001",
+        "execution_gen": 1,
+        "idempotency_key": "web-v21-sim-0001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "mission_kind": "PATROL",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "route_snapshot": {
+          "route_id": "d1000000-0000-4000-8000-000000000001",
+          "start_index": 0,
+          "waypoints": [
+            {
+              "index": 0,
+              "point_id": "b1000000-0000-4000-8000-000000000001",
+              "pose": {
+                "x": 0.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 1,
+              "point_id": "b1000000-0000-4000-8000-000000000002",
+              "pose": {
+                "x": 4.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 2,
+              "point_id": "b1000000-0000-4000-8000-000000000003",
+              "pose": {
+                "x": 8.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "STOP"
+            }
+          ]
+        },
+        "resume_of": null,
+        "issued_at": "2026-11-26T09:00:00+08:00",
+        "expires_at": "2026-11-26T09:00:30+08:00",
+        "operator_id": "11111111-2222-4333-8444-555555555555"
+      },
+      "expect": "SCHEMA_INVALID"
+    },
+    {
+      "name": "patrol_without_any_stop_waypoint",
+      "payload": {
+        "contract_version": "2.1.0-draft.3",
+        "kind": "MissionRequest",
+        "mission_id": "f1000000-0000-4000-8000-000000000001",
+        "command_id": "f6000000-0000-4000-8000-000000000001",
+        "execution_gen": 1,
+        "idempotency_key": "web-v21-sim-0001",
+        "vehicle_id": "firebot-sim-r002-01",
+        "environment": "SIM",
+        "target_boot_id": "6f1d2c3b-0a9e-4b8c-8d7e-1f2a3b4c5d6e",
+        "mission_kind": "PATROL",
+        "scene_id": "a1000000-0000-4000-8000-000000000001",
+        "scene_version": 1,
+        "scene_digest": "b6672a8c1c6729c7f324661a3b27d10f912d5f7f1afa908f3eac8c138fd6ff71",
+        "route_snapshot": {
+          "route_id": "d1000000-0000-4000-8000-000000000001",
+          "start_index": 0,
+          "waypoints": [
+            {
+              "index": 0,
+              "point_id": "b1000000-0000-4000-8000-000000000001",
+              "pose": {
+                "x": 0.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 1,
+              "point_id": "b1000000-0000-4000-8000-000000000002",
+              "pose": {
+                "x": 4.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            },
+            {
+              "index": 2,
+              "point_id": "b1000000-0000-4000-8000-000000000003",
+              "pose": {
+                "x": 8.0,
+                "y": 0.0,
+                "yaw": 0.0,
+                "frame_id": "map"
+              },
+              "arrival": "PASS_THROUGH"
+            }
+          ]
+        },
+        "nav_map_checksum": "sim-gazebo-r002-v1",
         "resume_of": null,
         "issued_at": "2026-11-26T09:00:00+08:00",
         "expires_at": "2026-11-26T09:00:30+08:00",

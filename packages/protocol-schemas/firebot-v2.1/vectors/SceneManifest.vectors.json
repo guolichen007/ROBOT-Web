@@ -3,7 +3,7 @@
     {
       "name": "sim_draft",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneManifest",
         "scene_id": "a1000000-0000-4000-8000-000000000001",
         "scene_version": 1,
@@ -162,7 +162,7 @@
     {
       "name": "sim_published_pending_traversability",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneManifest",
         "scene_id": "a1000000-0000-4000-8000-000000000001",
         "scene_version": 1,
@@ -323,7 +323,7 @@
     {
       "name": "published_without_digest",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneManifest",
         "scene_id": "a1000000-0000-4000-8000-000000000001",
         "scene_version": 1,
@@ -483,7 +483,7 @@
     {
       "name": "published_digest_tampered",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneManifest",
         "scene_id": "a1000000-0000-4000-8000-000000000001",
         "scene_version": 1,
@@ -643,7 +643,7 @@
     {
       "name": "published_route_ref_missing",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneManifest",
         "scene_id": "a1000000-0000-4000-8000-000000000001",
         "scene_version": 1,
@@ -802,7 +802,7 @@
     {
       "name": "published_dangling_corridor",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneManifest",
         "scene_id": "a1000000-0000-4000-8000-000000000001",
         "scene_version": 1,
@@ -962,7 +962,7 @@
     {
       "name": "published_without_return_home",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneManifest",
         "scene_id": "a1000000-0000-4000-8000-000000000001",
         "scene_version": 1,
@@ -1109,7 +1109,7 @@
     {
       "name": "published_traversability_failed",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneManifest",
         "scene_id": "a1000000-0000-4000-8000-000000000001",
         "scene_version": 1,
@@ -1269,7 +1269,7 @@
     {
       "name": "verified_without_evidence",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneManifest",
         "scene_id": "a1000000-0000-4000-8000-000000000001",
         "scene_version": 1,
@@ -1429,7 +1429,7 @@
     {
       "name": "route_single_point",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneManifest",
         "scene_id": "a1000000-0000-4000-8000-000000000001",
         "scene_version": 1,
@@ -1587,7 +1587,7 @@
     {
       "name": "polygon_two_vertices",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneManifest",
         "scene_id": "a1000000-0000-4000-8000-000000000001",
         "scene_version": 1,
@@ -1739,7 +1739,7 @@
     {
       "name": "resolution_zero",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneManifest",
         "scene_id": "a1000000-0000-4000-8000-000000000001",
         "scene_version": 1,
@@ -1899,7 +1899,7 @@
     {
       "name": "image_too_large",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneManifest",
         "scene_id": "a1000000-0000-4000-8000-000000000001",
         "scene_version": 1,
@@ -2059,7 +2059,7 @@
     {
       "name": "thresholds_inverted",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneManifest",
         "scene_id": "a1000000-0000-4000-8000-000000000001",
         "scene_version": 1,
@@ -2219,7 +2219,7 @@
     {
       "name": "point_coord_absurd",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneManifest",
         "scene_id": "a1000000-0000-4000-8000-000000000001",
         "scene_version": 1,
@@ -2379,7 +2379,7 @@
     {
       "name": "corridor_kind_left",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneManifest",
         "scene_id": "a1000000-0000-4000-8000-000000000001",
         "scene_version": 1,
@@ -2539,7 +2539,7 @@
     {
       "name": "published_before_created",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "SceneManifest",
         "scene_id": "a1000000-0000-4000-8000-000000000001",
         "scene_version": 1,

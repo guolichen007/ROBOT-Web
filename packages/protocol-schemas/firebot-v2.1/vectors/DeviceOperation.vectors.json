@@ -3,7 +3,7 @@
     {
       "name": "open_request",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "DeviceOperation",
         "message": "REQUEST",
         "operation_id": "f2000000-0000-4000-8000-000000000001",
@@ -21,7 +21,7 @@
     {
       "name": "open_completed_with_limit_switch",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "DeviceOperation",
         "message": "RESULT",
         "operation_id": "f2000000-0000-4000-8000-000000000001",
@@ -46,7 +46,7 @@
     {
       "name": "auto_mode_deferred",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "DeviceOperation",
         "message": "REQUEST",
         "operation_id": "f2000000-0000-4000-8000-000000000001",
@@ -65,7 +65,7 @@
     {
       "name": "completed_without_limit_switch",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "DeviceOperation",
         "message": "RESULT",
         "operation_id": "f2000000-0000-4000-8000-000000000001",
@@ -89,7 +89,7 @@
     {
       "name": "completed_but_position_unknown",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "DeviceOperation",
         "message": "RESULT",
         "operation_id": "f2000000-0000-4000-8000-000000000001",
@@ -113,7 +113,7 @@
     {
       "name": "failed_without_reason",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "DeviceOperation",
         "message": "RESULT",
         "operation_id": "f2000000-0000-4000-8000-000000000001",
@@ -137,7 +137,7 @@
     {
       "name": "request_carrying_result",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "DeviceOperation",
         "message": "REQUEST",
         "operation_id": "f2000000-0000-4000-8000-000000000001",
@@ -164,7 +164,7 @@
     {
       "name": "unknown_device",
       "payload": {
-        "contract_version": "2.1.0-draft.2",
+        "contract_version": "2.1.0-draft.3",
         "kind": "DeviceOperation",
         "message": "REQUEST",
         "operation_id": "f2000000-0000-4000-8000-000000000001",

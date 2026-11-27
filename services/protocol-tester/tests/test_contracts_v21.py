@@ -1,4 +1,4 @@
-"""Firebot Web V2.1 contract vectors (2.1.0-draft.2). Pure, no DB/MQTT."""
+"""Firebot Web V2.1 contract vectors (2.1.0-draft.3). Pure, no DB/MQTT."""
 
 from __future__ import annotations
 
@@ -116,6 +116,82 @@ def test_mission_admission_cases(case: dict) -> None:
 def test_threshold_exact_boundaries(case: dict) -> None:
     c.validate("VehicleSnapshot", case["snapshot"])
     assert c.threshold_alarms(case["snapshot"]) == case["expect"]
+
+
+@pytest.mark.parametrize("case", _named("MissionFeedback", "success_cases"))
+def test_mission_success_requires_platform_evidence(case: dict) -> None:
+    if case["name"] == "final_waypoint_pass_through_only":
+        # schema already refuses a patrol with no STOP waypoint; this proves the success
+        # check is independent of upstream validation (defence in depth)
+        with pytest.raises(c.ContractError):
+            c.validate("MissionRequest", case["request"])
+    else:
+        c.validate("MissionRequest", case["request"])
+    c.validate("VehicleSnapshot", case["snapshot"])
+    ok, code = c.confirm_mission_success(
+        case["request"], case["task"], case["snapshot"], now=_dt(case["now"])
+    )
+    assert (ok, code) == (case["expect"] == "OK", case["expect"])
+
+
+@pytest.mark.parametrize("case", _named("SceneLoadReceipt", "state_cases"))
+def test_scene_receipt_only_latest_load_current_boot(case: dict) -> None:
+    c.validate("SceneLoadReceipt", case["receipt"])
+    before = dict(case["vehicle_scene"])
+    applied, code, nxt = c.apply_scene_receipt(
+        case["vehicle_scene"], case["manifest"], case["receipt"]
+    )
+    assert code == case["expect"]
+    if case["expect"] == "OK":
+        assert nxt["state"] == "LOADED_CONFIRMED"
+        assert nxt["loaded_scene_digest"] == case["manifest"]["digest"]
+    elif case["expect"] in {"RECEIPT_REJECTED", "RECEIPT_FAILED"}:
+        assert applied and nxt["state"] == "LOAD_REJECTED"
+    else:
+        assert not applied and nxt == before  # stale/duplicate receipts never overwrite state
+
+
+def test_reviewed_r1b_false_accepts_all_rejected() -> None:
+    expected = {
+        ("MissionFeedback", "apply_cases"): {
+            "R1B_1_waypoint_jump_0_to_2": "WAYPOINT_SKIPPED",
+            "R1B_2_goal_reused_on_new_waypoint": "GOAL_REUSED",
+            "R1B_3_intermediate_succeeded": "INTERMEDIATE_SUCCEEDED",
+        },
+        ("OperationReadiness", "admission_cases"): {
+            "R1B_4_snapshot_map_checksum_mismatch": "NAV_MAP_MISMATCH",
+            "R1B_5_snapshot_10min_future": "SNAPSHOT_FROM_FUTURE",
+            "R1B_6a_offline_link_with_valid_readiness": "LINK_NOT_ONLINE",
+            "R1B_6b_stale_pose_with_valid_readiness": "POSE_NOT_LIVE",
+        },
+    }
+    for (contract, key), names in expected.items():
+        cases = {x["name"]: x for x in _load(contract)[key]}
+        for name, code in names.items():
+            assert cases[name]["expect"] == code, name
+
+
+def test_real_freeze_includes_software_estop() -> None:
+    real = copy.deepcopy(_load("OperationReadiness")["valid"][0]["payload"])
+    assert real["freeze_scope"] == "ALL"
+    real["actions"]["emergency_stop"]["allowed"] = True
+    real["actions"]["emergency_stop"]["reasons"] = []
+    real["actions"]["emergency_stop"]["permitted_for_user"] = True
+    with pytest.raises(c.ContractError) as err:
+        c.validate("OperationReadiness", real)
+    assert err.value.code == "FROZEN_BUT_ACTION_ALLOWED"
+    sim = copy.deepcopy(real)
+    sim.update(vehicle_id="firebot-sim-r002-01", environment="SIM", freeze_scope="ALL")
+    with pytest.raises(c.ContractError):
+        c.validate("OperationReadiness", sim)  # SIM under ALL freeze: e-stop also refused
+
+
+def test_legacy_readiness_cannot_allow_motion() -> None:
+    sim = copy.deepcopy(_load("OperationReadiness")["valid"][1]["payload"])
+    sim["source"] = "LEGACY_ROBOT_READINESS"
+    with pytest.raises(c.ContractError) as err:
+        c.validate("OperationReadiness", sim)
+    assert err.value.code == "LEGACY_READINESS_CANNOT_ALLOW_MOTION"
 
 
 def test_full_multi_waypoint_sequence_then_resume_generation() -> None:

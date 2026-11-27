@@ -1,8 +1,29 @@
 # R002_OPERATION_CONTRACT — 控制资格、任务、设备、告警与诊断合同
 
-> CONTRACT_VERSION=`2.1.0-draft.2` · 状态：**DRAFT，未冻结** · 基线 `23854b0`
+> CONTRACT_VERSION=`2.1.0-draft.3` · 状态：**DRAFT，未冻结** · 基线 `23854b0`
 > 机器可读：[firebot-web-v2.1.contracts.schema.json](../../../packages/protocol-schemas/firebot-v2.1/firebot-web-v2.1.contracts.schema.json)（VehicleSnapshot / OperationReadiness / MissionRequest / MissionFeedback / DeviceOperation / AlarmEvent / NavigationDiagnostics）；向量 [vectors/](../../../packages/protocol-schemas/firebot-v2.1/vectors/)；规则 [contracts_v21.py](../../../services/contracts_v21.py)；场景见 [R002_SCENE_CONTRACT.md](R002_SCENE_CONTRACT.md)。
 > 上位：[车辆安全责任合同.md](../车辆安全责任合同.md)（最终运动安全由车端负责）、[MQTT协议.md](../MQTT协议.md)、[FIREBOT_BRIDGE_CONTRACT_1.3.md](../FIREBOT_BRIDGE_CONTRACT_1.3.md)。
+
+## draft.3 变更（R1B，2026-11-27）——独立审查 6 类错误接受
+
+| # | 错误接受（draft.2） | draft.3 规则 | 拒绝码 |
+|---|---|---|---|
+| 1 | waypoint_index 0→2 跳跃 | 航点只能逐个推进；PASS_THROUGH 点也须按序上报（到达但不要求停车） | `WAYPOINT_SKIPPED` |
+| 2 | 新航点复用旧 Goal ID | 任务记录 `goals_used`（当前绑定 goal 恒计入）；新航点必须新 goal | `GOAL_REUSED` |
+| 3 | 中间航点报告 SUCCEEDED | SUCCEEDED 只允许在最后一个航点 | `INTERMEDIATE_SUCCEEDED` |
+| 4 | snapshot map_checksum 与 manifest 不一致 | LIVE 位姿必须带 map_checksum，准入与成功确认均比对 | `NAV_MAP_MISMATCH` |
+| 5 | 未来约 10 分钟的 snapshot | snapshot `generated_at` 超前 >2 s 拒绝 | `SNAPSHOT_FROM_FUTURE` |
+| 6 | OFFLINE / STALE 位姿 + 旧 readiness 通过准入 | 准入要求链路 ONLINE、位姿 LIVE 且定位 OK，并要求 readiness 由**本** snapshot 计算 | `LINK_NOT_ONLINE` / `POSE_NOT_LIVE` / `READINESS_NOT_FROM_THIS_SNAPSHOT` |
+
+**经过点与必须到达点**：航点 `arrival = PASS_THROUGH | STOP`；巡检路线至少一个 STOP，最后航点为成功锚点。不要求中间点停车。
+
+**任务最终成功**（`confirm_mission_success`）：车端 SUCCEEDED 只是声明。平台确认需同时满足：最后航点为 STOP；平台自有快照位姿 LIVE、定位 OK、与请求 `nav_map_checksum` 同图；位姿观测晚于 SUCCEEDED 声明且 ≤2 s；实测静止（`motion.stationary=true`、LIVE）；位置与朝向在该航点容差内（默认 0.2 m / 0.15 rad）。
+
+**readiness 权威来源与前置条件**：`source = SERVER_OPERATION_READINESS` 才能准入运动；`LEGACY_ROBOT_READINESS`（旧 `robot_readiness()` 兼容投影）只用于展示，Schema 语义规则禁止它允许任何运动类动作。`based_on_snapshot_at` 必须等于准入时使用的 snapshot `generated_at`。
+
+**冻结语义**：`freeze_scope = ALL | ALL_EXCEPT_STOP_MOTION`。**REAL 冻结恒为 ALL，包含未经授权的软件急停**（远程软件急停也是远程命令；现场急停为物理装置）。SIM 可用 `ALL_EXCEPT_STOP_MOTION` 保留 stop_motion / protective_stop。001 维持 V1 独立冻结，不再等待 Canonical 白名单决定。
+
+**场景回执**：`apply_scene_receipt` 只接受**当前最新** load_id、当前 boot、与 manifest 不可变身份（id+version+digest）一致的回执；旧回执与重复回执不覆盖已有结果。
 
 ## draft.2 变更（HF1，2026-11-27）
 
