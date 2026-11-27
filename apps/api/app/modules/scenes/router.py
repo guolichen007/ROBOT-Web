@@ -408,7 +408,7 @@ def save_scene(
     except IntegrityError as exc:
         db.rollback()
         raise PlatformError("SCENE_INTEGRITY", "场景引用不一致，未保存", status_code=422) from exc
-    return scene_payload(db, db.get(MapVersion, scene_id))
+    return scene_payload(db, _v2(db, scene_id))
 
 
 @router.delete("/{scene_id}/points/{point_id}")
@@ -449,7 +449,7 @@ def delete_point(
         **request_meta(request),
     )
     db.commit()
-    return scene_payload(db, db.get(MapVersion, scene_id))
+    return scene_payload(db, _v2(db, scene_id))
 
 
 @router.delete("/{scene_id}/routes/{route_id}")
@@ -481,4 +481,4 @@ def delete_route(
         **request_meta(request),
     )
     db.commit()
-    return scene_payload(db, db.get(MapVersion, scene_id))
+    return scene_payload(db, _v2(db, scene_id))

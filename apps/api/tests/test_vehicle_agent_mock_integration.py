@@ -210,11 +210,15 @@ def test_legacy_canonical_transport_and_v1_mutual_exclusion(runtime):
         # WEB-R1A: a canonical command with no authorised Command row is refused at the final
         # publish gate under ANY configuration: FG_NOT_ALLOWLISTED by default (REAL default deny),
         # FG_UNAUTHORIZED where a test stack allowlists the mock R002 (compose.test.yml).
+        # WEB-R1B: the global freeze is ON by default, so the default refusal is now
+        # FG_DOWNLINK_FROZEN (checked before the allowlist). Invariant: refused + nothing published.
         # Before R1A this published to robot/R002/command.
         from services.dispatch_gate import GateDenied
 
         before = len(runtime.published)
-        with pytest.raises(GateDenied, match="FG_NOT_ALLOWLISTED|FG_UNAUTHORIZED"):
+        with pytest.raises(
+            GateDenied, match="^(FG_DOWNLINK_FROZEN|FG_NOT_ALLOWLISTED|FG_UNAUTHORIZED):"
+        ):
             runtime.dispatcher.publish_command(payload, qos=1)
         assert len(runtime.published) == before
         payload["vehicle_id"] = "R001"
