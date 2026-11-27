@@ -1,0 +1,59 @@
+{
+  "results": [
+    "offline_1366x768",
+    "offline_1920x1080"
+  ],
+  "states": [
+    {
+      "state": "offline",
+      "server": {
+        "online_state": "STALE",
+        "estop_active": false,
+        "boot_id": "79277f02-38a1-4c74-b068-5ab3c6755137",
+        "x": 1.2,
+        "y": 1.2,
+        "theta": 1.5707963267948966,
+        "server_received_at": "2026-11-27T02:47:04.226658+00:00",
+        "safety_command_ready": {
+          "stop_motion": false,
+          "emergency_stop": false,
+          "reset_estop": false
+        },
+        "autonomous_task_ready": {
+          "patrol": false,
+          "extinguish": false,
+          "return_dock": false,
+          "cancel_task": false
+        },
+        "manual_control_ready": false,
+        "active_tasks": []
+      },
+      "shots": [
+        {
+          "viewport": "1366x768",
+          "file": "r1a_console_offline_1366x768.png",
+          "map": {
+            "w": 752,
+            "h": 471
+          },
+          "action_bar_bottom": 758,
+          "protective_stop": 758,
+          "popup_overlap": null,
+          "status": "车辆\nR001\nR002\nREAL\n通信\n陈旧 14s\n设备\n陈旧\n任务\n空闲\n安全\n急停状态未知\n\nX 1.20\nY 1.20\nyaw 90.0°\n定位 OK\n旧数据 10:47:04"
+        },
+        {
+          "viewport": "1920x1080",
+          "file": "r1a_console_offline_1920x1080.png",
+          "map": {
+            "w": 1183,
+            "h": 726
+          },
+          "action_bar_bottom": 1066,
+          "protective_stop": 1066,
+          "popup_overlap": null,
+          "status": "车辆\nR001\nR002\nREAL\n通信\n车辆离线\n设备\n离线\n任务\n空闲\n安全\n急停状态未知\n\n位姿 未知"
+        }
+      ]
+    }
+  ]
+}

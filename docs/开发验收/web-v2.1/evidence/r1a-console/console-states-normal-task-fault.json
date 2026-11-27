@@ -1,0 +1,130 @@
+{
+  "results": [
+    "normal_1366x768",
+    "normal_1920x1080",
+    "task_create_http_409",
+    "estop_http_202",
+    "fault_1366x768",
+    "fault_1920x1080"
+  ],
+  "states": [
+    {
+      "state": "normal",
+      "server": {
+        "online_state": "ONLINE",
+        "estop_active": false,
+        "boot_id": "7e7289b4-d547-4e8b-92e8-4838b6cead23",
+        "x": 1.2,
+        "y": 1.2,
+        "theta": 1.5707963267948966,
+        "server_received_at": "2026-11-27T02:46:36.722521+00:00",
+        "safety_command_ready": {
+          "stop_motion": true,
+          "emergency_stop": true,
+          "reset_estop": true
+        },
+        "autonomous_task_ready": {
+          "patrol": true,
+          "extinguish": true,
+          "return_dock": true,
+          "cancel_task": true
+        },
+        "manual_control_ready": true,
+        "active_tasks": []
+      },
+      "shots": [
+        {
+          "viewport": "1366x768",
+          "file": "r1a_console_normal_1366x768.png",
+          "map": {
+            "w": 752,
+            "h": 471
+          },
+          "action_bar_bottom": 758,
+          "protective_stop": 758,
+          "popup_overlap": null,
+          "status": "车辆\nR001\nR002\nREAL\n通信\n实时\n设备\n在线\n任务\n空闲\n安全\n急停状态未知\n\nX 1.20\nY 1.20\nyaw 90.0°\n定位 OK\n10:46:39"
+        },
+        {
+          "viewport": "1920x1080",
+          "file": "r1a_console_normal_1920x1080.png",
+          "map": {
+            "w": 1183,
+            "h": 737
+          },
+          "action_bar_bottom": 1066,
+          "protective_stop": 1066,
+          "popup_overlap": null,
+          "status": "车辆\nR001\nR002\nREAL\n通信\n实时\n设备\n在线\n任务\n空闲\n安全\n急停状态未知\n\nX 1.20\nY 1.20\nyaw 90.0°\n定位 OK\n10:46:41"
+        }
+      ]
+    },
+    {
+      "state": "task",
+      "skipped": true,
+      "reason": {
+        "error": {
+          "code": "PATROL_RESUME_REQUIRED",
+          "message": "存在未完成巡检，请选择继续巡检或返回等待区",
+          "request_id": "9b1fe6e5-ff76-4a84-be1c-c519eb2d826e",
+          "details": {}
+        }
+      }
+    },
+    {
+      "state": "fault",
+      "server": {
+        "online_state": "ONLINE",
+        "estop_active": true,
+        "boot_id": "7e7289b4-d547-4e8b-92e8-4838b6cead23",
+        "x": 1.2,
+        "y": 1.2,
+        "theta": 1.5707963267948966,
+        "server_received_at": "2026-11-27T02:46:43.141302+00:00",
+        "safety_command_ready": {
+          "stop_motion": true,
+          "emergency_stop": true,
+          "reset_estop": true
+        },
+        "autonomous_task_ready": {
+          "patrol": false,
+          "extinguish": false,
+          "return_dock": false,
+          "cancel_task": false
+        },
+        "manual_control_ready": false,
+        "active_tasks": []
+      },
+      "shots": [
+        {
+          "viewport": "1366x768",
+          "file": "r1a_console_fault_1366x768.png",
+          "map": {
+            "w": 752,
+            "h": 471
+          },
+          "action_bar_bottom": 758,
+          "protective_stop": 758,
+          "popup_overlap": null,
+          "status": "车辆\nR001\nR002\nREAL\n通信\n实时\n设备\n在线\n任务\n空闲\n安全\n软件急停锁存\n\nX 1.20\nY 1.20\nyaw 90.0°\n定位 OK\n10:46:45"
+        },
+        {
+          "viewport": "1920x1080",
+          "file": "r1a_console_fault_1920x1080.png",
+          "map": {
+            "w": 1183,
+            "h": 726
+          },
+          "action_bar_bottom": 1066,
+          "protective_stop": 1066,
+          "popup_overlap": null,
+          "status": "车辆\nR001\nR002\nREAL\n通信\n实时\n设备\n在线\n任务\n空闲\n安全\n软件急停锁存\n\nX 1.20\nY 1.20\nyaw 90.0°\n定位 OK\n10:46:48"
+        }
+      ],
+      "estop_command": {
+        "lifecycle": "CREATED",
+        "cmd": "emergency_stop"
+      }
+    }
+  ]
+}

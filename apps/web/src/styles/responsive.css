@@ -353,3 +353,256 @@
     width: auto;
   }
 }
+
+/* ============================================================================
+ * WEB-R1A 综合控制台（DESIGN.md §3.1）：地图主导 / 右侧双视频 + 控制栏 / 底部固定操作区。
+ * 仅作用于 .console-v21；放在本文件末尾以覆盖上方旧断点。只用 --yd-* 令牌。
+ * ==========================================================================*/
+.yd-monitor-view.console-v21,
+.yd-monitor-view.console-v21:has(> .hmi-sim-banner) {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.console-head {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.console-v21 .hmi-kpis {
+  gap: 8px;
+}
+.console-v21 .hmi-kpi {
+  padding: 8px 14px;
+  gap: 2px;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  column-gap: 12px;
+}
+.console-v21 .hmi-kpi strong {
+  font-size: 18px;
+  grid-row: span 2;
+  justify-self: end;
+  order: 2;
+}
+.console-v21 .hmi-kpi strong[data-unknown='true'] {
+  color: var(--yd-text-3);
+}
+.console-v21 .yd-monitor-core,
+.console-v21 .yd-monitor-core:has(.console-side) {
+  grid-template-columns: minmax(0, 2.4fr) minmax(320px, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 8px;
+}
+.console-v21 .yd-monitor-core > .operations-map-panel {
+  grid-row: auto;
+  min-height: 360px;
+}
+.console-side {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(200px, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+.console-v21 .video-grid {
+  grid-template-rows: none;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px;
+}
+.console-action-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(200px, 260px);
+  gap: 8px;
+  align-items: stretch;
+  min-width: 0;
+}
+.console-action-bar .operations-command-dock {
+  margin: 0;
+  min-width: 0;
+}
+.console-protective {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 8px 12px;
+  background: var(--yd-surface);
+  border: 1px solid var(--yd-danger-border);
+  border-radius: var(--yd-radius-md);
+}
+.protective-stop {
+  min-height: 44px;
+  border: 2px solid var(--yd-danger);
+  border-radius: var(--yd-radius-sm);
+  background: var(--yd-danger-soft);
+  color: var(--yd-danger);
+  font: inherit;
+  font-weight: 700;
+  font-size: 15px;
+}
+.protective-stop:disabled {
+  border-color: var(--yd-border-strong);
+  background: var(--yd-surface-soft);
+  color: var(--yd-text-3);
+  cursor: not-allowed;
+}
+.protective-stop:focus-visible,
+.console-vehicle select:focus-visible {
+  outline: 2px solid var(--yd-primary);
+  outline-offset: 2px;
+}
+.console-protective small {
+  color: var(--yd-text-2);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.hmi-manual-controls .control-panel {
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+}
+/* status bar */
+.console-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 6px 12px;
+  background: var(--yd-surface);
+  border: 1px solid var(--yd-border);
+  border-radius: var(--yd-radius-md);
+  font-size: 13px;
+  color: var(--yd-text-2);
+  flex-wrap: wrap;
+}
+.console-vehicle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.console-vehicle select {
+  min-height: 30px;
+  padding: 0 6px;
+  border: 1px solid var(--yd-border-strong);
+  border-radius: var(--yd-radius-sm);
+  font: inherit;
+  color: var(--yd-text);
+  background: var(--yd-surface);
+}
+.console-env {
+  padding: 2px 8px;
+  border-radius: var(--yd-radius-sm);
+  font-weight: 700;
+  font-size: 12px;
+  border: 1px solid var(--yd-border-strong);
+  color: var(--yd-text-2);
+}
+.console-env[data-env='REAL'] {
+  border-color: var(--yd-primary);
+  color: var(--yd-primary);
+  background: var(--yd-primary-soft);
+}
+.console-env[data-env='SIM'] {
+  border-color: var(--yd-warning);
+  color: var(--yd-warning);
+  background: var(--yd-warning-soft);
+}
+.console-dims {
+  display: flex;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex-wrap: wrap;
+}
+.console-dims li {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.console-dims b {
+  color: var(--yd-text);
+}
+.console-dims [data-level='ok'] b {
+  color: var(--yd-success);
+}
+.console-dims [data-level='warn'] b {
+  color: var(--yd-warning);
+}
+.console-dims [data-level='bad'] b {
+  color: var(--yd-danger);
+}
+.console-dims [data-level='unknown'] b {
+  color: var(--yd-text-3);
+}
+.console-pose {
+  margin: 0 0 0 auto;
+  display: inline-flex;
+  gap: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.console-pose b {
+  color: var(--yd-text);
+}
+.console-pose[data-stale='true'] b {
+  color: var(--yd-warning);
+}
+.console-pose time {
+  color: var(--yd-text-3);
+}
+/* compact shell on the console: the map, not the chrome, gets the height */
+.app-shell:has(.console-v21) .topbar {
+  height: 56px;
+}
+.app-shell:has(.console-v21) .hmi-title h1 {
+  font-size: 18px;
+}
+.app-shell:has(.console-v21) .situation-banner {
+  min-height: 38px;
+}
+/* fire popup must never cover the fixed action area: lift it above the bar */
+body.has-alarm-popup .alarm-popup {
+  bottom: 96px;
+}
+@media (max-width: 1400px) and (max-height: 860px) {
+  .console-v21 .yd-monitor-core,
+  .console-v21 .yd-monitor-core:has(.console-side) {
+    grid-template-columns: minmax(0, 1.9fr) minmax(300px, 1fr);
+  }
+  .console-v21 .yd-monitor-core > .operations-map-panel {
+    min-height: 300px;
+  }
+  .console-side {
+    grid-template-rows: minmax(176px, 0.9fr) minmax(0, 1fr);
+  }
+  .app-shell:has(.console-v21) .topbar {
+    height: 50px;
+  }
+  .console-status {
+    padding: 4px 10px;
+    gap: 10px;
+    font-size: 12px;
+  }
+  .console-v21 .hmi-kpi {
+    padding: 6px 12px;
+  }
+  .console-v21 .hmi-kpi strong {
+    font-size: 16px;
+  }
+  .console-v21 .hmi-kpi small {
+    display: none;
+  }
+  body.has-alarm-popup .alarm-popup {
+    bottom: 88px;
+    width: min(340px, calc(100vw - 24px));
+  }
+}
+@media (max-width: 1100px) {
+  .console-v21 .yd-monitor-core,
+  .console-v21 .yd-monitor-core:has(.console-side) {
+    grid-template-columns: 1fr;
+  }
+  .console-action-bar {
+    grid-template-columns: 1fr;
+  }
+}

@@ -115,7 +115,15 @@ export const useMonitorStore = defineStore('monitor', () => {
   // 1) 已是真正终态的行，永不被非终态覆盖（旧 HTTP 响应不得撤销 WS 已确认终态）；
   // 2) 其余按“服务端最近一次状态变更时间” terminal_at > ack_at > published_at > issued_at 比较；
   // 3) 时间相同则按软件反馈条数，再相同视为同一事实（幂等，不替换）。
-  const TERMINAL = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED', 'EXPIRED', 'ACK_REJECTED', 'ACK_UNSUPPORTED'])
+  const TERMINAL = new Set([
+    'SUCCEEDED',
+    'FAILED',
+    'CANCELLED',
+    'EXPIRED',
+    'ACK_REJECTED',
+    'ACK_UNSUPPORTED',
+    'GATE_REJECTED',
+  ])
   function commandStamp(row: AgentCommand): number {
     const value = row.terminal_at || row.ack_at || row.published_at || row.issued_at
     const parsed = value ? Date.parse(value) : NaN

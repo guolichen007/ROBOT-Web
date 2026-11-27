@@ -1,4 +1,4 @@
-/* global process, console */
+/* global process, console, Buffer, Event */
 // Firebot V2.1 WEB-2 — scene editor real-browser flow with hard assertions.
 // usage: node scripts/v21-editor-flow.mjs <outDir>
 // Loopback only. Generates a SYNTHETIC SIM map (not R002 field data, not DEMO_PARKING).

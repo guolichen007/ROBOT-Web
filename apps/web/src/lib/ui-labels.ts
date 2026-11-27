@@ -135,6 +135,14 @@ export const reasonCodeLabel = (v?: string): string =>
     INTEGRATION_PROFILE_MISSING: '缺少控制集成配置',
     CAPABILITY_DECLARATION_MISSING: '车辆能力声明缺失',
     EXTINGUISH_MODE_REQUIRED: '灭火任务必须明确选择处理方式',
+    REAL_CONTROL_NOT_AUTHORIZED: '真实车辆控制未获授权',
+    GATE_REJECTED: '已被最终发布门禁拒绝，未下发车辆',
+    FG_NOT_ALLOWLISTED: '车辆不在下行白名单，未下发',
+    FG_DOWNLINK_FROZEN: '下行已冻结，未下发',
+    FG_ENV_MISMATCH: '环境与车辆身份不符，未下发',
+    FG_BOOT_MISMATCH: '车辆已重启，命令作废',
+    FG_UNAUTHORIZED: '命令未经授权，未下发',
+    FG_REPLAY: '重复命令，未下发',
   })[String(v || '').toUpperCase()] || ''
 
 export const auditActionLabel = (v?: string): string =>

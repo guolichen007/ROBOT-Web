@@ -15,6 +15,10 @@ export interface RobotState {
   vehicle_agent_execution?: VehicleAgentExecution
   // G3：服务端登记的模拟来源（SIMULATED_VEHICLE_IDS）；真实车辆为 null
   simulation?: { simulated: true; label: 'SIMULATED'; source: string } | null
+  /** Contract 2.1 OperationReadiness (server-only source of truth); absent until the API provides it. */
+  operation_readiness?: {
+    actions?: Record<string, { allowed: boolean; reasons: string[]; required_permission?: string }>
+  } | null
   agent_state?: AgentState
   id?: string
   vehicle_id: string

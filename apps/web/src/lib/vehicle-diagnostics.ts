@@ -43,8 +43,9 @@ export function commandStages(row: AgentCommand): CommandStages {
   const vehicleAck = ack?.ack_source === 'vehicle'
   const feedback = ack?.software_feedback ?? []
   const lastFeedback = feedback[feedback.length - 1]
-  const published = Boolean(row.published_at) || !['CREATED', 'QUEUED', 'EXPIRED'].includes(status)
-  const failed = ['ACK_REJECTED', 'ACK_UNSUPPORTED', 'FAILED', 'EXPIRED'].includes(status)
+  const published =
+    Boolean(row.published_at) || !['CREATED', 'QUEUED', 'EXPIRED', 'GATE_REJECTED'].includes(status)
+  const failed = ['ACK_REJECTED', 'ACK_UNSUPPORTED', 'FAILED', 'EXPIRED', 'GATE_REJECTED'].includes(status)
   let outcome: CommandStages['outcome'] = 'running'
   let outcomeLabel = '执行中'
   if (status === 'CANCELLED' && software) {

@@ -22,8 +22,12 @@ function expectNoTemperature(wrapper: ReturnType<typeof mountWith>) {
   expect(wrapper.find('[data-kpi="temperature"]').exists()).toBe(false)
   expect(wrapper.text()).not.toContain('温度')
   expect(wrapper.text()).not.toContain('℃')
-  expect(wrapper.text()).not.toContain('未知')
-  expect(wrapper.findAll('.hmi-kpi').map((c) => c.find('span').text())).toEqual(FOUR_KPIS)
+  // WEB-R1A：未知值现明确显示“未知”；此处只禁止出现温度相关的未知卡片（G3-R2 原意）
+  expect(wrapper.text()).not.toMatch(/温度\s*未知/)
+  // WEB-R1A：Canonical 烟雾标签带“（单位待验证）”后缀，四项指标集合不变
+  expect(wrapper.findAll('.hmi-kpi').map((c) => c.find('span').text().replace('（单位待验证）', ''))).toEqual(
+    FOUR_KPIS,
+  )
 }
 
 describe('VehicleAgentKpis SIMULATED 标识', () => {

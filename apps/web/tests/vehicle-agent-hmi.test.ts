@@ -180,7 +180,9 @@ describe('vehicle agent HMI', () => {
     expect(wrapper.findAll('.hmi-kpi')).toHaveLength(4)
     expect(wrapper.findAll('[data-stale="true"]')).toHaveLength(4)
     expect(wrapper.find('[data-kpi="temperature"]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('--')
+    // WEB-R1A：未知值明确显示“未知 / 无数据”，不再只显示 --
+    expect(wrapper.text()).toContain('未知')
+    expect(wrapper.text()).toContain('无数据')
     expect(wrapper.text()).toContain('陈旧 / 离线')
     expect(agentFreshness(robot(), false, Date.now()).stale).toBe(true)
   })

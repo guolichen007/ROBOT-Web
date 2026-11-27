@@ -27,6 +27,10 @@ const available = computed(
 
 async function acquire(): Promise<boolean> {
   if (lease.value) return true
+  if (!auth.can('robot.control.manual')) {
+    emit('notice', '无手动控制权限，未申请控制租约', 'danger')
+    return false
+  }
   if (!available.value) {
     emit('notice', '机器人离线、陈旧或处于急停状态，无法手动控制', 'danger')
     return false
@@ -65,6 +69,8 @@ function vector(direction: string): { linear: number; angular: number } {
 
 async function pulse(): Promise<void> {
   if (!lease.value || !activeDirection.value) return
+  // 资格在租约期间失效（服务端 readiness 或权限变化）→ 不再发送任何控制帧
+  if (!available.value || !auth.can('robot.control.manual')) return
   seq.value += 1
   try {
     await api.post(`/robots/${props.robot?.vehicle_id}/commands/manual`, {

@@ -43,8 +43,11 @@ const cards = computed(() => {
     },
     {
       key: 'smoke',
-      label: '烟雾',
-      value: metric(v1 ? telemetry?.smog?.percentage : robot?.smoke, '%'),
+      // Canonical 1.3 sensor.smoke 无已验证单位：在标签上常显，避免被误读为 % 或 ppm
+      label: v1 ? '烟雾' : '烟雾（单位待验证）',
+      // V1 合同字段为 smog.percentage（0–100）；Canonical 1.3 sensor.smoke 单位未定义 → 不加单位
+      value: v1 ? metric(telemetry?.smog?.percentage, '%') : metric(robot?.smoke),
+      unitNote: v1 ? '' : '单位待验证',
       stale: freshness.value.stale,
     },
     {
@@ -70,8 +73,20 @@ const cards = computed(() => {
       :data-kpi="card.key"
     >
       <span>{{ card.label }}</span>
-      <strong>{{ card.value }}</strong>
-      <small>{{ card.stale ? '陈旧 / 离线' : simulated ? '模拟数据（SIMULATED）' : '服务器数据' }}</small>
+      <strong :data-unknown="card.value === '--' ? 'true' : 'false'">{{
+        card.value === '--' ? '未知' : card.value
+      }}</strong>
+      <small>{{
+        card.value === '--'
+          ? '无数据'
+          : card.stale
+            ? '陈旧 / 离线'
+            : simulated
+              ? '模拟数据（SIMULATED）'
+              : 'unitNote' in card && card.unitNote
+                ? `服务器数据 · ${card.unitNote}`
+                : '服务器数据'
+      }}</small>
     </article>
   </section>
 </template>
