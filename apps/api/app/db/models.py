@@ -11,8 +11,10 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
+    SmallInteger,
     String,
     Table,
     Text,
@@ -164,6 +166,27 @@ class MapVersion(Base):
     created_by: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # WEB-R1B 0011: explicit storage version (1 = legacy tables, 2 = V2.1 scene tables)
+    storage_version: Mapped[int] = mapped_column(SmallInteger, default=1, server_default="1")
+    revision: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    nav_image_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    nav_yaml_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    nav_map_checksum: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    nav_image_asset_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("assets.id"), nullable=True
+    )
+    nav_yaml_asset_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("assets.id"), nullable=True
+    )
+    width_px: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height_px: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    occupied_thresh: Mapped[float | None] = mapped_column(Float, nullable=True)
+    free_thresh: Mapped[float | None] = mapped_column(Float, nullable=True)
+    negate: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    origin_yaw: Mapped[float | None] = mapped_column(Float, nullable=True)
+    traversability: Mapped[str] = mapped_column(
+        String(24), default="PENDING_VERIFICATION", server_default="PENDING_VERIFICATION"
+    )
     __table_args__ = (UniqueConstraint("map_id", "version", name="uq_map_version"),)
 
 
@@ -177,7 +200,78 @@ class ParkingSlot(Base):
     polygon_json: Mapped[dict[str, Any]] = mapped_column(JsonType)
     center_pose_json: Mapped[dict[str, Any]] = mapped_column(JsonType)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    __table_args__ = (UniqueConstraint("map_version_id", "code", name="uq_slot_version_code"),)
+    __table_args__ = (
+        UniqueConstraint("map_version_id", "code", name="uq_slot_version_code"),
+        UniqueConstraint("map_version_id", "id", name="uq_parking_slots_version_id"),
+    )
+
+
+class ScenePoint(Base):
+    """V2.1 scene point (storage_version=2). Cross-version refs are impossible: composite FKs."""
+
+    __tablename__ = "scene_points"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    map_version_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("map_versions.id", ondelete="CASCADE"), index=True
+    )
+    point_uid: Mapped[str] = mapped_column(String(36))
+    code: Mapped[str] = mapped_column(String(64))
+    kind: Mapped[str] = mapped_column(String(24))
+    x: Mapped[float] = mapped_column(Float)
+    y: Mapped[float] = mapped_column(Float)
+    yaw: Mapped[float] = mapped_column(Float)
+    xy_tolerance_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    yaw_tolerance_rad: Mapped[float | None] = mapped_column(Float, nullable=True)
+    parking_slot_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    taught_from: Mapped[str] = mapped_column(String(24), default="MANUAL_INPUT")
+    __table_args__ = (
+        UniqueConstraint("map_version_id", "point_uid", name="uq_scene_points_version_uid"),
+        UniqueConstraint("map_version_id", "code", name="uq_scene_points_version_code"),
+        ForeignKeyConstraint(
+            ["map_version_id", "parking_slot_id"],
+            ["parking_slots.map_version_id", "parking_slots.id"],
+            name="fk_scene_points_slot_same_version",
+        ),
+    )
+
+
+class SceneRoute(Base):
+    __tablename__ = "scene_routes"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uuid_str)
+    map_version_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("map_versions.id", ondelete="CASCADE"), index=True
+    )
+    route_uid: Mapped[str] = mapped_column(String(36))
+    code: Mapped[str] = mapped_column(String(64))
+    closed: Mapped[bool] = mapped_column(Boolean, default=False)
+    __table_args__ = (
+        UniqueConstraint("map_version_id", "route_uid", name="uq_scene_routes_version_uid"),
+        UniqueConstraint("map_version_id", "code", name="uq_scene_routes_version_code"),
+    )
+
+
+class SceneRoutePoint(Base):
+    __tablename__ = "scene_route_points"
+    map_version_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    route_uid: Mapped[str] = mapped_column(String(36), primary_key=True)
+    seq: Mapped[int] = mapped_column(Integer, primary_key=True)
+    point_uid: Mapped[str] = mapped_column(String(36))
+    arrival: Mapped[str] = mapped_column(String(16), default="PASS_THROUGH")
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["map_version_id", "route_uid"],
+            ["scene_routes.map_version_id", "scene_routes.route_uid"],
+            ondelete="CASCADE",
+            name="fk_scene_route_points_route_same_version",
+        ),
+        ForeignKeyConstraint(
+            ["map_version_id", "point_uid"],
+            ["scene_points.map_version_id", "scene_points.point_uid"],
+            name="fk_scene_route_points_point_same_version",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+    )
 
 
 class InspectionPoint(Base):

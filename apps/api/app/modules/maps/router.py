@@ -70,6 +70,13 @@ def draft(db, version_id: str) -> MapVersion:
         raise HTTPException(404, "地图版本不存在")
     if version.status != "DRAFT":
         raise HTTPException(409, "Published/Archived 地图不可原地修改，请创建新版本")
+    if version.storage_version == 2:
+        # WEB-R1B: the V2.1 scene tables are the single write authority for storage_version=2
+        raise PlatformError(
+            "LEGACY_WRITE_ON_V21_SCENE",
+            "V2.1 场景只能通过 /api/v1/scenes 编辑",
+            status_code=409,
+        )
     return version
 
 

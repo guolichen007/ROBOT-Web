@@ -33,6 +33,7 @@ def main() -> None:
         f"firebot_rev2_{suffix}": "20260811_0002",
         f"firebot_rev3_{suffix}": "20260812_0003",
         f"firebot_rev8_{suffix}": "20260902_0008",
+        f"firebot_rev10_{suffix}": "20261122_0010",
     }
     try:
         with admin.connect() as connection:
@@ -46,7 +47,11 @@ def main() -> None:
             engine = create_engine(url)
             with engine.connect() as connection:
                 revision = connection.scalar(text("SELECT version_num FROM alembic_version"))
-                assert revision == "20261122_0010", (name, revision)
+                assert revision == "20261127_0011", (name, revision)
+                legacy = connection.scalar(
+                    text("SELECT count(*) FROM map_versions WHERE storage_version <> 1")
+                )
+                assert legacy == 0, (name, "pre-0011 rows must be storage_version=1")
                 default = connection.scalar(
                     text(
                         "SELECT column_default FROM information_schema.columns "
@@ -59,6 +64,9 @@ def main() -> None:
                     "robot_navigation_diagnostics",
                     "stop_operations",
                     "navigation_presets",
+                    "scene_points",
+                    "scene_routes",
+                    "scene_route_points",
                 ):
                     exists = connection.scalar(
                         text("SELECT to_regclass(:table_name)"), {"table_name": table}

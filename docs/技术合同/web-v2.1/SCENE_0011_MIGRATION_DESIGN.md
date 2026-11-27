@@ -1,6 +1,6 @@
 # SCENE 0011 · 地图场景持久化最小数据模型与迁移设计（仅设计，未实施）
 
-> 状态：**DESIGN ONLY**。本轮未新增 Alembic 迁移、未改 `apps/api/app/db/models.py`。独立变更边界：单独分支/单独提交、单独审查后再实施。
+> 状态：**第一批已在隔离库实施（WEB-R1B，`20261127_0011_scene_v21`，PostgreSQL 18.4 验证）**；未执行生产迁移。下文 §2 为完整设计，§6 为本批实际落地与偏差。
 > 依据：[R002_SCENE_CONTRACT.md](R002_SCENE_CONTRACT.md)（2.1.0-draft.2）· 现有最新迁移 `20261122_0010_web_r1_min`。
 
 ## 1. 目标与非目标
@@ -39,3 +39,16 @@
 1. 0011 迁移 + 模型 + migration matrix 测试（无 API 变化）。
 2. 草稿 CRUD/保存/发布 API（revision + digest + 发布校验调用 `contracts_v21`）。
 3. 加载请求/回执落库 + `robots.loaded_scene_*` 写入（只在 SIM 验证；REAL 恒 NONE）。
+
+
+## 6. WEB-R1B 第一批实际落地
+
+| 项 | 实施 |
+|---|---|
+| 存储版本 | `map_versions.storage_version` 1/2，CHECK 约束；既有数据全部 =1，旧表与历史数据保留；不按新表是否为空隐式回退 |
+| 唯一写入权威 | storage_version=2 只能经 `/api/v1/scenes` 写；旧 `/parking-slots` 等写接口返回 409 `LEGACY_WRITE_ON_V21_SCENE`；新接口对 =1 版本返回 409 `LEGACY_STORAGE_VERSION` |
+| 跨版本引用 | 复合外键 `(map_version_id, point_uid)` / `(map_version_id, route_uid)` / `(map_version_id, parking_slot_id)`；绕过 API 的原生 SQL 也被拒绝（测试） |
+| 被引用点位删除 | 点→路线引用外键为 `DEFERRABLE INITIALLY DEFERRED`。**偏差**：设计稿原写 NO ACTION，实测在 PG 上整版本级联删除会误报违反（测试清理发现），已改为提交时检查 |
+| 并发 | `UPDATE ... WHERE revision=? AND status='DRAFT' AND storage_version=2 RETURNING revision` 与保存同事务；双线程并发保存严格 `[200, 409]` |
+| 导入 | YAML+PGM/PNG 服务端严格校验（与前端同规则），图像沿用 API 10 MiB 上限；图像/YAML 入 assets，sha256 落库；`nav_map_checksum` 待车端算法，暂空 |
+| 本批未做 | 原子发布与确定性场景资产摘要、车位/走廊持久化、加载请求/回执落库、`robots.loaded_scene_*` |

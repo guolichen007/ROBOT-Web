@@ -35,6 +35,7 @@ from app.modules.operations.router import router as operations_router
 from app.modules.plans.router import router as plans_router
 from app.modules.reports.router import router as reports_router
 from app.modules.robots.router import router as robots_router
+from app.modules.scenes.router import router as scenes_router
 from app.modules.system.router import router as system_router
 from app.modules.tasks.router import router as tasks_router
 
@@ -124,6 +125,7 @@ for router in (
     commands_router,
     vehicle_agent_router,
     maps_router,
+    scenes_router,
     tasks_router,
     alarms_router,
     history_router,
